@@ -28,7 +28,15 @@ pub struct TooltipState {
 impl TooltipState {
     /// 写入方更新提示；无目标时调用以清除自己归属的提示。
     /// 性能（#112）：内容/位置无变化时早退，避免每帧标记 Changed 触发面板重绘。
-    pub fn update(&mut self, source: u16, visible: bool, title: String, lines: Vec<String>, x: f32, y: f32) {
+    pub fn update(
+        &mut self,
+        source: u16,
+        visible: bool,
+        title: String,
+        lines: Vec<String>,
+        x: f32,
+        y: f32,
+    ) {
         if visible {
             if self.visible
                 && self.source == source
@@ -157,7 +165,14 @@ pub fn ui_hint_system(
     ui_cameras: Query<(&Camera, &GlobalTransform), With<crate::ui::sprite_ui::UiEntity>>,
     nodes: Query<&Node>,
     parents: Query<&ChildOf>,
-    hints: Query<(Entity, &UiHint, &Node, &ComputedNode, &InheritedVisibility, &ZIndex)>,
+    hints: Query<(
+        Entity,
+        &UiHint,
+        &Node,
+        &ComputedNode,
+        &InheritedVisibility,
+        &ZIndex,
+    )>,
     mut state: ResMut<TooltipState>,
 ) {
     let clear = |state: &mut TooltipState| {
@@ -246,6 +261,35 @@ fn abs_ui_origin(
 /// #2775：Hint 命中矩形尺寸——显式 `Px` 控件用声明尺寸（与 C# 控件尺寸同源），
 /// 自动尺寸（`spawn_label` 这类文本按钮 `width/height = Auto`，如排行页签）回退到
 /// 布局结果；`ComputedNode` 存的是**物理像素**，乘 `inverse_scale_factor` 转逻辑像素。
+/// #2791 单元③：光标（视口逻辑坐标）是否落在任一**可见对话框根面板**矩形内。
+///
+/// 用途 = 世界头顶提示门控：C# 的头顶名字画在 `MapControl` 图层里，光标位于控件上时仍会
+/// 「画」但被对话框整体盖住；本端提示面板是 `GlobalZIndex(90)` 的置顶 bevy_ui 根，不门控就会
+/// 盖在对话框上、并与控件 Hint 抢同一个 [`TooltipState`] 面板（实机复现：悬停英雄管理窗时
+/// 显示的是其下方 NPC 的名字提示）。
+///
+/// 只统计 `DialogRoot` 根面板（面板自带 `Overflow::clip`），与 `dialog_drag_system` 的
+/// 包围盒口径一致；HUD 常驻元素不在其列（`DialogRoot` 之外），保持原样。
+pub(crate) fn cursor_over_dialog_rect(
+    cursor: Vec2,
+    dialogs: &Query<(&crate::game::dialogs::DialogRoot, &Visibility, &Node)>,
+) -> bool {
+    dialogs.iter().any(|(_, vis, node)| {
+        // 与 `dialog_drag_system` 同口径：只有显式 Visible 的根面板算「在上面」
+        *vis == Visibility::Visible && node_contains(node, cursor)
+    })
+}
+
+/// 光标是否落在 `Node` 的显式 `Px` 矩形内（宽高非 `Px` 的自动尺寸不参与，避免误判）
+fn node_contains(node: &Node, cursor: Vec2) -> bool {
+    let (Val::Px(l), Val::Px(t), Val::Px(w), Val::Px(h)) =
+        (node.left, node.top, node.width, node.height)
+    else {
+        return false;
+    };
+    cursor.x >= l && cursor.x <= l + w && cursor.y >= t && cursor.y <= t + h
+}
+
 fn ui_hint_size(node: &Node, computed: &ComputedNode) -> Option<(f32, f32)> {
     match (node.width, node.height) {
         (Val::Px(w), Val::Px(h)) => Some((w, h)),
@@ -280,8 +324,12 @@ pub fn tooltip_hint_system(
     };
     // UI 相机 Fixed 1024x768：窗口缩放/DPI 下必须换算成 UI 逻辑坐标，
     // 否则命中与面板定位用物理像素，悬停位置全偏
-    let Ok((cam, gtf)) = ui_cameras.single() else { return };
-    let Ok(world) = cam.viewport_to_world_2d(gtf, cursor) else { return };
+    let Ok((cam, gtf)) = ui_cameras.single() else {
+        return;
+    };
+    let Ok(world) = cam.viewport_to_world_2d(gtf, cursor) else {
+        return;
+    };
     let cursor = Vec2::new(world.x, -world.y);
     let mut topmost: Option<(&TooltipHint, f32)> = None;
     for (btn, hint, inherited, transform) in &buttons {
@@ -301,7 +349,14 @@ pub fn tooltip_hint_system(
         }
     }
     if let Some((hint, _)) = topmost {
-        state.update(1, true, String::new(), vec![hint.0.clone()], cursor.x, cursor.y);
+        state.update(
+            1,
+            true,
+            String::new(),
+            vec![hint.0.clone()],
+            cursor.x,
+            cursor.y,
+        );
     } else {
         state.update(1, false, String::new(), Vec::new(), 0.0, 0.0);
     }
@@ -315,9 +370,18 @@ pub fn tooltip_hint_system(
 /// 翻转时框的右/下边在光标左上（见 `tooltip_origin` 与其单测）。
 pub fn tooltip_panel_system(
     state: Res<TooltipState>,
-    mut bg: Query<(&mut Node, &mut Visibility), (With<TooltipBg>, Without<TooltipTitle>, Without<TooltipLine>)>,
-    mut title: Query<(&mut Text, &mut Visibility), (With<TooltipTitle>, Without<TooltipBg>, Without<TooltipLine>)>,
-    mut lines: Query<(&mut Text, &mut Visibility, &TooltipLine), (Without<TooltipBg>, Without<TooltipTitle>)>,
+    mut bg: Query<
+        (&mut Node, &mut Visibility),
+        (With<TooltipBg>, Without<TooltipTitle>, Without<TooltipLine>),
+    >,
+    mut title: Query<
+        (&mut Text, &mut Visibility),
+        (With<TooltipTitle>, Without<TooltipBg>, Without<TooltipLine>),
+    >,
+    mut lines: Query<
+        (&mut Text, &mut Visibility, &TooltipLine),
+        (Without<TooltipBg>, Without<TooltipTitle>),
+    >,
 ) {
         // 性能（#112）：TooltipState 未变化（update 已早退）时跳过面板重绘
     if !state.is_changed() {
@@ -410,20 +474,79 @@ pub fn despawn_tooltip_panel(mut commands: Commands, q: Query<Entity, With<Toolt
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    /// #2791 单元③：世界头顶提示门控的几何判定——只认「可见 + 显式 Px 矩形」的对话框根面板
+    #[test]
+    fn cursor_over_dialog_rect_hits_visible_root_only() {
+        use crate::game::dialogs::{DialogKind, DialogRoot};
+        use bevy::ecs::system::RunSystemOnce;
+
+        let mut world = World::new();
+        world.spawn((
+            DialogRoot(DialogKind::Menu),
+            Visibility::Visible,
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(100.0),
+                top: Val::Px(200.0),
+                width: Val::Px(300.0),
+                height: Val::Px(150.0),
+                ..default()
+            },
+        ));
+        world.spawn((
+            DialogRoot(DialogKind::Notice),
+            Visibility::Hidden,
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(400.0),
+                top: Val::Px(400.0),
+                width: Val::Px(100.0),
+                height: Val::Px(100.0),
+                ..default()
+            },
+        ));
+        let mut hit = |p: Vec2| {
+            world
+                .run_system_once(move |q: Query<(&DialogRoot, &Visibility, &Node)>| {
+                    cursor_over_dialog_rect(p, &q)
+                })
+                .expect("探针系统应成功")
+        };
+        assert!(hit(Vec2::new(150.0, 250.0)), "面板内部应命中");
+        assert!(hit(Vec2::new(100.0, 200.0)), "左上角（含边界）应命中");
+        assert!(hit(Vec2::new(400.0, 350.0)), "右边界应命中");
+        assert!(!hit(Vec2::new(99.0, 250.0)), "面板左侧外不命中");
+        assert!(!hit(Vec2::new(150.0, 351.0)), "面板下方外不命中");
+        assert!(!hit(Vec2::new(450.0, 450.0)), "隐藏面板不参与命中");
+    }
+
     #[test]
     fn update_early_out_on_same_content() {
         let mut s = TooltipState::default();
-        s.update(2, true, "剑".to_string(), vec!["耐久: 10/10".to_string()], 10.0, 20.0);
+        s.update(
+            2,
+            true,
+            "剑".to_string(),
+            vec!["耐久: 10/10".to_string()],
+            10.0,
+            20.0,
+        );
         assert!(s.visible);
         assert_eq!(s.source, 2);
         // 相同内容再次写入：不应重复标记（visible/source/title/lines 不变）
         let before = (s.visible, s.source, s.title.clone(), s.lines.clone());
-        s.update(2, true, "剑".to_string(), vec!["耐久: 10/10".to_string()], 10.0, 20.0);
+        s.update(
+            2,
+            true,
+            "剑".to_string(),
+            vec!["耐久: 10/10".to_string()],
+            10.0,
+            20.0,
+        );
         assert_eq!(
             (s.visible, s.source, s.title.clone(), s.lines.clone()),
             before
@@ -433,7 +556,14 @@ mod tests {
     #[test]
     fn update_clear_only_own_source() {
         let mut s = TooltipState::default();
-        s.update(3, true, "仓库".to_string(), vec!["物品".to_string()], 0.0, 0.0);
+        s.update(
+            3,
+            true,
+            "仓库".to_string(),
+            vec!["物品".to_string()],
+            0.0,
+            0.0,
+        );
         // 其他来源清除不影响当前
         s.update(2, false, String::new(), Vec::new(), 0.0, 0.0);
         assert!(s.visible);
@@ -455,7 +585,11 @@ mod tests {
             inverse_scale_factor: 0.5,
             ..ComputedNode::default()
         };
-        assert_eq!(ui_hint_size(&px, &laid_out), Some((24.0, 22.0)), "显式 Px 用声明值");
+        assert_eq!(
+            ui_hint_size(&px, &laid_out),
+            Some((24.0, 22.0)),
+            "显式 Px 用声明值"
+        );
         let auto = Node {
             width: Val::Auto,
             height: Val::Auto,
