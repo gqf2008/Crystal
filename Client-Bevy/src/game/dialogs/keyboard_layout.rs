@@ -142,6 +142,13 @@ pub fn binding_text_for(bindings: &[KeyBinding], action: &str) -> String {
         .unwrap_or_default()
 }
 
+/// #2775：C# `GetLocalization(ClientTextKeys.Xxx, CMain.InputKeys.GetKey(...))` 的等价——
+/// 把模板里的 `{0}` 替换成该动作的键位串；找不到绑定时为空串（对齐 C# `Key == Keys.None`
+/// 时 `GetKey` 早退返回空串，例如 C# `KeybindOptions.Mentor`，其 Hint 就是「师徒 ()」）。
+pub fn hint_with_key(bindings: &[KeyBinding], template: &str, action: &str) -> String {
+    template.replace("{0}", &binding_text_for(bindings, action))
+}
+
 /// KeyCode Debug 名 → KeyCode（覆盖默认键位 + 常用键；未知返回 None）
 fn key_code_from_name(name: &str) -> Option<KeyCode> {
     use KeyCode::*;
@@ -1107,6 +1114,26 @@ mod tests {
         assert_eq!(binding_text_for(&b, "英雄装备"), "Ctrl + C");
         assert_eq!(binding_text_for(&b, "腰带"), "Z");
         assert_eq!(binding_text_for(&b, "没有这个动作"), "");
+    }
+
+    /// #2775：Hint 模板 `{0}` → 键位串（C# `GetLocalization(key, GetKey(action))`）
+    #[test]
+    fn hint_with_key_matches_csharp_templates() {
+        let b = default_bindings();
+        assert_eq!(hint_with_key(&b, "大地图 ({0})", "大地图"), "大地图 (B)");
+        assert_eq!(hint_with_key(&b, "小地图 ({0})", "小地图"), "小地图 (V)");
+        assert_eq!(
+            hint_with_key(&b, "背包 ({0})", "英雄背包"),
+            "背包 (Ctrl + I)"
+        );
+        assert_eq!(hint_with_key(&b, "退出 ({0})", "退出"), "退出 (Alt + Q)");
+        // C# `KeybindOptions.Mentor` 默认 `Keys.None` → GetKey 空串 → C# 实际渲染「师徒 ()」
+        assert_eq!(hint_with_key(&b, "师徒 ({0})", "师徒"), "师徒 ()");
+        assert_eq!(
+            hint_with_key(&b, "邮件", "邮件"),
+            "邮件",
+            "无占位符模板原样返回"
+        );
     }
 
     /// #2595：文本输入聚焦时对话框热键让路——字母键（背包2=I）不触发，
