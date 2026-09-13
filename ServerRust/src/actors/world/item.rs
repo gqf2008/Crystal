@@ -953,6 +953,11 @@ impl Message<UseItemRequest> for WorldActor {
                                         multiplier: 1.0 + luck as f64 / 100.0,
                                         end_tick,
                                         pause_in_safe: true, // C# BuffType.Exp PauseInSafeZone
+                                        display: Some(crate::actors::player::MultiplierDisplay {
+                                            tag: crate::actors::player::BUFF_TAG_EXP,
+                                            remaining_ms: duration_ticks.saturating_mul(100),
+                                            percent: luck,
+                                        }),
                                     })
                                     .await;
                                 send_system_message(
@@ -979,6 +984,11 @@ impl Message<UseItemRequest> for WorldActor {
                                         multiplier: 1.0 + luck as f64 / 100.0,
                                         end_tick,
                                         pause_in_safe: true, // C# BuffType.Drop PauseInSafeZone
+                                        display: Some(crate::actors::player::MultiplierDisplay {
+                                            tag: crate::actors::player::BUFF_TAG_DROP,
+                                            remaining_ms: duration_ticks.saturating_mul(100),
+                                            percent: luck,
+                                        }),
                                     })
                                     .await;
                                 send_system_message(
@@ -2037,6 +2047,11 @@ impl Message<UseItemRequest> for WorldActor {
                                         multiplier: 1.0 + exp_rate as f64 / 100.0,
                                         end_tick,
                                         pause_in_safe: true,
+                                        display: Some(crate::actors::player::MultiplierDisplay {
+                                            tag: crate::actors::player::BUFF_TAG_EXP,
+                                            remaining_ms: ticks.saturating_mul(100),
+                                            percent: exp_rate,
+                                        }),
                                     })
                                     .await;
                                 applied = true;
@@ -2050,6 +2065,11 @@ impl Message<UseItemRequest> for WorldActor {
                                         multiplier: 1.0 + drop_rate as f64 / 100.0,
                                         end_tick,
                                         pause_in_safe: true,
+                                        display: Some(crate::actors::player::MultiplierDisplay {
+                                            tag: crate::actors::player::BUFF_TAG_DROP,
+                                            remaining_ms: ticks.saturating_mul(100),
+                                            percent: drop_rate,
+                                        }),
                                     })
                                     .await;
                                 applied = true;

@@ -2592,6 +2592,7 @@ impl WorldActor {
                                     multiplier: state.exp_multiplier,
                                     end_tick: self.tick_count + 100,
                                     pause_in_safe: true,
+                                    display: None,
                                 })
                                 .await;
                             debug!(
@@ -2605,6 +2606,12 @@ impl WorldActor {
                                     multiplier: 1.0,
                                     end_tick: 0,
                                     pause_in_safe: false,
+                                    // 批23 单元①：到期 → 发 S.RemoveBuff（C# 同）
+                                    display: Some(crate::actors::player::MultiplierDisplay {
+                                        tag: crate::actors::player::BUFF_TAG_EXP,
+                                        remaining_ms: 0,
+                                        percent: 0,
+                                    }),
                                 })
                                 .await;
                             send_system_message(&self.gate_ref, *session_id, "双倍经验效果已结束");
@@ -2621,6 +2628,7 @@ impl WorldActor {
                                     multiplier: state.drop_multiplier,
                                     end_tick: self.tick_count + 100,
                                     pause_in_safe: true,
+                                    display: None,
                                 })
                                 .await;
                             debug!(
@@ -2634,6 +2642,11 @@ impl WorldActor {
                                     multiplier: 1.0,
                                     end_tick: 0,
                                     pause_in_safe: false,
+                                    display: Some(crate::actors::player::MultiplierDisplay {
+                                        tag: crate::actors::player::BUFF_TAG_DROP,
+                                        remaining_ms: 0,
+                                        percent: 0,
+                                    }),
                                 })
                                 .await;
                             send_system_message(&self.gate_ref, *session_id, "掉落加成效果已结束");

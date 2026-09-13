@@ -809,17 +809,74 @@ pub(crate) fn buff_values(t: &crate::combat::buff::BuffType) -> Vec<i32> {
 /// `[tag u8][remaining_ms u32][paused u8][value_count u8][values i32…]`。
 /// 文案/图标表仍留在客户端（C# 的 `BuffImage`/`BuffString` 本来也是客户端表）；
 /// `remaining_ms` 为**剩余时长**（C# `ClientBuff.ExpireTime` 同样是时长，客户端再叠加本机时钟）。
-pub(crate) fn build_add_buff_body(b: &crate::combat::buff::BuffInstance) -> Vec<u8> {
-    let values = buff_values(&b.buff_type);
+pub(crate) fn build_add_buff_body_raw(
+    tag: u8,
+    remaining_ms: u32,
+    paused: bool,
+    values: &[i32],
+) -> Vec<u8> {
     let mut body = Vec::with_capacity(7 + values.len() * 4);
-    body.push(buff_tag(&b.buff_type));
-    body.extend_from_slice(&(b.remaining_ticks.saturating_mul(100)).to_le_bytes());
-    body.push(u8::from(b.paused));
+    body.push(tag);
+    body.extend_from_slice(&remaining_ms.to_le_bytes());
+    body.push(u8::from(paused));
     body.push(values.len().min(u8::MAX as usize) as u8);
     for v in values.iter().take(u8::MAX as usize) {
         body.extend_from_slice(&v.to_le_bytes());
     }
     body
+}
+
+pub(crate) fn build_add_buff_body(b: &crate::combat::buff::BuffInstance) -> Vec<u8> {
+    build_add_buff_body_raw(
+        buff_tag(&b.buff_type),
+        b.remaining_ticks.saturating_mul(100),
+        b.paused,
+        &buff_values(&b.buff_type),
+    )
+}
+
+/// #2791 批23 单元①：倍率类加成（Exp/Drop）的客户端 tag。
+/// C# 里它们是 `BuffType.Exp(105)`/`BuffType.Drop(106)`（`BuffImage` = 260 / 162），
+/// 而本端 Rust 用 `SetExpMultiplier`/`SetDropMultiplier` 承载，没有对应 `combat::BuffType` 变体，
+/// 故单列两个 tag（不参与 `buff_tag` 映射）。
+pub(crate) const BUFF_TAG_EXP: u8 = 29;
+pub(crate) const BUFF_TAG_DROP: u8 = 30;
+
+/// 倍率类加成在 Buff 窗的显示参数（C# `UseItem` Buff 药水 `case 4/5` → `AddBuff(Exp/Drop, …,
+/// Stats{[ExpRatePercent/ItemDropRatePercent] = Luck})`；`HumanObject.AddBuff` 对本人无条件 Enqueue）
+#[derive(Debug, Clone, Copy)]
+pub struct MultiplierDisplay {
+    /// 客户端 tag（[`BUFF_TAG_EXP`] / [`BUFF_TAG_DROP`]）
+    pub tag: u8,
+    /// 生效时下发（C# `Buff.ExpireTime` 语义：剩余时长 ms）
+    pub remaining_ms: u32,
+    /// C# `item.GetTotal(Stat.Luck)`（百分比数值）
+    pub percent: i32,
+}
+
+impl PlayerActor {
+    /// 批23 单元①：倍率类加成的 `S.AddBuff` / `S.RemoveBuff`（到期由 `tick_exp_events_and_invisibility`
+    /// 把倍率重置为 1.0 → `active=false` → 发 RemoveBuff，与 C# `RemoveBuff` 一致）
+    fn send_multiplier_buff(&self, d: MultiplierDisplay, active: bool) {
+        let (opcode, body) = if active {
+            (
+                mir2_shared::enums::ServerPacketIds::AddBuff as i16,
+                build_add_buff_body_raw(d.tag, d.remaining_ms, false, &[d.percent]),
+            )
+        } else {
+            (
+                mir2_shared::enums::ServerPacketIds::RemoveBuff as i16,
+                vec![d.tag],
+            )
+        };
+        let _ = self
+            .gate_ref
+            .tell(SendToClient {
+                session_id: self.state.session_id,
+                data: build_packet_bytes(opcode, &body),
+            })
+            .try_send();
+    }
 }
 
 /// serde 默认：MentorSkillBoost 默认 true（C# Settings.MentorSkillBoost）。
@@ -1308,6 +1365,8 @@ pub struct SetExpMultiplier {
     pub end_tick: u64,
     /// C# BuffProperty.PauseInSafeZone：安全区内到期顺延（药水/卷轴类加成）
     pub pause_in_safe: bool,
+    /// 批23 单元①：Buff 窗显示（`None` = 本次不更新，例如安全区顺延）
+    pub display: Option<MultiplierDisplay>,
 }
 
 impl Message<SetExpMultiplier> for PlayerActor {
@@ -1321,6 +1380,9 @@ impl Message<SetExpMultiplier> for PlayerActor {
         self.state.exp_multiplier = msg.multiplier.max(1.0);
         self.state.exp_multiplier_end_tick = msg.end_tick;
         self.state.exp_multiplier_pause_in_safe = msg.pause_in_safe;
+        if let Some(d) = msg.display {
+            self.send_multiplier_buff(d, self.state.exp_multiplier > 1.0);
+        }
     }
 }
 
@@ -1330,6 +1392,8 @@ pub struct SetDropMultiplier {
     pub end_tick: u64,
     /// C# BuffProperty.PauseInSafeZone：安全区内到期顺延（药水/卷轴类加成）
     pub pause_in_safe: bool,
+    /// 批23 单元①：Buff 窗显示（`None` = 本次不更新）
+    pub display: Option<MultiplierDisplay>,
 }
 
 impl Message<SetDropMultiplier> for PlayerActor {
@@ -1343,6 +1407,9 @@ impl Message<SetDropMultiplier> for PlayerActor {
         self.state.drop_multiplier = msg.multiplier.max(1.0);
         self.state.drop_multiplier_end_tick = msg.end_tick;
         self.state.drop_multiplier_pause_in_safe = msg.pause_in_safe;
+        if let Some(d) = msg.display {
+            self.send_multiplier_buff(d, self.state.drop_multiplier > 1.0);
+        }
     }
 }
 
@@ -7973,6 +8040,25 @@ mod tests {
         assert_eq!(body[0], 6);
         assert_eq!(i32::from_le_bytes(body[7..11].try_into().unwrap()), 12);
         assert_eq!(i32::from_le_bytes(body[11..15].try_into().unwrap()), 1);
+    }
+
+    #[test]
+    /// #2797 单元①：倍率类加成（Exp/Drop）的 Buff 窗载荷 = 与普通 buff 同格式
+    /// （tag 29/30 + 剩余时长 + 百分比），C# `HumanObject.AddBuff` 对本人无条件 Enqueue
+    #[test]
+    fn multiplier_buff_body_matches_add_buff_wire() {
+        let body = super::build_add_buff_body_raw(super::BUFF_TAG_EXP, 30 * 60 * 1000, false, &[50]);
+        assert_eq!(body[0], super::BUFF_TAG_EXP);
+        assert_eq!(i32::from_le_bytes(body[1..5].try_into().unwrap()), 1_800_000);
+        assert_eq!(body[5], 0);
+        assert_eq!(body[6], 1);
+        assert_eq!(i32::from_le_bytes(body[7..11].try_into().unwrap()), 50);
+        assert_eq!(body.len(), 11);
+        // Drop 同构，仅 tag 不同
+        let drop_body =
+            super::build_add_buff_body_raw(super::BUFF_TAG_DROP, 1_000, false, &[120]);
+        assert_eq!(drop_body[0], super::BUFF_TAG_DROP);
+        assert_eq!(i32::from_le_bytes(drop_body[7..11].try_into().unwrap()), 120);
     }
 
     #[test]

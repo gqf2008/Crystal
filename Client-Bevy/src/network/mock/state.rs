@@ -168,6 +168,9 @@ pub(crate) fn potion_item(index: i32) -> mir2_shared::data::item::UserItem {
                 2 => "魔法药(小)".to_string(),
                 5 => "木剑".to_string(),
                 10 => "布衣".to_string(),
+                // 批23 单元①：Buff 药水（C# `ItemType.Potion` shape 4 = Exp / 5 = Drop）
+                3 => "双倍经验药水".to_string(),
+                4 => "掉率加成药水".to_string(),
                 _ => format!("#{}", index),
             },
             image: index as u16,
@@ -176,7 +179,11 @@ pub(crate) fn potion_item(index: i32) -> mir2_shared::data::item::UserItem {
                 10 => ItemType::Armour,
                 _ => ItemType::Potion,
             },
-            shape: 0,
+            shape: match index {
+                3 => 4, // Exp（C# `UseItem` case 4）
+                4 => 5, // Drop（C# `UseItem` case 5）
+                _ => 0,
+            },
             price: 10,
             stats: {
                 let mut s = mir2_shared::data::stats::Stats::new();
@@ -191,6 +198,9 @@ pub(crate) fn potion_item(index: i32) -> mir2_shared::data::item::UserItem {
                         s.set(Stat::MinAC, 2);
                         s.set(Stat::MaxAC, 5);
                     }
+                    // Buff 药水：C# 用 `Stat.Luck` 当加成百分比（Exp/Drop）
+                    3 => s.set(Stat::Luck, 50),
+                    4 => s.set(Stat::Luck, 120),
                     _ => {}
                 }
                 s
