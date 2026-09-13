@@ -698,11 +698,11 @@ fn creature_action_system(
             // 改名/释放确认键与其它按钮（关闭等）不参与 C# 的 `Enabled` 开关
             None => true,
         };
-        let want_color = if enabled {
-            Color::WHITE
-        } else {
-            Color::srgb(0.55, 0.55, 0.55)
-        };
+        // C# `MirButton` 禁用时 `Index` 回落 `base.Index`（`DisabledIndex` 未设 = -1），且
+        // `IntelligentCreatureDialog` 从未设置 `GrayScale` → **禁用态外观与可用态相同**，
+        // 只是点击被 `MirControl` 的 `!Enabled` 拦掉（:831-885）。此前用 `ImageNode.color`
+        // 暗化是自造视觉，按原版回退为原色。
+        let want_color = Color::WHITE;
         if node.color != want_color {
             node.color = want_color;
         }

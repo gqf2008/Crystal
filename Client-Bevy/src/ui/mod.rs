@@ -2,6 +2,7 @@
 pub mod client_settings;
 pub mod controls;
 pub mod credits;
+pub mod gray;
 pub mod intro;
 pub mod libpinyin_ime;
 pub mod keyboard_nav;

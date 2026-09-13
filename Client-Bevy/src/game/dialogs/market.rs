@@ -27,6 +27,7 @@ use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
 use crate::ui::sprite_ui::{shared_cjk_font, ui_image, UiCjkFont, UiFont, UiImageCache};
+use crate::ui::gray::UiGray;
 use crate::ui::theme::{
     load_lib_image, spawn_container, spawn_icon_button, spawn_item_cell_ui, spawn_label,
     spawn_label_center, spawn_panel, spawn_scroll_bar_ui, ImageButton, UiItemCellData,
@@ -624,6 +625,19 @@ pub enum MarketBottomBtn {
     Mail,
 }
 
+/// C# `UpdateInterface`（TrustMerchantDialog.cs:1005-1033）底栏四键的 `Enabled`：
+/// 有选中 → Buy/Mail 可用、CollectSold 不可用（反之亦然）；SellNow 仅当选中行卖家为
+/// `Bid Met`（拍卖已有人出价）。禁用态同时是 `GrayScale = true` 的灰度绘制。
+pub fn market_bottom_enabled(kind: MarketBottomBtn, has_sel: bool, bid_met: bool) -> bool {
+    match kind {
+        MarketBottomBtn::Buy => has_sel,
+        MarketBottomBtn::CollectSold => !has_sel,
+        // C# `Selected != null && Selected.Listing.Seller == "Bid Met"`
+        MarketBottomBtn::SellNow => has_sel && bid_met,
+        MarketBottomBtn::Mail => has_sel,
+    }
+}
+
 /// 行内绝对定位节点（`border` = 四周 1px 描边，用于选中框）
 fn row_node(x: f32, y: f32, w: f32, h: f32, border: bool) -> Node {
     Node {
@@ -995,7 +1009,11 @@ fn spawn_market(
         {
             let (n, h, pr) = buy_market.clone();
             spawn_icon_button(p, n, h, pr, TM_BUY_POS.0, TM_BUY_POS.1, 84.0, 25.0, 10)
-                .insert((MarketBuyBtn, MarketBottomBtn::Buy));
+                .insert((
+                    MarketBuyBtn,
+                    MarketBottomBtn::Buy,
+                    UiGray::default(),
+                ));
         }
         // 表头标签（C# 5 个 Title*Label，居中；文案随页签变化）
         for (kind, x, y, w) in TM_HEADERS {
@@ -1060,6 +1078,7 @@ fn spawn_market(
                 MarketMailBtn,
                 MarketBottomBtn::Mail,
                 MarketForPanel::MarketOnly,
+                UiGray::default(),
             ));
         }
         // C# 翻页：Back Prguse2[240..242] @(251,419)、Next Prguse2[243..245] @(320,419)
@@ -1173,6 +1192,7 @@ fn spawn_market(
                 MarketCollectSoldBtn,
                 MarketBottomBtn::CollectSold,
                 MarketForPanel::ConsignOnly,
+                UiGray::default(),
             ));
         }
         {
@@ -1192,6 +1212,7 @@ fn spawn_market(
                     MarketSellNowBtn,
                     MarketBottomBtn::SellNow,
                     MarketForPanel::AuctionOnly,
+                    UiGray::default(),
                 ));
             }
         }
@@ -1846,7 +1867,7 @@ fn market_row_system(
     mut icons: Query<(&MarketRowIcon, &mut ImageNode, &mut Node)>,
     mut labels: Query<(&MarketRowText, &mut Text, &mut TextColor)>,
     mut borders: Query<(&MarketRowBorder, &mut Visibility), Without<MarketAuctionRow>>,
-    mut bottom_btns: Query<(&MarketBottomBtn, &mut ImageNode), Without<MarketRowIcon>>,
+    mut bottom_btns: Query<(&MarketBottomBtn, &mut UiGray), Without<MarketRowIcon>>,
 ) {
     if !mgr.is_open(DialogKind::Market) {
         return;
@@ -1969,20 +1990,11 @@ fn market_row_system(
     let sel = selected.and_then(|i| market.listings.get(i));
     let has_sel = sel.is_some();
     let bid_met = sel.map(|i| i.seller == "Bid Met").unwrap_or(false);
-    for (kind, mut node) in &mut bottom_btns {
-        let enabled = match kind {
-            MarketBottomBtn::Buy => has_sel,
-            MarketBottomBtn::CollectSold => !has_sel,
-            MarketBottomBtn::SellNow => bid_met,
-            MarketBottomBtn::Mail => has_sel,
-        };
-        let want = if enabled {
-            Color::WHITE
-        } else {
-            Color::srgb(0.55, 0.55, 0.55)
-        };
-        if node.color != want {
-            node.color = want;
+    for (kind, mut gray) in &mut bottom_btns {
+        // C# `GrayScale = !Enabled`（:1005-1033）：禁用态按 `grayscale.ps` 灰度绘制
+        let want = !market_bottom_enabled(*kind, has_sel, bid_met);
+        if gray.gray != want {
+            gray.gray = want;
         }
     }
 }
@@ -2534,6 +2546,25 @@ mod tests {
         assert_eq!((TM_PRICE_HEADER_W, TM_PRICE_HEADER_H), (88.0, 21.0));
         assert_eq!(TM_PRICE_ICON_POS, (371.0, 65.0));
         assert_eq!((TM_PRICE_ICON_W, TM_PRICE_ICON_H), (12.0, 11.0));
+    }
+
+    /// #2742：C# `UpdateInterface`（TrustMerchantDialog.cs:1005-1033）底栏四键 `Enabled`
+    /// （禁用态即 `GrayScale = true` 灰化）。
+    #[test]
+    fn market_bottom_buttons_gray_when_disabled() {
+        use MarketBottomBtn::*;
+        // 有选中：Buy/Mail 可用（不灰）、CollectSold 灰化
+        assert!(market_bottom_enabled(Buy, true, false));
+        assert!(!market_bottom_enabled(CollectSold, true, false));
+        assert!(market_bottom_enabled(Mail, true, false));
+        // 无选中：相反
+        assert!(!market_bottom_enabled(Buy, false, false));
+        assert!(market_bottom_enabled(CollectSold, false, false));
+        assert!(!market_bottom_enabled(Mail, false, false));
+        // SellNow 仅当选中行卖家为 Bid Met
+        assert!(!market_bottom_enabled(SellNow, true, false));
+        assert!(market_bottom_enabled(SellNow, true, true));
+        assert!(!market_bottom_enabled(SellNow, false, true));
     }
 
     /// #2720：`GetOrderedListings()` 排序（Normal 原序 / Low 升序 / High 降序，稳定）

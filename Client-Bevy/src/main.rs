@@ -137,6 +137,14 @@ fn main() {
     app.add_systems(Update, (mark_ui_render_layers, propagate_ui_render_layers));
     // bevy_ui 迁移：三帧图按钮交互（Interaction → normal/hover/pressed 帧切换）
     app.add_systems(Update, client_bevy::ui::theme::image_button_system);
+    // #2742：C# `MirImageControl.GrayScale` 等价灰度（须排在帧切换系统之后：
+    // 后者每帧把原帧写回 `ImageNode.image`，本系统再按需替换成灰度变体）
+    app.init_resource::<client_bevy::ui::gray::UiGrayCache>();
+    app.add_systems(
+        Update,
+        client_bevy::ui::gray::apply_ui_gray_system
+            .after(client_bevy::ui::theme::image_button_system),
+    );
     // #91 UI 按钮交互音效（全场景：登录/选角/游戏）
     app.add_systems(Update, client_bevy::ui::sprite_ui::ui_button_sound_system);
     // 文本黑色描边同步（C# MirLabel OutLine：4 方向 1px 黑色副本跟随正文内容变化）。
