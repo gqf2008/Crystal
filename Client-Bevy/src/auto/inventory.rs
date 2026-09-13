@@ -462,10 +462,23 @@ pub(crate) fn auto_refine_test(
         &client_bevy::game::player_state::Inventory,
         With<client_bevy::actor::LocalPlayer>,
     >,
+    npcs: Query<(
+        &client_bevy::actor::NetObjectId,
+        &client_bevy::actor::NpcName,
+        &Transform,
+    )>,
+    players: Query<
+        &Transform,
+        (
+            With<client_bevy::actor::LocalPlayer>,
+            With<client_bevy::actor::NetObjectId>,
+        ),
+    >,
     mut mgr: ResMut<client_bevy::game::dialogs::DialogManager>,
     mut t: Local<f32>,
     mut stage: Local<u8>,
     mut uid: Local<Option<u64>>,
+    mut npc_oid: Local<Option<u32>>,
 ) {
     use client_bevy::scenes::AppState;
     if *state != AppState::Game {
@@ -485,6 +498,64 @@ pub(crate) fn auto_refine_test(
             if *t < 8.0 {
                 return;
             }
+            // #2843：服务端按 C# 校验 NPC 页 key（DepositRefineItem 要求 [@REFINE]）——
+            // 先对最近的铁匠 NPC 发 CallNPC("[@REFINE]")，等 S.NPCRefine 把精炼窗打开
+            let oid = players.single().ok().and_then(|ptf| {
+                let (px, py) = client_bevy::game::movement::world_to_tile(
+                    ptf.translation.x,
+                    ptf.translation.y,
+                );
+                npcs.iter()
+                    .filter(|(_, n, _)| {
+                        let name = n.0.to_lowercase();
+                        name.contains("blacksmith") || name.contains("carlos")
+                    })
+                    .map(|(id, _, tf)| {
+                        let (nx, ny) = client_bevy::game::movement::world_to_tile(
+                            tf.translation.x,
+                            tf.translation.y,
+                        );
+                        (id.0, (nx - px).abs() + (ny - py).abs())
+                    })
+                    .min_by_key(|(_, d)| *d)
+                    .map(|(id, _)| id)
+            });
+            match oid {
+                Some(oid) => {
+                    *npc_oid = Some(oid);
+                    net.send_packet(&mir2_shared::packets::client::npc::CallNPC {
+                        object_id: oid,
+                        key: "[@REFINE]".to_string(),
+                    });
+                    tracing::info!("[REFINETEST] CallNPC [@REFINE] {}", oid);
+                    *stage = 6;
+                    *t = 0.0;
+                }
+                None => {
+                    tracing::warn!(
+                        "[REFINETEST] ❌ 附近没有精炼 NPC（Blacksmith/Carlos）——跳过（不加页 key 会被服务端拒绝）"
+                    );
+                    *stage = 9;
+                }
+            }
+        }
+        // #2843：等精炼窗打开（S.NPCRefine → Refine 对话）
+        6 => {
+            if *t >= 5.0 {
+                tracing::warn!("[REFINETEST] ❌ 未收到 NPCRefine（精炼页未打开）");
+                *stage = 9;
+                return;
+            }
+            if mgr.is_open(client_bevy::game::dialogs::DialogKind::Refine) {
+                tracing::info!("[REFINETEST] ✅ 精炼页已打开");
+                *stage = 1;
+                *t = 0.0;
+            }
+        }
+        1 => {
+            if *t < 1.0 {
+                return;
+            }
             if !mgr.is_open(client_bevy::game::dialogs::DialogKind::Refine) {
                 mgr.toggle(client_bevy::game::dialogs::DialogKind::Refine);
             }
@@ -502,7 +573,7 @@ pub(crate) fn auto_refine_test(
                         to: 0,
                     });
                     tracing::info!("[REFINETEST] 存入精炼物品 uid={}", item_uid);
-                    *stage = 1;
+                    *stage = 2;
                     *t = 0.0;
                 }
                 None => {
@@ -511,7 +582,8 @@ pub(crate) fn auto_refine_test(
                 }
             }
         }
-        1 => {
+        // 等存入确认（服务端聊天反馈；#2827 后客户端也会收到确认包）
+        2 => {
             if *t >= 6.0 {
                 tracing::warn!("[REFINETEST] ❌ 未收到存入确认");
                 *stage = 9;
@@ -523,11 +595,11 @@ pub(crate) fn auto_refine_test(
                     unique_id: uid.unwrap_or(0),
                 });
                 tracing::info!("[REFINETEST] 开始精炼");
-                *stage = 2;
+                *stage = 3;
                 *t = 0.0;
             }
         }
-        2 => {
+        3 => {
             if *t >= 6.0 {
                 tracing::warn!("[REFINETEST] ❌ 未收到精炼开始确认");
                 *stage = 9;
@@ -535,22 +607,38 @@ pub(crate) fn auto_refine_test(
             }
             if chat_has(&chat, "精炼已开始") {
                 tracing::info!("[REFINETEST] ✅ 精炼已开始（等待 65 秒）");
-                *stage = 3;
+                *stage = 4;
                 *t = 0.0;
             }
         }
-        3 => {
+        4 => {
             if *t < 65.0 {
+                return;
+            }
+            // #2843：CheckRefine 要求 [@REFINECHECK] 页——先请页，再发查看
+            if let Some(oid) = *npc_oid {
+                net.send_packet(&mir2_shared::packets::client::npc::CallNPC {
+                    object_id: oid,
+                    key: "[@REFINECHECK]".to_string(),
+                });
+                tracing::info!("[REFINETEST] CallNPC [@REFINECHECK] {}", oid);
+            }
+            *stage = 7;
+            *t = 0.0;
+        }
+        // #2843：等查看页生效后再发 C.CheckRefine
+        7 => {
+            if *t < 2.0 {
                 return;
             }
             net.send_packet(&client_bevy::network::RefineCheckWire {
                 unique_id: uid.unwrap_or(0),
             });
             tracing::info!("[REFINETEST] 查看精炼结果");
-            *stage = 4;
+            *stage = 5;
             *t = 0.0;
         }
-        4 => {
+        5 => {
             if *t >= 8.0 {
                 tracing::warn!("[REFINETEST] ❌ 未收到精炼结果");
                 *stage = 9;
@@ -580,7 +668,7 @@ pub(crate) fn auto_refine_test(
                             to: grid as i32,
                         });
                         tracing::info!("[REFINETEST] 取回精炼物品到背包格 {}", grid);
-                        *stage = 5;
+                        *stage = 8;
                         *t = 0.0;
                     }
                     None => {
@@ -590,7 +678,7 @@ pub(crate) fn auto_refine_test(
                 }
             }
         }
-        5 => {
+        8 => {
             if *t < 5.0 {
                 return;
             }
