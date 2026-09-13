@@ -159,11 +159,12 @@
 | 批17 悬停提示闭环 + Hint 覆盖 | 控制接口加光标探针（`cursor` RPC）+ `nearby` 带视口坐标，把「自动化无光标」的复现障碍做进产品；修提示框 CJK 豆腐字（Arial → 共享宋体主字体）；补技能栏格 `SkillMpCooldownKey` 与大地图（搜索NPC/队友名）Hint，时间格式收进 `game::time_format` | #2768 #2769 #2770 |
 | 批18 悬停提示长尾（一） | 玩家右键菜单 5 项 Hint + 新增 `KeybindOptions.Trade`（按 C# 默认 T，热键发 `C.TradeRequest`；租赁扩展键让位改 `;`）；修菜单字体豆腐与菜单项顺序；新增**通用按钮 Hint 通道**（`UiHint`/`ui_hint_system`，沿 `ChildOf` 累加求绝对原点）并补 Mail/Group/Friend 三窗按钮 Hint | #2772 #2773 |
 | 批19 悬停提示长尾（二） | Ranking/Relationship/Mentor/GuildTerritory/Hero/腰带/耐久/音量/技能页 103 条描述等 Hint；**提示面板由 sprite 层迁到 bevy_ui 置顶**（旧实现被对话框整块盖住）；修空提示框与描边副本残留；菜单窗 13 项、小地图条 3 项、`char_page`/`player_menu` 控制接口 | #2776 #2777 #2778 #2779 |
+| 批20 聊天控制栏 + 三档尺寸 | C# `ChatControlBar` 落地（9 按钮 + 发送前缀语义 + Hint + 交易/设置）；聊天窗口 0/1/2 档（面板 2221/2224/2227、行数 4/7/11、底边固定向上长高）；腰带随档位上移 + 滚动条轨道换图/滑块比例；新增 `chat_size` 控制接口 | #2782 #2783 #2784 |
 
 ## 6. 验证基线
 
 - `cargo check --tests`（Client-Bevy）通过。
-- `cargo test`（Client-Bevy）：472 lib + 2 bin + 1 smoke + 24 alignment 通过（批19 单元④ 后基线）。
+- `cargo test`（Client-Bevy）：481 lib + 2 bin + 1 smoke + 24 alignment 通过（批20 单元③ 后基线）。
 - Report 的 C# `Prguse[1633]` 在当前本地 Data 包缺失；已使用按 C# 控件边界推导的 360x244 深色兜底面板并保留对应子控件坐标，待资源包更新后自动加载正确背景。
 - ServerRust：673 lib + 6 integration 通过（批16 单元① 后基线）；SharedRust 185 + 11（2 ignored）；`MapEditor/SharedRust` `cargo check` 通过（副本同步）。
 - 关键实机/定向验证：UI 子树泄漏截图、Character 技能页、AssignKey 模态输入、Timer 穿透、登录安全键盘资源；批7 复验 Mail/Buff；批8 复验 Center 窗口。
@@ -213,6 +214,8 @@
 - 批19 菜单窗/小地图条 Hint 实机复验（2026-09-13，同上）：菜单「退出 (Alt + Q)」「帮助 (H)」「师徒 ()」（C# `KeybindOptions.Mentor` 默认 `Keys.None` → 原版就渲染「师徒 ()」，逐字复刻）、「公会 (G)」；小地图条「小地图 (V)」「邮件」「大地图 (B)」。
 - 批19 动态 Hint 实机复验（2026-09-13，同上）：设置窗音效条「80%」/音乐条「60%」（两值不同说明逐条绑定正确）、耐久钮「耐久面板」、英雄行为按钮「英雄行为：攻击」「英雄行为：自动」。实机暴露并修复两个提示框缺陷：① 命中空文案 `UiHint` 会写入 `lines=[""]` → 空提示框（队伍无成员时可见）；② 隐藏标题/行时只隐藏正文不清空 → 4 个黑描边副本残留暗字。
 - 批19 技能页 Hint 复验 + 门禁（2026-09-13，`char_page {page:3}` + 光标探针）：第 1 行「攻杀剑术」显示「攻杀剑术／被动技能／…／当前技能等级 1／下一等级 2」，第 2 行「刺杀剑术」显示对应描述（含原版缺空行版式）；扩展点把正文 `\n` 计入行数后框体尺寸才够。红检：`skill_hint` 的 `{2}` 替换变异成空串 → FAILED；`binding_key_text` 的 `RequireCtrl == 1` 变异成 `!= 2` → FAILED；`behaviour_hint(3)` 变异成「自定义」→ FAILED。顺带修 mock：第二个魔法名字是「刺杀剑术」而 `spell` 写成 `Spell::Fencing`（应为 `Thrusting`），否则技能页 Hint 显示成另一技能（mock 枚举取值必须与线上一致，批16 CreatureType 同类）。
+- 批20 聊天控制栏实机复验（2026-09-13，`--auto-enter` + 光标探针，截图转 JPG）：`Prguse[2034]` 控制栏 @(230,656) 按 C# 渲染 9 个按钮，「全部」呈选中（按下）帧，悬停依次显示「全部/喊话/情侣/交易 (T)/聊天设置」；负控无提示。控制栏此前**整条未实现**（`chat.rs` 的 `ChatTabBtn`/`ChatBarBtn`/`ChatSettingsBtn` 三个组件只有声明与系统分支、从未 spawn）。
+- 批20 聊天三档尺寸实机复验（2026-09-13，`chat_size {size}` RPC 驱动，截图转 JPG）：0 档面板 632x68 紧贴控制栏；1/2 档面板向上长高 +48/+96（**底边固定**）、控制栏与 Home/Up 随之上移、行数 4→7→11；2 档下两条横向腰带（药水/英雄）随之上移到 522（= 控制栏顶边 560 − 腰带高 38），不再与聊天窗重叠；切回 0 档整体复位。C# `ChangeSize` 的「Down/End/输入框相对位置 +48*size」抵消长高 → 绝对坐标不变，Bevy 生成期即绝对值，无需处理（单测 `chat_size_tops_follow_bottom_anchor` 钉住）。
 
 ## 7. 已知有意偏差
 
@@ -250,4 +253,4 @@
 - 世界悬停未按「光标是否在控件上」门控：C# `GameScene.OnMouseMove` 在 `MouseControl != null`（光标位于控件上）时不画头顶提示；Bevy `actor_hover_tooltip_system` 无此门控，对话框打开时仍会命中其下方的怪物/NPC 头顶提示（实机在设置面板上悬停时可见 NPC 名提示与控件 Hint 叠加）。批19 未改（属输入门控而非 Hint 机制），留待后续批次。
 - 悬停提示（`MirControl.Hint`）覆盖长尾：C# 侧 `Hint = ` 共 **203 处**（`rg -c "Hint\s*=" Client/MirScenes`，其中 MainDialogs 149）。**已对齐**：HUD 主按钮 8 个（含键位）、小地图条 3 个（邮件/大地图/小地图）、菜单窗 13 个（含键位）、物品/商品/角色格（`item_tooltip_lines`）、头顶名字（玩家/怪物/NPC）、技能栏格（`SkillMpCooldownKey`）、大地图（搜索NPC/队友名）、玩家右键菜单 5 项、Mail（发送/读取/删除）、Group（允许拒绝队伍请求/添加/移除/成员名）、Friend（添加/移除/备注/邮件/悄悄话）、Ranking 6 页签、Relationship 5 项、Mentor 3 项、GuildTerritory 4 项（退出/翻页/购买）、Hero 行为 4 项 + 英雄/药水腰带 2 项、耐久面板钮、设置窗 2 条音量滑条、**技能页 7 行魔法格**（103 条技能描述，`dialogs/skill_desc.rs`，按 C# `Spell` 分派）。
   机制：sprite-UI `UiButton` 走 `TooltipHint`（source=1）；bevy UI `Button`/文本按钮走 `UiHint`（source=8，命中用「沿 `ChildOf` 链累加各级 `Node.left/top` 的绝对矩形」，`Auto` 尺寸回退 `ComputedNode`）；提示面板自身是 `GlobalZIndex(90)` 的 bevy_ui 根节点（批19 由 sprite 层迁移——旧实现会被所属对话框整块盖住）；带键位的文案按 C# `KeyBindSettings.GetKey` 拼接（`keyboard_layout::{binding_key_text, hint_with_key}`）。
-  **仍未接 Hint 的**（均为「控件未实现」或需先移植文案表）：`ChatControlBar`（`MainDialogs.cs:1255-1454` 共 11 个按钮：大小/聊天设置/7 个频道/交易 (T)/报告——Bevy 整条控制栏未实现，`chat.rs` 的 `ChatTabBtn`/`ChatBarBtn`/`ChatSettingsBtn` 声明后从未 spawn，现以聊天设置面板的过滤勾选框替代）、`LoverButton`（`:2502` 配偶名，Bevy 无该控件）、`BuffDialog` 增益图标（`BuffDialog.cs:151/773` 的 `BuffString`/`CombinedBuffText` 需按 `BuffType` 分派的文案表；Bevy buff 窗是文本行、无图标实体）、`HeroManageAvatar`（`HeroDialogs.cs:884` `info.ToString()`，Bevy 无头像控件）、GuildTerritory 的「发送邮件给公会会长」（`GuildTerritoryDialog .cs:160`，Bevy 未实现该按钮）、Gameshop 的两个付款方式复选框（`GameshopDialog.cs:190/204`，Bevy 未实现）、Mail 的回复（`MailDialogs.cs:189`，Bevy 无回复窗）、Relationship `AllowButton` 的动态 Hint（`:237/:243` 已婚/未婚两态，本批先落静态默认）。盘点清单见 #2767。
+  **仍未接 Hint 的**（均为「控件未实现」或需先移植文案表）：`ChatControlBar`（`MainDialogs.cs:1255-1454`）**批20 已实现**（9 个可用按钮 + 发送前缀语义 + Hint；`ReportButton` 是构造即 `Visible=false` 的原版死控件，不创建）、`LoverButton`（`:2502` 配偶名，Bevy 无该控件）、`BuffDialog` 增益图标（`BuffDialog.cs:151/773` 的 `BuffString`/`CombinedBuffText` 需按 `BuffType` 分派的文案表；Bevy buff 窗是文本行、无图标实体）、`HeroManageAvatar`（`HeroDialogs.cs:884` `info.ToString()`，Bevy 无头像控件）、GuildTerritory 的「发送邮件给公会会长」（`GuildTerritoryDialog .cs:160`，Bevy 未实现该按钮）、Gameshop 的两个付款方式复选框（`GameshopDialog.cs:190/204`，Bevy 未实现）、Mail 的回复（`MailDialogs.cs:189`，Bevy 无回复窗）、Relationship `AllowButton` 的动态 Hint（`:237/:243` 已婚/未婚两态，本批先落静态默认）。盘点清单见 #2767。
