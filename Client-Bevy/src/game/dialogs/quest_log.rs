@@ -523,6 +523,36 @@ pub fn quest_link_tooltip_lines(
     lines
 }
 
+/// #2810 单元③：奖励格悬停物品说明（C# `QuestCell.OnMouseEnter`，`QuestDialogs.cs:1663-1673`）：
+/// `new UserItem(Item) { MaxDura = Item.Durability, CurrentDura = Item.Durability }` → `CreateItemLabel`。
+/// 本端复用背包的物品 tooltip 行构造（`inventory::item_tooltip_lines`，逐条对齐 C# `MirItemCell`）——
+/// 奖励物品的完整 `ItemInfo` 随任务定义下发（#2801 单元③），故类型/耐久/属性/需求/重量价格都能给。
+pub fn quest_reward_item_tooltip_lines(item: &mir2_shared::data::item::ItemInfo) -> Vec<String> {
+    use crate::game::dialogs::inventory::InvItem;
+    let tooltip_item = InvItem {
+        item_index: item.index,
+        grade: u8::from(item.grade),
+        name: item.name.clone(),
+        image: item.image,
+        count: 1,
+        item_type: u8::from(item.item_type),
+        shape: item.shape,
+        // C# `QuestCell.OnMouseEnter` 把当前/最大耐久都设成 `Item.Durability`
+        current_dura: item.durability,
+        max_dura: item.durability,
+        stats: item.stats.iter().map(|(k, v)| (k as u8, v)).collect(),
+        required_type: u8::from(item.required_type),
+        required_amount: item.required_amount,
+        required_class: item.required_class.bits(),
+        required_gender: item.required_gender.bits(),
+        soul_bound_id: -1,
+        weight: item.weight as u16,
+        price: item.price,
+        ..Default::default()
+    };
+    crate::game::dialogs::inventory::item_tooltip_lines(&tooltip_item)
+}
+
 /// #2801 单元②：消息区标题行圆点（C# `QuestMessage_AfterDraw` 的 `Prguse[919]`，`:1066-1080`）
 #[derive(Component)]
 pub struct QuestDetailBullet(pub usize);
@@ -1793,9 +1823,18 @@ fn quest_detail_reward_system(
         Option<&mut Text>,
         Option<&mut ImageNode>,
     )>,
-    cells: Query<
-        (Entity, &QuestRewardCell, &Interaction),
-        (With<Button>, Without<QuestRewardPart>),
+    cells: Query<(Entity, &QuestRewardCell, Option<&Interaction>), Without<QuestRewardPart>>,
+    // #2810 单元③：奖励格悬停物品说明（C# `QuestCell.OnMouseEnter`）
+    mut tooltip: ResMut<crate::ui::tooltip::TooltipState>,
+    probe: Res<crate::control::CursorProbe>,
+    windows: Query<&Window>,
+    panels: Query<
+        &Node,
+        (
+            With<QuestDetailWidget>,
+            Without<QuestRewardPart>,
+            Without<QuestDetailLine>,
+        ),
     >,
     mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
 ) {
@@ -1938,6 +1977,9 @@ fn quest_detail_reward_system(
 
     // 可选排点击 = 多选一（C# `SelectItems[i].Click`，`:1497-1515`；其余格取消选中）
     for (e, cell, inter) in &cells {
+        let Some(inter) = inter else {
+            continue;
+        };
         let was = prev_inter.insert(e, *inter);
         if !(*inter == Interaction::Pressed && was != Some(Interaction::Pressed)) {
             continue;
@@ -1951,6 +1993,44 @@ fn quest_detail_reward_system(
             reward_item_display_with_catalog(&catalog, r),
             idx
         );
+    }
+
+    // #2810 单元③：奖励格悬停物品说明（C# `QuestCell.OnMouseEnter/OnMouseLeave`，`:1663-1683`）
+    // `CreateItemLabel(new UserItem(Item){MaxDura=CurrentDura=Item.Durability})` → 本端复用背包
+    // 的物品 tooltip 行构造；光标取 `resolve_cursor`（探针优先，自动化可驱动）。
+    let cursor = crate::control::resolve_cursor(
+        probe.pos,
+        windows.single().ok().and_then(|w| w.cursor_position()),
+    );
+    let origin = panels
+        .single()
+        .map(|n| crate::ui::theme::node_origin(n, quest_detail_origin()))
+        .unwrap_or_else(|_| quest_detail_origin());
+    let mut hovered: Option<(String, Vec<String>)> = None;
+    if let Some(c) = cursor {
+        for (_, cell, _) in &cells {
+            let x = origin.0 + QUEST_REWARD_CELL_X0 + cell.slot as f32 * QUEST_REWARD_CELL_DX;
+            let y = origin.1
+                + if cell.fixed {
+                    QUEST_REWARD_FIXED_Y
+                } else {
+                    QUEST_REWARD_SELECT_Y
+                };
+            if c.x >= x && c.x <= x + QUEST_REWARD_CELL && c.y >= y && c.y <= y + QUEST_REWARD_CELL
+            {
+                if let Some(r) = reward_at(*cell) {
+                    hovered = Some((
+                        r.item.name.clone(),
+                        quest_reward_item_tooltip_lines(&r.item),
+                    ));
+                }
+                break;
+            }
+        }
+    }
+    match (hovered, cursor) {
+        (Some((title, lines)), Some(c)) => tooltip.update(14, true, title, lines, c.x, c.y),
+        _ => tooltip.update(14, false, String::new(), Vec::new(), 0.0, 0.0),
     }
 }
 
@@ -3072,6 +3152,92 @@ mod tests {
         );
     }
 
+    /// #2810 单元③：奖励物品说明行（C# `QuestCell.OnMouseEnter` `:1663-1673` → `CreateItemLabel`；
+    /// 本端复用背包 `item_tooltip_lines`，耐久取 `Item.Durability` 作当前/最大）
+    #[test]
+    fn quest_reward_item_tooltip_lines_from_item_info() {
+        use mir2_shared::data::stats::Stats;
+        use mir2_shared::enums::{ItemType, Stat};
+        let mut stats = Stats::new();
+        stats.set(Stat::MinDC, 5);
+        stats.set(Stat::MaxDC, 12);
+        let item = mir2_shared::data::item::ItemInfo {
+            index: 5,
+            name: "木剑".to_string(),
+            item_type: ItemType::Weapon,
+            durability: 30,
+            stats,
+            ..Default::default()
+        };
+        let lines = quest_reward_item_tooltip_lines(&item);
+        assert!(lines.iter().any(|l| l == "类型: 武器"), "{lines:?}");
+        assert!(lines.iter().any(|l| l == "耐久: 30/30"), "{lines:?}");
+        assert!(lines.iter().any(|l| l == "攻击: 5-12"), "{lines:?}");
+    }
+
+    /// #2810 单元③：奖励格悬停弹物品说明（探针驱动；离开则清）——C# `OnMouseEnter/OnMouseLeave`
+    #[test]
+    fn quest_detail_reward_cell_hover_shows_item_label() {
+        fn setup(probe: Option<Vec2>) -> World {
+            let mut world = World::new();
+            let mut mgr = DialogManager::default();
+            mgr.open(DialogKind::QuestDetail);
+            world.insert_resource(mgr);
+            world.insert_resource(QuestDetailState {
+                quest_id: Some(1),
+                ..Default::default()
+            });
+            world.insert_resource(QuestLogState::default());
+            world.insert_resource(GameLibraries::default());
+            world.insert_resource(Assets::<Image>::default());
+            world.insert_resource(crate::ui::sprite_ui::UiImageCache::default());
+            world.insert_resource(crate::ui::tooltip::TooltipState::default());
+            world.insert_resource(crate::control::CursorProbe { pos: probe });
+            let mut q = info(1, 1, RequiredClass::from_bits_truncate(0));
+            q.rewards_fixed_item = vec![reward(10)];
+            q.rewards_select_item = vec![];
+            world.insert_resource(QuestCatalog {
+                infos: vec![q],
+                ..Default::default()
+            });
+            world.spawn((
+                QuestDetailWidget,
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: Val::Px(532.0),
+                    top: Val::Px(60.0),
+                    ..default()
+                },
+            ));
+            // 固定排第 0 格 @(15,24) 32x32（面板内相对）
+            world.spawn((
+                QuestRewardCell {
+                    fixed: true,
+                    slot: 0,
+                },
+                Node::default(),
+            ));
+            world
+        }
+
+        // 探针在格子中心（532+15+16, 60+24+16）
+        let mut world = setup(Some(Vec2::new(563.0, 100.0)));
+        world
+            .run_system_once(quest_detail_reward_system)
+            .expect("奖励区系统应运行");
+        let tip = world.resource::<crate::ui::tooltip::TooltipState>();
+        assert!(tip.visible, "悬停奖励格应弹物品说明");
+        assert_eq!(tip.source, 14, "归属方 = 任务奖励物品（14）");
+        assert_eq!(tip.title, "奖励物品10");
+
+        // 探针移开 → 清掉自己归属的提示
+        let mut world = setup(Some(Vec2::new(100.0, 700.0)));
+        world
+            .run_system_once(quest_detail_reward_system)
+            .expect("奖励区系统应运行");
+        assert!(!world.resource::<crate::ui::tooltip::TooltipState>().visible);
+    }
+
     /// #2810 单元②：链接系统级渲染——常色青、探针命中转橙 + 弹提示（C# `NewLink` `:1355-1382`）
     #[test]
     fn quest_detail_link_hover_turns_orange_and_shows_tooltip() {
@@ -3537,6 +3703,9 @@ mod tests {
         world.insert_resource(GameLibraries::default());
         world.insert_resource(Assets::<Image>::default());
         world.insert_resource(crate::ui::sprite_ui::UiImageCache::default());
+        // #2810 单元③：奖励格悬停物品说明所需资源
+        world.insert_resource(crate::ui::tooltip::TooltipState::default());
+        world.insert_resource(crate::control::CursorProbe { pos: None });
 
         let mut q = info(1, 1, RequiredClass::from_bits_truncate(0));
         q.reward_exp = 100;
@@ -3694,6 +3863,9 @@ mod tests {
         world.insert_resource(GameLibraries::default());
         world.insert_resource(Assets::<Image>::default());
         world.insert_resource(crate::ui::sprite_ui::UiImageCache::default());
+        // #2810 单元③：奖励格悬停物品说明所需资源
+        world.insert_resource(crate::ui::tooltip::TooltipState::default());
+        world.insert_resource(crate::control::CursorProbe { pos: None });
 
         let mut q = info(1, 1, RequiredClass::from_bits_truncate(0));
         q.reward_exp = 0;
