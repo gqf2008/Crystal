@@ -79,7 +79,9 @@ impl Packet for MockCreatureList {
         // #2757：两条样本覆盖 C# 规则表两种形态（默认选中第 1 条 = 三行信息全非空）：
         // ① `Chick` 行（Mouse 11 / Auto 7 / Semi 7 + 产黑石）② `BabyPig` 行（只开 Semi 3 / 满 4000）。
         writer.write_i32::<LittleEndian>(2)?; // count
-        writer.write_u8(mir2_shared::enums::IntelligentCreatureType::Chick as u8)?;
+
+        // 类型字节用 **ServerRust `CreatureType`** 编号（BabyChicken=6；共享枚举是 C# 编号，勿混用）
+        writer.write_u8(6)?;
         writer.write_u8(1)?; // pickup
         writer.write_u8(1)?; // enabled
         writer.write_u8(0)?; // hunger
@@ -108,7 +110,7 @@ impl Packet for MockCreatureList {
         writer.write_i32::<LittleEndian>(7500)?; // fullness
         writer.write_i64::<LittleEndian>(7 * 86400)?; // expire_in_secs
         writer.write_i32::<LittleEndian>(3600)?; // blackstone_time
-        writer.write_u8(mir2_shared::enums::IntelligentCreatureType::BabyPig as u8)?;
+        writer.write_u8(2)?; // ServerRust `CreatureType::BabyPig`
         writer.write_u8(1)?; // pickup
         writer.write_u8(1)?; // enabled
         writer.write_u8(42)?; // hunger
@@ -133,7 +135,7 @@ impl Packet for MockCreatureList {
 
         // #2761 包尾三字段：召唤态（第 1 条已召唤）/召唤种类/玩家珍珠数
         writer.write_u8(1)?; // creature_summoned
-        writer.write_u8(mir2_shared::enums::IntelligentCreatureType::Chick as u8)?; // summoned_type
+        writer.write_u8(6)?; // summoned_type（与本包第 1 条一致）
         writer.write_i32::<LittleEndian>(1234)?; // pearl_count
         Ok(())
     }
