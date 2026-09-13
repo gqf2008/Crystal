@@ -161,11 +161,12 @@
 | 批19 悬停提示长尾（二） | Ranking/Relationship/Mentor/GuildTerritory/Hero/腰带/耐久/音量/技能页 103 条描述等 Hint；**提示面板由 sprite 层迁到 bevy_ui 置顶**（旧实现被对话框整块盖住）；修空提示框与描边副本残留；菜单窗 13 项、小地图条 3 项、`char_page`/`player_menu` 控制接口 | #2776 #2777 #2778 #2779 |
 | 批20 聊天控制栏 + 三档尺寸 | C# `ChatControlBar` 落地（9 按钮 + 发送前缀语义 + Hint + 交易/设置）；聊天窗口 0/1/2 档（面板 2221/2224/2227、行数 4/7/11、底边固定向上长高）；腰带随档位上移 + 滚动条轨道换图/滑块比例；新增 `chat_size` 控制接口 | #2782 #2783 #2784 |
 | 批21 §7 剩余缺口（一） | 观察窗伴侣钮（`PlayerInspect` 协议补 `lover_name`：服务端两处写入 + mock + 客户端解析 + 两端字节契约单测）+ 观察窗 CJK 字体；Mail 回复钮 + GuildTerritory 邮件会长钮（复用写信链路）；伴侣钮已婚/未婚两态动态 Hint | #2787 #2788 #2789 |
+| 批22 §7 剩余缺口（二） | ① 英雄管理窗（`Prguse[1688]` + 8 槽头像 + 当前头像 + `Hint = info.ToString()` + MakeActiveHero 确认 → `C.ChangeHero`；`ManageHeroes` 补 `max_count`：C# 语义 = `maximum_hero_count + 1`；新增独立 `DialogKind::HeroManage` + `dialog hero_manage` 控制接口）② 商城付款方式复选框 + 完整 `BuyProduct`（`Prguse[2086/2087]` 互斥 + 余额标签 + 未选/余额不足聊天提示 + MirMessageBox 确认；`GameShopInfo` 商品项补 `can_buy_credit/can_buy_gold` 两字节，SharedRust + MapEditor 副本 + 服务端 + 客户端解析同步）③ 世界头顶提示按「光标在对话框上」门控（`cursor_over_dialog_rect`）④ BuffDialog 图标行 + Hint（`Prguse2[20..30]` 右缘锚定 + `BuffIcon[BuffImage]` + `BuffString`/`CombinedBuffText` 文案表；`AddBuff` wire 补 `remaining_ms/paused/values`） | #2792 #2793 #2794 #2795 |
 
 ## 6. 验证基线
 
 - `cargo check --tests`（Client-Bevy）通过。
-- `cargo test`（Client-Bevy）：485 lib + 2 bin + 1 smoke + 24 alignment 通过（批21 单元③ 后基线）；ServerRust 674 lib + 6 integration（批21 单元① 后，含 `PlayerInspect` 身份段字节契约）。
+- `cargo test`（Client-Bevy）：**496 lib** + 2 bin + 1 smoke + 24 alignment 通过（批22 单元④ 后基线）；ServerRust **678 lib** + 6 integration（批22 单元④ 后，含 `AddBuff` 载荷字节断言）。
 - Report 的 C# `Prguse[1633]` 在当前本地 Data 包缺失；已使用按 C# 控件边界推导的 360x244 深色兜底面板并保留对应子控件坐标，待资源包更新后自动加载正确背景。
 - ServerRust：673 lib + 6 integration 通过（批16 单元① 后基线）；SharedRust 185 + 11（2 ignored）；`MapEditor/SharedRust` `cargo check` 通过（副本同步）。
 - 关键实机/定向验证：UI 子树泄漏截图、Character 技能页、AssignKey 模态输入、Timer 穿透、登录安全键盘资源；批7 复验 Mail/Buff；批8 复验 Center 窗口。
@@ -220,6 +221,8 @@
 - 批21 观察窗伴侣钮实机复验（2026-09-13，`--auto-enter --inspect-test` + 光标探针，截图转 JPG）：观察窗左上角 (17,17) 出现 `Prguse[604]` 红心钮（配偶名非空才显示），悬停显示「示范伴侣」（= mock 下发的配偶名）；顺带修掉观察窗行会标签的整行豆腐（原用 Arial，改共享宋体）。协议侧：`PlayerInspect` 身份段补 `lover_name`（服务端 `inspect_identity_bytes` 两处调用 + 客户端 `parse_inspect_identity` + mock），两端用同一串手推字节互为见证。
 - 批21 邮件回复/领地邮件 + 伴侣钮两态实机复验（2026-09-13，同上）：Mail 底栏 4 键（发送/回复/读取/删除）悬停回复键显示「回复」；GuildTerritory (262,208) 信封键显示「发送邮件给公会会长」；关系窗伴侣钮未婚态显示「允许/禁止传送」、已婚态（临时开关摆状态，验证后已删）显示「允许/阻止结婚」；负控均无提示。
 
+- 批22 实机/JPG 复验（2026-09-13，`--auto-enter`（+`--buff-test`）与 Control API `cursor` 探针/真实光标点击；`DialogKind::HeroManage` 与 `dialog hero_manage` 控制入口）：① 英雄管理窗 `Prguse[1688]` @(350,350) + 8 槽头像（占用槽 36x30 @+5,+5、超名额槽 `Prguse[1689]` 空框）→ 悬停槽 0 得「英雄小刀 / Level 30 male warrior」，点槽 → MakeActiveHero 确认框 → YES 发 `C.ChangeHero` 且左侧当前头像同步；② 商城付款行 @(250/340,449) 金币/积分互斥勾选、余额标签 0 / 10,000，三种购买分支（金币成交、积分不可购、积分余额不足）日志逐条对账；③ 同一视口坐标下对话框开着无世界头顶提示、全关后恢复；④ Buff 图标行右缘 898（贴小地图左缘）+ 逐图标 Hint（`魔法盾/增加 伤害减免 ： 15%/过期: 19s` 等）+ 收起态「3」与 `当前增益效果` 合计。
+
 ## 7. 已知有意偏差
 
 - Creature：C# `CreatureRenameButton` 构造即 `Visible = false` 且再无置真处（原版死控件，改名入口点不到）；Bevy 保留可用的「改名」按钮（功能补齐见 #1281），仅坐标/精灵与 C# 对齐。
@@ -253,7 +256,8 @@
 - Craft：C# `BeforeDraw` 在背包关闭时会隐藏合成窗，Bevy 未实现（挂机脚本会直开 Craft，保持现状以免回归）。
 - Craft：`CraftButton` 的 `Enabled`/`GrayScale` 已按 C# `RefreshCraftCells`（NPCDialogs.cs:2686-2723）对齐：未选配方或任一工具/材料槽未就位 → 按钮灰度且点击不触发（构造默认即 `GrayScale=true, Enabled=false`）；超出 3 工具格 / 6 材料格的额外需求按 C# `continue` 忽略。
 - Mail：C# `BlockListButton`/`BugReportButton`（MailDialogs.cs:257-283，`Prguse[520]` @(183,414) / `Prguse[523]` @(210,414) 28x25）构造即 `GrayScale = true, Enabled = false` 且无 Click 处理（`AllowDisabledMouseOver` 默认 false，连 Hint 都不弹）；批13 单元3 已按原坐标补这两个灰度占位图（不含交互）。
-- 世界悬停未按「光标是否在控件上」门控：C# `GameScene.OnMouseMove` 在 `MouseControl != null`（光标位于控件上）时不画头顶提示；Bevy `actor_hover_tooltip_system` 无此门控，对话框打开时仍会命中其下方的怪物/NPC 头顶提示（实机在设置面板上悬停时可见 NPC 名提示与控件 Hint 叠加）。批19 未改（属输入门控而非 Hint 机制），留待后续批次。
+- 世界悬停按「光标是否在控件上」门控（**批22 单元③ 已对齐**）：C# 的头顶名字画在 `MapControl` 图层、光标位于控件上时仍绘制但被对话框整块盖住（等价于「控件 Hint 优先」）；本端提示面板迁到 `GlobalZIndex(90)` 置顶层后该隐式遮盖消失，故用 `cursor_over_dialog_rect`（可见 `DialogRoot` 根面板的显式 `Px` 矩形，几何判定、可被 `cursor` 探针驱动）在 `actor_hover_tooltip_system` 里清自身 source=12 并 return。HUD 常驻元素（非 `DialogRoot`）不在门控范围，保持原样。
 - 悬停提示（`MirControl.Hint`）覆盖长尾：C# 侧 `Hint = ` 共 **203 处**（`rg -c "Hint\s*=" Client/MirScenes`，其中 MainDialogs 149）。**已对齐**：HUD 主按钮 8 个（含键位）、小地图条 3 个（邮件/大地图/小地图）、菜单窗 13 个（含键位）、物品/商品/角色格（`item_tooltip_lines`）、头顶名字（玩家/怪物/NPC）、技能栏格（`SkillMpCooldownKey`）、大地图（搜索NPC/队友名）、玩家右键菜单 5 项、Mail（发送/读取/删除）、Group（允许拒绝队伍请求/添加/移除/成员名）、Friend（添加/移除/备注/邮件/悄悄话）、Ranking 6 页签、Relationship 5 项、Mentor 3 项、GuildTerritory 4 项（退出/翻页/购买）、Hero 行为 4 项 + 英雄/药水腰带 2 项、耐久面板钮、设置窗 2 条音量滑条、**技能页 7 行魔法格**（103 条技能描述，`dialogs/skill_desc.rs`，按 C# `Spell` 分派）。
   机制：sprite-UI `UiButton` 走 `TooltipHint`（source=1）；bevy UI `Button`/文本按钮走 `UiHint`（source=8，命中用「沿 `ChildOf` 链累加各级 `Node.left/top` 的绝对矩形」，`Auto` 尺寸回退 `ComputedNode`）；提示面板自身是 `GlobalZIndex(90)` 的 bevy_ui 根节点（批19 由 sprite 层迁移——旧实现会被所属对话框整块盖住）；带键位的文案按 C# `KeyBindSettings.GetKey` 拼接（`keyboard_layout::{binding_key_text, hint_with_key}`）。
-  **仍未接 Hint 的**（均为「控件未实现」或需先移植文案表）：`ChatControlBar`（`MainDialogs.cs:1255-1454`）**批20 已实现**（9 个可用按钮 + 发送前缀语义 + Hint；`ReportButton` 是构造即 `Visible=false` 的原版死控件，不创建）、`LoverButton`（`:2502`）**批21 已实现**（协议补 `lover_name` + `Prguse[604]` 钮 + Hint=配偶名）、`BuffDialog` 增益图标（`BuffDialog.cs:151/773` 的 `BuffString`/`CombinedBuffText` 需按 `BuffType` 分派的文案表；Bevy buff 窗是文本行、无图标实体）、`HeroManageAvatar`（`HeroDialogs.cs:884` `info.ToString()`，Bevy 无头像控件）、GuildTerritory 的「发送邮件给公会会长」（`GuildTerritoryDialog .cs:160`）**批21 已实现**、Gameshop 的两个付款方式复选框（`GameshopDialog.cs:190/204`，Bevy 未实现）、Mail 的回复（`MailDialogs.cs:189`）**批21 已实现**（复用写信链路）；Relationship `AllowButton` 的动态 Hint（`:237/:243` 已婚「允许/阻止结婚」/未婚「允许/禁止传送」）**批21 已实现**。盘点清单见 #2767。
+  **批22 后已全部接上**（原「控件未实现」三项 + Buff 图标，见上）：`ChatControlBar`（批20）、`LoverButton`（批21）、GuildTerritory 邮件会长钮（批21）、Mail 回复（批21）、Relationship `AllowButton` 动态 Hint（批21）、`HeroManageAvatar`（批22 单元①）、Gameshop 付款复选框（批22 单元②）、`BuffDialog` 增益图标 Hint（批22 单元④）。**剩余长尾**：C# `S.AddBuff` 里的 Exp(105)/Drop(106) 在本端由 `SetExpMultiplier`/`SetDropMultiplier` 承载、不是 `BuffInstance`（故 Buff 窗不出现这两枚图标）；C# 的 `PoisonBuffDialog`（毒窗口，`Prguse2[40..]`）本端未实现（毒走 `LocalPoisonChanged` 提示）。
+  **Buff 显示近似（批22 单元④）**：Rust 端 `BuffType` 比 C# 粗（`AttackBoost` 同时覆盖 C# `Rage` 与 Buff 药水 `Impact`；`Invisibility` 覆盖 `Hiding`/`MoonLight`/`DarkBody`），`dialogs/buff.rs::buff_display` 按**代表来源**取 C# 图标/文案；毒类（`Poison/Slow/Frozen/Stun`）取 `PoisonType` 的图标与名称；展开态面板宽度按 art 宽度布局（C# `Size.Width` 展开时被改写成 `count*23`，比 art 窄 ~21px）；渐隐动画（C# `Opacity 0→1`，0.2/55ms）简化为直接显隐；Buff 窗为状态驱动 `AlwaysVisible`，未实现 C# 的 `Movable = false` 限制（本端按 `DialogKind` 拖动，可被拖动）。
