@@ -30,6 +30,27 @@ use state::*;
 const MOCK_DIR_DX: [i32; 8] = [0, 1, 1, 1, 0, -1, -1, -1];
 const MOCK_DIR_DY: [i32; 8] = [-1, -1, 0, 1, 1, 1, 0, -1];
 
+/// 市场列表行（mock 侧与服务端 `MarketListing` 同形）
+type MockMarketListing = (u64, mir2_shared::data::item::UserItem, String, u32, u8, u32);
+
+/// #2736：每页 10 条（与服务端 `MarketPageRequest` 的 `start = page * 10` 一致）
+const MOCK_MARKET_PAGE_SIZE: usize = 10;
+
+/// #2736：市场页数（与服务端 `send_market` 一致，至少 1 页）
+fn mock_market_page_count(listings: &[MockMarketListing]) -> usize {
+    listings.len().div_ceil(MOCK_MARKET_PAGE_SIZE).max(1)
+}
+
+/// #2736：取某页切片（越界返回空，等价服务端 `start..end.min(len)`）
+fn mock_market_page_slice(listings: &[MockMarketListing], page: usize) -> Vec<MockMarketListing> {
+    let start = page * MOCK_MARKET_PAGE_SIZE;
+    let end = (start + MOCK_MARKET_PAGE_SIZE).min(listings.len());
+    if start >= end {
+        return Vec::new();
+    }
+    listings[start..end].to_vec()
+}
+
 pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
     std::thread::Builder::new()
         .name("mock-server".into())
@@ -151,6 +172,23 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                 } else {
                     Vec::new()
                 };
+            // #2736：跨页累积排序实机验证——3 页 25 条，价格逐条递减（越靠后的页越便宜），
+            // 这样「只排当前页」与「C# 全量排序」的页内结果必然不同。
+            if std::env::args().any(|a| a == "--market-many") {
+                mock_market_listings.clear();
+                for i in 0..25u64 {
+                    let mut seed = market_item(853);
+                    seed.unique_id = 1000 + i;
+                    mock_market_listings.push((
+                        6000 + i,
+                        seed,
+                        format!("卖家{}", i),
+                        1000 - i as u32 * 10,
+                        0u8,
+                        0u32,
+                    ));
+                }
+            }
             let mut mock_next_auction: u64 = 5000;
             // #788：接受方推送状态（--mail-read / --marriage-accept / --mentor-accept）
             let mut mock_mail_pushed = false;
@@ -1069,15 +1107,20 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                 // #720：市场（--market-test）
                                 x if x == ClientPacketIds::MarketRefresh as i16 => {
                                     if let Ok(_p) = client::market::MarketRefresh::read_body(&mut cur) {
-                                        send(&to_client, &MockNPCMarket);
+                                        send(
+                                            &to_client,
+                                            &MockNPCMarket {
+                                                pages: mock_market_page_count(&mock_market_listings),
+                                            },
+                                        );
                                         send(
                                             &to_client,
                                             &MockNPCMarketPage {
-                                                listings: mock_market_listings.clone(),
+                                                listings: mock_market_page_slice(&mock_market_listings, 0),
                                             },
                                         );
                                         tracing::info!(
-                                            "🏪 [MOCK] 市场刷新回发（{} 件）",
+                                            "🏪 [MOCK] 市场刷新回发第 1 页（共 {} 件）",
                                             mock_market_listings.len()
                                         );
                                     }
@@ -1085,17 +1128,35 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                 // #2720：C# 规范 `C.MarketSearch`（打开市场/点筛选走的就是它）
                                 x if x == ClientPacketIds::MarketSearch as i16 => {
                                     if let Ok(_p) = client::market::MarketSearch::read_body(&mut cur) {
-                                        send(&to_client, &MockNPCMarket);
+                                        send(
+                                            &to_client,
+                                            &MockNPCMarket {
+                                                pages: mock_market_page_count(&mock_market_listings),
+                                            },
+                                        );
                                         send(
                                             &to_client,
                                             &MockNPCMarketPage {
-                                                listings: mock_market_listings.clone(),
+                                                listings: mock_market_page_slice(&mock_market_listings, 0),
                                             },
                                         );
                                         tracing::info!(
-                                            "🏪 [MOCK] 市场搜索回发（{} 件）",
+                                            "🏪 [MOCK] 市场搜索回发第 1 页（共 {} 件）",
                                             mock_market_listings.len()
                                         );
+                                    }
+                                }
+                                // #2736：`C.MarketPage`——与服务端一致每页 10 条（跨页累积排序实机验证用）
+                                x if x == ClientPacketIds::MarketPage as i16 => {
+                                    if let Ok(p) = client::market::MarketPage::read_body(&mut cur) {
+                                        let page = p.page.max(0) as usize;
+                                        let listings = mock_market_page_slice(&mock_market_listings, page);
+                                        tracing::info!(
+                                            "🏪 [MOCK] 市场翻页 page={} 回发 {} 件",
+                                            page,
+                                            listings.len()
+                                        );
+                                        send(&to_client, &MockNPCMarketPage { listings });
                                     }
                                 }
                                 x if x == ClientPacketIds::ConsignItem as i16 => {

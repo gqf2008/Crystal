@@ -58,7 +58,12 @@ pub struct MarketItem {
 /// 市场状态
 #[derive(Resource)]
 pub struct MarketState {
+    /// 已累积页的条目（C# `TrustMerchantDialog.Listings`：`NPCMarket` 赋值、`NPCMarketPage` `AddRange`）
     pub listings: Vec<MarketItem>,
+    /// 已累积的页数（C# `(Listings.Count - 1) / 10`；0 = 尚未收到任何页）
+    pub loaded_pages: usize,
+    /// 最近一次 `C.MarketPage` 请求的页号（服务器回包不带页号，靠它定位累积位置）
+    pub pending_page: Option<usize>,
     pub pages: usize,
     pub page: usize,
     /// 选中的列表行（购买/取回/立即售出目标）
@@ -87,6 +92,8 @@ impl Default for MarketState {
     fn default() -> Self {
         Self {
             listings: Vec::new(),
+            loaded_pages: 0,
+            pending_page: None,
             pages: 0,
             page: 0,
             selected: None,
@@ -360,12 +367,75 @@ pub fn panel_part_visible(kind: MarketForPanel, panel: MarketPanelType) -> bool 
 }
 
 /// 当前页第 `slot` 行对应的 `listings` 下标（按价格排序重排后）。
-/// Bevy 服务端按页下发（`listings` = 当前页），故不复用 C# 的 `Page*10 + i` 全量索引。
+///
+/// C# `UpdateInterface`（TrustMerchantDialog.cs:983-996）用 `orderedListings[Page * 10 + i]`
+/// —— 索引打在**累积后的全量列表**上，故价格排序是跨页的；`listings` 即该累积列表。
 pub fn row_listing_index(market: &MarketState, slot: usize) -> Option<usize> {
     let prices: Vec<u32> = market.listings.iter().map(|l| l.price).collect();
     display_order(&prices, market.price_filter)
-        .get(slot)
+        .get(market.page * 10 + slot)
         .copied()
+}
+
+/// 累积一页商品（C# `GameScene.NPCMarketPage`，GameScene.cs:5644-5654）：
+/// `Listings.AddRange(p.Listings)` 后 `Page = (Listings.Count - 1) / 10`。
+///
+/// 服务器回包不带页号（`S.NPCMarketPage` 只有 listings），故由调用方给出该页页号：
+/// - `page == 0`：新一轮搜索结果（`NPCMarket` / 搜索 / 刷新）→ 替换累积并复位选中；
+/// - `page <= loaded_pages`：续接/覆盖已加载前缀内的该页（C# 顺序累积等价行为）；
+/// - `page > loaded_pages`：缺页（正常交互不会发生，翻页只请求已加载前缀的下一页）→ 忽略。
+pub fn accumulate_market_page(market: &mut MarketState, page: usize, items: Vec<MarketItem>) {
+    if page == 0 {
+        market.listings.clear();
+        market.loaded_pages = 0;
+        market.selected = None;
+    } else if page > market.loaded_pages {
+        tracing::warn!(
+            "🏪 忽略缺页回包 page={}（已加载 {} 页）",
+            page,
+            market.loaded_pages
+        );
+        return;
+    }
+    let keep = (page * 10).min(market.listings.len());
+    market.listings.truncate(keep);
+    market.listings.extend(items);
+    market.loaded_pages = page + 1;
+    // C# `Page = (Listings.Count - 1) / 10`：顺序累积时即刚到的这一页
+    market.page = page;
+    market.pending_page = None;
+}
+
+/// C# `BackButton.Click`（:192-198）：`if (Page <= 0) return;` 后 `Page--` —— 已在
+/// 累积列表里，纯本地翻页，不请求服务器。
+pub fn back_page_action(page: usize) -> Option<usize> {
+    (page > 0).then(|| page - 1)
+}
+
+/// C# `NextButton.Click`（:210-222）：`Page >= PageCount - 1` 不动作；
+/// `Page < (Listings.Count - 1) / 10` → 本地翻页；否则发 `C.MarketPage{Page+1}`。
+/// 返回 `(目标页, 是否需请求服务器)`。
+pub fn next_page_action(
+    page: usize,
+    loaded_pages: usize,
+    total_pages: usize,
+) -> Option<(usize, bool)> {
+    let next = page + 1;
+    if next >= total_pages.max(1) {
+        return None;
+    }
+    Some((next, next >= loaded_pages))
+}
+
+/// 发 `C.MarketPage{page}` 并登记待回包的页号（`pending_page` 只登记最早一次未回包的请求：
+/// 服务端对翻页有 500ms 节流会静默丢包，登记最早页可让后续重试自愈）。
+pub fn request_market_page(
+    market: &mut MarketState,
+    net: &crate::network::NetConnection,
+    page: usize,
+) {
+    market.pending_page.get_or_insert(page);
+    net.send_packet(&crate::network::MarketPageWire { page: page as u32 });
 }
 
 // ===== 买/取回确认框（C# `MirMessageBox` YesNo，TrustMerchantDialog.cs:360-440）=====
@@ -1306,6 +1376,8 @@ fn market_ui_system(
         market.filter_index = 0;
         market.filter_sub_index = None;
         market.filter_skip = 0;
+        // 新一轮搜索：清掉上一次会话的未决翻页请求（页累积由第 0 页回包复位）
+        market.pending_page = None;
         send_market_search(
             &net,
             "",
@@ -1323,21 +1395,19 @@ fn market_ui_system(
         }
     }
     // 渲染（#89 滚轮翻页：scroll.offset 行号 ↔ market.page 同步）
+    // 可滚动范围 = 已累积页（C# 同为顺序翻页：未加载的页先请求、不跳页）
     {
         let mut sl = scroll.single_mut();
         if let Ok(sl) = sl.as_mut() {
-            sl.set_total(market.pages.max(1) * 10);
+            sl.set_total(market.loaded_pages.max(1) * 10);
             let want = market.page * 10;
             if sl.offset != want {
                 sl.offset = want; // 翻页按钮驱动 → 同步滚动条
             }
             let new_page = sl.offset / 10;
             if new_page != market.page {
-                // 滚轮驱动 → 翻页并请求服务器
+                // 滚轮驱动 → 本地翻页（仅已累积页）
                 market.page = new_page;
-                net.send_packet(&crate::network::MarketPageWire {
-                    page: new_page as u32,
-                });
             }
         }
     }
@@ -1404,16 +1474,24 @@ fn market_ui_system(
     // 翻页
     for (e, inter) in &prev_btn {
         if edge(e, inter, &mut prev_inter) {
-            if market.page > 0 {
-                market.page -= 1;
-                net.send_packet(&crate::network::MarketPageWire { page: market.page as u32 });
+            // C# `BackButton.Click`：纯本地翻页（列表已累积）
+            if let Some(prev) = back_page_action(market.page) {
+                market.page = prev;
             }
         }
     }
     for (e, inter) in &next_btn {
-        if edge(e, inter, &mut prev_inter) && market.page + 1 < market.pages.max(1) {
-            market.page += 1;
-            net.send_packet(&crate::network::MarketPageWire { page: market.page as u32 });
+        if edge(e, inter, &mut prev_inter) {
+            // C# `NextButton.Click`：已累积 → 本地翻页；否则请求下一页
+            if let Some((next, need_request)) =
+                next_page_action(market.page, market.loaded_pages, market.pages)
+            {
+                if need_request {
+                    request_market_page(&mut market, &net, next);
+                } else {
+                    market.page = next;
+                }
+            }
         }
     }
 }
@@ -2200,7 +2278,11 @@ fn market_server_events(
                 market.pages = *pages;
             }
             ServerEvent::MarketListings { listings } => {
-                market.listings = listings
+                // C# `GameScene.NPCMarketPage`：`Listings.AddRange(p.Listings)` 后
+                // `Page = (Listings.Count - 1) / 10`（累积 + 跳到刚到的页）。
+                // 回包不带页号：有未决请求 → 该页；否则视为新一轮搜索的第 0 页。
+                let page = market.pending_page.take().unwrap_or(0);
+                let items: Vec<MarketItem> = listings
                     .iter()
                     .map(|e| {
                         let name = if !e.item.name.is_empty() {
@@ -2228,6 +2310,7 @@ fn market_server_events(
                         }
                     })
                     .collect();
+                accumulate_market_page(&mut market, page, items);
             }
             ServerEvent::MarketConsign { uid, success } => {
                 if *success {
@@ -2476,6 +2559,115 @@ mod tests {
         assert_eq!(row_listing_index(&market, 0), Some(1));
         assert_eq!(row_listing_index(&market, 3), Some(0));
         assert_eq!(row_listing_index(&market, 4), None);
+    }
+
+    /// #2736：价格排序必须**跨页**（C# `Listings.AddRange` 后对全量 `Listings` 排序，
+    /// `UpdateInterface` 取 `orderedListings[Page*10 + i]`）——第 0 页首行要能显示
+    /// 来自第 1 页的最便宜商品，证明不是「只排当前页」。
+    #[test]
+    fn market_sort_accumulates_across_pages() {
+        let mk = |price: u32| MarketItem {
+            price,
+            ..Default::default()
+        };
+        let mut market = MarketState::default();
+        // 第 0 页（服务器顺序，10 条）
+        accumulate_market_page(
+            &mut market,
+            0,
+            vec![
+                mk(500),
+                mk(100),
+                mk(300),
+                mk(100),
+                mk(900),
+                mk(200),
+                mk(700),
+                mk(150),
+                mk(600),
+                mk(250),
+            ],
+        );
+        assert_eq!((market.loaded_pages, market.page), (1, 0));
+        // 第 1 页 `AddRange`（C# `NPCMarketPage`）
+        accumulate_market_page(&mut market, 1, vec![mk(50), mk(800)]);
+        assert_eq!((market.listings.len(), market.loaded_pages), (12, 2));
+        assert_eq!(market.page, 1, "C# `Page = (Listings.Count - 1) / 10`");
+
+        market.price_filter = MarketPriceFilter::Low;
+        // 全量升序下标：50(10) 100(1) 100(3) 150(7) 200(5) 250(9) 300(2) 500(0) 600(8) 700(6) 800(11) 900(4)
+        market.page = 0;
+        let row0: Vec<Option<usize>> = (0..10).map(|s| row_listing_index(&market, s)).collect();
+        assert_eq!(
+            row0,
+            vec![
+                Some(10),
+                Some(1),
+                Some(3),
+                Some(7),
+                Some(5),
+                Some(9),
+                Some(2),
+                Some(0),
+                Some(8),
+                Some(6)
+            ]
+        );
+        assert_eq!(
+            market.listings[row_listing_index(&market, 0).unwrap()].price,
+            50,
+            "第 0 页首行 = 全量最便宜（来自第 1 页）"
+        );
+        // 第 1 页 = 全量排序的后两条
+        market.page = 1;
+        assert_eq!(row_listing_index(&market, 0), Some(11));
+        assert_eq!(row_listing_index(&market, 1), Some(4));
+        assert_eq!(row_listing_index(&market, 2), None);
+        // Normal 保持服务器累积顺序
+        market.price_filter = MarketPriceFilter::Normal;
+        assert_eq!(row_listing_index(&market, 1), Some(11));
+    }
+
+    /// #2736：页累积语义（C# `NPCMarket`/`NPCMarketPage`）——第 0 页替换并复位选中，
+    /// 后续页续接，缺页忽略。
+    #[test]
+    fn market_page_accumulation_matches_csharp() {
+        let mk = |price: u32| MarketItem {
+            price,
+            ..Default::default()
+        };
+        let mut market = MarketState::default();
+        accumulate_market_page(&mut market, 0, vec![mk(10)]);
+        assert_eq!((market.listings.len(), market.loaded_pages), (1, 1));
+
+        market.selected = Some(0);
+        accumulate_market_page(&mut market, 0, vec![mk(20), mk(30)]);
+        assert_eq!((market.listings.len(), market.loaded_pages), (2, 1));
+        assert_eq!(market.selected, None, "新一轮搜索结果应清空选中");
+        assert_eq!(market.page, 0);
+
+        accumulate_market_page(&mut market, 1, vec![mk(40)]);
+        assert_eq!((market.listings.len(), market.loaded_pages), (3, 2));
+        // 缺页（page > loaded_pages）忽略，不破坏已累积前缀
+        accumulate_market_page(&mut market, 3, vec![mk(50)]);
+        assert_eq!((market.listings.len(), market.loaded_pages), (3, 2));
+        assert_eq!(market.page, 1);
+    }
+
+    /// #2736：翻页动作（C# `BackButton.Click` 本地、`NextButton.Click` 已累积则本地，
+    /// 否则 `C.MarketPage`）。
+    #[test]
+    fn market_page_actions_match_csharp() {
+        assert_eq!(back_page_action(0), None);
+        assert_eq!(back_page_action(2), Some(1));
+        // 已累积前缀内 → 本地翻页（无需请求）
+        assert_eq!(next_page_action(0, 3, 3), Some((1, false)));
+        assert_eq!(next_page_action(1, 3, 3), Some((2, false)));
+        // 未累积 → 请求服务器
+        assert_eq!(next_page_action(0, 1, 3), Some((1, true)));
+        // 末页 / 只有一页 → 不动作
+        assert_eq!(next_page_action(2, 3, 3), None);
+        assert_eq!(next_page_action(0, 1, 1), None);
     }
 
     /// #2720：Mail 按钮锚点与正文（C# `MailButton` + `InterestedInPurchase`）

@@ -154,7 +154,7 @@
 ## 6. 验证基线
 
 - `cargo check --tests`（Client-Bevy）通过。
-- `cargo test`（Client-Bevy）：422 lib + 2 bin + 1 smoke + 24 alignment 通过（批11 Craft 背包格锁定后基线）。
+- `cargo test`（Client-Bevy）：425 lib + 2 bin + 1 smoke + 24 alignment 通过（批11 TrustMerchant 跨页排序后基线）。
 - Report 的 C# `Prguse[1633]` 在当前本地 Data 包缺失；已使用按 C# 控件边界推导的 360x244 深色兜底面板并保留对应子控件坐标，待资源包更新后自动加载正确背景。
 - ServerRust：667 lib + 6 integration 通过（批10 列表行后基线）；SharedRust 185 + 11（2 ignored）；`MapEditor/SharedRust` `cargo check` 通过（副本同步）。
 - 关键实机/定向验证：UI 子树泄漏截图、Character 技能页、AssignKey 模态输入、Timer 穿透、登录安全键盘资源；批7 复验 Mail/Buff；批8 复验 Center 窗口。
@@ -170,6 +170,8 @@
 - 批11 Creature 禁用态实机复验（2026-09-13，`--skip-login` + Control API `dialog creature open` 截图；临时注释掉打开时的宠物列表请求以制造「无选中」状态，验证后已还原）：无选中时 RENAME/OPTIONS/DISABLE(=SemiAuto)/RELEASE/**SUMMON** 全部可见但灰化、DISMISS 隐藏；有选中（mock 小猪）时改为 RENAME/OPTIONS/DISABLE/RELEASE 亮态且 Dismiss 顶替 Summon——两态与 C# `RefreshUI` error/else 分支一致。
 - 批11 Craft 背包格锁定实机复验（2026-09-13，`--auto-enter`（真实登录链路，mock 才有背包物品）+ Control API 打开 Inventory/Craft 截图；mock 不下发 `PanelType::Craft` 商品行，故临时注入一条与 mock 背包匹配的配方，并用 `Interaction::Pressed` 驱动真实放入分支，验证后均已还原）：放入「布衣」后 Craft 材料格显示该物品且提示「放入 布衣」，来源背包格（第 3 格）图标由均值 RGB(70,35,47) 压暗到 (29,13,19)（≈`Color.DimGray` 0.41 系数），同排其它格像素不变。
 - 批11 Craft 锁定门禁（2026-09-13）：`craft_lock_sync_matches_placed_slots`（放入/AutoFill 锁定、幂等、取出一格解锁、`ResetCells` 全解锁）与 `inv_locked_slots_match_csharp` / `inv_locked_slot_is_not_clickable`（DimGray 图标色、锁定格不可命中）；红检：把 `sync_craft_locks` 改成只清空不加锁、`inv_clickable_slot` 改成恒真，两条断言分别如期失败。
+- 批11 TrustMerchant 跨页排序实机复验（2026-09-13，`--skip-login --market-many` + Control API 打开 trust_merchant；mock 新增 3 页共 25 条、价格逐条递减 1000→760，临时驱动「排序→请求第 2 页→本地回第 1 页」，验证后已删除）：全量升序排序下第 1 页由 `1,000…910`（卖家0…9）变为 `810…900`（卖家19…10，全部来自服务器第 2 页）——证明排序跨页而非只排当前页；第 2 页（加载后自动跳转）显示全量第 11–20 名 `910…1000`；本地回第 1 页不触发服务器请求（mock 未收到 `MarketPage` 日志）。
+- 批11 TrustMerchant 分页 mock 对齐（2026-09-13）：`MockNPCMarket` 改为按页数下发页名、`MarketSearch`/`MarketRefresh` 只回第 1 页、新增 `C.MarketPage` 分支按 10 条/页切片（此前 mock 把全部条数当一页回，与服务端 `start = page * 10` 不一致），并新增 `--market-many` 造多页数据供实机验证。
 
 ## 7. 已知有意偏差
 
@@ -186,7 +188,7 @@
 - ItemRent：`S.UpdateRentalItem` 除 C# 的 `HasData`+`LoanItem` 外仍带 `rental_fee`/`rental_period`（Rust 扩展，客户端只在 >0 时用作兜底刷新）；`S.CanConfirmItemRental`/`S.ConfirmItemRental` 在 C# 是空包，Rust 端口带 `can_confirm`/`success` 载荷（自洽偏离，双方均为 Rust 实现）。
 - ItemRent：C# 租客侧的合计费用在服务端 `SetItemRentalFee` 里即时扣金币（`S.LoseGold`）；Rust 服务端到 `ConfirmItemRental` 成交时才扣，客户端费用标签两侧都由本地/对包数值驱动，显示一致。
 - ItemRent：mock 单客户端下 `ItemRentalRequest` 固定回 `Renting=false`（物主侧），租客侧窗口与锁定帧的实机验证靠临时把 mock 回包改 `true` 截图（验证后已还原）。
-- TrustMerchant：价格排序按**当前页**重排（C# 把各页 `AddRange` 累积后对全量 `Listings` 排序；Bevy 服务端按页下发（`MarketPage`），故只对本页 10 条排序 —— 跨页顺序可能与 C# 不同）。
+- TrustMerchant：价格排序已对齐 C#（`Listings.AddRange` 累积后对全量排序，`UpdateInterface` 取 `orderedListings[Page*10+i]`）——客户端按页累积（`MarketState.loaded_pages`/`pending_page`），翻页与 C# 一致（Back 本地翻页、Next 已累积则本地否则发 `C.MarketPage`），滚轮范围 = 已累积页。残留偏差：`S.NPCMarketPage` 不带页号，客户端按「最近一次请求页（无未决请求 = 第 0 页）」归属累积位置，而 C# 靠 `NPCMarket`/`NPCMarketPage` 两种包区分。
 - TrustMerchant：写邮件正文复用邮件窗的 `MirTextBox`（预填文本与 C# `ComposeMail(recipient, message)` 一致），换行/焦点细节未逐像素复刻。
 - TrustMerchant：拍卖出价在 C# 走 `MirAmountBox`（带物品图标、默认 `Price+1`），Bevy 复用底栏价格输入框（缺省 `当前价+1`），确认框文案一致（批11 已补 `MirMessageBox`）。
 - TrustMerchant：C# `AuctionRow.SelectedImage`（`Prguse[545]` 296x38）构造后 `Visible=false` 且全仓无置真处（原版死控件）；选中高亮只用 `Border`（1px 外扩橙框），Bevy 一致。
