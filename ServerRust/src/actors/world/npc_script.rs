@@ -1103,11 +1103,15 @@ async fn eval_one_check(
                 false
             }
         }
-        // CHECKHUM <op> <count> <map> <instance> — 地图玩家数（对齐 C# CheckType.CheckHum；instance 忽略）
+        // CHECKHUM <op> <count> <map> <instance> — 地图玩家数（对齐 C# CheckType.CheckHum:1764-1780；
+        // 实例取不到 → -1 失败，对齐 C# map == null → failed）
         "CHECKHUM" => {
             let (op, want) = parse_op_amount(args);
             let map_name = args.get(2).map(|s| s.as_str()).unwrap_or("");
-            let count = if let Some(mi) = map_index_by_name(world, map_name) {
+            let instance = args.get(3).and_then(|s| s.parse::<i32>().ok()).unwrap_or(0);
+            let count = if let Some(mi) =
+                resolve_map_by_name_and_instance(&world.map_infos, map_name, instance)
+            {
                 let mut n = 0i64;
                 for (sid, r) in &world.players {
                     if *sid == session_id {
@@ -1133,7 +1137,10 @@ async fn eval_one_check(
             let monster_name = arg0();
             let (op, want) = parse_op_amount(&args[1..]);
             let map_name = args.get(3).map(|s| s.as_str()).unwrap_or("");
-            let count = if let Some(mi) = map_index_by_name(world, map_name) {
+            let instance = args.get(4).and_then(|s| s.parse::<i32>().ok()).unwrap_or(0);
+            let count = if let Some(mi) =
+                resolve_map_by_name_and_instance(&world.map_infos, map_name, instance)
+            {
                 // 怪物名是否存在（去空格、忽略大小写）
                 let known = world
                     .monster_name_index
@@ -1156,11 +1163,14 @@ async fn eval_one_check(
             };
             compare_i64(count, op, want)
         }
-        // CHECKMON <op> <count> <map> <instance> — 地图怪物数（对齐 C# CheckType.CheckMon）
+        // CHECKMON <op> <count> <map> <instance> — 地图怪物数（对齐 C# CheckType.CheckMon:1782-1798）
         "CHECKMON" => {
             let (op, want) = parse_op_amount(args);
             let map_name = args.get(2).map(|s| s.as_str()).unwrap_or("");
-            let count = if let Some(mi) = map_index_by_name(world, map_name) {
+            let instance = args.get(3).and_then(|s| s.parse::<i32>().ok()).unwrap_or(0);
+            let count = if let Some(mi) =
+                resolve_map_by_name_and_instance(&world.map_infos, map_name, instance)
+            {
                 world
                     .monsters
                     .values()
@@ -2346,22 +2356,23 @@ async fn exec_action(
         // Rust 暂无独立副本实例，instance 忽略，等同传送到指定地图坐标）
         "INSTANCEMOVE" => {
             let map_name = arg0();
-            let _instance = arg1().parse::<i32>().unwrap_or(0);
+            let instance = arg1().parse::<i32>().unwrap_or(0);
             let x = arg2().parse::<i32>().unwrap_or(0);
             let y = arg3().parse::<i32>().unwrap_or(0);
-            if let Some(map_index) = world
-                .map_infos
-                .values()
-                .find(|m| m.file_name.eq_ignore_ascii_case(map_name))
-                .map(|m| m.index as u16)
+            // #2840：C# `GetMapByNameAndInstance(map, instance)`——取不到实例即 no-op（NPCSegment.cs:3090-3099）
+            if let Some(map_index) =
+                resolve_map_by_name_and_instance(&world.map_infos, map_name, instance)
             {
                 teleport_player(world, session_id, map_index, x, y).await;
                 debug!(
                     "NPC INSTANCEMOVE: map={} ({},{}) instance={}",
-                    map_name, x, y, _instance
+                    map_name, x, y, instance
                 );
             } else {
-                warn!("NPC INSTANCEMOVE: map '{}' not found", map_name);
+                warn!(
+                    "NPC INSTANCEMOVE: map '{}' instance {} not found (no-op)",
+                    map_name, instance
+                );
             }
         }
         // RECALL —— 传送到当前 NPC 位置（对齐 mod.rs 旧处理器 RECALL）
@@ -3481,12 +3492,31 @@ fn now_minute() -> u32 {
 }
 
 /// 地图名（file_name）→ map_index（大小写不敏感）
-fn map_index_by_name(world: &WorldActor, map_name: &str) -> Option<u16> {
-    world
-        .map_infos
+/// #2840：C# `Envir.GetMapByNameAndInstance`（`Envir.cs:4607-4614`）——**同名地图多副本**解析：
+/// - `instance < 0` → 0；`instance > 0` → `instance - 1`（C# 先减一）
+/// - 取 `file_name == name`（忽略大小写）的地图列表（本端按 map index 升序，保证跨进程稳定；
+///   C# 用 `MapList` 顺序 = 地图定义顺序），越界返回 None（C# 取不到即 null）
+pub(crate) fn resolve_map_by_name_and_instance(
+    map_infos: &HashMap<i32, crate::db::MapInfo>,
+    map_name: &str,
+    instance: i32,
+) -> Option<u16> {
+    if map_name.is_empty() {
+        return None;
+    }
+    let mut matched: Vec<&crate::db::MapInfo> = map_infos
         .values()
-        .find(|m| m.file_name.eq_ignore_ascii_case(map_name))
-        .map(|m| m.index as u16)
+        .filter(|m| m.file_name.eq_ignore_ascii_case(map_name))
+        .collect();
+    matched.sort_by_key(|m| m.index);
+    let idx = if instance < 0 {
+        0
+    } else if instance > 0 {
+        (instance - 1) as usize
+    } else {
+        0
+    };
+    matched.get(idx).map(|m| m.index as u16)
 }
 
 /// 名单文件：是否包含指定行（精确匹配，对齐 C# CheckNameList Contains）
@@ -3961,11 +3991,9 @@ async fn propagate_flag_to_quests(world: &WorldActor, session_id: u64, flag_numb
 /// 对齐 C# Envir.GetMapByNameAndInstance）；纯数字形态回退 DB index（兼容数字地图参数
 /// 的旧脚本）；找不到返回 None。
 fn resolve_map_ref(map_infos: &HashMap<i32, crate::db::MapInfo>, map_ref: &str) -> Option<u16> {
-    if let Some(m) = map_infos
-        .values()
-        .find(|m| m.file_name.eq_ignore_ascii_case(map_ref))
-    {
-        return Some(m.index as u16);
+    // #2840：按名解析改走「同名多副本」解析（instance=0 = C# 默认），顺带消除 HashMap 顺序不确定性
+    if let Some(idx) = resolve_map_by_name_and_instance(map_infos, map_ref, 0) {
+        return Some(idx);
     }
     if let Ok(idx) = map_ref.parse::<u16>() {
         if map_infos.contains_key(&(idx as i32)) {
@@ -5109,6 +5137,72 @@ You don't have enough Gold!
         m1.file_name = "M001".to_string();
         infos.insert(12, m1);
         infos
+    }
+
+    /// 同名多副本地图（对照真实数据的 whitevil_etc ×3 / whitevil_empty ×2）
+    fn test_map_infos_with_instances() -> HashMap<i32, crate::db::MapInfo> {
+        let mut infos = HashMap::new();
+        for (idx, name) in [
+            (367, "whitevil_etc"),
+            (369, "whitevil_etc"),
+            (375, "whitevil_etc"),
+            (371, "whitevil_empty"),
+            (372, "whitevil_empty"),
+        ] {
+            let mut m = crate::db::MapInfo::default();
+            m.index = idx;
+            m.file_name = name.to_string();
+            infos.insert(idx, m);
+        }
+        infos
+    }
+
+    /// #2840：C# `GetMapByNameAndInstance`（`Envir.cs:4607-4614`）——同名多副本解析
+    #[test]
+    fn resolve_map_by_name_and_instance_matches_csharp() {
+        let infos = test_map_infos_with_instances();
+        // instance 0 / 负数 / 1 → 第一副本（C#：`< 0 → 0`，`> 0 → 先减一`，故 1 与 0 等价）
+        assert_eq!(
+            resolve_map_by_name_and_instance(&infos, "whitevil_etc", 0),
+            Some(367)
+        );
+        assert_eq!(
+            resolve_map_by_name_and_instance(&infos, "whitevil_etc", -5),
+            Some(367)
+        );
+        assert_eq!(
+            resolve_map_by_name_and_instance(&infos, "whitevil_etc", 1),
+            Some(367)
+        );
+        // instance 2 / 3 → 第二 / 第三副本
+        assert_eq!(
+            resolve_map_by_name_and_instance(&infos, "whitevil_etc", 2),
+            Some(369)
+        );
+        assert_eq!(
+            resolve_map_by_name_and_instance(&infos, "whitevil_etc", 3),
+            Some(375)
+        );
+        // 越界 → None（C# 返 null）
+        assert_eq!(
+            resolve_map_by_name_and_instance(&infos, "whitevil_etc", 4),
+            None
+        );
+        // 大小写不敏感 / 名字不存在 / 空名
+        assert_eq!(
+            resolve_map_by_name_and_instance(&infos, "WHITEVIL_ETC", 2),
+            Some(369)
+        );
+        assert_eq!(
+            resolve_map_by_name_and_instance(&infos, "whitevil_empty", 1),
+            Some(371)
+        );
+        assert_eq!(
+            resolve_map_by_name_and_instance(&infos, "whitevil_empty", 2),
+            Some(372)
+        );
+        assert_eq!(resolve_map_by_name_and_instance(&infos, "nope", 0), None);
+        assert_eq!(resolve_map_by_name_and_instance(&infos, "", 0), None);
     }
 
     #[test]
