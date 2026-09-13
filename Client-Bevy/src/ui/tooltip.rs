@@ -139,12 +139,16 @@ pub fn spawn_tooltip_panel(
 /// 按钮 Hint 检测（source=1）：悬停 UiButton+TooltipHint 显示
 pub fn tooltip_hint_system(
     windows: Query<&Window>,
+    probe: Res<crate::control::CursorProbe>,
     ui_cameras: Query<(&Camera, &GlobalTransform), With<crate::ui::sprite_ui::UiEntity>>,
     buttons: Query<(&UiButton, &TooltipHint, &InheritedVisibility, &Transform)>,
     mut state: ResMut<TooltipState>,
 ) {
     let Ok(window) = windows.single() else { return };
-    let Some(cursor) = window.cursor_position() else { return };
+    // #2771：无焦点环境（自动化）用控制接口的光标探针驱动
+    let Some(cursor) = crate::control::resolve_cursor(probe.pos, window.cursor_position()) else {
+        return;
+    };
     // UI 相机 Fixed 1024x768：窗口缩放/DPI 下必须换算成 UI 逻辑坐标，
     // 否则命中与面板定位用物理像素，悬停位置全偏
     let Ok((cam, gtf)) = ui_cameras.single() else { return };

@@ -40,7 +40,30 @@ pub struct PlayerMenuState {
 pub struct PlayerMenuWidget;
 
 #[derive(Component)]
-pub struct PlayerMenuOption(PlayerMenuAction);
+pub struct PlayerMenuOption {
+    action: PlayerMenuAction,
+    /// #2771：行号。此前按 Query 迭代顺序自增（实体表顺序 ≠ 生成顺序）→ 菜单项顺序会乱
+    /// （实机见过「交易/组队/加好友/观察/邮件/私聊/查看」与生成顺序不符）；改为按生成序固定。
+    index: usize,
+}
+
+/// C# `KeybindOptions.Trade` 的绑定名（`KeyBindSettings.cs:340`，默认 T，文案「请求交易」）
+pub const TRADE_KEYBIND_ACTION: &str = "请求交易";
+
+/// 玩家菜单项 Hint 文案（C# `MainDialogs.cs` 玩家菜单）：
+/// 组队=「邀请加入队伍」、加好友=「添加到好友列表」、邮件=「发送邮件」、
+/// 交易=「交易 ({键})」（`Trade` 键位文本）、观察=「观战」；私聊/查看 C# 无 Hint。
+pub fn player_menu_hint(action: PlayerMenuAction, trade_key: &str) -> Option<String> {
+    let text = match action {
+        PlayerMenuAction::Group => "邀请加入队伍".to_string(),
+        PlayerMenuAction::AddFriend => "添加到好友列表".to_string(),
+        PlayerMenuAction::Mail => "发送邮件".to_string(),
+        PlayerMenuAction::Trade => format!("交易 ({trade_key})"),
+        PlayerMenuAction::Observe => "观战".to_string(),
+        PlayerMenuAction::Whisper | PlayerMenuAction::Inspect => return None,
+    };
+    Some(text)
+}
 
 pub struct PlayerMenuPlugin;
 
@@ -68,12 +91,13 @@ fn spawn_player_menu(
     mut commands: Commands,
     mut images: ResMut<Assets<Image>>,
     mut fonts: ResMut<Assets<Font>>,
-    mut ui_font: ResMut<UiFont>,
+    mut cjk_font: ResMut<crate::ui::sprite_ui::UiCjkFont>,
+    kb: Res<crate::game::dialogs::keyboard_layout::KeyboardState>,
 ) {
-    if !ui_font.0.is_strong() {
-        ui_font.0 = crate::ui::sprite_ui::load_ui_font(&mut fonts);
-    }
-    let font = ui_font.0.clone();
+    // #2771 实机暴露：菜单项文字用 `UiFont`(Arial) 时**渲染成豆腐**（与批17 提示框同源——
+    // parley 的 Hani 回退只在首次排版生效，而本菜单文本先以 (-999,-999) 建好、打开时才移进视野
+    // → 首次排版时机与可见性错开）。改用共享宋体主字体（与 NPC/公告等动态文本一致）。
+    let font = crate::ui::sprite_ui::shared_cjk_font(&mut fonts, &mut cjk_font);
     let white = images.add(crate::map_renderer::make_image(vec![255, 255, 255, 255], 1, 1));
     commands.spawn((
         UiEntity,
@@ -97,6 +121,15 @@ fn spawn_player_menu(
         ("观察", PlayerMenuAction::Observe),
         ("邮件", PlayerMenuAction::Mail),
     ];
+    // #2771：菜单项 Hint（C# `MainDialogs.cs` 玩家菜单按钮：2232 GroupButton=邀请加入队伍、
+    // 2261 FriendButton=添加到好友列表、2277 MailButton=发送邮件、2290 TradeButton=交易 ({键})、
+    // 2303 ObserveButton=观战）。私聊/查看两项 C# 无 Hint。
+    let trade_key = kb
+        .bindings
+        .iter()
+        .find(|b| b.action == TRADE_KEYBIND_ACTION)
+        .map(|b| crate::game::dialogs::keyboard_layout::key_name(b.key))
+        .unwrap_or_default();
     for (i, (label, action)) in items.iter().enumerate() {
         let t = spawn_ui_text(
             &mut commands, &font, label,
@@ -104,12 +137,20 @@ fn spawn_player_menu(
             12.0, Color::WHITE, 20.2,
         );
         commands.entity(t).insert((
-            PlayerMenuOption(*action),
+            PlayerMenuOption {
+                action: *action,
+                index: i,
+            },
             UiButton {
                 rect: (-999.0, -999.0, 90.0, 18.0),
                 clicked: false,
             },
         ));
+        if let Some(hint) = player_menu_hint(*action, &trade_key) {
+            commands
+                .entity(t)
+                .insert(crate::ui::tooltip::TooltipHint(hint));
+        }
     }
 }
 
@@ -146,6 +187,39 @@ fn player_menu_open_system(
         tracing::info!("🖱️ 右键玩家 {} → 打开菜单", state.name);
     } else {
         state.visible = false;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// #2771：玩家菜单 Hint 文案对齐 C# `MainDialogs.cs` 的五个按钮；私聊/查看 C# 无 Hint
+    #[test]
+    fn player_menu_hint_matches_csharp() {
+        assert_eq!(
+            player_menu_hint(PlayerMenuAction::Group, "T").as_deref(),
+            Some("邀请加入队伍")
+        );
+        assert_eq!(
+            player_menu_hint(PlayerMenuAction::AddFriend, "T").as_deref(),
+            Some("添加到好友列表")
+        );
+        assert_eq!(
+            player_menu_hint(PlayerMenuAction::Mail, "T").as_deref(),
+            Some("发送邮件")
+        );
+        // C# `Trade` 文案带键位：`交易 ({GetKey(Trade)})`
+        assert_eq!(
+            player_menu_hint(PlayerMenuAction::Trade, "T").as_deref(),
+            Some("交易 (T)")
+        );
+        assert_eq!(
+            player_menu_hint(PlayerMenuAction::Observe, "T").as_deref(),
+            Some("观战")
+        );
+        assert_eq!(player_menu_hint(PlayerMenuAction::Whisper, "T"), None);
+        assert_eq!(player_menu_hint(PlayerMenuAction::Inspect, "T"), None);
     }
 }
 
@@ -193,8 +267,7 @@ pub(crate) fn player_menu_ui_system(
     // 选项定位（跟随面板）；菜单未打开时必须隐藏并移出屏幕，
     // 否则 7 个菜单文字会一直显示在左上角 (8,6..126)（用户看到的“交易/组队/私聊...”）
     // 且按钮 rect 留在 (0,0) 附近可被误点击
-    let mut idx = 0usize;
-    for (mut tf, mut btn, mut vis, _) in &mut options {
+    for (mut tf, mut btn, mut vis, option) in &mut options {
         if !state.visible {
             *vis = Visibility::Hidden;
             tf.translation.x = -999.0;
@@ -203,21 +276,21 @@ pub(crate) fn player_menu_ui_system(
             continue;
         }
         *vis = Visibility::Visible;
-        let oy = state.y + 6.0 + idx as f32 * 20.0;
+        // #2771：行号取生成序（`option.index`），不再依赖 Query 迭代顺序
+        let oy = state.y + 6.0 + option.index as f32 * 20.0;
         tf.translation.x = state.x + 8.0;
         tf.translation.y = -oy;
         btn.rect = (state.x, oy, 90.0, 18.0);
-        idx += 1;
     }
     if !state.visible {
         return;
     }
     // 选项点击
-    for (_, btn, _vis, action) in &options {
+    for (_, btn, _vis, option) in &options {
         if !btn.clicked {
             continue;
         }
-        match action.0 {
+        match option.action {
             PlayerMenuAction::Trade => {
                 net.send_packet(&mir2_shared::packets::client::trade::TradeRequest);
                 tracing::info!("🤝 请求交易: {}", state.name);

@@ -13,6 +13,7 @@
 //   dialog {kind,action?}  打开/关闭/切换对话框（默认 toggle；验收截图巡回用，#2586）
 //   cursor {x,y} | {clear:true}  注入/清除「光标探针」（#2767：自动化环境 winit 收不到真实
 //                               光标 → 悬停类系统用探针坐标驱动；`nearby` 的 vp 字段给出目标视口坐标）
+//   player_menu {object_id}  以该玩家的视口坐标打开右键菜单（#2771：悬停 Hint 的实机验证入口）
 // ============================================================================
 
 use std::io::{BufRead, BufReader, Write};
@@ -89,6 +90,11 @@ enum ControlCommand {
     /// #2767：注入/清除光标探针（视口逻辑坐标 0..1024/0..768）
     Cursor {
         pos: Option<Vec2>,
+        reply: Sender<String>,
+    },
+    /// #2771：打开玩家右键菜单（实机验证菜单 Hint；坐标取该玩家视口位置）
+    PlayerMenu {
+        object_id: u32,
         reply: Sender<String>,
     },
 }
@@ -311,6 +317,28 @@ fn handle_conn(mut stream: std::net::TcpStream, tx: Sender<ControlCommand>) {
                 if tx
                     .send(ControlCommand::Cursor {
                         pos,
+                        reply: reply_tx,
+                    })
+                    .is_ok()
+                {
+                    let s = reply_rx
+                        .recv_timeout(std::time::Duration::from_secs(2))
+                        .unwrap_or_else(|_| "{}".to_string());
+                    serde_json::from_str::<Value>(&s).unwrap_or_else(|_| json!({}))
+                } else {
+                    json!({"error": "control channel closed"})
+                }
+            }
+            "player_menu" => {
+                // #2771：{object_id} → 以该玩家视口坐标打开右键菜单；返回菜单左上角，便于脚本算悬停点
+                let object_id = params
+                    .get("object_id")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0) as u32;
+                let (reply_tx, reply_rx) = bounded::<String>(1);
+                if tx
+                    .send(ControlCommand::PlayerMenu {
+                        object_id,
                         reply: reply_tx,
                     })
                     .is_ok()
@@ -558,6 +586,7 @@ fn apply_control_commands(
     chat: Res<crate::game::chat::ChatState>,
     ime: Res<crate::ui::pinyin_ime::PinyinIme>,
     mut cursor_probe: ResMut<CursorProbe>,
+    mut player_menu: ResMut<crate::game::player_menu::PlayerMenuState>,
     q: ControlQueries,
 ) {
     while let Ok(cmd) = control.0.try_recv() {
@@ -682,6 +711,37 @@ fn apply_control_commands(
                 let s = match pos {
                     Some(v) => json!({"ok": true, "cursor": {"x": v.x, "y": v.y}}),
                     None => json!({"ok": true, "cursor": null}),
+                }
+                .to_string();
+                let _ = reply.send(s);
+            }
+            ControlCommand::PlayerMenu { object_id, reply } => {
+                // #2771：以该玩家的视口坐标当作右键点（C# 右键玩家 → 菜单左上角 = 光标位置）
+                let found = q
+                    .others
+                    .iter()
+                    .find(|(_, _, oid)| oid.0 == object_id)
+                    .map(|(tf, name, _)| (tf.translation, name.0.clone()));
+                let s = match found {
+                    Some((pos, name)) => {
+                        let vp = q
+                            .map_cameras
+                            .single()
+                            .ok()
+                            .and_then(|(cam, gtf)| cam.world_to_viewport(gtf, pos).ok());
+                        match vp {
+                            Some(vp) => {
+                                player_menu.visible = true;
+                                player_menu.name = name.clone();
+                                player_menu.object_id = object_id;
+                                player_menu.x = vp.x;
+                                player_menu.y = vp.y;
+                                json!({"ok": true, "name": name, "x": vp.x, "y": vp.y})
+                            }
+                            None => json!({"error": "world_to_viewport failed"}),
+                        }
+                    }
+                    None => json!({"error": "object not found"}),
                 }
                 .to_string();
                 let _ = reply.send(s);
