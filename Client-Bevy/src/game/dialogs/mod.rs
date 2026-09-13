@@ -902,6 +902,8 @@ impl Plugin for DialogsPlugin {
             Update,
             (
                 crate::ui::tooltip::tooltip_hint_system,
+                // #2771：bevy UI 按钮（`spawn_icon_button`）的通用 Hint 通道
+                crate::ui::tooltip::ui_hint_system,
                 crate::ui::tooltip::tooltip_panel_system,
             )
                 .run_if(in_state(AppState::Game)),

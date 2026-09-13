@@ -170,14 +170,16 @@ fn spawn_friend(
             spawn_icon_button(p, n, h, pr, 206.0, 3.0, 20.0, 20.0, 10).insert(FriendClose);
         }
         // 添加/删除/备注/邮件/私聊（Prguse 554-568 @(60/88/116/144/172, 241)）
-        let acts: [(bool, bool, bool, bool, bool, usize, f32); 5] = [
-            (true, false, false, false, false, 554, 60.0),
-            (false, true, false, false, false, 557, 88.0),
-            (false, false, true, false, false, 560, 116.0),
-            (false, false, false, true, false, 563, 144.0),
-            (false, false, false, false, true, 566, 172.0),
+        // #2771：末列为 C# `FriendDialog.cs` 的 Hint（141 AddFriend=添加、171 RemoveFriend=移除、
+        // 197 FriendMemo=备注、217 FriendMail=邮件、235 FriendWhisper=悄悄话）
+        let acts: [(bool, bool, bool, bool, bool, usize, f32, &str); 5] = [
+            (true, false, false, false, false, 554, 60.0, "添加"),
+            (false, true, false, false, false, 557, 88.0, "移除"),
+            (false, false, true, false, false, 560, 116.0, "备注"),
+            (false, false, false, true, false, 563, 144.0, "邮件"),
+            (false, false, false, false, true, 566, 172.0, "悄悄话"),
         ];
-        for (is_add, is_remove, is_memo, is_email, is_whisper, idx, x) in acts {
+        for (is_add, is_remove, is_memo, is_email, is_whisper, idx, x, hint) in acts {
             if let (Some(n), Some(h), Some(pr)) = (
                 load_lib_image(&mut libs, &mut images, LibraryName::Prguse, idx),
                 load_lib_image(&mut libs, &mut images, LibraryName::Prguse, idx + 1),
@@ -190,6 +192,9 @@ fn spawn_friend(
                         is_memo,
                         is_email,
                         is_whisper,
+                    },
+                    crate::ui::tooltip::UiHint {
+                        text: hint.to_string(),
                     },
                 ));
             }
