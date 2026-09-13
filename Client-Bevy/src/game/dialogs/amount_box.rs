@@ -29,9 +29,14 @@ pub struct AmountBoxState {
     pub visible: bool,
     pub title: String,
     pub max: u32,
+    /// 下限（C# `MinAmount`；确认值钳到 [min, max]）
+    pub min: u32,
     pub value: String,
     /// 预填 max 后未编辑（首个数字整体替换，C# 预填全选语义）
     pub fresh: bool,
+    /// 物品图标（C# `ImageIndex` = `Item.Info.Image`，`ItemImage` @(15,34) 38x34）；
+    /// None = 不显示图标（拆分/丢弃等无图标场景）
+    pub icon: Option<(LibraryName, usize)>,
 }
 
 #[derive(Component)]
@@ -51,6 +56,14 @@ pub struct AmountTitleText;
 
 #[derive(Component)]
 pub struct AmountValueText;
+
+/// 物品图标节点（C# `ItemImage` @(15,34) 38x34）
+#[derive(Component)]
+pub struct AmountIconNode;
+
+/// 图标节点（自绘 ImageNode）
+#[derive(Component)]
+pub struct AmountIconImage;
 
 pub struct AmountBoxPlugin;
 
@@ -72,11 +85,32 @@ impl AmountBoxState {
     /// Amount 初值=max——空 Enter 即以最后有效值确认，#2609）。
     /// fresh=预填未编辑态：首个数字输入整体替换（C# :92-93 预填全选语义）
     pub fn ask(&mut self, title: impl Into<String>, max: u32) {
+        self.ask_with(title, None, max, 0, 1);
+    }
+
+    /// C# `MirAmountBox(title, image, max, min, defaultAmount)`：
+    /// 初值 `Amount = max`，文本框取 `defaultAmount∈(0, max]` 否则 `max`（整段选中）；
+    /// `image` = `Item.Info.Image`（不传则不显示图标）。
+    pub fn ask_with(
+        &mut self,
+        title: impl Into<String>,
+        icon: Option<(LibraryName, usize)>,
+        max: u32,
+        default_amount: u32,
+        min: u32,
+    ) {
         self.visible = true;
         self.title = title.into();
         self.max = max.max(1);
-        self.value = self.max.to_string();
+        self.min = min.clamp(1, self.max);
+        let initial = if default_amount > 0 && default_amount <= self.max {
+            default_amount
+        } else {
+            self.max
+        };
+        self.value = initial.to_string();
         self.fresh = true;
+        self.icon = icon;
     }
 }
 
@@ -114,6 +148,21 @@ fn spawn_amount_box(
         spawn_label(p, &cjk, "", 19.0, 8.0, 12.0, Color::WHITE, 9).insert(AmountTitleText);
         // 数量值（C# (60,40)）
         spawn_label(p, &cjk, "", 60.0, 40.0, 14.0, Color::WHITE, 9).insert(AmountValueText);
+        // 物品图标（C# `ItemImage` @(15,34) 38x34；无图标时隐藏）
+        p.spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(15.0),
+                top: Val::Px(34.0),
+                width: Val::Px(38.0),
+                height: Val::Px(34.0),
+                ..default()
+            },
+            ImageNode::default(),
+            Visibility::Hidden,
+            ZIndex(9),
+            AmountIconNode,
+        ));
         // OK Title[200/201/202]（C# (23,76)）
         if let (Some(n), Some(h), Some(pr)) = (
             load_lib_image(&mut libs, &mut images, LibraryName::Title, 200),
@@ -149,7 +198,7 @@ fn confirm_amount(state: &AmountBoxState) -> Option<u32> {
         .parse::<u32>()
         .ok()
         .or(Some(state.max))
-        .map(|v| v.clamp(1, state.max))
+        .map(|v| v.clamp(state.min.max(1), state.max))
 }
 
 /// 显示/隐藏 + 数字输入 + OK/Cancel/Close
@@ -161,12 +210,19 @@ pub(crate) fn amount_box_system(
     mut result: MessageWriter<AmountBoxResult>,
     mut keys: MessageReader<KeyboardInput>,
     mut ime: ResMut<PinyinIme>,
+    mut libs: ResMut<GameLibraries>,
+    mut images: ResMut<Assets<Image>>,
+    mut cache: ResMut<crate::ui::sprite_ui::UiImageCache>,
     ok: Query<(Entity, &Interaction), (With<AmountOk>, Without<AmountCancel>, Without<AmountClose>)>,
     cancel: Query<(Entity, &Interaction), (With<AmountCancel>, Without<AmountOk>, Without<AmountClose>)>,
     close: Query<(Entity, &Interaction), (With<AmountClose>, Without<AmountOk>, Without<AmountCancel>)>,
     mut widgets: Query<&mut Visibility, With<AmountBoxWidget>>,
     mut titles: Query<&mut Text, (With<AmountTitleText>, Without<AmountValueText>)>,
     mut values: Query<&mut Text, (With<AmountValueText>, Without<AmountTitleText>)>,
+    mut icons: Query<
+        (&mut ImageNode, &mut Visibility),
+        (With<AmountIconNode>, Without<AmountBoxWidget>),
+    >,
     mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
 ) {
     fn edge(
@@ -186,6 +242,30 @@ pub(crate) fn amount_box_system(
     }
     if !state.visible {
         return;
+    }
+    // C# `ItemImage`：`ImageIndex` = `Item.Info.Image`（无图标时隐藏）
+    for (mut node, mut vis) in &mut icons {
+        let handle = state
+            .icon
+            .map(|(lib, idx)| {
+                crate::ui::sprite_ui::ui_image(&mut libs, &mut images, &mut cache, lib, idx)
+            })
+            .flatten();
+        match handle {
+            Some(h) => {
+                if node.image != h {
+                    node.image = h;
+                }
+                if *vis != Visibility::Visible {
+                    *vis = Visibility::Visible;
+                }
+            }
+            None => {
+                if *vis != Visibility::Hidden {
+                    *vis = Visibility::Hidden;
+                }
+            }
+        }
     }
 
     // 数字键盘输入 + Esc/Enter（C# MirAmountBox：Esc=Cancel、Enter=OK；
