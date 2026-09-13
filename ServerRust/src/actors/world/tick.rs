@@ -2496,28 +2496,34 @@ impl WorldActor {
                         }
                     }
                 }
-                // 落点玩家 MAC 伤害（C# player.Struck(Value, MAC)，无攻击者）
-                let neutral = crate::combat::attack::CombatStats::default();
+                // 落点玩家 MAC 伤害（C# `player.Struck(Value, MAC)`，无攻击者）：
+                // #2845 起改走 `struck_damage`（必中 + 仅护甲减免），不再经 `resolve_attack`
+                // ——修前该路径会受 defender.magic_resist 免疫、可被 reflect 反射，与 C# `Struck` 不符。
                 for (sid, record) in &self.players {
                     if let Ok(Some(st)) = record.actor_ref.ask(GetPlayerState).await {
                         if st.is_dead || st.map_index != map_index || st.x != sx || st.y != sy {
                             continue;
                         }
                         let defender = st.to_combat_stats();
-                        let r = crate::combat::attack::resolve_attack(
-                            &neutral,
-                            &defender,
-                            value.max(0),
-                            mir2_shared::enums::DefenceType::Mac,
-                            0,
+                        // C# `Stats[Stat.MinMAC]..Stats[Stat.MaxMAC]` 随机护甲（GetAttackPower）
+                        let armour = crate::combat::attack::get_defence_power(
+                            defender.min_mac,
+                            defender.max_mac,
                         );
-                        if r.is_hit && r.damage > 0 {
+                        let damage = crate::combat::attack::struck_damage(
+                            armour,
+                            value.max(0),
+                            defender.armour_rate,
+                            defender.damage_rate,
+                            defender.damage_reduction_percent,
+                        );
+                        if damage > 0 {
                             let died = record
                                 .actor_ref
                                 .ask(TakeDamage {
                                     attacker_id: 0, // environment
                                     attacker_session: 0,
-                                    damage: r.damage,
+                                    damage,
                                 })
                                 .await
                                 .unwrap_or(false);
