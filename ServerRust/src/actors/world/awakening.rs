@@ -30,6 +30,11 @@ impl WorldActor {
 
     /// 存入精炼物品/材料的实际逻辑（C# DepositRefineItem）；确认包由调用方统一发
     async fn deposit_refine_item_inner(&mut self, session_id: u64, from: i32, to: i32) -> bool {
+        // #2843：C# DepositRefineItem（:12509）要求 NPCPage.Key == [@REFINE]，否则回 success=false 的确认包
+        if !self.npc_page_allows(session_id, &["[@REFINE]"]) {
+            debug!("DepositRefineItem rejected: not on [@REFINE] page");
+            return false;
+        }
         let record = match self.players.get(&session_id) {
             Some(r) => r,
             None => return false,
@@ -331,6 +336,11 @@ impl Message<RefineItemRequest> for WorldActor {
     type Reply = ();
 
     async fn handle(&mut self, msg: RefineItemRequest, _ctx: &mut Context<Self, Self::Reply>) {
+        // #2843：C# RefineItem（:12647）要求 NPCPage.Key == [@REFINE]（防远程发包）
+        if !self.npc_page_allows(msg.session_id, &["[@REFINE]"]) {
+            send_system_message(&self.gate_ref, msg.session_id, "请先打开精炼页");
+            return;
+        }
         let record = match self.players.get(&msg.session_id) {
             Some(r) => r,
             None => return,
@@ -480,6 +490,11 @@ impl Message<CheckRefineRequest> for WorldActor {
     type Reply = ();
 
     async fn handle(&mut self, msg: CheckRefineRequest, _ctx: &mut Context<Self, Self::Reply>) {
+        // #2843：C# CheckRefine（:12905）要求 NPCPage.Key == [@REFINECHECK]（防远程发包）
+        if !self.npc_page_allows(msg.session_id, &["[@REFINECHECK]"]) {
+            send_system_message(&self.gate_ref, msg.session_id, "请先打开精炼查看页");
+            return;
+        }
         let record = match self.players.get(&msg.session_id) {
             Some(r) => r,
             None => return,

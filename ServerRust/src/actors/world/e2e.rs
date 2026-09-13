@@ -320,6 +320,171 @@ fn e2e_refine_deposit_and_retrieve_ack_packets() {
     });
 }
 
+/// #2843：不在 `[@REFINE]` 页时存入武器必须被拒（C# `PlayerObject.cs:12509`）——
+/// 背包里有可存入武器（DB 直插到格 0）时，无页请求只能回 `success=false`。
+///
+/// 红检：删除 `deposit_refine_item_inner` 里的 `npc_page_allows` 门槛 →
+/// 存入会成功（`success=true`）→ 本用例断言 FAILED。
+#[test]
+fn e2e_refine_deposit_requires_refine_npc_page() {
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .thread_stack_size(8 * 1024 * 1024)
+        .enable_time()
+        .build()
+        .unwrap();
+    rt.block_on(async {
+        let session_id = 31u64;
+        let (gate_ref, _tx, mut rx) = setup_gate_and_session(session_id).await;
+        let db_pool = e2e_setup_login(&gate_ref, session_id, &mut rx).await;
+
+        let social_ref = SocialActor::spawn(SocialActorArgs {
+            gate_ref: gate_ref.clone(),
+            db_pool: db_pool.clone(),
+            config: SocialActorConfig::default(),
+        });
+        let world_ref = WorldActor::spawn(WorldActorArgs {
+            tick_interval_ms: 1000,
+            gate_ref: gate_ref.clone(),
+            map_dir: std::path::PathBuf::from("."),
+            spawn_dir: None,
+            quest_dir: std::path::PathBuf::from("."),
+            npc_script_dir: std::path::PathBuf::from("."),
+            db_pool: db_pool.clone(),
+            social_ref,
+            conquest_cfg: crate::util::config::ConquestConfig::default(),
+            rested_cfg: crate::util::config::RestedConfig::default(),
+            pvp_cfg: crate::util::config::PvpConfig::default(),
+            health_regen_weight: 10,
+            mana_regen_weight: 10,
+            goods_hide_added_stats: true,
+            goods_on: true,
+            goods_max_stored: 15,
+            goods_buy_back_time_minutes: 60,
+            goods_buy_back_max_stored: 20,
+            safe_zone_healing: false,
+            archive_inactive_after_months: 12,
+            monster_recall_enabled: true,
+            monster_recall_range: 12,
+            monster_recall_cooldown_ms: 5000,
+            exp_mob_level_difference: true,
+            refine_cfg: crate::util::config::RefineConfig::default(),
+            replace_wedring_cost: 125,
+            lover_exp_bonus: 5,
+            mentor_exp_boost: 10,
+            mentor_damage_boost: 10,
+            mentor_skill_boost: true,
+            mentee_exp_bank: 1,
+            orbs_exp_list: Vec::new(),
+            orbs_dmg_list: Vec::new(),
+            orbs_def_list: Vec::new(),
+            awakening_cfg: Default::default(),
+            gem_cfg: Default::default(),
+            hero_exp_list: Vec::new(),
+            setup_cfg: Default::default(),
+            drop_rate: 1.0,
+            exp_rate: 1.0,
+            experience_list: Vec::new(),
+            item_timeout_ticks: 300,
+            max_drop_gold: 2000,
+            drop_gold: true,
+            rarity_cfg: crate::util::config::RarityConfig::default(),
+            notice_path: "Notice.txt".to_string(),
+            death_exp_penalty_percent: 0,
+            movement_pacing_ms: 0,
+            fishing_cfg: crate::util::ini::FishingConfig::default(),
+            random_item_stats: Vec::new(),
+            guild_buff_infos: Vec::new(),
+        });
+        let _ = gate_ref.ask(SetWorldRef { world_ref }).await;
+
+        // 建角（此时背包为空）
+        let mut nc_body = Vec::new();
+        let _ = mir2_shared::binary::write_dotnet_string(&mut nc_body, "RefinePageChar");
+        nc_body.push(0u8);
+        nc_body.push(0u8);
+        let _ = gate_ref
+            .ask(ClientData {
+                session_id,
+                data: build_packet_bytes(
+                    mir2_shared::enums::ClientPacketIds::NewCharacter as i16,
+                    &nc_body,
+                ),
+            })
+            .await;
+        assert!(
+            wait_opcode_body(
+                &mut rx,
+                mir2_shared::enums::ServerPacketIds::NewCharacterSuccess as i16,
+                3
+            )
+            .await
+            .is_some(),
+            "NewCharacterSuccess"
+        );
+
+        // 直插一把武器到背包格 0（StartGame 时载入）
+        let mut weapon = mir2_shared::data::item::UserItem::default();
+        weapon.item_index = 1;
+        weapon.unique_id = 9001;
+        weapon.count = 1;
+        let item_json = serde_json::to_string(&weapon).expect("serialize item");
+        sqlx::query(
+            "INSERT INTO inventory_backpack (character_name, grid, item_json) VALUES (?, 0, ?)",
+        )
+        .bind("RefinePageChar")
+        .bind(item_json)
+        .execute(&db_pool)
+        .await
+        .expect("insert backpack item");
+
+        let _ = gate_ref
+            .ask(ClientData {
+                session_id,
+                data: build_packet_bytes(
+                    mir2_shared::enums::ClientPacketIds::StartGame as i16,
+                    &0i32.to_le_bytes().to_vec(),
+                ),
+            })
+            .await;
+        assert!(
+            wait_opcode_body(
+                &mut rx,
+                mir2_shared::enums::ServerPacketIds::StartGame as i16,
+                5
+            )
+            .await
+            .is_some(),
+            "StartGame"
+        );
+
+        // 未开 [@REFINE] 页 → 存入必须被拒（success=false）
+        let mut body = Vec::new();
+        body.extend_from_slice(&0i32.to_le_bytes()); // from = 背包格 0（有武器）
+        body.extend_from_slice(&0i32.to_le_bytes()); // to = 武器槽
+        let _ = gate_ref
+            .ask(ClientData {
+                session_id,
+                data: build_packet_bytes(
+                    mir2_shared::enums::ClientPacketIds::DepositRefineItem as i16,
+                    &body,
+                ),
+            })
+            .await;
+        let ack = wait_opcode_body(
+            &mut rx,
+            mir2_shared::enums::ServerPacketIds::DepositRefineItem as i16,
+            3,
+        )
+        .await
+        .expect("deposit ack packet missing");
+        assert_eq!(ack.len(), 9, "ack body = [from i32][to i32][success u8]");
+        assert_eq!(
+            ack[8], 0,
+            "未开 [@REFINE] 页时存入必须被拒（C# PlayerObject.cs:12509）"
+        );
+    });
+}
+
 #[tokio::test]
 async fn e2e_client_version_handshake() {
     let session_id = 1u64;
