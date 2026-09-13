@@ -65,6 +65,10 @@ pub struct AmountIconNode;
 #[derive(Component)]
 pub struct AmountIconImage;
 
+/// 输入框容器（C# `InputTextBox` @(58,43) 132x19，`Border = true` → 1px 边框）
+#[derive(Component)]
+pub struct AmountInputBox;
+
 pub struct AmountBoxPlugin;
 
 impl Plugin for AmountBoxPlugin {
@@ -114,6 +118,47 @@ impl AmountBoxState {
     }
 }
 
+/// C# `MirAmountBox` 输入框边框三态（`Border = true` + `BorderColour`）
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AmountBorder {
+    /// 合法（`Amount >= MinAmount` 且未到上限）
+    Lime,
+    /// 合法且 `Amount == MaxAmount`（C# 先钳到上限再判等）
+    Orange,
+    /// 非法（空/非数字/`< MinAmount`）—— C# 同时隐藏 OK 键
+    Red,
+}
+
+impl AmountBorder {
+    /// C# `Color.Lime` / `Color.Orange` / `Color.Red`
+    pub fn color(self) -> Color {
+        match self {
+            Self::Lime => Color::srgb_u8(0, 255, 0),
+            Self::Orange => Color::srgb_u8(255, 165, 0),
+            Self::Red => Color::srgb_u8(255, 0, 0),
+        }
+    }
+}
+
+/// C# `MirAmountBox.TextBox_TextChanged`（MirAmountBox.cs:172-194）：
+/// `uint.TryParse(text) && Amount >= MinAmount` → Lime 且 **OK 可见**；
+/// `Amount > MaxAmount` 时 C# 先钳到 MaxAmount 并回写文本，随后 `Amount == MaxAmount` → Orange；
+/// 否则（解析失败或低于下限）→ Red 且 **OK 隐藏**。返回 `(边框态, OK 是否可见)`。
+pub fn amount_border_state(value: &str, min: u32, max: u32) -> (AmountBorder, bool) {
+    let Ok(amount) = value.trim().parse::<u32>() else {
+        return (AmountBorder::Red, false);
+    };
+    if amount < min.max(1) {
+        return (AmountBorder::Red, false);
+    }
+    if amount >= max {
+        // C# 钳到 MaxAmount 后判等 → Orange（OK 可见）
+        (AmountBorder::Orange, true)
+    } else {
+        (AmountBorder::Lime, true)
+    }
+}
+
 fn cleanup_amount_box(mut commands: Commands, roots: Query<Entity, With<AmountBoxWidget>>) {
     for e in roots.iter() {
         commands.entity(e).despawn();
@@ -146,8 +191,28 @@ fn spawn_amount_box(
     commands.entity(panel).with_children(|p| {
         // 标题（C# (19,8)）
         spawn_label(p, &cjk, "", 19.0, 8.0, 12.0, Color::WHITE, 9).insert(AmountTitleText);
-        // 数量值（C# (60,40)）
-        spawn_label(p, &cjk, "", 60.0, 40.0, 14.0, Color::WHITE, 9).insert(AmountValueText);
+        // 输入框容器（C# `InputTextBox` @(58,43) 132x19 + `Border=true` 的 1px 外框；
+        // Bevy 边框画在节点内 → 容器取 (57,42) 134x21，内容区正好是 C# 的 132x19）
+        p.spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(57.0),
+                top: Val::Px(42.0),
+                width: Val::Px(134.0),
+                height: Val::Px(21.0),
+                border: UiRect::all(Val::Px(1.0)),
+                ..default()
+            },
+            BackgroundColor(Color::BLACK),
+            BorderColor::all(AmountBorder::Lime.color()),
+            ZIndex(9),
+            AmountInputBox,
+        ))
+        .with_children(|ib| {
+            // 数量值（C# 文本框内文字；相对输入框 (3,2) = 绝对 (60,44)）
+            spawn_label(ib, &cjk, "", 3.0, 2.0, 14.0, Color::WHITE, 10)
+                .insert(AmountValueText);
+        });
         // 物品图标（C# `ItemImage` @(15,34) 38x34；无图标时隐藏）
         p.spawn((
             Node {
@@ -213,16 +278,31 @@ pub(crate) fn amount_box_system(
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
     mut cache: ResMut<crate::ui::sprite_ui::UiImageCache>,
-    ok: Query<(Entity, &Interaction), (With<AmountOk>, Without<AmountCancel>, Without<AmountClose>)>,
+    mut ok: Query<
+        (Entity, &Interaction, &mut Visibility),
+        (With<AmountOk>, Without<AmountCancel>, Without<AmountClose>),
+    >,
     cancel: Query<(Entity, &Interaction), (With<AmountCancel>, Without<AmountOk>, Without<AmountClose>)>,
     close: Query<(Entity, &Interaction), (With<AmountClose>, Without<AmountOk>, Without<AmountCancel>)>,
-    mut widgets: Query<&mut Visibility, With<AmountBoxWidget>>,
+    mut widgets: Query<
+        &mut Visibility,
+        (
+            With<AmountBoxWidget>,
+            Without<AmountOk>,
+            Without<AmountIconNode>,
+        ),
+    >,
     mut titles: Query<&mut Text, (With<AmountTitleText>, Without<AmountValueText>)>,
     mut values: Query<&mut Text, (With<AmountValueText>, Without<AmountTitleText>)>,
     mut icons: Query<
         (&mut ImageNode, &mut Visibility),
-        (With<AmountIconNode>, Without<AmountBoxWidget>),
+        (
+            With<AmountIconNode>,
+            Without<AmountBoxWidget>,
+            Without<AmountOk>,
+        ),
     >,
+    mut input_box: Query<&mut BorderColor, With<AmountInputBox>>,
     mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
 ) {
     fn edge(
@@ -265,6 +345,24 @@ pub(crate) fn amount_box_system(
                     *vis = Visibility::Hidden;
                 }
             }
+        }
+    }
+    // C# `MirAmountBox.TextBox_TextChanged`：边框三态 + OK 键显隐
+    let (border, ok_visible) = amount_border_state(&state.value, state.min, state.max);
+    for mut color in &mut input_box {
+        let want = BorderColor::all(border.color());
+        if *color != want {
+            *color = want;
+        }
+    }
+    for (_, _, mut vis) in &mut ok {
+        let want = if ok_visible {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
+        if *vis != want {
+            *vis = want;
         }
     }
 
@@ -323,7 +421,7 @@ pub(crate) fn amount_box_system(
         }
     }
 
-    for (e, inter) in &ok {
+    for (e, inter, _) in &mut ok {
         if edge(e, inter, &mut prev_inter) {
             // C# Enter 即 OKButton.InvokeMouseClick（:204-209/:277-278）——
             // 两路径同一解析/钳制（审查 MAJOR：旧 OK 路径未同步，语义分裂）
@@ -350,5 +448,50 @@ pub(crate) fn amount_box_system(
     }
     if let Ok(mut v) = values.single_mut() {
         v.0 = state.value.clone();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// #2747：C# `MirAmountBox.TextBox_TextChanged`（:172-194）的边框三态与 OK 显隐：
+    /// `>= MinAmount` → Lime + OK 可见；`> MaxAmount` 先钳到 Max → `== MaxAmount` → Orange；
+    /// 解析失败或 `< MinAmount` → Red + OK 隐藏。
+    #[test]
+    fn amount_border_state_matches_csharp() {
+        // 合法区间 → Lime
+        assert_eq!(
+            amount_border_state("50", 1, 100),
+            (AmountBorder::Lime, true)
+        );
+        // 恰好到上限 / 超过上限（C# 钳到 Max 后判等）→ Orange
+        assert_eq!(
+            amount_border_state("100", 1, 100),
+            (AmountBorder::Orange, true)
+        );
+        assert_eq!(
+            amount_border_state("5000", 1, 100),
+            (AmountBorder::Orange, true)
+        );
+        // 低于下限（出价场景 min = 当前价 + 1）→ Red + OK 隐藏
+        assert_eq!(
+            amount_border_state("150", 151, u32::MAX),
+            (AmountBorder::Red, false)
+        );
+        assert_eq!(
+            amount_border_state("200", 151, u32::MAX),
+            (AmountBorder::Lime, true)
+        );
+        // 空 / 非数字 → Red + OK 隐藏
+        assert_eq!(amount_border_state("", 1, 100), (AmountBorder::Red, false));
+        assert_eq!(
+            amount_border_state("abc", 1, 100),
+            (AmountBorder::Red, false)
+        );
+        // 颜色 = C# `Color.Lime` / `Color.Orange` / `Color.Red`
+        assert_eq!(AmountBorder::Lime.color(), Color::srgb_u8(0, 255, 0));
+        assert_eq!(AmountBorder::Orange.color(), Color::srgb_u8(255, 165, 0));
+        assert_eq!(AmountBorder::Red.color(), Color::srgb_u8(255, 0, 0));
     }
 }

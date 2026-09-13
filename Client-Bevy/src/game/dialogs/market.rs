@@ -1721,7 +1721,6 @@ fn market_consign_system(
     mut inv_click: ResMut<InvClickState>,
     mut locked: ResMut<InvLockedSlots>,
     inv_q: Query<&Inventory, With<LocalPlayer>>,
-    mut price_box: Query<&mut BackgroundColor, With<MarketPriceField>>,
     mut sell_btn: Query<(Entity, &Interaction, &mut UiGray), With<MarketSellItemBtn>>,
     cell: Query<(Entity, &Interaction), With<MarketConsignCell>>,
     collect_btn: Query<(Entity, &Interaction), With<MarketCollectSoldBtn>>,
@@ -1785,15 +1784,10 @@ fn market_consign_system(
         input.texts.insert(6, price.to_string());
     }
     let state = price_state(market.panel, price);
-    // C# `PriceTextBox.BorderColour`：Red / Lime / Orange（Bevy 用输入框底色近似）
-    let fill = match state {
-        MarketPriceState::Invalid => Color::srgba(0.45, 0.10, 0.10, 0.9),
-        MarketPriceState::Valid => Color::srgba(0.10, 0.35, 0.12, 0.9),
-        MarketPriceState::Capped => Color::srgba(0.45, 0.30, 0.05, 0.9),
-    };
-    for mut bg in &mut price_box {
-        *bg = BackgroundColor(fill);
-    }
+    // C# `TextBox_TextChanged` 只改 `PriceTextBox.BorderColour`（:1333/1337/1345/1355/1359），
+    // 而该控件**从未置 `Border = true`**（`MirControl._border` 默认 false，`Draw()` 的
+    // `DrawBorder()` 因此早返回）→ 原版售价框没有任何三态视觉，Bevy 不再自造底色
+    //（批13 之前用输入框底色近似，属误读）。三态本身仍驱动 `SellItemButton.Enabled`。
     // C# `SellItemButton.Enabled`：价格合法才可提交；禁用态按 `GrayScale` 真灰度（批12）
     let allowed = state.allowed() && market.consign_item.is_some();
     for (e, inter, mut gray) in &mut sell_btn {

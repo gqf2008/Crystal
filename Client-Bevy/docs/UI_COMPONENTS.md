@@ -156,7 +156,7 @@
 ## 6. 验证基线
 
 - `cargo check --tests`（Client-Bevy）通过。
-- `cargo test`（Client-Bevy）：434 lib + 2 bin + 1 smoke + 24 alignment 通过（批12 拍卖出价数量框后基线）。
+- `cargo test`（Client-Bevy）：435 lib + 2 bin + 1 smoke + 24 alignment 通过（批13 输入框边框三态后基线）。
 - Report 的 C# `Prguse[1633]` 在当前本地 Data 包缺失；已使用按 C# 控件边界推导的 360x244 深色兜底面板并保留对应子控件坐标，待资源包更新后自动加载正确背景。
 - ServerRust：667 lib + 6 integration 通过（批10 列表行后基线）；SharedRust 185 + 11（2 ignored）；`MapEditor/SharedRust` `cargo check` 通过（副本同步）。
 - 关键实机/定向验证：UI 子树泄漏截图、Character 技能页、AssignKey 模态输入、Timer 穿透、登录安全键盘资源；批7 复验 Mail/Buff；批8 复验 Center 窗口。
@@ -183,6 +183,7 @@
 - 批12 拍卖出价门禁（2026-09-13）：`market_buy_outcome_matches_csharp`（拍卖分支改为 `BidAmount`）、`market_bid_uses_amount_box_like_csharp`（默认/下限 = 当前价+1、金额确定后确认框文案与动作、低于下限钳制、取消不弹确认）；红检：把 `ask_with` 初值改回 `max` 忽略默认值 → 断言如期失败。
 - 批12 收尾三窗复验（2026-09-13，合并后单一进程 `--auto-enter --market-buy` + Control API 依次开 Market/Creature/Craft 截图）：Market = 两行（寄售 100 / 拍卖「100 出价」）+ 无选中时 BUY 仍为真灰度（均值 `(85.3,85.3,85.3)`、色度 0）+ 背包按 C# 推到 x=497 且第 3 格图标为原色 `(73.7,36.6,49.6)`（无残留锁）；Creature = PET STATUS 面板与操作列正常；Craft = `Prguse[1109]` 面板 + `CRAFT` 按钮灰度（AUTO 保持原色）。
 - 批13 锁定格透明度实机复验（2026-09-13，`--auto-enter --market-many` + Control API；寄售放入/切页签用临时驱动，验证后已删除）：同一来源格（第 3 格）未锁均值 `(73.7,36.6,49.6)`；锁定后 `(27.4,12.5,17.5)`，locked/unlocked 比例 **0.371/0.342/0.352**（批12 无 alpha 时为 0.410/0.374/0.389）——与 C# `0.412 × 0.8 = 0.330` 加单元格底色的 alpha 混合一致。
+- 批13 输入框边框实机复验（2026-09-13，`--skip-login --market-buy` + Control API；选拍卖行/按 BUY/改数量/切页签用临时驱动，验证后已删除）：数量框 `Lime` 态 = 绿 1px 边框 + `OKAY` 可见（默认 151）；把值改成 100（低于下限 151）→ **红 1px 边框 + OKAY 隐藏**（只剩 CANCEL），与 C# `TextBox_TextChanged` 合法/非法分支一致；切到寄售页签后售价框为纯深色输入框（不再有红/绿/橙自造底色），SELL 键保持禁用灰。
 
 ## 7. 已知有意偏差
 
@@ -205,7 +206,8 @@
 - TrustMerchant：拍卖出价已对齐 C#：按 BUY 先弹 `MirAmountBox`（`BidAmount` 标题 + `ItemImage` @(15,34) 38x34 物品图标 + 默认/下限 `Price + 1`、上限 `uint.MaxValue`），OK 后再弹 `MirMessageBox`（`ConfirmBidGoldForItem`）——批12 单元3 落地 `AmountBoxState::ask_with`（批11 已补确认框）。
 - TrustMerchant：C# `AuctionRow.SelectedImage`（`Prguse[545]` 296x38）构造后 `Visible=false` 且全仓无置真处（原版死控件）；选中高亮只用 `Border`（1px 外扩橙框），Bevy 一致。
 - TrustMerchant：`C.AuctionRow` 到期列在 C# 用本地墙钟 `DateTime`；Bevy 用 `chrono::Local` 格式化（同一时刻的本地显示），mock 侧写「当前-1h」便于核对格式。
-- TrustMerchant：售价框边框三态（C# `PriceTextBox.BorderColour` 只画 1px 边框色）在 Bevy 用输入框底色近似；底栏 `BuyButton`/`CollectSoldButton`/`MailButton`/`SellNowButton` 与 `SellItemButton` 的禁用态已按 C# `GrayScale`（`:1005-1033` 与 `RefreshCraftCells` 同套语义）走真灰度（`ui::gray`，公式见 `Data/Shaders/grayscale.ps`）。C# 寄售选物锁定背包格（`tempCell.Locked`）已对齐（`InvLockReason::Consign`；放入锁、换物/切页签/关窗/`S.ConsignItem` 回包解锁）；C# `Show()` 把背包推到 `Size.Width + 5`、`Hide()` 复位 (0,0) 也已对齐（`InventoryPlaceAt`）。
+- TrustMerchant：底栏 `BuyButton`/`CollectSoldButton`/`MailButton`/`SellNowButton` 与 `SellItemButton` 的禁用态已按 C# `GrayScale`（`:1005-1033` 与 `RefreshCraftCells` 同套语义）走真灰度（`ui::gray`，公式见 `Data/Shaders/grayscale.ps`）。C# 寄售选物锁定背包格（`tempCell.Locked`）已对齐（`InvLockReason::Consign`；放入锁、换物/切页签/关窗/`S.ConsignItem` 回包解锁）；C# `Show()` 把背包推到 `Size.Width + 5`、`Hide()` 复位 (0,0) 也已对齐（`InventoryPlaceAt`）。
+- TrustMerchant / 数量框：售价框的「三态边框」§7 原描述有误——C# `PriceTextBox.BorderColour` 虽被 `TextBox_TextChanged` 赋值（:1333/1337/1345/1355/1359），但该控件从未置 `Border = true`，`MirControl.Draw()` 的 `DrawBorder()` 因 `_border` 默认 false 早返回 → **原版售价框没有三态视觉**；批13 已删掉 Bevy 自造的底色近似（三态仍驱动 `SellItemButton.Enabled`）。真正画 1px 边框三态的是 `MirAmountBox` 的输入框（`Border = true; BorderColour = Lime`，:80-87、`TextBox_TextChanged`:172-194 → 合法 Lime、`== MaxAmount` Orange、非法 Red 且隐藏 OK 键），批13 已按其坐标 (58,43) 132x19 补框（Bevy 容器取 (57,42) 134x21 使内容区一致）。
 - TrustMerchant：筛选树 `Prguse2[205/206]` 手柄的拖动用「按下时记录抓取偏移 → 按住按光标 y 反算 `Skip`」实现（C# 是 `MirControl.OnMoving`）；手柄高度固定为精灵原始 12x18（C# 也未按 `PossibleTotal` 缩放）。
 - TrustMerchant：Find/筛选/页签搜索改发 C# 规范 `C.MarketSearch`（此前 Bevy `MarketSearchWire` 只写关键字，被网关 `read_body` 静默丢弃 → 搜索无效）；`MarketRefresh` 仅保留在刷新按钮（C# `RefreshButton.Click` 先清空搜索框）。
 - Craft：C# `BeforeDraw` 在背包关闭时会隐藏合成窗，Bevy 未实现（挂机脚本会直开 Craft，保持现状以免回归）。
