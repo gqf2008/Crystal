@@ -15,10 +15,11 @@ use crate::map_renderer::GameLibraries;
 use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
+use crate::ui::gray::UiGray;
 use crate::ui::sprite_ui::{shared_cjk_font, UiCjkFont, UiFont};
 use crate::ui::theme::{
-    load_lib_image, spawn_container, spawn_icon_button, spawn_item_cell_ui, spawn_label,
-    spawn_panel, spawn_scroll_bar_ui, UiItemCellData, UiScrollList,
+    load_lib_image, spawn_container, spawn_icon_button, spawn_image, spawn_item_cell_ui,
+    spawn_label, spawn_panel, spawn_scroll_bar_ui, UiItemCellData, UiScrollList,
 };
 
 /// 邮件列表条目
@@ -698,6 +699,16 @@ fn spawn_mail(
         ) {
             spawn_icon_button(p, n, h, pr, 100.0, 390.0, 32.0, 24.0, 10)
                 .insert(MailCollect);
+        }
+        // C# `MailDialogs.cs:257-283`：`BlockListButton`/`BugReportButton` 是构造即
+        // `GrayScale = true, Enabled = false` 的禁用占位键（`Prguse[520]` @(183,414)、
+        // `Prguse[523]` @(210,414)，均 28x25）；两键无 Click 处理，且 `MirControl` 的
+        // `AllowDisabledMouseOver` 默认 false（连 Hint 都不弹）→ Bevy 用批12 的灰度绘制
+        // 纯占位图，不挂 Button/Interaction。
+        for (idx, x) in [(520usize, 183.0f32), (523, 210.0)] {
+            if let Some(h) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, idx) {
+                spawn_image(p, h, x, 414.0, 28.0, 25.0, 10).insert(UiGray::new(true));
+            }
         }
     });
 

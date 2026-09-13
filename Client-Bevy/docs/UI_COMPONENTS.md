@@ -184,6 +184,7 @@
 - 批12 收尾三窗复验（2026-09-13，合并后单一进程 `--auto-enter --market-buy` + Control API 依次开 Market/Creature/Craft 截图）：Market = 两行（寄售 100 / 拍卖「100 出价」）+ 无选中时 BUY 仍为真灰度（均值 `(85.3,85.3,85.3)`、色度 0）+ 背包按 C# 推到 x=497 且第 3 格图标为原色 `(73.7,36.6,49.6)`（无残留锁）；Creature = PET STATUS 面板与操作列正常；Craft = `Prguse[1109]` 面板 + `CRAFT` 按钮灰度（AUTO 保持原色）。
 - 批13 锁定格透明度实机复验（2026-09-13，`--auto-enter --market-many` + Control API；寄售放入/切页签用临时驱动，验证后已删除）：同一来源格（第 3 格）未锁均值 `(73.7,36.6,49.6)`；锁定后 `(27.4,12.5,17.5)`，locked/unlocked 比例 **0.371/0.342/0.352**（批12 无 alpha 时为 0.410/0.374/0.389）——与 C# `0.412 × 0.8 = 0.330` 加单元格底色的 alpha 混合一致。
 - 批13 输入框边框实机复验（2026-09-13，`--skip-login --market-buy` + Control API；选拍卖行/按 BUY/改数量/切页签用临时驱动，验证后已删除）：数量框 `Lime` 态 = 绿 1px 边框 + `OKAY` 可见（默认 151）；把值改成 100（低于下限 151）→ **红 1px 边框 + OKAY 隐藏**（只剩 CANCEL），与 C# `TextBox_TextChanged` 合法/非法分支一致；切到寄售页签后售价框为纯深色输入框（不再有红/绿/橙自造底色），SELL 键保持禁用灰。
+- 批13 Mail 占位键实机复验（2026-09-13，`--skip-login` + Control API `dialog mail open` 截图）：底栏右侧出现 `Prguse[520]`/`[523]` 两个键，均值 RGB `(110.4,110.6,109.3)`/`(114.4,114.7,112.9)`、色度 `1.46`/`2.15`（≈0 = 批12 灰度公式），同排可用的发送/删除键保持棕色原色 —— 与 C# `GrayScale=true, Enabled=false` 占位态一致。
 
 ## 7. 已知有意偏差
 
@@ -211,4 +212,5 @@
 - TrustMerchant：筛选树 `Prguse2[205/206]` 手柄的拖动用「按下时记录抓取偏移 → 按住按光标 y 反算 `Skip`」实现（C# 是 `MirControl.OnMoving`）；手柄高度固定为精灵原始 12x18（C# 也未按 `PossibleTotal` 缩放）。
 - TrustMerchant：Find/筛选/页签搜索改发 C# 规范 `C.MarketSearch`（此前 Bevy `MarketSearchWire` 只写关键字，被网关 `read_body` 静默丢弃 → 搜索无效）；`MarketRefresh` 仅保留在刷新按钮（C# `RefreshButton.Click` 先清空搜索框）。
 - Craft：C# `BeforeDraw` 在背包关闭时会隐藏合成窗，Bevy 未实现（挂机脚本会直开 Craft，保持现状以免回归）。
-- Craft：`CraftButton` 的 `Enabled`/`GrayScale` 已按 C# `RefreshCraftCells`（NPCDialogs.cs:2686-2723）对齐：未选配方或任一工具/材料槽未就位 → 按钮灰度且点击不触发（构造默认即 `GrayScale=true, Enabled=false`）；超出 3 工具格 / 6 材料格的额外需求按 C# `continue` 忽略。残留偏差：C# `MailDialog` 的 `BlockListButton`/`BugReportButton` 是构造即 `GrayScale=true, Enabled=false` 的禁用占位键，Bevy 未实现这两个占位控件。
+- Craft：`CraftButton` 的 `Enabled`/`GrayScale` 已按 C# `RefreshCraftCells`（NPCDialogs.cs:2686-2723）对齐：未选配方或任一工具/材料槽未就位 → 按钮灰度且点击不触发（构造默认即 `GrayScale=true, Enabled=false`）；超出 3 工具格 / 6 材料格的额外需求按 C# `continue` 忽略。
+- Mail：C# `BlockListButton`/`BugReportButton`（MailDialogs.cs:257-283，`Prguse[520]` @(183,414) / `Prguse[523]` @(210,414) 28x25）构造即 `GrayScale = true, Enabled = false` 且无 Click 处理（`AllowDisabledMouseOver` 默认 false，连 Hint 都不弹）；批13 单元3 已按原坐标补这两个灰度占位图（不含交互）。
