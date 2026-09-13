@@ -753,7 +753,10 @@ pub fn make_behavior(monster_name: &str) -> Box<dyn MonsterBehavior + Send + Syn
     }
     if name.contains("venomspider") || name.contains("venom spider") || name.contains("毒液蜘蛛")
     {
-        return Box::new(bosses::venom_spider::VenomSpiderBehavior::new());
+        // #2837：本地数据里 VenomSpider/VenomSpider0/VenomSpider3 的 ai=4 → C# `case 4: SpittingSpider`
+        // （`MonsterObject.cs:27`）；`VenomSpider` 类（=AI 100）在本地数据中零使用。
+        // 因此按 AI 4 语义（SpittingSpider：继承 HarvestMonster 可采集、ACAgility、绿毒 2000ms）处理。
+        return Box::new(bosses::spitting_spider::SpittingSpiderBehavior::new());
     }
     if name.contains("thunderelement")
         || name.contains("thunder element")
@@ -806,6 +809,14 @@ pub fn make_behavior(monster_name: &str) -> Box<dyn MonsterBehavior + Send + Syn
             && !name.contains("guardian")
             && !name.contains("vanguard")
             && !name.contains("bodyguard"))
+        // #2837：C# `case 6:`/`case 58:` → Guard（MonsterObject.cs:30-31/:58）——
+        // 本地数据里 Sentry(11 创生点)/Royal_Guard(19)/Royal_Lieutenant 都是 ai=6 的守卫，
+        // 漏名会让它们落到 DefaultBehavior（可被玩家打死、会回血），与 C# `Guard.IsAttackTarget => false`/`CanRegen => false` 不符。
+        || name.contains("sentry")
+        || name.contains("royal_guard")
+        || name.contains("royal guard")
+        || name.contains("royal_lieutenant")
+        || name.contains("royal lieutenant")
     {
         return Box::new(bosses::guard::GuardBehavior::new());
     }
@@ -1267,6 +1278,50 @@ pub fn is_passive_object(monster_name: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #2837：C# `case 6:`/`case 58:` = `Guard`（`MonsterObject.cs:30-31`/`:58`）——
+    /// 本地数据里 `Sentry`(ai=6, 11 创生点)/`Royal_Guard`(ai=6, 19)/`Royal_Lieutenant`(ai=6) 都是守卫，
+    /// 必须走 `GuardBehavior`（不可被攻击、不回血）。
+    #[test]
+    fn guard_ai_family_uses_guard_behavior() {
+        for name in [
+            "Guard",
+            "Guard1",
+            "Guard2",
+            "Guard3",
+            "Sentry",
+            "Royal_Guard",
+            "Royal_Lieutenant",
+        ] {
+            let b = make_behavior(name);
+            assert!(
+                !b.is_attackable(),
+                "{name} 应走 GuardBehavior（C# Guard.IsAttackTarget => false）"
+            );
+            assert!(
+                !b.can_regen(),
+                "{name} 应走 GuardBehavior（C# Guard.CanRegen => false）"
+            );
+        }
+    }
+
+    /// #2837：本地数据 `venomspider*` 的 ai=4 → C# `case 4: SpittingSpider`（继承 HarvestMonster ⇒ 可采集）；
+    /// `VenomSpider` 类（AI 100）在本地数据零使用。
+    #[test]
+    fn venom_spider_family_uses_ai4_spitting_spider() {
+        for name in [
+            "VenomSpider",
+            "VenomSpider0",
+            "VenomSpider3",
+            "SpittingSpider",
+        ] {
+            let b = make_behavior(name);
+            assert!(
+                b.is_harvestable(),
+                "{name} 的 C# AI=4 = SpittingSpider（HarvestMonster）→ 必须可采集"
+            );
+        }
+    }
 
     /// #2358：C# Deer.cs（AI 1/2）——Deer 系全部注册且可采集
     #[test]
