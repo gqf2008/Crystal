@@ -335,7 +335,10 @@ impl Packet for MockGuildInvitePush {
 }
 
 /// #720：市场页数（客户端格式 [count i32][page dotnet]）
-pub(crate) struct MockNPCMarket;
+pub(crate) struct MockNPCMarket {
+    /// 页数（与服务端 `send_market` 一致：客户端按页名条数取页数）
+    pub(crate) pages: usize,
+}
 
 impl Packet for MockNPCMarket {
     const OPCODE: i16 = mir2_shared::enums::ServerPacketIds::NPCMarket as i16;
@@ -346,8 +349,11 @@ impl Packet for MockNPCMarket {
 
     fn write_body<W: std::io::Write>(&self, writer: &mut W) -> mir2_shared::data::stats::SharedResult<()> {
         use byteorder::{LittleEndian, WriteBytesExt};
-        writer.write_i32::<LittleEndian>(1)?;
-        mir2_shared::binary::write_dotnet_string(writer, "全部")?;
+        let pages = self.pages.max(1);
+        writer.write_i32::<LittleEndian>(pages as i32)?;
+        for i in 0..pages {
+            mir2_shared::binary::write_dotnet_string(writer, &format!("第{}页", i + 1))?;
+        }
         Ok(())
     }
 }
