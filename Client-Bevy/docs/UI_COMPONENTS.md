@@ -154,7 +154,7 @@
 ## 6. 验证基线
 
 - `cargo check --tests`（Client-Bevy）通过。
-- `cargo test`（Client-Bevy）：419 lib + 2 bin + 1 smoke + 24 alignment 通过（批11 Creature 禁用态后基线）。
+- `cargo test`（Client-Bevy）：422 lib + 2 bin + 1 smoke + 24 alignment 通过（批11 Craft 背包格锁定后基线）。
 - Report 的 C# `Prguse[1633]` 在当前本地 Data 包缺失；已使用按 C# 控件边界推导的 360x244 深色兜底面板并保留对应子控件坐标，待资源包更新后自动加载正确背景。
 - ServerRust：667 lib + 6 integration 通过（批10 列表行后基线）；SharedRust 185 + 11（2 ignored）；`MapEditor/SharedRust` `cargo check` 通过（副本同步）。
 - 关键实机/定向验证：UI 子树泄漏截图、Character 技能页、AssignKey 模态输入、Timer 穿透、登录安全键盘资源；批7 复验 Mail/Buff；批8 复验 Center 窗口。
@@ -168,6 +168,8 @@
 - 批10 价格排序/Mail 实机复验（2026-09-13，`--skip-login --market-buy` + Control API 截图；临时置 `price_filter=Low`、`selected=Some(0)`，验证后已还原）：价格表头右侧出现 `Prguse2[925]` 蓝色下三角（(371,65)）；底栏出现 Mail 键（`Prguse[437]` 信封图，(350,448)，有选中行时为亮态），位于 Refresh(320) 与 Buy(380) 之间。
 - 批11 买/取回确认框实机复验（2026-09-13，`--skip-login --market-buy` + Control API 截图；临时把确认框设为可见并填 `ConfirmBuyItemWithPrice` 文案，验证后已还原）：`Prguse[360]` 456x190 居中面板 + 文本「确定要以12,345 金币购买屠龙吗？」(35,35) + YES(260,157)/NO(360,157) 76x25 精灵按钮，与 C# `MirMessageBox` YesNo 一致。
 - 批11 Creature 禁用态实机复验（2026-09-13，`--skip-login` + Control API `dialog creature open` 截图；临时注释掉打开时的宠物列表请求以制造「无选中」状态，验证后已还原）：无选中时 RENAME/OPTIONS/DISABLE(=SemiAuto)/RELEASE/**SUMMON** 全部可见但灰化、DISMISS 隐藏；有选中（mock 小猪）时改为 RENAME/OPTIONS/DISABLE/RELEASE 亮态且 Dismiss 顶替 Summon——两态与 C# `RefreshUI` error/else 分支一致。
+- 批11 Craft 背包格锁定实机复验（2026-09-13，`--auto-enter`（真实登录链路，mock 才有背包物品）+ Control API 打开 Inventory/Craft 截图；mock 不下发 `PanelType::Craft` 商品行，故临时注入一条与 mock 背包匹配的配方，并用 `Interaction::Pressed` 驱动真实放入分支，验证后均已还原）：放入「布衣」后 Craft 材料格显示该物品且提示「放入 布衣」，来源背包格（第 3 格）图标由均值 RGB(70,35,47) 压暗到 (29,13,19)（≈`Color.DimGray` 0.41 系数），同排其它格像素不变。
+- 批11 Craft 锁定门禁（2026-09-13）：`craft_lock_sync_matches_placed_slots`（放入/AutoFill 锁定、幂等、取出一格解锁、`ResetCells` 全解锁）与 `inv_locked_slots_match_csharp` / `inv_locked_slot_is_not_clickable`（DimGray 图标色、锁定格不可命中）；红检：把 `sync_craft_locks` 改成只清空不加锁、`inv_clickable_slot` 改成恒真，两条断言分别如期失败。
 
 ## 7. 已知有意偏差
 
@@ -177,7 +179,7 @@
 - Creature：C# `HelpPetButton`（`Prguse2[257..259]` @ `Size.Width-48,3`）在原版无 Click 处理（死控件），Bevy 未实现该占位按钮，待有宠物帮助页时再补。
 - Creature：`刷新` 是 Bevy 扩展按钮（C# 无此控件），用中文文本渲染；此前借用 MessageBox 的 `Title[206..208]`（原版是「YES」精灵），实机截图里会显示成「YES」。
 - Craft：C# 用客户端本地 `ItemInfo` 库解析需求图标，Rust 客户端无本地物品库 —— 图标/名称改由 `RecipeRequirement.image/name` 随包下发（协议自洽偏离，已注释说明）。
-- Craft：C# 放入材料后会锁定对应背包格（`SelectedCell.Locked`）直到关窗；Bevy 目前只记录背包槽号，未在背包侧锁定（后续可加 `LockedSlots` 资源）。
+- Craft：C# 放入材料后会锁定对应背包格（`SelectedCell.Locked`）直到关窗（`AutoFill` 逐格锁定、`ResetCells()` 全解锁）；Bevy 已对齐（`InvLockedSlots` 资源 + 图标按 `Color.DimGray` 灰化 + 锁定格不响应点击/选择）。残留偏差：C# 还以 0.8 不透明度叠加绘制，Bevy 只改图标色（无 alpha 混合）；C# `MirItemCell.Locked` 的其它来源（装备/拆分/移入腰带/镶嵌等）Bevy 未逐个实现，当前仅 Craft 驱动锁定。
 - Refine：C# 的待精炼武器走 NPCDialog 的 ItemCell（投放窗确认即 `C.RefineItem{UniqueID}`）；Rust 服务端语义是两步（`DepositRefineItem to=0` 存入 → `RefineItem{uid}` 发起），故 Bevy 的投放窗确认在收到存入确认后再发 `RefineItem`（对外行为等价，多一个包）。
 - ItemRent：C# `KeybindOptions.Rental` 在 `KeyBindSettings.New()` 里**没有默认绑定行**（枚举成员存在但无 `KeyBind`，原版默认无键，键位面板也列不出）；Bevy 作扩展给「租赁」（界面组，默认 `T`）并在键位面板可重绑，热键 `ItemRentalDialog.Toggle()` 语义与 C# `GameScene.cs:779-781` 一致。
 - ItemRent：`Prguse[238]` 面板位图**自带**右上角关闭图样（C# 四窗都画得到），但只有自有窗挂了可点关闭键（`Prguse2[360..362]`）——C# `GuestItemRentDialog`/`GuestItemRentingDialog` 本身没有 `closeButton`，Bevy 同样只在自有窗挂 `ItemRentalClose`，对方窗的 X 是装饰。

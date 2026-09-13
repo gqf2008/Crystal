@@ -47,6 +47,18 @@ pub struct CraftState {
     pub slots: [Option<CraftPlaced>; CRAFT_SLOT_COUNT],
 }
 
+/// 把「材料槽 → 来源背包格」的锁定关系同步进 [`InvLockedSlots`]（C# `CraftDialog.Selected`
+/// 字典与 `cell.Locked` 一一对应；`ResetCells()` 时清空 → 本函数幂等收敛）。
+pub fn sync_craft_locks(
+    locked: &mut crate::game::dialogs::inventory::InvLockedSlots,
+    slots: &[Option<CraftPlaced>; CRAFT_SLOT_COUNT],
+) {
+    locked.clear();
+    for placed in slots.iter().flatten() {
+        locked.lock(placed.inv_slot);
+    }
+}
+
 /// 当前选中配方的详情（C# `CraftDialog.Recipe` 等价物）
 pub fn selected_recipe_info<'a>(
     state: &'a CraftState,
@@ -317,6 +329,7 @@ fn craft_ui_system(
     mut mgr: ResMut<DialogManager>,
     mut state: ResMut<CraftState>,
     mut npc_goods: ResMut<NpcGoodsState>,
+    mut locked: ResMut<crate::game::dialogs::inventory::InvLockedSlots>,
     inv_origin: Res<InventoryOrigin>,
     close: Query<(Entity, &Interaction), With<CraftClose>>,
     mut widgets: Query<&mut Visibility, With<CraftWidget>>,
@@ -360,8 +373,9 @@ fn craft_ui_system(
     for (e, inter) in &close {
         if edge(e, inter, &mut prev_inter) {
             mgr.close(DialogKind::Craft);
-            // C# `Hide()` → ResetCells()
+            // C# `Hide()` → ResetCells()（含解锁来源背包格）
             state.slots = Default::default();
+            sync_craft_locks(&mut locked, &state.slots);
         }
     }
     for (mut text, line) in &mut lines {
@@ -397,6 +411,8 @@ fn craft_slots_system(
     mut image_cache: ResMut<crate::ui::sprite_ui::UiImageCache>,
     inv_q: Query<&crate::game::player_state::Inventory, With<crate::actor::LocalPlayer>>,
     mut inv_click: ResMut<crate::game::dialogs::inventory::InvClickState>,
+    // #2736：C# `SelectedCell.Locked`——放入材料/自动填充后锁定来源背包格
+    mut locked: ResMut<crate::game::dialogs::inventory::InvLockedSlots>,
     autofill_btn: Query<(Entity, &Interaction), With<CraftAutoFill>>,
     craft_btn: Query<(Entity, &Interaction), With<CraftBtn>>,
     mut cells: Query<(&CraftCell, &mut UiItemCellData), Without<UiItemCellIcon>>,
@@ -421,6 +437,7 @@ fn craft_slots_system(
     if *slot_recipe != current_recipe {
         *slot_recipe = current_recipe;
         state.slots = Default::default();
+        sync_craft_locks(&mut locked, &state.slots); // C# `ResetCells()`：换配方即解锁
     }
     let inv_items: Vec<Option<crate::game::dialogs::inventory::InvItem>> =
         inv_q.single().map(|inv| inv.items.clone()).unwrap_or_default();
@@ -490,8 +507,10 @@ fn craft_slots_system(
                 item_index: item.item_index,
                 count: req.count,
             });
-            inv_click.selected = None; // C#：放入后清空 SelectedCell 并锁定背包格
+            // C# `Grid_Click`：放入后清空 SelectedCell 并 **锁定来源背包格**（:2433）
+            inv_click.selected = None;
             state.message = format!("放入 {}", name);
+            sync_craft_locks(&mut locked, &state.slots);
         } else if filled {
             state.message = "该槽已有物品".to_string();
         } else {
@@ -507,6 +526,7 @@ fn craft_slots_system(
             None => state.message = "请先选择合成产物".to_string(),
             Some(recipe) => {
                 state.slots = Default::default();
+                sync_craft_locks(&mut locked, &state.slots); // C# `AutoFill()` 先 `ResetCells(false)`
                 let mut requirements = recipe.tools.clone();
                 requirements.extend(recipe.ingredients.iter().cloned());
                 let inventory: Vec<(i32, u16, u16)> = inv_items
@@ -529,6 +549,8 @@ fn craft_slots_system(
                         placed += 1;
                     }
                 }
+                // C# `AutoFill`：逐格 `cell.Locked = true`（:2479/:2506）
+                sync_craft_locks(&mut locked, &state.slots);
                 state.message = format!("自动填充 {}/{} 槽", placed, requirements.len());
                 tracing::info!("🔧 自动填充 {}/{} 槽", placed, requirements.len());
             }
@@ -572,6 +594,7 @@ fn craft_slots_system(
 fn craft_server_events(
     mut events: MessageReader<crate::network::server_event::ServerEvent>,
     mut craft: ResMut<CraftState>,
+    mut locked: ResMut<crate::game::dialogs::inventory::InvLockedSlots>,
 ) {
     use crate::network::server_event::ServerEvent;
     for ev in events.read() {
@@ -590,6 +613,9 @@ fn craft_server_events(
             } else {
                 format!("合成失败（配方 {}）", recipe_id)
             };
+            // C# `S.CraftItem` → `CraftDialog.UpdateCraftCells()`：失效格解除锁定并清空
+            craft.slots = Default::default();
+            sync_craft_locks(&mut locked, &craft.slots);
         }
     }
 }
@@ -598,6 +624,42 @@ fn craft_server_events(
 mod tests {
     use super::*;
     use mir2_shared::enums::PanelType;
+
+    /// #2736：C# `CraftDialog.Selected`（材料槽 → 来源背包格）与 `cell.Locked` 一一对应，
+    /// `ResetCells()` 清空槽位即全部解锁；同步幂等（重复调用不残留旧锁）
+    #[test]
+    fn craft_lock_sync_matches_placed_slots() {
+        let mut slots: [Option<CraftPlaced>; CRAFT_SLOT_COUNT] = Default::default();
+        let mut locked = crate::game::dialogs::inventory::InvLockedSlots::default();
+
+        slots[0] = Some(CraftPlaced {
+            inv_slot: 5,
+            item_index: 1,
+            count: 1,
+        });
+        slots[4] = Some(CraftPlaced {
+            inv_slot: 12,
+            item_index: 2,
+            count: 3,
+        });
+        sync_craft_locks(&mut locked, &slots);
+        assert!(locked.is_locked(5) && locked.is_locked(12));
+        assert!(!locked.is_locked(0));
+
+        // 幂等
+        sync_craft_locks(&mut locked, &slots);
+        assert!(locked.is_locked(5) && locked.is_locked(12));
+
+        // 取出一个槽 → 该来源格解锁，其余保持
+        slots[0] = None;
+        sync_craft_locks(&mut locked, &slots);
+        assert!(!locked.is_locked(5) && locked.is_locked(12));
+
+        // C# `ResetCells()`：全清 → 全部解锁
+        slots = Default::default();
+        sync_craft_locks(&mut locked, &slots);
+        assert!(!locked.is_locked(12));
+    }
 
     fn sel() -> Option<SelectedRecipe> {
         Some(SelectedRecipe {
