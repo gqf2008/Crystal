@@ -155,6 +155,8 @@ impl MonsterBehavior for HellLordBehavior {
                         tick_ms: 500,
                         caster_oid: monster.object_id,
                         caster_session: 0,
+                        cells: Vec::new(),
+                        show: true,
                     });
             }
         }

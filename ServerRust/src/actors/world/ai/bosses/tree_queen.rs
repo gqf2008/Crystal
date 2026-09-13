@@ -87,6 +87,8 @@ impl MonsterBehavior for TreeQueenBehavior {
                             tick_ms: 2000,
                             caster_oid: monster.object_id,
                             caster_session: 0,
+                            cells: Vec::new(),
+                            show: true,
                         });
                 }
             } else {
@@ -113,6 +115,8 @@ impl MonsterBehavior for TreeQueenBehavior {
                                 tick_ms: 1000,
                                 caster_oid: monster.object_id,
                                 caster_session: 0,
+                                cells: Vec::new(),
+                                show: true,
                             });
                     }
                 }
@@ -139,6 +143,8 @@ impl MonsterBehavior for TreeQueenBehavior {
                         tick_ms: 1000,
                         caster_oid: monster.object_id,
                         caster_session: 0,
+                        cells: Vec::new(),
+                        show: true,
                     });
             }
             let next = fastrand::i32(2..=3) as u64 * 10;
