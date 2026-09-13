@@ -215,6 +215,13 @@ pub fn default_bindings() -> Vec<KeyBinding> {
         // #1562：宠物模式切换（C# ChangePetmode=Ctrl+A；Bevy 中 A 用于相机平移 → 改 Ctrl+T 避免冲突）
         KeyBinding::new_mod("宠物模式切换", "交互", KeyCode::KeyT, 1, 2, 2),
         KeyBinding::new("聊天", "交互", KeyCode::Enter),
+        // #2771：C# `KeyBindSettings.cs:340` `KeybindOptions.Trade`（文案「请求交易」，默认 T，
+        // 组 General）→ `GameScene.cs:776-777` 按下即发 `C.TradeRequest`
+        KeyBinding::new(
+            crate::game::player_menu::TRADE_KEYBIND_ACTION,
+            "交互",
+            KeyCode::KeyT,
+        ),
         KeyBinding::new("背包", "界面", KeyCode::F9),
         KeyBinding::new("背包2", "界面", KeyCode::KeyI),
         KeyBinding::new("角色", "界面", KeyCode::F10),
@@ -256,7 +263,9 @@ pub fn default_bindings() -> Vec<KeyBinding> {
         KeyBinding::new("关闭全部", "系统", KeyCode::Escape),
         // #2720：租赁浏览窗（C# `KeybindOptions.Rental` 有枚举成员但 `KeyBindSettings` 里
         // 没有默认绑定行 → 原版默认不可用；Bevy 作扩展给 T 键，可在键位面板重绑）
-        KeyBinding::new("租赁", "界面", KeyCode::KeyT),
+        // #2771：原为 T（Bevy 扩展自选）——与 C# `KeybindOptions.Trade` 的默认 T 冲突，
+        // 改到空闲的分号键；C# 该扩展本身无默认绑定（`KeyBindSettings` 无 Rental 行）
+        KeyBinding::new("租赁", "界面", KeyCode::Semicolon),
     ]
 }
 
@@ -686,6 +695,7 @@ fn dialog_hotkey_system(
     keys: Res<ButtonInput<KeyCode>>,
     kb: Res<KeyboardState>,
     gate: Res<crate::game::input_gate::TextInputGate>,
+    net: Res<crate::network::NetConnection>,
     mut mgr: ResMut<DialogManager>,
     mut page: ResMut<CharPage>,
     mut opt: ResMut<crate::game::dialogs::option::OptionState>,
@@ -793,6 +803,17 @@ fn dialog_hotkey_system(
     if let Some(b) = kb.bindings.iter().find(|b| b.action == "腰带") {
         if !blocked(b) && keys.just_pressed(b.key) {
             potion_belt_visible.0 = !potion_belt_visible.0;
+        }
+    }
+    // #2771：C# `GameScene.cs:776-777` `KeybindOptions.Trade` → `C.TradeRequest`
+    if let Some(b) = kb
+        .bindings
+        .iter()
+        .find(|b| b.action == crate::game::player_menu::TRADE_KEYBIND_ACTION)
+    {
+        if !blocked(b) && keys.just_pressed(b.key) {
+            net.send_packet(&mir2_shared::packets::client::trade::TradeRequest);
+            tracing::info!("🤝 交易快捷键：请求交易");
         }
     }
 }
@@ -930,6 +951,21 @@ mod tests {
         assert_eq!(key_code_from_name("NotAKey"), None);
     }
 
+    /// #2771：C# `KeybindOptions.Trade`（`KeyBindSettings.cs:340`：文案「请求交易」、默认 T）已进默认表，
+    /// 键位面板可列出、热键系统据此发 `C.TradeRequest`（`GameScene.cs:776-777`）
+    #[test]
+    fn trade_keybind_matches_csharp_default() {
+        let defaults = default_bindings();
+        let b = defaults
+            .iter()
+            .find(|b| b.action == crate::game::player_menu::TRADE_KEYBIND_ACTION)
+            .expect("默认表应含请求交易（C# Trade）");
+        assert_eq!(b.key, KeyCode::KeyT);
+        assert_eq!(b.group, "交互");
+        // C# `RequireAlt/Shift/Ctrl = 2`（不限）
+        assert_eq!((b.require_alt, b.require_shift, b.require_ctrl), (2, 2, 2));
+    }
+
     #[test]
     fn bindings_roundtrip_ini() {
         let defaults = default_bindings();
@@ -979,6 +1015,8 @@ mod tests {
         app.init_resource::<CharPage>();
         app.init_resource::<crate::game::dialogs::option::OptionState>();
         app.init_resource::<crate::game::dialogs::potion_belt::PotionBeltVisible>();
+        // #2771：`dialog_hotkey_system` 新增 `Res<NetConnection>`（交易快捷键发 C.TradeRequest）
+        app.insert_resource(crate::network::NetConnection::default());
         app.insert_resource(crate::game::input_gate::TextInputGate(gate_on));
         app.add_systems(Update, dialog_hotkey_system);
         app.world_mut()
@@ -996,9 +1034,10 @@ mod tests {
             .iter()
             .find(|b| b.action == "租赁")
             .expect("默认键位应含「租赁」（Bevy 扩展）");
-        assert_eq!(rent.key, KeyCode::KeyT);
+        // #2771：T 归还给 C# `KeybindOptions.Trade`
+        assert_eq!(rent.key, KeyCode::Semicolon);
 
-        let mut app = hotkey_app(false, KeyCode::KeyT);
+        let mut app = hotkey_app(false, KeyCode::Semicolon);
         app.update();
         assert!(
             app.world()
