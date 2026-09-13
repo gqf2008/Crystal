@@ -20,6 +20,7 @@ use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
 use crate::ui::sprite_ui::{shared_cjk_font, UiCjkFont, UiFont};
+use crate::ui::gray::UiGray;
 use crate::ui::theme::{
     load_lib_image, spawn_icon_button, spawn_item_cell_ui, spawn_label, spawn_panel, UiItemCellData,
     UiItemCellIcon,
@@ -154,6 +155,28 @@ pub fn craft_slot_accepts(
     } else {
         count >= requirement.count
     }
+}
+
+/// C# `CraftDialog.CraftButton` 的 `Enabled`/`GrayScale`（NPCDialogs.cs:2379-2390 构造即
+/// `GrayScale = true, Enabled = false`；`RefreshCraftCells`（:2686-2723）在选中配方后先置
+/// 可用，再对每个工具/材料槽判 `need = Grid[i].Item == null || Item.Count < ShadowItem.Count`，
+/// 任一槽未满足 → `Enabled = false; GrayScale = true`）。
+///
+/// Bevy 侧：未选配方 → 不可用；已选配方 → 该配方列出的工具/材料槽全部就位才可用
+/// （超出 3 工具格 / 6 材料格的额外需求按 C# `continue` 语义忽略）。
+pub fn craft_button_enabled(
+    info: Option<&mir2_shared::data::client_data::ClientRecipeInfo>,
+    slots: &[Option<CraftPlaced>; CRAFT_SLOT_COUNT],
+) -> bool {
+    let Some(info) = info else {
+        return false;
+    };
+    let tools = info.tools.len().min(CRAFT_TOOL_COUNT);
+    let ingredients = info.ingredients.len().min(CRAFT_ING_COUNT);
+    slots[..tools].iter().all(|s| s.is_some())
+        && slots[CRAFT_TOOL_COUNT..CRAFT_TOOL_COUNT + ingredients]
+            .iter()
+            .all(|s| s.is_some())
 }
 
 /// C# `AutoFill()`：按配方顺序（先工具后材料）在背包里挑未占用且满足条件的物品，
@@ -303,7 +326,7 @@ fn spawn_craft(
             load_lib_image(&mut libs, &mut images, LibraryName::Title, CRAFT_CONFIRM_INDEX + 2),
         ) {
             spawn_icon_button(p, n, h, pr, CRAFT_CONFIRM_POS.0, CRAFT_CONFIRM_POS.1, 80.0, 25.0, 10)
-                .insert(CraftBtn);
+                .insert((CraftBtn, UiGray::default()));
         }
         // C# Grid：3 工具格 + 6 材料格（影子格由 ui_system 按配方刷新）
         for i in 0..CRAFT_SLOT_COUNT {
@@ -414,7 +437,7 @@ fn craft_slots_system(
     // #2736：C# `SelectedCell.Locked`——放入材料/自动填充后锁定来源背包格
     mut locked: ResMut<crate::game::dialogs::inventory::InvLockedSlots>,
     autofill_btn: Query<(Entity, &Interaction), With<CraftAutoFill>>,
-    craft_btn: Query<(Entity, &Interaction), With<CraftBtn>>,
+    mut craft_btn: Query<(Entity, &Interaction, &mut UiGray), With<CraftBtn>>,
     mut cells: Query<(&CraftCell, &mut UiItemCellData), Without<UiItemCellIcon>>,
     cell_inter: Query<(Entity, &Interaction, &CraftCell)>,
     mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
@@ -556,24 +579,21 @@ fn craft_slots_system(
             }
         }
     }
-    // 合成（C# `CraftItem()`：材料槽全部就位才发包，带上选中的背包槽）
-    for (e, inter) in &craft_btn {
-        if !edge(e, inter, &mut prev_inter) {
+    // C# `RefreshCraftCells`：任一工具/材料槽未满足 → `CraftButton.Enabled = false; GrayScale = true`
+    // （构造默认即「不可用 + 灰度」），禁用时点击不触发（C# `MirControl` 的 `!Enabled` 早返回）。
+    let craft_enabled = craft_button_enabled(info.as_ref(), &state.slots);
+    for (e, inter, mut gray) in &mut craft_btn {
+        let want_gray = !craft_enabled;
+        if gray.gray != want_gray {
+            gray.gray = want_gray;
+        }
+        if !craft_enabled || !edge(e, inter, &mut prev_inter) {
             continue;
         }
+        // 合成（C# `CraftItem()`：材料槽全部就位才发包，带上选中的背包槽）
         let Some(r) = state.selected.clone() else {
-            state.message = "请先在左侧商品列表点击合成产物".to_string();
             continue;
         };
-        let need = info
-            .as_ref()
-            .map(|recipe| recipe.tools.len() + recipe.ingredients.len())
-            .unwrap_or(0);
-        let filled = state.slots.iter().filter(|s| s.is_some()).count();
-        if need == 0 || filled < need {
-            state.message = format!("材料槽未就位（{}/{}），可用「AUTO」自动填充", filled, need);
-            continue;
-        }
         let slots: Vec<i32> = state
             .slots
             .iter()
@@ -624,6 +644,72 @@ fn craft_server_events(
 mod tests {
     use super::*;
     use mir2_shared::enums::PanelType;
+
+    /// #2742：C# `RefreshCraftCells`（NPCDialogs.cs:2686-2723）——未选配方或任一工具/材料槽
+    /// 未就位 → `CraftButton.Enabled = false; GrayScale = true`（构造默认也是禁用 + 灰度）。
+    #[test]
+    fn craft_button_enabled_matches_refresh_craft_cells() {
+        use mir2_shared::data::client_data::{ClientRecipeInfo, RecipeRequirement};
+        let req = |index: i32| RecipeRequirement {
+            item_index: index,
+            count: 1,
+            image: index as u16,
+            name: format!("#{index}"),
+            min_dura: 0,
+        };
+        let recipe = ClientRecipeInfo {
+            gold: 1,
+            chance: 100,
+            item: req(9),
+            tools: vec![req(5)],
+            ingredients: vec![req(1)],
+        };
+        let mut slots: [Option<CraftPlaced>; CRAFT_SLOT_COUNT] = Default::default();
+        // 未选配方 → 不可用（C# 构造默认 `Enabled=false, GrayScale=true`）
+        assert!(!craft_button_enabled(None, &slots));
+        // 已选配方但槽位空 → 不可用
+        assert!(!craft_button_enabled(Some(&recipe), &slots));
+        // 只放工具（材料缺）→ 仍不可用
+        slots[0] = Some(CraftPlaced {
+            inv_slot: 1,
+            item_index: 5,
+            count: 1,
+        });
+        assert!(!craft_button_enabled(Some(&recipe), &slots));
+        // 工具 + 材料都就位 → 可用
+        slots[CRAFT_TOOL_COUNT] = Some(CraftPlaced {
+            inv_slot: 2,
+            item_index: 1,
+            count: 1,
+        });
+        assert!(craft_button_enabled(Some(&recipe), &slots));
+        // 只吃工具的配方：工具就位即可用
+        let tool_only = ClientRecipeInfo {
+            ingredients: vec![],
+            ..recipe.clone()
+        };
+        assert!(craft_button_enabled(Some(&tool_only), &slots));
+        // 超出 3 工具格 / 6 材料格的额外需求按 C# `continue` 忽略
+        let many_tools = ClientRecipeInfo {
+            tools: vec![req(5), req(5), req(5), req(5)],
+            ingredients: vec![],
+            ..recipe.clone()
+        };
+        // 只有第 1 个工具格就位 → 仍不可用（第 2/3 个工具格未就位）
+        assert!(!craft_button_enabled(Some(&many_tools), &slots));
+        // 第 2/3 个工具格就位 → 可用（第 4 个工具超出格子按 C# `continue` 不检查）
+        slots[1] = Some(CraftPlaced {
+            inv_slot: 3,
+            item_index: 5,
+            count: 1,
+        });
+        slots[2] = Some(CraftPlaced {
+            inv_slot: 4,
+            item_index: 5,
+            count: 1,
+        });
+        assert!(craft_button_enabled(Some(&many_tools), &slots));
+    }
 
     /// #2736：C# `CraftDialog.Selected`（材料槽 → 来源背包格）与 `cell.Locked` 一一对应，
     /// `ResetCells()` 清空槽位即全部解锁；同步幂等（重复调用不残留旧锁）

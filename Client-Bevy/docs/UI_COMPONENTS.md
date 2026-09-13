@@ -155,7 +155,7 @@
 ## 6. 验证基线
 
 - `cargo check --tests`（Client-Bevy）通过。
-- `cargo test`（Client-Bevy）：425 lib + 2 bin + 1 smoke + 24 alignment 通过（批11 TrustMerchant 跨页排序后基线）。
+- `cargo test`（Client-Bevy）：430 lib + 2 bin + 1 smoke + 24 alignment 通过（批12 禁用态灰度后基线）。
 - Report 的 C# `Prguse[1633]` 在当前本地 Data 包缺失；已使用按 C# 控件边界推导的 360x244 深色兜底面板并保留对应子控件坐标，待资源包更新后自动加载正确背景。
 - ServerRust：667 lib + 6 integration 通过（批10 列表行后基线）；SharedRust 185 + 11（2 ignored）；`MapEditor/SharedRust` `cargo check` 通过（副本同步）。
 - 关键实机/定向验证：UI 子树泄漏截图、Character 技能页、AssignKey 模态输入、Timer 穿透、登录安全键盘资源；批7 复验 Mail/Buff；批8 复验 Center 窗口。
@@ -174,12 +174,14 @@
 - 批11 TrustMerchant 跨页排序实机复验（2026-09-13，`--skip-login --market-many` + Control API 打开 trust_merchant；mock 新增 3 页共 25 条、价格逐条递减 1000→760，临时驱动「排序→请求第 2 页→本地回第 1 页」，验证后已删除）：全量升序排序下第 1 页由 `1,000…910`（卖家0…9）变为 `810…900`（卖家19…10，全部来自服务器第 2 页）——证明排序跨页而非只排当前页；第 2 页（加载后自动跳转）显示全量第 11–20 名 `910…1000`；本地回第 1 页不触发服务器请求（mock 未收到 `MarketPage` 日志）。
 - 批11 TrustMerchant 分页 mock 对齐（2026-09-13）：`MockNPCMarket` 改为按页数下发页名、`MarketSearch`/`MarketRefresh` 只回第 1 页、新增 `C.MarketPage` 分支按 10 条/页切片（此前 mock 把全部条数当一页回，与服务端 `start = page * 10` 不一致），并新增 `--market-many` 造多页数据供实机验证。
 - 批11 收尾三窗复验（2026-09-13，合并后单一进程 `--skip-login --market-many` + Control API 依次开 Market/Creature/Inventory+Craft 截图）：Market = 10 行 + `第 1/3 页` + 右侧滚动条可滚范围=已累积页；Creature（mock 小猪为已召唤态）= RENAME/OPTIONS/DISABLE/DISMISS 亮态、RELEASE 灰化、无 SUMMON（与 C# `RefreshUI` 已召唤分支一致）；Craft = `Prguse[1109]` 面板 + 「未选择产物——点击左侧商品列表」提示 + AUTO/CRAFT 按钮就位。
+- 批12 禁用态灰度实机复验（2026-09-13，`--skip-login --market-many` + Control API；「有选中」态用临时系统置 `market.selected = Some(0)`，验证后已删除）：Market 无选中时 BUY 区域平均 RGB `(85.3,85.3,85.3)`、色度 `max|R-G|+|G-B| = 0`（真灰度 = `grayscale.ps`），同屏可用的 REFRESH/FIND 保留色度（26/40）——即「灰度只作用于禁用的那一键」；临时选中第 1 行后 BUY 变为 `(101.1,82.7,57.1)`、色度 44（`GrayScale=false` 回原色）。Craft 无配方时 CRAFT 按钮 `(85.4,85.4,85.4)` 色度 0、同排 AUTO `(102.9,92.4,75.4)` 色度 28。
+- 批12 灰度门禁（2026-09-13）：`gray_pixel_matches_csharp_shader`（0.3/0.59/0.11 逐通道 + alpha 保留）、`gray_rgba_keeps_size_and_alpha`、`gray_cache_round_trips_and_dedups`（同源去重 + 灰度→源回溯）、`craft_button_enabled_matches_refresh_craft_cells`、`market_bottom_buttons_gray_when_disabled`；红检：把 `GRAY_COEFFS[0]` 改成 0.25、把 `craft_button_enabled` 改成恒真，两条断言分别如期失败。
 
 ## 7. 已知有意偏差
 
 - Creature：C# `CreatureRenameButton` 构造即 `Visible = false` 且再无置真处（原版死控件，改名入口点不到）；Bevy 保留可用的「改名」按钮（功能补齐见 #1281），仅坐标/精灵与 C# 对齐。
 - Creature：C# `CreatureInfo`/`CreatureInfo1` 是选中宠物的能力文案（`CanPickupItems`/`CanProduceBlackStones`），`CreatureInfo2` @(19,191) 未实现；Bevy 用 (19,161) 一行承载「数量 + 选中宠物名/模式/饥饿度」，语义不同但坐标对齐。
-- Creature：未选中宠物时按 C# `RefreshUI` 保留按钮但灰化（`Enabled=false`）；禁用视觉仍用 `ImageNode.color` 暗化近似 C# `GrayScale`（无灰度着色器）。C# 「已召唤**其它种类**宠物」时 `SummonButton` 会切到 `Title[593..595]` 并禁用，Bevy 无该区分（按当前宠物的召唤状态处理）。
+- Creature：未选中宠物时按 C# `RefreshUI` 保留按钮但 `Enabled=false`；**禁用态外观与可用态相同**（C# `MirButton` 无 `DisabledIndex` 时 `Index` 回落 `base.Index`，且本对话框从不置 `GrayScale`），Bevy 已按此回退原色（此前用 `ImageNode.color` 暗化属自造视觉，批12 已纠正）。C# 「已召唤**其它种类**宠物」时 `SummonButton` 会切到 `Title[593..595]` 并禁用，Bevy 无该区分（按当前宠物的召唤状态处理）。
 - Creature：C# `HelpPetButton`（`Prguse2[257..259]` @ `Size.Width-48,3`）在原版无 Click 处理（死控件），Bevy 未实现该占位按钮，待有宠物帮助页时再补。
 - Creature：`刷新` 是 Bevy 扩展按钮（C# 无此控件），用中文文本渲染；此前借用 MessageBox 的 `Title[206..208]`（原版是「YES」精灵），实机截图里会显示成「YES」。
 - Craft：C# 用客户端本地 `ItemInfo` 库解析需求图标，Rust 客户端无本地物品库 —— 图标/名称改由 `RecipeRequirement.image/name` 随包下发（协议自洽偏离，已注释说明）。
@@ -195,7 +197,8 @@
 - TrustMerchant：拍卖出价在 C# 走 `MirAmountBox`（带物品图标、默认 `Price+1`），Bevy 复用底栏价格输入框（缺省 `当前价+1`），确认框文案一致（批11 已补 `MirMessageBox`）。
 - TrustMerchant：C# `AuctionRow.SelectedImage`（`Prguse[545]` 296x38）构造后 `Visible=false` 且全仓无置真处（原版死控件）；选中高亮只用 `Border`（1px 外扩橙框），Bevy 一致。
 - TrustMerchant：`C.AuctionRow` 到期列在 C# 用本地墙钟 `DateTime`；Bevy 用 `chrono::Local` 格式化（同一时刻的本地显示），mock 侧写「当前-1h」便于核对格式。
-- TrustMerchant：售价框边框三态（C# `PriceTextBox.BorderColour` 只画 1px 边框色）在 Bevy 用输入框底色近似；`Enabled = false` 的灰度统一用 `ImageNode.color` 暗化近似（无灰度着色器，`SellItemButton`/`BuyButton`/`CollectSoldButton`/`SellNowButton` 同）；C# 寄售选物会锁定背包格（`tempCell.Locked`），Bevy 只记录选中物、未锁背包格。
+- TrustMerchant：售价框边框三态（C# `PriceTextBox.BorderColour` 只画 1px 边框色）在 Bevy 用输入框底色近似；底栏 `BuyButton`/`CollectSoldButton`/`MailButton`/`SellNowButton` 的禁用态已按 C# `GrayScale = !Enabled`（`:1005-1033`）走真灰度（`ui::gray`，公式见 `Data/Shaders/grayscale.ps`）。C# 寄售选物会锁定背包格（`tempCell.Locked`），Bevy 只记录选中物、未锁背包格。
 - TrustMerchant：筛选树 `Prguse2[205/206]` 手柄的拖动用「按下时记录抓取偏移 → 按住按光标 y 反算 `Skip`」实现（C# 是 `MirControl.OnMoving`）；手柄高度固定为精灵原始 12x18（C# 也未按 `PossibleTotal` 缩放）。
 - TrustMerchant：Find/筛选/页签搜索改发 C# 规范 `C.MarketSearch`（此前 Bevy `MarketSearchWire` 只写关键字，被网关 `read_body` 静默丢弃 → 搜索无效）；`MarketRefresh` 仅保留在刷新按钮（C# `RefreshButton.Click` 先清空搜索框）。
 - Craft：C# `BeforeDraw` 在背包关闭时会隐藏合成窗，Bevy 未实现（挂机脚本会直开 Craft，保持现状以免回归）。
+- Craft：`CraftButton` 的 `Enabled`/`GrayScale` 已按 C# `RefreshCraftCells`（NPCDialogs.cs:2686-2723）对齐：未选配方或任一工具/材料槽未就位 → 按钮灰度且点击不触发（构造默认即 `GrayScale=true, Enabled=false`）；超出 3 工具格 / 6 材料格的额外需求按 C# `continue` 忽略。残留偏差：C# `MailDialog` 的 `BlockListButton`/`BugReportButton` 是构造即 `GrayScale=true, Enabled=false` 的禁用占位键，Bevy 未实现这两个占位控件。
