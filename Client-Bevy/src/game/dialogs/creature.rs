@@ -21,7 +21,7 @@ use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
 use crate::ui::sprite_ui::{shared_cjk_font, UiCjkFont, UiFont};
 use crate::ui::theme::{
-    load_lib_image, spawn_container, spawn_icon_button, spawn_label, spawn_panel,
+    load_lib_image, spawn_container, spawn_icon_button, spawn_image, spawn_label, spawn_panel,
 };
 
 /// 宠物条目
@@ -155,6 +155,30 @@ struct CreatureMessage;
 #[derive(Component)]
 struct CreatureInfoLine(u8);
 
+/// C# `FullnessBG`（`Prguse2[530]`，@185,129；常显）
+#[derive(Component)]
+struct CreatureFullnessBg;
+
+/// C# `FullnessFG`（`Prguse2[531]`；按 `Fullness/10000` 裁切，仅选中时可见）
+#[derive(Component)]
+struct CreatureFullnessFg;
+
+/// C# `FullnessMin`/`FullnessNow` 刻度（`0`=Min[532] 在 (179,118)、`1`=Now[533] 在 (179,143)）
+#[derive(Component)]
+struct CreatureBarMarker(u8);
+
+/// C# `BlackStoneImageBG`（`Prguse2[428]`，@215,348；常显）
+#[derive(Component)]
+struct CreatureBlackStoneBg;
+
+/// C# `BlackStoneImageFG`（`Prguse2[420]`，@242,353；按 `BlackstoneTime/10800` 裁切）
+#[derive(Component)]
+struct CreatureBlackStoneFg;
+
+/// C# `HoverLabel`（完整度条刻度/条身、黑石条三处的悬停提示）
+#[derive(Component)]
+struct CreatureHover;
+
 pub struct CreaturePlugin;
 
 impl Plugin for CreaturePlugin {
@@ -168,7 +192,12 @@ app.add_systems(OnEnter(AppState::Game), spawn_creature);
         app.add_systems(OnExit(AppState::Game), cleanup_creature);
         app.add_systems(
             Update,
-            (creature_ui_system, creature_action_system, creature_options_system)
+            (
+                creature_ui_system,
+                creature_action_system,
+                creature_options_system,
+                creature_bars_system,
+            )
                 .chain()
                 .run_if(in_state(AppState::Game)),
         );
@@ -189,6 +218,28 @@ const CREATURE_SLOT_DX: f32 = 81.0;
 const CREATURE_SLOT_DY: f32 = 40.0;
 const CREATURE_SLOT_W: f32 = 76.0;
 const CREATURE_SLOT_H: f32 = 32.0;
+
+// ---- #2761 完整度条 / 黑石条（C# `IntelligentCreatureDialogs.cs:179-258 / 347-401`）----
+/// C# `FullnessBG`/`FullnessFG`（`Prguse2[530]/[531]`）@(185,129)，原生 248x12
+const CREATURE_FULLNESS_X: f32 = 185.0;
+const CREATURE_FULLNESS_Y: f32 = 129.0;
+const CREATURE_FULLNESS_W: f32 = 248.0;
+const CREATURE_FULLNESS_H: f32 = 12.0;
+/// C# `FullnessMin`（`Prguse2[532]`）16x24、`FullnessNow`（`Prguse2[533]`）16x9 的基准坐标
+const CREATURE_MARKER_MIN_Y: f32 = 118.0;
+const CREATURE_MARKER_NOW_Y: f32 = 143.0;
+const CREATURE_MARKER_W: f32 = 16.0;
+/// 刻度精灵的 x 偏移：C# `FG.X + 段宽 - 8`（16 宽精灵以其中心对齐段落右端）
+const CREATURE_MARKER_OFFSET: f32 = 8.0;
+/// C# `BlackStoneImageBG`（`Prguse2[428]`）@(215,348) 204x17 / `FG`（`Prguse2[420]`）@(242,353) 172x7
+const CREATURE_BLACKSTONE_X: f32 = 215.0;
+const CREATURE_BLACKSTONE_Y: f32 = 348.0;
+const CREATURE_BLACKSTONE_FG_X: f32 = 242.0;
+const CREATURE_BLACKSTONE_FG_Y: f32 = 353.0;
+const CREATURE_BLACKSTONE_FG_W: f32 = 172.0;
+const CREATURE_BLACKSTONE_FG_H: f32 = 7.0;
+/// C# `IntelligentCreatureDialogs.blackstoneProduceTime = 10800`（3 小时，秒）
+const BLACKSTONE_PRODUCE_TIME: f32 = 10800.0;
 
 fn creature_slot_rect(index: usize, ox: f32, oy: f32) -> (f32, f32, f32, f32) {
     let col = (index % 5) as f32;
@@ -247,6 +298,91 @@ fn creature_mode_buttons_visible(has_selection: bool, pickup_mode: u8) -> (bool,
     } else {
         (pickup_mode == 0, pickup_mode != 0)
     }
+}
+
+/// 完整度条比例（C# `FullnessForeGround_AfterDraw`：`percent = Fullness / 10000`，>1 钳 1）。
+fn fullness_percent(fullness: i32) -> f32 {
+    (fullness as f32 / 10000.0).clamp(0.0, 1.0)
+}
+
+/// 黑石产出条比例（C# `BlackStoneImageFG_AfterDraw`：`BlackstoneTime / 10800`，>1 钳 1）。
+fn blackstone_percent(blackstone_time: i32) -> f32 {
+    (blackstone_time.max(0) as f32 / BLACKSTONE_PRODUCE_TIME).clamp(0.0, 1.0)
+}
+
+/// 条段落宽度（C# `(int)(Size.Width * percent)`：截断取整，不是四舍五入）。
+fn bar_section(width: f32, percent: f32) -> f32 {
+    (width * percent).floor()
+}
+
+/// 刻度精灵左端（C# `FG.Location.X + 段宽 - 8`）。
+fn marker_left(bar_x: f32, section: f32) -> f32 {
+    bar_x + section - CREATURE_MARKER_OFFSET
+}
+
+/// C# `Functions.PrintTimeSpanFromSeconds`（`accurate = true`，`Shared/Functions/Functions.cs:86-108`）：
+/// <1m → `{s}s`；<1h → `{m}m {s:02}s`；<1d → `{h}h {m:02}m {s:02}s`；
+/// 否则 `{d}d {h:02}h {m:02}m {s:02}s`（本批用于黑石条悬停与 `CreatureDeadline`）。
+fn format_time_span(secs: f64) -> String {
+    let total = secs.max(0.0) as u64;
+    let s = total % 60;
+    let m = (total / 60) % 60;
+    let h = (total / 3600) % 24;
+    let d = total / 86400;
+    if total < 60 {
+        format!("{s}s")
+    } else if total < 3600 {
+        format!("{m}m {s:02}s")
+    } else if total < 86400 {
+        format!("{h}h {m:02}m {s:02}s")
+    } else {
+        format!("{d}d {h:02}h {m:02}m {s:02}s")
+    }
+}
+
+/// C# `Control_MouseEnter`（:403-431）三处悬停的文案与 `HoverLabel` 尺寸/位置。
+/// 返回 `(文案, 标签左上角 x, y, 标签宽, 标签高)`；未命中返回 `None`。
+fn creature_hover_label(
+    creature: &CreatureEntry,
+    min_left: f32,
+    cursor: (f32, f32),
+) -> Option<(String, f32, f32, f32, f32)> {
+    let (lx, ly) = cursor;
+    let in_rect = |x: f32, y: f32, w: f32, h: f32| lx >= x && lx <= x + w && ly >= y && ly <= y + h;
+    // 刻度命中优先（C# 中它是后建控件、压在同坐标的 FG 之上）
+    if in_rect(min_left, CREATURE_MARKER_MIN_Y, CREATURE_MARKER_W, 24.0) {
+        return Some((
+            format!("需要 {}", creature.rules.minimal_fullness),
+            min_left + CREATURE_MARKER_OFFSET - 75.0,
+            CREATURE_FULLNESS_Y - 18.0,
+            150.0,
+            15.0,
+        ));
+    }
+    if in_rect(
+        CREATURE_FULLNESS_X,
+        CREATURE_FULLNESS_Y,
+        CREATURE_FULLNESS_W,
+        CREATURE_FULLNESS_H,
+    ) {
+        return Some((
+            format!("{} / 10000", creature.fullness),
+            CREATURE_FULLNESS_X,
+            CREATURE_FULLNESS_Y - 2.0,
+            CREATURE_FULLNESS_W,
+            CREATURE_FULLNESS_H,
+        ));
+    }
+    if in_rect(CREATURE_BLACKSTONE_X, CREATURE_BLACKSTONE_Y, 204.0, 17.0) {
+        return Some((
+            format_time_span(BLACKSTONE_PRODUCE_TIME as f64 - creature.blackstone_time as f64),
+            CREATURE_BLACKSTONE_X + 5.0,
+            CREATURE_BLACKSTONE_Y - 2.0,
+            204.0,
+            17.0,
+        ));
+    }
+    None
 }
 
 /// 槽位文字宽度估算（对话框 12px 字体：CJK 按 12px、半角按 6px）。
@@ -390,6 +526,87 @@ fn spawn_creature(
         for (i, y) in [(0u8, 161.0), (1, 176.0), (2, 191.0)] {
             spawn_label(p, &cjk, "", 19.0, y, 12.0, Color::WHITE, 9).insert(CreatureInfoLine(i));
         }
+        // #2761 C# 完整度条：BG[530]/FG[531] @(185,129) 248x12，Min[532] 16x24 @(179,118)，
+        // Now[533] 16x9 @(179,143)；FG/刻度仅「选中宠物」时可见（C# `BeforeAfterDraw`）
+        if let Some(img) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 530) {
+            spawn_image(
+                p,
+                img,
+                CREATURE_FULLNESS_X,
+                CREATURE_FULLNESS_Y,
+                CREATURE_FULLNESS_W,
+                CREATURE_FULLNESS_H,
+                10,
+            )
+            .insert(CreatureFullnessBg);
+        }
+        if let Some(img) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 531) {
+            spawn_image(
+                p,
+                img,
+                CREATURE_FULLNESS_X,
+                CREATURE_FULLNESS_Y,
+                CREATURE_FULLNESS_W,
+                CREATURE_FULLNESS_H,
+                11,
+            )
+            .insert((CreatureFullnessFg, Visibility::Hidden));
+        }
+        if let Some(img) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 532) {
+            spawn_image(
+                p,
+                img,
+                CREATURE_FULLNESS_X - CREATURE_MARKER_OFFSET,
+                CREATURE_MARKER_MIN_Y,
+                CREATURE_MARKER_W,
+                24.0,
+                12,
+            )
+            .insert((CreatureBarMarker(0), Visibility::Hidden));
+        }
+        if let Some(img) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 533) {
+            spawn_image(
+                p,
+                img,
+                CREATURE_FULLNESS_X - CREATURE_MARKER_OFFSET,
+                CREATURE_MARKER_NOW_Y,
+                CREATURE_MARKER_W,
+                9.0,
+                12,
+            )
+            .insert((CreatureBarMarker(1), Visibility::Hidden));
+        }
+        // #2761 C# 黑石产出条：BG[428] @(215,348) 204x17（常显）+ FG[420] @(242,353) 172x7
+        if let Some(img) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 428) {
+            spawn_image(
+                p,
+                img,
+                CREATURE_BLACKSTONE_X,
+                CREATURE_BLACKSTONE_Y,
+                204.0,
+                17.0,
+                10,
+            )
+            .insert(CreatureBlackStoneBg);
+        }
+        if let Some(img) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 420) {
+            spawn_image(
+                p,
+                img,
+                CREATURE_BLACKSTONE_FG_X,
+                CREATURE_BLACKSTONE_FG_Y,
+                CREATURE_BLACKSTONE_FG_W,
+                CREATURE_BLACKSTONE_FG_H,
+                11,
+            )
+            .insert(CreatureBlackStoneFg);
+        }
+        // C# `HoverLabel`：单标签、按被悬停控件定位（本批接完整度条与黑石条三处）
+        spawn_label(p, &cjk, "", 0.0, 0.0, 12.0, Color::WHITE, 20).insert((
+            CreatureHover,
+            TextLayout::justify(Justify::Center),
+            Visibility::Hidden,
+        ));
         // Bevy 扩展行（C# 无对应控件）：紧随 C# 三行信息之后的同间距第四行（191+15=206）放数量
         // 摘要；操作反馈放按钮行与宠物槽之间的空档（DISMISS/RELEASE 底 242，宠物槽顶 259）。
         spawn_label(p, &cjk, "", 19.0, 206.0, 12.0, Color::WHITE, 9).insert(CreatureSummary);
@@ -679,6 +896,151 @@ fn creature_ui_system(
     }
 }
 
+
+/// #2761：完整度条 / 黑石条 / 悬停提示（C# `FullnessForeGround_AfterDraw`:347-377、
+/// `BlackStoneImageFG_AfterDraw`:378-401、`Control_MouseEnter`:403-431）。
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
+fn creature_bars_system(
+    mgr: Res<DialogManager>,
+    state: Res<CreatureState>,
+    windows: Query<&Window>,
+    panel: Query<&Node, With<CreatureWidget>>,
+    mut fullness_fg: Query<
+        (&mut Node, &mut ImageNode, &mut Visibility),
+        (
+            With<CreatureFullnessFg>,
+            Without<CreatureBlackStoneFg>,
+            Without<CreatureBarMarker>,
+            Without<CreatureHover>,
+            // 与只读的 `panel: Query<&Node, With<CreatureWidget>>` 证明不相交（B0001）
+            Without<CreatureWidget>,
+        ),
+    >,
+    mut blackstone_fg: Query<
+        (&mut Node, &mut ImageNode, &mut Visibility),
+        (
+            With<CreatureBlackStoneFg>,
+            Without<CreatureFullnessFg>,
+            Without<CreatureBarMarker>,
+            Without<CreatureHover>,
+            Without<CreatureWidget>,
+        ),
+    >,
+    mut markers: Query<
+        (&mut Node, &mut Visibility, &CreatureBarMarker),
+        (
+            Without<CreatureFullnessFg>,
+            Without<CreatureBlackStoneFg>,
+            Without<CreatureHover>,
+            Without<CreatureWidget>,
+        ),
+    >,
+    mut hover: Query<
+        (&mut Node, &mut Text, &mut Visibility),
+        (
+            With<CreatureHover>,
+            Without<CreatureFullnessFg>,
+            Without<CreatureBlackStoneFg>,
+            Without<CreatureBarMarker>,
+            Without<CreatureWidget>,
+        ),
+    >,
+) {
+    if !mgr.is_open(DialogKind::Creature) {
+        return;
+    }
+    let selected = state.creatures.get(state.selected);
+
+    // C# `BeforeAfterDraw`：无选中 → FG/两个刻度隐藏（BG 常显）
+    let visible = if selected.is_some() {
+        Visibility::Visible
+    } else {
+        Visibility::Hidden
+    };
+    let min_section = bar_section(
+        CREATURE_FULLNESS_W,
+        selected
+            .map(|c| (c.rules.minimal_fullness as f32 / 10000.0).clamp(0.0, 1.0))
+            .unwrap_or(0.0),
+    );
+    let fullness_section = bar_section(
+        CREATURE_FULLNESS_W,
+        selected
+            .map(|c| fullness_percent(c.fullness))
+            .unwrap_or(0.0),
+    );
+    let blackstone_section = bar_section(
+        CREATURE_BLACKSTONE_FG_W,
+        selected
+            .map(|c| blackstone_percent(c.blackstone_time))
+            .unwrap_or(0.0),
+    );
+    let min_left = marker_left(CREATURE_FULLNESS_X, min_section);
+
+    if let Ok((mut node, mut image, mut vis)) = fullness_fg.single_mut() {
+        node.width = Val::Px(fullness_section);
+        image.rect = Some(Rect::new(0.0, 0.0, fullness_section, CREATURE_FULLNESS_H));
+        *vis = visible;
+    }
+    if let Ok((mut node, mut image, mut vis)) = blackstone_fg.single_mut() {
+        node.width = Val::Px(blackstone_section);
+        image.rect = Some(Rect::new(
+            0.0,
+            0.0,
+            blackstone_section,
+            CREATURE_BLACKSTONE_FG_H,
+        ));
+        *vis = visible;
+    }
+    for (mut node, mut vis, marker) in &mut markers {
+        *vis = visible;
+        let x = if marker.0 == 0 {
+            min_left
+        } else if fullness_section <= 0.0 {
+            // C#：`percent <= 0` 时 `FullnessNow` 复位到构造坐标 (179,143)
+            CREATURE_FULLNESS_X - CREATURE_MARKER_OFFSET
+        } else {
+            marker_left(CREATURE_FULLNESS_X, fullness_section)
+        };
+        node.left = Val::Px(x);
+    }
+
+    // 悬停提示（C# `Control_MouseEnter`/`MouseLeave`）
+    let cursor_local = windows
+        .single()
+        .ok()
+        .and_then(|w| w.cursor_position())
+        .map(|cur| {
+            let (ox, oy) = panel
+                .single()
+                .map(|n| {
+                    crate::ui::theme::node_origin(
+                        n,
+                        crate::game::dialogs::center_origin(CREATURE_W, CREATURE_H),
+                    )
+                })
+                .unwrap_or(crate::game::dialogs::center_origin(CREATURE_W, CREATURE_H));
+            (cur.x - ox, cur.y - oy)
+        });
+    let label = selected
+        .zip(cursor_local)
+        .and_then(|(c, cursor)| creature_hover_label(c, min_left, cursor));
+    if let Ok((mut node, mut text, mut vis)) = hover.single_mut() {
+        match label {
+            Some((content, x, y, w, _h)) => {
+                text.0 = content;
+                node.left = Val::Px(x);
+                node.top = Val::Px(y);
+                node.width = Val::Px(w);
+                *vis = Visibility::Visible;
+            }
+            None => {
+                text.0.clear();
+                *vis = Visibility::Hidden;
+            }
+        }
+    }
+}
 
 /// 宠物操作（C# IntelligentCreatureDialog ButtonClick：改名/召唤/解散/释放/自动/半自动）
 #[allow(clippy::too_many_arguments)]
@@ -1430,5 +1792,71 @@ mod layout_tests {
             creature_info_texts(Some(&dragon))[0],
             "可以拾取物品（5x5 auto/semi-auto, 7x7 mouse）。"
         );
+    }
+
+    /// #2761：完整度/黑石条比例与刻度定位按 C# 公式（`Fullness/10000`、`BlackstoneTime/10800`，
+    /// 段落宽 `(int)(W*percent)` 截断取整，刻度 x = `FG.X + 段宽 - 8`）。
+    #[test]
+    fn creature_bars_match_csharp_percent_and_marker() {
+        assert_eq!(fullness_percent(4000), 0.4);
+        assert_eq!(fullness_percent(10000), 1.0);
+        assert_eq!(fullness_percent(12345), 1.0); // >1 钳 1
+        assert_eq!(fullness_percent(0), 0.0);
+        assert_eq!(blackstone_percent(5400), 0.5);
+        assert_eq!(blackstone_percent(10800), 1.0);
+
+        // C# BabyPig：MinimalFullness 4000 → 段宽 99（248*0.4=99.2 截断），刻度 x = 185+99-8
+        let section = bar_section(CREATURE_FULLNESS_W, 0.4);
+        assert_eq!(section, 99.0);
+        assert_eq!(marker_left(CREATURE_FULLNESS_X, section), 276.0);
+        // C# 满值 → 整条
+        assert_eq!(bar_section(CREATURE_FULLNESS_W, 1.0), 248.0);
+        // C# `percent <= 0` 时 `FullnessNow` 复位到 (179,143)（= FG.X - 6）
+        assert_eq!(CREATURE_FULLNESS_X - CREATURE_MARKER_OFFSET, 177.0);
+    }
+
+    /// #2761：`Functions.PrintTimeSpanFromSeconds` 四档格式（C# `Functions.cs:86-108`）。
+    #[test]
+    fn creature_format_time_span_matches_csharp() {
+        assert_eq!(format_time_span(0.0), "0s");
+        assert_eq!(format_time_span(59.0), "59s");
+        assert_eq!(format_time_span(61.0), "1m 01s");
+        assert_eq!(format_time_span(3661.0), "1h 01m 01s");
+        assert_eq!(format_time_span(90061.0), "1d 01h 01m 01s");
+        // 负数（理论上不会出现）按 C# TimeSpan 语义不崩：钳到 0
+        assert_eq!(format_time_span(-5.0), "0s");
+    }
+
+    /// #2761：悬停文案三处（C# `Control_MouseEnter`:403-431）——
+    /// 刻度→`需要 {MinimalFullness}`、条身→`{Fullness} / 10000`、黑石条→剩余时间。
+    #[test]
+    fn creature_hover_label_matches_csharp() {
+        let c = entry_with_rules(IntelligentCreatureRules {
+            minimal_fullness: 4000,
+            ..Default::default()
+        });
+        let mut c = c;
+        c.fullness = 7500;
+        c.blackstone_time = 3600;
+        let min_left = marker_left(CREATURE_FULLNESS_X, 99.0);
+
+        // 刻度命中（Min 精灵 16x24 @(179,118)）
+        let (text, x, y, w, h) =
+            creature_hover_label(&c, min_left, (min_left + 1.0, 130.0)).unwrap();
+        assert_eq!(text, "需要 4000");
+        assert_eq!((x, y, w, h), (276.0 + 8.0 - 75.0, 111.0, 150.0, 15.0));
+
+        // 条身命中（@185,129 248x12；避开刻度 x 区间）
+        let (text, x, y, w, h) = creature_hover_label(&c, min_left, (400.0, 135.0)).unwrap();
+        assert_eq!(text, "7500 / 10000");
+        assert_eq!((x, y, w, h), (185.0, 127.0, 248.0, 12.0));
+
+        // 黑石条命中（BG @215,348 204x17）
+        let (text, x, y, w, h) = creature_hover_label(&c, min_left, (300.0, 355.0)).unwrap();
+        assert_eq!(text, "2h 00m 00s"); // 10800 - 3600 = 7200 秒
+        assert_eq!((x, y, w, h), (220.0, 346.0, 204.0, 17.0));
+
+        // 未命中
+        assert!(creature_hover_label(&c, min_left, (10.0, 300.0)).is_none());
     }
 }

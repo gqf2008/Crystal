@@ -1373,6 +1373,8 @@ mod tests {
         assert_eq!(
             c.rules,
             mir2_shared::data::client_data::IntelligentCreatureRules {
+                // C# `IntelligentCreatureInfo.MinimalFullness` 字段默认 1000（Chick 行未显式给）
+                minimal_fullness: 1000,
                 mouse_pickup_enabled: true,
                 mouse_pickup_range: 11,
                 auto_pickup_enabled: true,
