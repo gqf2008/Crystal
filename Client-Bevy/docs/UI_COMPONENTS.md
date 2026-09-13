@@ -156,11 +156,12 @@
 | 批14 背包锁定 per-grid 化 | 锁资源升为 `(reason, LockGrid, index)`；仓库存入/取出锁与解锁（含 C# 目标格选择）；交易存入/取回锁与解锁 + 交易槽灰化 | #2753 #2754 |
 | 批15 宠物规则 + Creature 信息行 | 服务端移植 C# `IntelligentCreatureInfo` 静态表并随 `UpdateIntelligentCreatureList` 下发规则；客户端 `CreatureInfo`/`CreatureInfo1`/`CreatureInfo2` 三行按 C# 文案与 (19,161)/(19,176)/(19,191) 落地 | #2758 #2759 #2760 |
 | 批16 Creature 面板剩余控件 | 列表包补 `icon/fullness/expire/blackstone` + C# 尾部三字段（召唤态/召唤种类/玩家珍珠数）；完整度条 + 黑石条 + 刻度与悬停；槽位图标/选中框；`CreatureName`/`CreatureDeadline`/`CreaturePearls`；面板宠物动画（帧表 + 8 秒交替）与「已召唤其它种类」按钮态 | #2762 #2763 #2764 #2765 |
+| 批17 悬停提示闭环 + Hint 覆盖 | 控制接口加光标探针（`cursor` RPC）+ `nearby` 带视口坐标，把「自动化无光标」的复现障碍做进产品；修提示框 CJK 豆腐字（Arial → 共享宋体主字体）；补技能栏格 `SkillMpCooldownKey` 与大地图（搜索NPC/队友名）Hint，时间格式收进 `game::time_format` | #2768 #2769 #2770 |
 
 ## 6. 验证基线
 
 - `cargo check --tests`（Client-Bevy）通过。
-- `cargo test`（Client-Bevy）：452 lib + 2 bin + 1 smoke + 24 alignment 通过（批16 单元④ 后基线）。
+- `cargo test`（Client-Bevy）：456 lib + 2 bin + 1 smoke + 24 alignment 通过（批17 单元② 后基线）。
 - Report 的 C# `Prguse[1633]` 在当前本地 Data 包缺失；已使用按 C# 控件边界推导的 360x244 深色兜底面板并保留对应子控件坐标，待资源包更新后自动加载正确背景。
 - ServerRust：673 lib + 6 integration 通过（批16 单元① 后基线）；SharedRust 185 + 11（2 ignored）；`MapEditor/SharedRust` `cargo check` 通过（副本同步）。
 - 关键实机/定向验证：UI 子树泄漏截图、Character 技能页、AssignKey 模态输入、Timer 穿透、登录安全键盘资源；批7 复验 Mail/Buff；批8 复验 Center 窗口。
@@ -200,6 +201,9 @@
 - 批16 实机复验（2026-09-13，`--auto-enter` + Control API，截图转 JPG）：合并态面板一次截图核对全部新增项 —— NAME 框内居中「小鸡」、第二行「过期: 7d 00h 00m 00s」、完整度条 75%（Min 刻度 10% = `MinimalFullness 1000`、Now 刻度 75%）、黑石条 33%（`3600/10800` 蓝段 57px/172）、槽位 chick/pig 图标 + `Prguse2[535]` 选中框、珍珠图标 + `1234`、三行信息 / 摘要 (206) / 反馈 (333) 互不压叠；相隔 0.4s 两张截图在宠物框 190x140 区域内有 3589 px（13.5%）差异 → 面板动画在推进。
 - 批16 悬停/按钮态实机复验（2026-09-13，同上）：悬停文案用**临时固定 cursor** 驱动一次真实分支（共享桌面 OS `SetCursorPos` 会被抢焦点、`cursor_position()` 读不到新值），截得 `7500 / 10000` 居中显示在条身上，验证后已还原（`Select-String TEMP` 复核为空）；「已召唤其它种类」用**临时 mock 尾字段**（声明小猪召唤中 + 小鸡未激活）截得原 DISMISS 位置改显 `Title[593..595]` 的 SUMMON 帧、Dismiss 隐藏，验证后已还原为 `6/1`。
 - 批16 mock 编号修正（2026-09-13）：`MockCreatureList` 的宠物类型字节此前用共享枚举（C# 编号：小鸡 4 / 小猪 3），而真实服务端用 ServerRust `CreatureType`（小鸡 6 / 小猪 2）→ 实机里「小鸡」会按类型 4 播成 BabySkeleton 帧（已截图复现）。现改用 ServerRust 编号并同步尾部 `summoned_type`。属「mock 必须模拟线上格式」类缺陷：mock 只用「同一个包里自洽」不够，必须与服务端实际枚举一致。
+- 批17 光标探针 + 悬停闭环（2026-09-13，`--auto-enter` + Control API，截图转 JPG）：控制接口新增 `cursor {x,y}` / `cursor {clear:true}`，`nearby` 每条实体带 `vp`（世界→逻辑视口）。用探针驱动真实悬停链路：`bevy2char` 视口 `(560,384)`、探针 `(570,354)` 命中 → 头顶显示「bevy2char」（黄标题 + 白行）；负控把探针移到 `(10,10)` → 同区域 65.9% 像素变化、均值亮度 57→92（提示消失）。
+- 批17 提示框字体修正（2026-09-13）：提示框文本原用 `UiFont`(Arial)，parley 的 Hani 回退只在实体首次排版生效 → 悬停换文本后退化成豆腐字（#2599 同类），实机把「怪物5」渲染成「□□5」。改用共享宋体主字体（`shared_cjk_font`，与 NPC/公告等动态文本一致）后正确显示「怪物5」/「bevy2char」。
+- 批17 Hint 补齐实机复验（2026-09-13，同上，截图转 JPG）：技能栏（`Mir2Config.ini` `Skillbar0X=220` → 格 0 中心 UI (247,14)）探针命中后显示「攻杀剑术 / 魔法值: 4 / 冷却时间: 0.0s / 键位: F1」；大地图搜索按钮（面板局部 (39,479)）显示「搜索NPC」；负控移开探针后技能栏提示区 36.9% 像素变化、均值亮度 78.3→91.3（提示消失）。队友名提示因 mock 无队伍数据未实机触发，命中半径与同图过滤由单测覆盖。
 
 ## 7. 已知有意偏差
 
@@ -233,3 +237,4 @@
 - Craft：C# `BeforeDraw` 在背包关闭时会隐藏合成窗，Bevy 未实现（挂机脚本会直开 Craft，保持现状以免回归）。
 - Craft：`CraftButton` 的 `Enabled`/`GrayScale` 已按 C# `RefreshCraftCells`（NPCDialogs.cs:2686-2723）对齐：未选配方或任一工具/材料槽未就位 → 按钮灰度且点击不触发（构造默认即 `GrayScale=true, Enabled=false`）；超出 3 工具格 / 6 材料格的额外需求按 C# `continue` 忽略。
 - Mail：C# `BlockListButton`/`BugReportButton`（MailDialogs.cs:257-283，`Prguse[520]` @(183,414) / `Prguse[523]` @(210,414) 28x25）构造即 `GrayScale = true, Enabled = false` 且无 Click 处理（`AllowDisabledMouseOver` 默认 false，连 Hint 都不弹）；批13 单元3 已按原坐标补这两个灰度占位图（不含交互）。
+- 悬停提示（`MirControl.Hint`）覆盖长尾：C# 侧 `Hint = ` 约 190 处，批17 已补**技能栏格**（`SkillMpCooldownKey`）与**大地图**（`SearchButton`「搜索NPC」、队友光点名字）两处；已对齐的还有 HUD 主按钮（8 个，含键位）、物品/商品/角色格（`item_tooltip_lines`）、头顶名字（玩家/怪物/NPC）。**仍未接 Hint 的**：聊天频道/设置按钮（`MainDialogs.cs:1275-1445`）、图标栏与技能页格（`:1695` 附近的技能格已补，但技能页 `CharacterDialog` 的魔法格未接）、玩家右键菜单（`:2232-2303` 邀请入队/加好友/发邮件/交易/观察）、`LoverButton`（`:2502` 显示配偶名）、音量条（`:2844` 显示百分比）、Friend/Group/GuildTerritory/Hero/Mail/Ranking/Relationship/Mentor 各对话框按钮（约 40 处）、`BuffDialog` 增益图标（`BuffString`/`CombinedBuffText`，需移植按 `BuffType` 分派的文案表）。这些属同一机制的长尾，留待后续批次（盘点清单见 #2767）。
