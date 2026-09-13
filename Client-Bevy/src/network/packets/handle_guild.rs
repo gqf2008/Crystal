@@ -1,12 +1,40 @@
-use bevy::prelude::*;
-use mir2_shared::packets::base::{Packet, PacketHeader};
+use super::*;
 use crate::network::*;
 use crate::ui::login::AuthFeedback;
-use super::*;
+use bevy::prelude::*;
+use mir2_shared::packets::base::{Packet, PacketHeader};
 // #2630：显式引入本处理器构造的 UI 载荷类型——原先经 network/mod.rs 私有 use 再沿
 // super::* 隐私链隐式传入，易被误当死 import 清理（ecsnet 即踩此坑），改为显式声明。
 use crate::game::dialogs::guild::GuildMember as UiGuildMember;
 use crate::game::dialogs::guild_territory::TerritoryRow;
+use crate::network::server_event::ShopCatalogItem;
+
+/// `S.GameShopInfo` 单条商品解析（#2791 单元②：尾部两字节 = C# `CanBuyCredit`/`CanBuyGold`，
+/// 与 `SharedRust::packets::server::special_systems::GameShopInfo::write_body` 同序）
+pub(crate) fn parse_shop_catalog_item(cur: &mut std::io::Cursor<&[u8]>) -> Option<ShopCatalogItem> {
+    use byteorder::{LittleEndian, ReadBytesExt};
+    let item_index = cur.read_i32::<LittleEndian>().ok()?;
+    let gold_price = cur.read_u32::<LittleEndian>().ok()?;
+    let credit_price = cur.read_u32::<LittleEndian>().ok()?;
+    let count = cur.read_i32::<LittleEndian>().ok()?;
+    let _class = cur.read_u8().ok()?;
+    let category = mir2_shared::binary::read_dotnet_string(cur).ok()?;
+    let stock = cur.read_i32::<LittleEndian>().ok()?;
+    let _is_bought = cur.read_u8().ok()?;
+    let _deal = cur.read_u8().ok()?;
+    let can_buy_credit = cur.read_u8().ok()? != 0;
+    let can_buy_gold = cur.read_u8().ok()? != 0;
+    Some(ShopCatalogItem {
+        item_index,
+        gold_price,
+        credit_price,
+        count,
+        category,
+        stock,
+        can_buy_gold,
+        can_buy_credit,
+    })
+}
 
 // 网络包解码分派（#72 拆分）：handle_guild 处理 arms_guild.rs 的服务端包分支。
 // 由 packets.rs::handle_packet 调度器按 opcode 调用；返回 true 表示已处理。
@@ -24,7 +52,8 @@ pub(crate) fn handle_guild(    net: &mut NetConnection,
     server_events: &mut MessageWriter<ServerEvent>,
     control: &mut ControlState,
     next: &mut NextState<AppState>,
-    payload: &[u8],) -> bool {
+    payload: &[u8],
+) -> bool {
     use mir2_shared::packets::server::*;
 
     let mut cur = std::io::Cursor::new(payload);
@@ -32,7 +61,25 @@ pub(crate) fn handle_guild(    net: &mut NetConnection,
         return false;
     };
     let opcode = header.opcode;
-    const HANDLED: &[i16] = &[ServerPacketIds::UserStorage as i16, ServerPacketIds::GuildStatus as i16, ServerPacketIds::GuildStorageList as i16, ServerPacketIds::NPCMarket as i16, ServerPacketIds::NPCMarketPage as i16, ServerPacketIds::ConsignItem as i16, ServerPacketIds::MarketSuccess as i16, ServerPacketIds::MarketFail as i16, ServerPacketIds::GameShopInfo as i16, ServerPacketIds::GameShopStock as i16, ServerPacketIds::GuildTerritoryPage as i16, ServerPacketIds::GuildRequestWar as i16, ServerPacketIds::StoragePasswordResult as i16, ServerPacketIds::StorageUnlockResult as i16, ServerPacketIds::NPCStorage as i16, ServerPacketIds::GuildExpGain as i16, ServerPacketIds::GuildNameRequest as i16];
+    const HANDLED: &[i16] = &[
+        ServerPacketIds::UserStorage as i16,
+        ServerPacketIds::GuildStatus as i16,
+        ServerPacketIds::GuildStorageList as i16,
+        ServerPacketIds::NPCMarket as i16,
+        ServerPacketIds::NPCMarketPage as i16,
+        ServerPacketIds::ConsignItem as i16,
+        ServerPacketIds::MarketSuccess as i16,
+        ServerPacketIds::MarketFail as i16,
+        ServerPacketIds::GameShopInfo as i16,
+        ServerPacketIds::GameShopStock as i16,
+        ServerPacketIds::GuildTerritoryPage as i16,
+        ServerPacketIds::GuildRequestWar as i16,
+        ServerPacketIds::StoragePasswordResult as i16,
+        ServerPacketIds::StorageUnlockResult as i16,
+        ServerPacketIds::NPCStorage as i16,
+        ServerPacketIds::GuildExpGain as i16,
+        ServerPacketIds::GuildNameRequest as i16,
+    ];
     let handled = HANDLED.contains(&opcode);
     match opcode {
         // #270：行会经验/行会名请求
@@ -61,7 +108,10 @@ pub(crate) fn handle_guild(    net: &mut NetConnection,
                         items.iter().flatten().count()
                     );
                     // 仓库数据/打开对话框逻辑移入 storage 消费端
-                    server_events.write(ServerEvent::StorageOpened { items, visible: true });
+                    server_events.write(ServerEvent::StorageOpened {
+                        items,
+                        visible: true,
+                    });
                 }
                 Err(e) => tracing::warn!("⚠️ UserStorage 解析失败: {} (len={})", e, payload.len()),
             }
@@ -99,7 +149,14 @@ pub(crate) fn handle_guild(    net: &mut NetConnection,
             if body.len() == 1 {
                 let in_guild = body[0] != 0;
                 server_events.write(ServerEvent::GuildInGuild { in_guild });
-                tracing::info!("🏰 行会状态: {}", if in_guild { "在行会中" } else { "未加入行会" });
+                tracing::info!(
+                    "🏰 行会状态: {}",
+                    if in_guild {
+                        "在行会中"
+                    } else {
+                        "未加入行会"
+                    }
+                );
             } else {
                 let mut cur = std::io::Cursor::new(body);
                 let name = mir2_shared::binary::read_dotnet_string(&mut cur).unwrap_or_default();
@@ -128,7 +185,12 @@ pub(crate) fn handle_guild(    net: &mut NetConnection,
                     let rank = cur.read_u8().unwrap_or(0);
                     let rank_index = cur.read_u8().unwrap_or(0);
                     let online = cur.read_u8().unwrap_or(0) != 0;
-                    members.push(UiGuildMember { name: mname, rank, rank_index, online });
+                    members.push(UiGuildMember {
+                        name: mname,
+                        rank,
+                        rank_index,
+                        online,
+                    });
                 }
                 let mut gold_buf = [0u8; 4];
                 let gold = if std::io::Read::read_exact(&mut cur, &mut gold_buf).is_ok() {
@@ -164,7 +226,11 @@ pub(crate) fn handle_guild(    net: &mut NetConnection,
                                     gsi.item.unique_id,
                                     gsi.item.item_index,
                                     gsi.item.count,
-                                    gsi.item.info.as_ref().map(|i| i.name.clone()).unwrap_or_default(),
+                                    gsi.item
+                                        .info
+                                        .as_ref()
+                                        .map(|i| i.name.clone())
+                                        .unwrap_or_default(),
                                 )
                             })
                         })
@@ -175,7 +241,11 @@ pub(crate) fn handle_guild(    net: &mut NetConnection,
                     tracing::info!("🏰 仓库物品列表: {} 格（{} 件）", total, count);
                 }
                 Err(e) => {
-                    tracing::warn!("⚠️ GuildStorageList 解析失败: {} (len={})", e, payload.len())
+                    tracing::warn!(
+                        "⚠️ GuildStorageList 解析失败: {} (len={})",
+                        e,
+                        payload.len()
+                    )
                 }
             }
         }
@@ -212,7 +282,11 @@ pub(crate) fn handle_guild(    net: &mut NetConnection,
                     Ok(v) => v,
                     Err(_) => { ok = false; break; }
                 };
-                let item = match mir2_shared::data::item::UserItem::read_from(&mut cur, i32::MAX, i32::MAX) {
+                let item = match mir2_shared::data::item::UserItem::read_from(
+                    &mut cur,
+                    i32::MAX,
+                    i32::MAX,
+                ) {
                     Ok(v) => v,
                     Err(_) => { ok = false; break; }
                 };
@@ -267,7 +341,10 @@ pub(crate) fn handle_guild(    net: &mut NetConnection,
                     server_events.write(ServerEvent::MarketConsign { uid, success: true });
                     tracing::info!("🏪 寄售成功: uid={}", uid);
                 } else {
-                    server_events.write(ServerEvent::MarketConsign { uid, success: false });
+                    server_events.write(ServerEvent::MarketConsign {
+                        uid,
+                        success: false,
+                    });
                     tracing::warn!("🏪 寄售失败: uid={}", uid);
                 }
             }
@@ -277,10 +354,14 @@ pub(crate) fn handle_guild(    net: &mut NetConnection,
             let mut cur = std::io::Cursor::new(body);
             match mir2_shared::binary::read_dotnet_string(&mut cur) {
                 Ok(msg) => {
-                    server_events.write(ServerEvent::MarketSuccess { message: msg.clone() });
+                    server_events.write(ServerEvent::MarketSuccess {
+                        message: msg.clone(),
+                    });
                     tracing::info!("🏪 市场成功: {}", msg);
                 }
-                Err(e) => tracing::warn!("⚠️ MarketSuccess 解析失败: {} (len={})", e, payload.len()),
+                Err(e) => {
+                    tracing::warn!("⚠️ MarketSuccess 解析失败: {} (len={})", e, payload.len())
+                }
             }
         }
         x if x == ServerPacketIds::MarketFail as i16 => {
@@ -291,7 +372,8 @@ pub(crate) fn handle_guild(    net: &mut NetConnection,
         // ---- M35: 商城 ----
         x if x == ServerPacketIds::GameShopInfo as i16 => {
             // [count i32][per: item_index i32][gold u32][credit u32][count i32][class u8]
-            //      [category 7-bit][stock i32][is_bought u8][deal u8]...[credit u32][gold u32]
+            //      [category 7-bit][stock i32][is_bought u8][deal u8]
+            //      [can_buy_credit u8][can_buy_gold u8]]...[credit u32][gold u32]
             let body = &payload[PacketHeader::HEADER_SIZE..];
             let mut cur = std::io::Cursor::new(body);
             use byteorder::{LittleEndian, ReadBytesExt};
@@ -299,16 +381,13 @@ pub(crate) fn handle_guild(    net: &mut NetConnection,
             let mut items = Vec::with_capacity(count);
             let mut ok = true;
             for _ in 0..count {
-                let item_index = match cur.read_i32::<LittleEndian>() { Ok(v) => v, Err(_) => { ok = false; break; } };
-                let gold_price = match cur.read_u32::<LittleEndian>() { Ok(v) => v, Err(_) => { ok = false; break; } };
-                let credit_price = match cur.read_u32::<LittleEndian>() { Ok(v) => v, Err(_) => { ok = false; break; } };
-                let _count = match cur.read_i32::<LittleEndian>() { Ok(v) => v, Err(_) => { ok = false; break; } };
-                let _class = match cur.read_u8() { Ok(v) => v, Err(_) => { ok = false; break; } };
-                let category = match mir2_shared::binary::read_dotnet_string(&mut cur) { Ok(v) => v, Err(_) => { ok = false; break; } };
-                let stock = match cur.read_i32::<LittleEndian>() { Ok(v) => v, Err(_) => { ok = false; break; } };
-                let _is_bought = match cur.read_u8() { Ok(v) => v, Err(_) => { ok = false; break; } };
-                let _deal = match cur.read_u8() { Ok(v) => v, Err(_) => { ok = false; break; } };
-                items.push((item_index, gold_price, credit_price, category, stock));
+                match parse_shop_catalog_item(&mut cur) {
+                    Some(it) => items.push(it),
+                    None => {
+                        ok = false;
+                        break;
+                    }
+                }
             }
             if ok {
                 let _credit = cur.read_u32::<LittleEndian>().unwrap_or(0);
@@ -340,11 +419,40 @@ pub(crate) fn handle_guild(    net: &mut NetConnection,
             let mut rows = Vec::with_capacity(count);
             let mut ok = true;
             for _ in 0..count {
-                let id = match cur.read_i32::<LittleEndian>() { Ok(v) => v, Err(_) => { ok = false; break; } };
-                let map_index = match cur.read_i32::<LittleEndian>() { Ok(v) => v, Err(_) => { ok = false; break; } };
-                let owner = match mir2_shared::binary::read_dotnet_string(&mut cur) { Ok(v) => v, Err(_) => { ok = false; break; } };
-                let state = match cur.read_u8() { Ok(v) => v, Err(_) => { ok = false; break; } };
-                rows.push(TerritoryRow { id, map_index, owner, state });
+                let id = match cur.read_i32::<LittleEndian>() {
+                    Ok(v) => v,
+                    Err(_) => {
+                        ok = false;
+                        break;
+                    }
+                };
+                let map_index = match cur.read_i32::<LittleEndian>() {
+                    Ok(v) => v,
+                    Err(_) => {
+                        ok = false;
+                        break;
+                    }
+                };
+                let owner = match mir2_shared::binary::read_dotnet_string(&mut cur) {
+                    Ok(v) => v,
+                    Err(_) => {
+                        ok = false;
+                        break;
+                    }
+                };
+                let state = match cur.read_u8() {
+                    Ok(v) => v,
+                    Err(_) => {
+                        ok = false;
+                        break;
+                    }
+                };
+                rows.push(TerritoryRow {
+                    id,
+                    map_index,
+                    owner,
+                    state,
+                });
             }
             if ok {
                 let row_count = rows.len();
@@ -361,7 +469,9 @@ pub(crate) fn handle_guild(    net: &mut NetConnection,
             let mut cur = std::io::Cursor::new(body);
             match mir2_shared::binary::read_dotnet_string(&mut cur) {
                 Ok(name) => {
-                    server_events.write(ServerEvent::TerritoryWar { guild_name: name.clone() });
+                    server_events.write(ServerEvent::TerritoryWar {
+                        guild_name: name.clone(),
+                    });
                     tracing::info!("🏯 宣战确认: {}", name);
                 }
                 Err(e) => {
@@ -373,4 +483,62 @@ pub(crate) fn handle_guild(    net: &mut NetConnection,
         _ => {}
     }
     handled
+}
+
+#[cfg(test)]
+mod shop_catalog_tests {
+    use super::parse_shop_catalog_item;
+
+    /// #2791 单元②：`S.GameShopInfo` 商品项字节序（与 SharedRust `GameShopInfo::write_body`
+    /// 同序）：`[item_index i32][gold u32][credit u32][count i32][class u8][category 7-bit]
+    /// [stock i32][is_bought u8][deal u8][can_buy_credit u8][can_buy_gold u8]`
+    #[test]
+    fn parses_can_buy_flags_from_item_tail() {
+        use byteorder::{LittleEndian, WriteBytesExt};
+        let mut body: Vec<u8> = Vec::new();
+        body.write_i32::<LittleEndian>(221).unwrap();
+        body.write_u32::<LittleEndian>(100).unwrap();
+        body.write_u32::<LittleEndian>(50).unwrap();
+        body.write_i32::<LittleEndian>(2).unwrap();
+        body.write_u8(3).unwrap();
+        // category：C# 7-bit 长度前缀 + UTF-8
+        let cat = "武器".as_bytes();
+        body.write_u8(cat.len() as u8).unwrap();
+        body.extend_from_slice(cat);
+        body.write_i32::<LittleEndian>(5).unwrap();
+        body.write_u8(0).unwrap(); // is_bought
+        body.write_u8(1).unwrap(); // deal
+        body.write_u8(1).unwrap(); // can_buy_credit
+        body.write_u8(0).unwrap(); // can_buy_gold
+        let mut cur = std::io::Cursor::new(body.as_slice());
+        let item = parse_shop_catalog_item(&mut cur).expect("应解析成功");
+        assert_eq!(item.item_index, 221);
+        assert_eq!(item.gold_price, 100);
+        assert_eq!(item.credit_price, 50);
+        assert_eq!(item.count, 2);
+        assert_eq!(item.category, "武器");
+        assert_eq!(item.stock, 5);
+        assert!(item.can_buy_credit);
+        assert!(!item.can_buy_gold);
+    }
+
+    /// 截断（缺 `can_buy_gold` 字节）→ None，不 panic
+    #[test]
+    fn truncated_item_returns_none() {
+        use byteorder::{LittleEndian, WriteBytesExt};
+        let mut body: Vec<u8> = Vec::new();
+        body.write_i32::<LittleEndian>(1).unwrap();
+        body.write_u32::<LittleEndian>(10).unwrap();
+        body.write_u32::<LittleEndian>(0).unwrap();
+        body.write_i32::<LittleEndian>(1).unwrap();
+        body.write_u8(0).unwrap();
+        body.write_u8(1).unwrap();
+        body.extend_from_slice(b"x");
+        body.write_i32::<LittleEndian>(99).unwrap();
+        body.write_u8(0).unwrap();
+        body.write_u8(0).unwrap();
+        body.write_u8(1).unwrap(); // 只有 can_buy_credit
+        let mut cur = std::io::Cursor::new(body.as_slice());
+        assert!(parse_shop_catalog_item(&mut cur).is_none());
+    }
 }

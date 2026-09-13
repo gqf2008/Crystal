@@ -387,8 +387,11 @@ pub enum ServerEvent {
     MarketSuccess { message: String },
     /// MarketFail：市场失败
     MarketFail { reason: u8 },
-    /// GameShopInfo：商城目录（item_index, gold_price, credit_price, category, stock）
-    ShopCatalog { items: Vec<(i32, u32, u32, String, i32)>, gold: u32 },
+    /// GameShopInfo：商城目录（见 [`ShopCatalogItem`]）
+    ShopCatalog {
+        items: Vec<ShopCatalogItem>,
+        gold: u32,
+    },
     /// GameShopStock：商品库存更新
     ShopStock { item_id: i32, stock: i32 },
     /// GuildTerritoryPage：领地列表
@@ -596,6 +599,22 @@ pub struct MarketPageEntry {
 }
 
 use crate::game::dialogs::npc_goods::GoodsEntry;
+
+/// `S.GameShopInfo` 单条商品（#2791 单元②）。
+/// `can_buy_gold`/`can_buy_credit` = C# `GameShopItem.CanBuyGold/CanBuyCredit`
+/// （`Shared/Data/ItemData.cs:793-794`）：付款方式复选框据此判定能否用该货币购买
+/// （`MirGameShopCell.BuyProduct`）；`count` = C# `Item.Count`，用于购买确认文案 `{3}`。
+#[derive(Debug, Clone, Default)]
+pub struct ShopCatalogItem {
+    pub item_index: i32,
+    pub gold_price: u32,
+    pub credit_price: u32,
+    pub count: i32,
+    pub category: String,
+    pub stock: i32,
+    pub can_buy_gold: bool,
+    pub can_buy_credit: bool,
+}
 
 use crate::game::dialogs::big_map::NpcRow;
 use mir2_shared::data::client_data::ClientMagic;

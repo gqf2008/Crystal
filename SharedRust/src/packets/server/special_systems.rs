@@ -283,6 +283,11 @@ pub struct GameShopItem {
     pub stock: i32,        // 库存
     pub is_bought: bool,   // 是否已购买
     pub deal: bool,        // 是否特价
+    /// C# `GameShopItem.CanBuyCredit`（`Shared/Data/ItemData.cs:793`）：商城付款方式
+    /// 「用积分购买」对本商品是否可用（客户端 `MirGameShopCell.BuyProduct` 据此选 pType）
+    pub can_buy_credit: bool,
+    /// C# `GameShopItem.CanBuyGold`（`Shared/Data/ItemData.cs:794`）
+    pub can_buy_gold: bool,
 }
 
 impl Packet for GameShopInfo {
@@ -306,6 +311,8 @@ impl Packet for GameShopInfo {
             writer.write_i32::<LittleEndian>(item.stock)?;
             writer.write_u8(if item.is_bought { 1 } else { 0 })?;
             writer.write_u8(if item.deal { 1 } else { 0 })?;
+            writer.write_u8(if item.can_buy_credit { 1 } else { 0 })?;
+            writer.write_u8(if item.can_buy_gold { 1 } else { 0 })?;
         }
 
         writer.write_u32::<LittleEndian>(self.credit)?;
@@ -333,6 +340,8 @@ impl Packet for GameShopInfo {
             let stock = reader.read_i32::<LittleEndian>()?;
             let is_bought = reader.read_u8()? != 0;
             let deal = reader.read_u8()? != 0;
+            let can_buy_credit = reader.read_u8()? != 0;
+            let can_buy_gold = reader.read_u8()? != 0;
 
             items.push(GameShopItem {
                 item_index,
@@ -344,6 +353,8 @@ impl Packet for GameShopInfo {
                 stock,
                 is_bought,
                 deal,
+                can_buy_credit,
+                can_buy_gold,
             });
         }
 
@@ -593,5 +604,37 @@ mod guild_buff_tests {
         let parsed = GuildBuffList::read_body(&mut cur).unwrap();
         assert!(parsed.active_buffs.is_empty());
         assert!(parsed.guild_buffs.is_empty());
+    }
+
+    /// #2791 单元②：`GameShopInfo` 商品项尾部两字节 = C# `GameShopItem.CanBuyCredit` /
+    /// `CanBuyGold`（`Shared/Data/ItemData.cs:844-845` 顺序：先 Credit 后 Gold）
+    #[test]
+    fn game_shop_item_wire_carries_can_buy_flags() {
+        let packet = GameShopInfo {
+            items: vec![GameShopItem {
+                item_index: 7,
+                gold_price: 100,
+                credit_price: 50,
+                count: 2,
+                class: 3,
+                category: "武器".to_string(),
+                stock: 5,
+                is_bought: false,
+                deal: true,
+                can_buy_credit: true,
+                can_buy_gold: false,
+            }],
+            credit: 11,
+            gold: 22,
+        };
+        let mut body = Vec::new();
+        packet.write_body(&mut body).unwrap();
+        // 尾部 = [can_buy_credit u8][can_buy_gold u8][credit u32][gold u32]
+        let tail = &body[body.len() - 10..];
+        assert_eq!(
+            tail,
+            [1u8, 0, 11, 0, 0, 0, 22, 0, 0, 0],
+            "item 尾部两字节 = CanBuyCredit/CanBuyGold，再是 credit/gold"
+        );
     }
 }
