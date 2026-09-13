@@ -102,6 +102,11 @@ enum ControlCommand {
         page: usize,
         reply: Sender<String>,
     },
+    /// #2781：切换聊天窗口档位（0/1/2 → 4/7/11 行）——控制栏「大小」按钮的实机验证入口
+    ChatSize {
+        size: usize,
+        reply: Sender<String>,
+    },
 }
 
 /// dialog 命令的动作（#2586）
@@ -376,6 +381,25 @@ fn handle_conn(mut stream: std::net::TcpStream, tx: Sender<ControlCommand>) {
                     json!({"error": "control channel closed"})
                 }
             }
+            "chat_size" => {
+                // #2781：{size} 0/1/2 → 聊天窗口 4/7/11 行（等价点控制栏「大小」按钮）
+                let size = params.get("size").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+                let (reply_tx, reply_rx) = bounded::<String>(1);
+                if tx
+                    .send(ControlCommand::ChatSize {
+                        size,
+                        reply: reply_tx,
+                    })
+                    .is_ok()
+                {
+                    let s = reply_rx
+                        .recv_timeout(std::time::Duration::from_secs(2))
+                        .unwrap_or_else(|_| "{}".to_string());
+                    serde_json::from_str::<Value>(&s).unwrap_or_else(|_| json!({}))
+                } else {
+                    json!({"error": "control channel closed"})
+                }
+            }
             "pickup" => {
                 let object_id = params
                     .get("object_id")
@@ -608,7 +632,7 @@ fn apply_control_commands(
     time: Res<Time>,
     game_data: Res<GameData>,
     mut libs: ResMut<GameLibraries>,
-    chat: Res<crate::game::chat::ChatState>,
+    mut chat: ResMut<crate::game::chat::ChatState>,
     ime: Res<crate::ui::pinyin_ime::PinyinIme>,
     mut cursor_probe: ResMut<CursorProbe>,
     mut player_menu: ResMut<crate::game::player_menu::PlayerMenuState>,
@@ -777,6 +801,14 @@ fn apply_control_commands(
                 page_res.0 = page;
                 mgr.open(crate::game::dialogs::DialogKind::Character);
                 let s = json!({"ok": true, "page": page}).to_string();
+                let _ = reply.send(s);
+            }
+            ControlCommand::ChatSize { size, reply } => {
+                // #2781：设置聊天窗口档位（行数随之同步；几何由 chat_size_system 应用）
+                let size = size.min(2);
+                chat.size = size;
+                chat.visible_lines = crate::game::chat::chat_size_lines(size);
+                let s = json!({"ok": true, "size": size, "lines": chat.visible_lines}).to_string();
                 let _ = reply.send(s);
             }
             ControlCommand::GetState { reply } => {

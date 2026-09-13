@@ -273,7 +273,8 @@ impl Default for ChatState {
             input_text: String::new(),
             visible_lines: 4,
             scroll_up: 0,
-            size: 1,
+            // C# `ChatDialog.WindowSize` 初值 0（4 行）
+            size: 0,
             prefix: String::new(),
             last_pm: None,
         }
@@ -337,6 +338,30 @@ const CHAT_INPUT_Y: f32 = 725.0;
 const CHAT_BAR_X: f32 = 230.0;
 const CHAT_BAR_Y: f32 = 656.0;
 
+/// #2781：聊天窗口底边（C# `ChatDialog` 换尺寸时 `Location.Y = 旧底边 - 新高度` → **底边固定**）
+const CHAT_PANEL_BOTTOM: f32 = 739.0;
+/// 每档尺寸面板长高的像素（C# `ChangeSize`：Down/End/输入框下移 48/96，面板同）
+const CHAT_SIZE_STEP: f32 = 48.0;
+/// C# `Index = 2221/2224/2227`（0/1/2 档面板图）
+const CHAT_PANEL_IMAGES: [usize; 3] = [2221, 2224, 2227];
+/// C# `CountBar.Index = 2012/2013/2014`
+const CHAT_SCROLLBAR_IMAGES: [usize; 3] = [2012, 2013, 2014];
+
+/// #2781：档位 → 行数（C# `ChangeSize`：`LineCount = 4/7/11`）
+pub fn chat_size_lines(size: usize) -> usize {
+    [4, 7, 11][size.min(2)]
+}
+
+/// #2781：档位 → 面板顶边（底边固定，向上长高）
+pub fn chat_panel_top(size: usize) -> f32 {
+    CHAT_PANEL_BOTTOM - 68.0 - CHAT_SIZE_STEP * size.min(2) as f32
+}
+
+/// #2781：档位 → 控制栏顶边（C# SizeButton.Click：`Location.Y = ChatDialog.Top - Size.Height`）
+pub fn chat_bar_top(size: usize) -> f32 {
+    CHAT_BAR_Y - CHAT_SIZE_STEP * size.min(2) as f32
+}
+
 /// 控制栏按钮表（C# `MainDialogs.cs:1265-1451`）：(动作, 常态帧, 悬停帧, 按下帧, 相对 x)
 const CHAT_BAR_BUTTONS: &[(ChatBarAction, usize, usize, usize, f32)] = &[
     (ChatBarAction::All, 2036, 2037, 2038, 12.0),
@@ -347,6 +372,7 @@ const CHAT_BAR_BUTTONS: &[(ChatBarAction, usize, usize, usize, f32)] = &[
     (ChatBarAction::Group, 2051, 2052, 2053, 122.0),
     (ChatBarAction::Guild, 2054, 2055, 2056, 144.0),
     (ChatBarAction::Trade, 2004, 2005, 2006, 166.0),
+    (ChatBarAction::Size, 2057, 2058, 2059, 574.0),
     (ChatBarAction::Settings, 2060, 2061, 2062, 596.0),
 ];
 
@@ -375,6 +401,7 @@ pub enum ChatBarAction {
     Trade,
     Report,
     Settings,
+    Size,
 }
 
 /// 控制栏按钮组件
@@ -419,6 +446,7 @@ pub fn chat_bar_hint(
         ChatBarAction::Guild => "公会".to_string(),
         ChatBarAction::Report => "报告".to_string(),
         ChatBarAction::Settings => "聊天设置".to_string(),
+        ChatBarAction::Size => "大小".to_string(),
         // C# `:1432` `TradeKey` = 「交易 ({0})」+ `GetKey(KeybindOptions.Trade)`
         ChatBarAction::Trade => crate::game::dialogs::keyboard_layout::hint_with_key(
             &kb.bindings,
@@ -432,9 +460,13 @@ pub fn chat_bar_hint(
 #[derive(Component)]
 struct ChatSettingsBtn;
 
-/// 聊天设置面板背景（透明开关改 alpha）
+/// 聊天对话框背景（C# `ChatDialog`；透明开关改它的 alpha）
 #[derive(Component)]
 struct ChatPanelBg;
+
+/// #2781：聊天面板三档底图（C# `ChatDialog.Index = 2221/2224/2227`，`ChangeSize` 切换）
+#[derive(Component)]
+struct ChatSizeImages([Handle<Image>; 3]);
 
 /// 聊天设置面板（过滤/透明）
 #[derive(Component)]
@@ -460,6 +492,13 @@ impl Plugin for ChatPlugin {
         // #2781：聊天控制栏（C# ChatControlBar）
         app.add_systems(OnEnter(AppState::Game), spawn_chat_control_bar);
         app.add_systems(Update, chat_bar_system.run_if(in_state(AppState::Game)));
+        // #2781：聊天窗口三档尺寸（C# ChangeSize）——排在点击处理之后，同帧生效
+        app.add_systems(
+            Update,
+            chat_size_system
+                .after(chat_bar_system)
+                .run_if(in_state(AppState::Game)),
+        );
         app.add_systems(OnExit(AppState::Game), cleanup_chat);
         app.add_systems(
             Update,
@@ -522,32 +561,63 @@ if !crate::ui::sprite_ui::ui_enabled("chat") {
 
     // 面板背景：C# 白色纹理 Prguse[2221]（632x68 自然尺寸，不拉伸）
     let white = images.add(crate::map_renderer::make_image(vec![255, 255, 255, 255], 1, 1));
-    let chat_bg = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Prguse, 2221)
-        .unwrap_or_else(|| white.clone());
+    // #2781：三档底图（C# `ChangeSize` 换 `Index`；尺寸取图源自然尺寸）
+    let size_imgs: Vec<Handle<Image>> = CHAT_PANEL_IMAGES
+        .iter()
+        .map(|idx| {
+            ui_image(
+                &mut libs,
+                &mut images,
+                &mut cache,
+                LibraryName::Prguse,
+                *idx,
+            )
+            .unwrap_or_else(|| white.clone())
+        })
+        .collect();
+    let chat_bg = size_imgs[0].clone();
     commands.spawn((
         UiEntity,
         ChatPanel,
         ChatPanelBg,
+        ChatSizeImages([
+            size_imgs[0].clone(),
+            size_imgs[1].clone(),
+            size_imgs[2].clone(),
+        ]),
         Sprite {
             image: chat_bg,
+            custom_size: Some(Vec2::new(632.0, 68.0)),
             // C# Color.White（纹理自身 alpha）；Bevy 高 z 靠前：
             // 面板 z=2.05 低于所有内容（2.2+），内容才显示在面板上
             color: Color::WHITE,
             ..default()
         },
         bevy::sprite::Anchor::TOP_LEFT,
-        Transform::from_xyz(panel_x, -panel_y, 2.05),
+        Transform::from_xyz(panel_x, -chat_panel_top(0), 2.05),
         Visibility::Visible,
     ));
 
-    // 消息行（C# ChatPanel：4 行，起点 (1,1)，行距 13）
-    for i in 0..4usize {
+    // 消息行（C# ChatPanel：最多 11 行 @(1,1+13i)，行距 13；按档位显示 4/7/11 行）
+    for i in 0..chat_size_lines(2) {
         let e = spawn_ui_text(
-            &mut commands, &font, "",
-            panel_x + 1.0, panel_y + 1.0 + i as f32 * 13.0,
-            11.0, Color::srgb(0.1, 0.1, 0.15), 4.0,
+            &mut commands,
+            &font,
+            "",
+            panel_x + 1.0,
+            chat_panel_top(0) + 1.0 + i as f32 * 13.0,
+            11.0,
+            Color::srgb(0.1, 0.1, 0.15),
+            4.0,
         );
-        commands.entity(e).insert(ChatLine(i));
+        commands.entity(e).insert((
+            ChatLine(i),
+            if i < chat_size_lines(0) {
+                Visibility::Visible
+            } else {
+                Visibility::Hidden
+            },
+        ));
     }
     // 滚动按钮（C# ChatDialog Home/Up/Down/End 图片按钮：x=618，y=1/9/39/45）
     let scroll_btns: [(KeyScroll, usize, usize, usize, f32, f32, f32); 4] = [
@@ -723,6 +793,16 @@ fn chat_bar_system(
                 tracing::info!("💬 控制栏: 请求交易");
             }
             ChatBarAction::Settings => {} // 由 chat_option_system 处理
+            // C# `SizeButton.Click` → `ChatDialog.ChangeSize()`：0→1→2→0，行数 4/7/11
+            ChatBarAction::Size => {
+                chat.size = (chat.size + 1) % 3;
+                chat.visible_lines = chat_size_lines(chat.size);
+                tracing::info!(
+                    "💬 聊天窗口尺寸 -> {} 档（{} 行）",
+                    chat.size,
+                    chat.visible_lines
+                );
+            }
             a => {
                 if let Some(prefix) = chat_bar_prefix(a) {
                     chat.prefix = prefix.to_string();
@@ -747,6 +827,87 @@ fn chat_bar_system(
             frames.pressed = want.clone();
             sprite.image = want;
         }
+    }
+}
+
+/// #2781：聊天窗口三档尺寸（C# `ChatDialog.ChangeSize`，`MainDialogs.cs:1188-1226`）。
+///
+/// **底边固定**：面板换图并向上长高（2221/2224/2227，+48/+96）、消息行从新顶边 `(1, 1+13i)` 起排、
+/// Home/Up 随顶边上移；Down/End 因 C# 把它们重设成 `顶边 + 39/45 + 48*size` 而在绝对坐标上**不动**
+/// （Bevy 生成期即为绝对值，无需处理）；控制栏整体随顶边上移（C# `SizeButton.Click`）。
+fn chat_size_system(
+    chat: Res<ChatState>,
+    images: Res<Assets<Image>>,
+    mut applied: Local<Option<usize>>,
+    mut panel: Query<(&mut Sprite, &ChatSizeImages), With<ChatPanelBg>>,
+    mut lines: Query<(&mut Transform, &mut Visibility, &ChatLine)>,
+    mut scroll: Query<(&mut Transform, &ChatScrollBtn), Without<ChatLine>>,
+    mut bar_bg: Query<
+        &mut Transform,
+        (
+            With<ChatBarBg>,
+            Without<ChatLine>,
+            Without<ChatScrollBtn>,
+            Without<ChatBarButton>,
+        ),
+    >,
+    mut bar_btns: Query<
+        &mut Transform,
+        (
+            With<ChatBarButton>,
+            Without<ChatLine>,
+            Without<ChatScrollBtn>,
+            Without<ChatBarBg>,
+        ),
+    >,
+) {
+    let size = chat.size.min(2);
+    if *applied == Some(size) {
+        return;
+    }
+    let prev = applied.unwrap_or(0);
+    *applied = Some(size);
+    let top = chat_panel_top(size);
+    for (mut sp, handles) in &mut panel {
+        let img = &handles.0[size];
+        if sp.image != *img {
+            sp.image = img.clone();
+        }
+        let natural = images
+            .get(img)
+            .map(|i| i.size_f32())
+            .unwrap_or(Vec2::new(632.0, 68.0));
+        if let Some(cs) = sp.custom_size.as_mut() {
+            *cs = natural;
+        }
+    }
+    let visible_lines = chat_size_lines(size);
+    for (mut tf, mut vis, line) in &mut lines {
+        tf.translation.y = -(top + 1.0 + line.0 as f32 * 13.0);
+        *vis = if line.0 < visible_lines {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
+    }
+    // Home @(618,1) / Up @(618,9) 相对面板顶边（C# 未在 ChangeSize 里重设它们 → 随面板上移）
+    for (mut tf, btn) in &mut scroll {
+        let by = match btn.0 {
+            KeyScroll::Home => 1.0,
+            KeyScroll::Up => 9.0,
+            // Down/End 在 C# 被重设到「顶边 + 39/45 + 48*size」→ 绝对坐标不变
+            _ => continue,
+        };
+        tf.translation.y = -(top + by);
+    }
+    // 控制栏：整体随聊天面板顶边上移（C# `SizeButton.Click` 里的 Location 重设）
+    let bar_top = chat_bar_top(size);
+    let dy = bar_top - chat_bar_top(prev);
+    for mut tf in &mut bar_bg {
+        tf.translation.y -= dy;
+    }
+    for mut tf in &mut bar_btns {
+        tf.translation.y -= dy;
     }
 }
 
@@ -1740,11 +1901,15 @@ mod chat_scroll_tests {
 #[cfg(test)]
 mod whisper_partner_tests {
     use super::{
-        chat_bar_hint, chat_bar_prefix, chat_bar_system, whisper_partner, ChatBarAction,
-        ChatBarButton, ChatBarFrames, ChatState,
+        chat_bar_hint, chat_bar_prefix, chat_bar_system, chat_bar_top, chat_panel_top,
+        chat_size_lines, chat_size_system, whisper_partner, ChatBarAction, ChatBarBg,
+        ChatBarButton, ChatBarFrames, ChatLine, ChatPanelBg, ChatScrollBtn, ChatSizeImages,
+        ChatState, KeyScroll,
     };
     use crate::ui::sprite_ui::UiButton;
-    use bevy::prelude::{Handle, Image, Sprite, World};
+    use bevy::prelude::{
+        default, Assets, Handle, Image, Sprite, Transform, Vec2, Visibility, World,
+    };
     use mir2_shared::enums::ChatType;
 
     #[test]
@@ -1843,6 +2008,144 @@ mod whisper_partner_tests {
             .clone();
         assert_eq!(frames.normal, p, "选中项常显按下帧");
         assert_eq!(frames.hover, p);
+    }
+
+    /// #2781：档位 → 行数（C# `ChangeSize`：4/7/11；越界钳到 2 档）
+    #[test]
+    fn chat_size_lines_matches_csharp() {
+        assert_eq!(chat_size_lines(0), 4);
+        assert_eq!(chat_size_lines(1), 7);
+        assert_eq!(chat_size_lines(2), 11);
+        assert_eq!(chat_size_lines(9), 11, "越界钳到最大档");
+    }
+
+    /// #2781：底边固定 → 面板顶边/控制栏顶边（C# `ChangeSize` + `SizeButton.Click`）
+    #[test]
+    fn chat_size_tops_follow_bottom_anchor() {
+        assert_eq!(chat_panel_top(0), 671.0, "C# 初始 (230,671)");
+        assert_eq!(chat_panel_top(1), 623.0, "长高 48");
+        assert_eq!(chat_panel_top(2), 575.0, "长高 96");
+        assert_eq!(chat_bar_top(0), 656.0, "C# 控制栏初始 y = ScreenHeight-112");
+        assert_eq!(chat_bar_top(1), 608.0);
+        assert_eq!(chat_bar_top(2), 560.0);
+        // 输入行/滚动 Down·End 的绝对坐标不随档位变化（C# 重设相对位置抵消长高）
+        assert_eq!(chat_panel_top(0) + 54.0, 725.0);
+        assert_eq!(chat_panel_top(1) + 54.0 + 48.0, 725.0);
+        assert_eq!(chat_panel_top(2) + 54.0 + 96.0, 725.0);
+    }
+
+    /// #2781：点击大小按钮 → 档位循环 + 行数同步
+    #[test]
+    fn chat_bar_size_button_cycles_window_size() {
+        use bevy::ecs::system::RunSystemOnce;
+
+        let mut world = World::new();
+        world.insert_resource(ChatState::default());
+        world.insert_resource(crate::network::NetConnection::default());
+        let h = Handle::<Image>::default();
+        world.spawn((
+            UiButton {
+                rect: (0.0, 0.0, 20.0, 16.0),
+                clicked: true,
+            },
+            ChatBarButton(ChatBarAction::Size),
+            crate::ui::sprite_ui::ButtonFrames {
+                normal: h.clone(),
+                hover: h.clone(),
+                pressed: h.clone(),
+            },
+            Sprite::default(),
+            ChatBarFrames {
+                normal: h.clone(),
+                hover: h.clone(),
+                pressed: h.clone(),
+            },
+        ));
+        world
+            .run_system_once(chat_bar_system)
+            .expect("控制栏系统应成功");
+        let chat = world.resource::<ChatState>();
+        assert_eq!(chat.size, 1, "0 → 1 档");
+        assert_eq!(chat.visible_lines, 7, "行数随档位同步");
+    }
+
+    /// #2781：`chat_size_system` 几何联动：面板换图长高、消息行按档位显示并从新顶边起排、
+    /// Home 随顶边上移、控制栏整体上移
+    #[test]
+    fn chat_size_system_moves_panel_lines_and_bar() {
+        use bevy::ecs::system::RunSystemOnce;
+
+        let mut world = World::new();
+        let mut chat = ChatState::default();
+        chat.size = 1;
+        chat.visible_lines = chat_size_lines(1);
+        world.insert_resource(chat);
+        world.insert_resource(Assets::<Image>::default());
+        let h = Handle::<Image>::default();
+        let panel = world
+            .spawn((
+                ChatPanelBg,
+                ChatSizeImages([h.clone(), h.clone(), h.clone()]),
+                Sprite {
+                    image: h.clone(),
+                    custom_size: Some(Vec2::new(632.0, 68.0)),
+                    ..default()
+                },
+            ))
+            .id();
+        let mut lines = Vec::new();
+        for i in 0..11usize {
+            lines.push(
+                world
+                    .spawn((ChatLine(i), Transform::default(), Visibility::Hidden))
+                    .id(),
+            );
+        }
+        let home = world
+            .spawn((ChatScrollBtn(KeyScroll::Home), Transform::default()))
+            .id();
+        let bar = world
+            .spawn((ChatBarBg, Transform::from_xyz(230.0, -656.0, 2.4)))
+            .id();
+        world
+            .run_system_once(chat_size_system)
+            .expect("尺寸系统应成功");
+        // 面板：换图（默认句柄）+ 长高到 116（1 档）
+        let sp = world.entity(panel).get::<Sprite>().unwrap();
+        assert_eq!(
+            sp.custom_size,
+            Some(Vec2::new(632.0, 68.0)),
+            "无资产时回退原尺寸"
+        );
+        // 行：0..6 可见、从新顶边 (623+1) 起排
+        assert_eq!(
+            world
+                .entity(lines[0])
+                .get::<Transform>()
+                .unwrap()
+                .translation
+                .y,
+            -624.0
+        );
+        assert_eq!(
+            world.entity(lines[6]).get::<Visibility>().unwrap(),
+            &Visibility::Visible
+        );
+        assert_eq!(
+            world.entity(lines[7]).get::<Visibility>().unwrap(),
+            &Visibility::Hidden,
+            "7 行档位下第 8 行起隐藏"
+        );
+        // Home 随顶边上移（623+1）
+        assert_eq!(
+            world.entity(home).get::<Transform>().unwrap().translation.y,
+            -624.0
+        );
+        // 控制栏上移 48（world y 变大）
+        assert_eq!(
+            world.entity(bar).get::<Transform>().unwrap().translation.y,
+            -608.0
+        );
     }
 }
 
