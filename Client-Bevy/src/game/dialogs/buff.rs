@@ -622,6 +622,8 @@ fn spawn_buff(
         BuffWidget,
         BuffPanel,
         crate::game::dialogs::AlwaysVisible,
+        // C# `BuffDialog` 构造即 `Movable = false`（`BuffDialog.cs:32`）→ 不可拖动（#2797 单元②）
+        crate::game::dialogs::NotDraggable,
     ));
 
     commands.entity(panel).with_children(|p| {

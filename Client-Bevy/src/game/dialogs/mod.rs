@@ -136,6 +136,11 @@ pub struct DialogManager {
 #[derive(Component)]
 pub struct AlwaysVisible;
 
+/// 不可拖动标记（#2797 单元②）：C# `Movable = false` 的窗口（如 `BuffDialog`，`BuffDialog.cs:32`）
+/// 不参与 `dialog_drag_system` 的拖动与包围盒——否则点它会把同 `DialogKind` 的窗口一起拖走。
+#[derive(Component)]
+pub struct NotDraggable;
+
 /// 状态驱动窗口的统一桥接：服务端/脚本状态变化时同步管理栈，
 /// 让通用显隐兜底、世界输入锁与 z 序使用同一真值。
 pub fn sync_dialog_state(mgr: &mut DialogManager, kind: DialogKind, visible: bool) {
@@ -335,6 +340,58 @@ mod tests {
         assert!(is_descendant_of(mid, root, &mut parent_of));
         assert!(!is_descendant_of(root, root, &mut parent_of));
         assert!(!is_descendant_of(other, root, &mut parent_of));
+    }
+
+    /// #2797 单元②：`NotDraggable` 的根（C# `Movable = false`，如 Buff 窗）不参与拖动
+    #[test]
+    fn not_draggable_root_is_ignored_by_drag_system() {
+        let mut world = World::new();
+        let mut window = Window::default();
+        window.set_cursor_position(Some(Vec2::new(10.0, 10.0)));
+        world.spawn((window, PrimaryWindow));
+        let mut mouse = ButtonInput::<MouseButton>::default();
+        mouse.press(MouseButton::Left);
+        world.insert_resource(mouse);
+        world.insert_resource(DialogDrag::default());
+        world.insert_resource(crate::game::dialogs::inventory::InventoryOrigin(0.0, 0.0));
+
+        // Buff 窗根面板 @(854,0) 44x34 + NotDraggable（C# `Movable = false`）
+        let panel = world
+            .spawn((
+                DialogRoot(DialogKind::Buff),
+                NotDraggable,
+                Visibility::Visible,
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: Val::Px(0.0),
+                    top: Val::Px(0.0),
+                    width: Val::Px(44.0),
+                    height: Val::Px(34.0),
+                    ..default()
+                },
+                GlobalZIndex(30),
+            ))
+            .id();
+
+        world
+            .run_system_once(dialog_drag_system)
+            .expect("drag 系统应运行");
+        assert_eq!(
+            world.resource::<DialogDrag>().dragging,
+            None,
+            "NotDraggable 根不应起拖"
+        );
+        // 移动光标到别处：面板位置不变（未被拖动）
+        let mut windows = world.query_filtered::<&mut Window, With<PrimaryWindow>>();
+        if let Some(mut w) = windows.iter_mut(&mut world).next() {
+            w.set_cursor_position(Some(Vec2::new(200.0, 200.0)));
+        }
+        world
+            .run_system_once(dialog_drag_system)
+            .expect("drag 系统应运行");
+        let node = world.entity(panel).get::<Node>().unwrap().clone();
+        assert_eq!(node.left, Val::Px(0.0));
+        assert_eq!(node.top, Val::Px(0.0));
     }
 
     /// bevy_ui 拖拽：点中根面板（非按钮）→ 拖动 Node.left/top；第二帧移动鼠标 →
@@ -596,7 +653,11 @@ pub fn dialog_drag_system(
     mouse: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window>,
     buttons: Query<&Interaction, With<Button>>,
-    mut dialogs: Query<(Entity, &DialogRoot, &Visibility, &mut Node, &GlobalZIndex)>,
+    // #2797 单元②：C# `Movable = false` 的窗口（`NotDraggable`）不参与拖动/包围盒
+    mut dialogs: Query<
+        (Entity, &DialogRoot, &Visibility, &mut Node, &GlobalZIndex),
+        Without<NotDraggable>,
+    >,
     mut text_rects: Query<(Entity, &mut TextInputRect)>,
     mut drop_downs: Query<(Entity, &mut UiDropDown)>,
     parents: Query<&ChildOf>,
