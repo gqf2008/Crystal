@@ -592,7 +592,7 @@ impl Message<AwakeningNeedMaterialsRequest> for WorldActor {
             return;
         }
 
-        let _awake_type = match mir2_shared::enums::AwakeType::try_from(msg.awake_type) {
+        let awake_type = match mir2_shared::enums::AwakeType::try_from(msg.awake_type) {
             Ok(t) => t,
             Err(_) => {
                 send_system_message(&self.gate_ref, msg.session_id, "无效的觉醒类型");
@@ -628,37 +628,42 @@ impl Message<AwakeningNeedMaterialsRequest> for WorldActor {
         }
 
         // 计算所需材料：觉醒材料是 item_type=35 的物品
-        // shape 编码：0=DC, 1=MC, 2=SC, 3=AC, 4=MAC, 5=HpMp, 100=通用
+        // shape 编码（C# 约定，见真实物品库 BraveryGlyph/MagicGlyph/…/AwakeningSoul）：
+        // 0=DC, 1=MC, 2=SC, 3=AC, 4=MAC, 5=HPMP, 100=通用
         let awake_level = item.awake.awake_level();
-        let grade_index = match item_info.grade {
-            1..=4 => item_info.grade - 1,
-            _ => {
-                send_system_message(&self.gate_ref, msg.session_id, "该物品品级不支持觉醒");
-                return;
-            }
-        };
+        if !(1..=4).contains(&item_info.grade) {
+            send_system_message(&self.gate_ref, msg.session_id, "该物品品级不支持觉醒");
+            return;
+        }
 
-        // 材料数量 = 基础值 * (1 + 已觉醒等级)
-        let base_count: i32 = match grade_index {
-            0 => 3,
-            1 => 5,
-            2 => 8,
-            _ => 12,
-        };
-        let needed = base_count * (1 + awake_level as i32);
+        // C# Awake.AwakeMaterials + AwakeMaterialRate：
+        // need[slot] = base[type][slot][grade] + (byte)(material_rate[grade] * level)（PlayerObject.cs:9061-9067）
+        let type_shape = awake_type_shape(awake_type);
+        let need = awakening_material_need(
+            &self.awakening_cfg,
+            awake_type,
+            item_info.grade,
+            awake_level as u32,
+        );
 
-        // 查找匹配的觉醒材料物品
-        let type_shape = msg.awake_type.saturating_sub(1) as i32;
+        // 查找匹配的觉醒材料物品：品级必须与物品相同（C# :9073-9084）
         let mut materials = Vec::new();
-        for (idx, info) in self.item_infos.iter() {
-            if info.item_type != 35 {
-                continue;
-            } // ItemType::Awakening
-            if info.shape == type_shape || info.shape == 100 {
+        for (slot, shape) in [type_shape, 100].iter().enumerate() {
+            let mut found: Option<i32> = None;
+            for (idx, info) in self.item_infos.iter() {
+                if info.item_type == 35 /* ItemType::Awakening */
+                    && info.grade == item_info.grade
+                    && info.shape == *shape
+                {
+                    found = Some(*idx);
+                    break;
+                }
+            }
+            if let Some(item_id) = found {
                 materials.push(
                     mir2_shared::packets::server::awakening_system::MaterialInfo {
-                        item_id: *idx,
-                        count: needed,
+                        item_id,
+                        count: need[slot] as i32,
                     },
                 );
             }
@@ -846,57 +851,66 @@ impl Message<AwakeningRequest> for WorldActor {
             return;
         }
 
-        // 检查材料：计算所需数量
-        let base_count: u16 = match grade {
-            1 => 3,
-            2 => 5,
-            3 => 8,
-            _ => 12,
-        };
-        let needed = base_count * (1 + awake_level as u16);
-
-        // 查找匹配的觉醒材料
-        let type_shape = msg.awake_type.saturating_sub(1) as i32;
-        let mut material_index: Option<i32> = None;
+        // 检查材料（C# HasAwakeningNeedMaterials :9123-9166）：两类 shape 分别统计、
+        // 数量必须分别精确等于需求（计数按需求上限截断 → 「可用 >= 需求」等价），
+        // 品级必须与物品相同（None 品级不参与），再按需求逐项消耗。
+        let type_shape = awake_type_shape(awake_type);
+        let need =
+            awakening_material_need(&self.awakening_cfg, awake_type, grade, awake_level as u32);
+        let mut material_indices: [Vec<i32>; 2] = [Vec::new(), Vec::new()];
         for (idx, info) in self.item_infos.iter() {
-            if info.item_type == 35 // ItemType::Awakening
-                && (info.shape == type_shape || info.shape == 100)
-            {
-                material_index = Some(*idx);
-                break;
+            if info.item_type == 35 /* ItemType::Awakening */ && info.grade == grade {
+                if info.shape == type_shape {
+                    material_indices[0].push(*idx);
+                } else if info.shape == 100 {
+                    material_indices[1].push(*idx);
+                }
             }
         }
-        // 没有配置觉醒材料（mat_idx == 0），跳过材料检查
-        let mat_idx = material_index.unwrap_or_default();
 
-        // 检查材料数量
-        if mat_idx > 0 {
-            let available = record
-                .actor_ref
-                .ask(crate::actors::player::CountItemsByIndex {
-                    item_index: mat_idx,
-                })
-                .await
-                .unwrap_or(0);
-            if available < needed {
+        let mut available = [0i32; 2];
+        let mut per_index: [Vec<(i32, i32)>; 2] = [Vec::new(), Vec::new()];
+        for slot in 0..2 {
+            for idx in &material_indices[slot] {
+                let have = record
+                    .actor_ref
+                    .ask(crate::actors::player::CountItemsByIndex { item_index: *idx })
+                    .await
+                    .unwrap_or(0) as i32;
+                available[slot] += have;
+                per_index[slot].push((*idx, have));
+            }
+        }
+        for slot in 0..2 {
+            if available[slot] < need[slot] as i32 {
                 self.send_awakening_result(msg.session_id, AWAKE_RESULT_NO_MATERIALS, -1);
                 return;
             }
         }
 
-        // 扣除材料
-        if mat_idx > 0 {
-            let consumed = record
-                .actor_ref
-                .ask(crate::actors::player::ConsumeItemsByIndex {
-                    item_index: mat_idx,
-                    count: needed,
-                })
-                .await
-                .unwrap_or(false);
-            if !consumed {
-                self.send_awakening_result(msg.session_id, AWAKE_RESULT_NO_MATERIALS, -1);
-                return;
+        for slot in 0..2 {
+            let mut remaining = need[slot] as i32;
+            for (idx, have) in &per_index[slot] {
+                if remaining <= 0 {
+                    break;
+                }
+                let take = (*have).min(remaining);
+                if take <= 0 {
+                    continue;
+                }
+                let consumed = record
+                    .actor_ref
+                    .ask(crate::actors::player::ConsumeItemsByIndex {
+                        item_index: *idx,
+                        count: take as u16,
+                    })
+                    .await
+                    .unwrap_or(false);
+                if !consumed {
+                    self.send_awakening_result(msg.session_id, AWAKE_RESULT_NO_MATERIALS, -1);
+                    return;
+                }
+                remaining -= take;
             }
         }
 
@@ -912,7 +926,7 @@ impl Message<AwakeningRequest> for WorldActor {
 
         // 执行觉醒：70% 成功率
         let roll = fastrand::u8(0..100);
-        if roll < self.awakening_cfg.success_rate {
+        if awakening_roll_succeeds(roll, self.awakening_cfg.success_rate) {
             // 成功：计算觉醒值（#2416：AwakeningSystem.ini 配置化）
             let chance_max = self
                 .awakening_cfg
@@ -1123,6 +1137,42 @@ pub fn awake_type_name(t: mir2_shared::enums::AwakeType) -> &'static str {
 
 /// C# Awake.MakeHit：给定命中次数 / chance_max / itemRate，确定性计算觉醒值。
 /// stepValue = chance_max / 5；makeValue = total <= 1 ? 1 : floor(total)；value = max(1, makeValue * rate)。
+/// SharedRust `AwakeType`（None=3 … HpMp=9）→ C# `AwakeType`（None=0 … HPMP=6）
+/// （C# 枚举 `Shared/Enums.cs:105-114` 为 0-based 1..=6 对应 DC..HPMP）
+pub(crate) fn awake_type_csharp(awake_type: mir2_shared::enums::AwakeType) -> i32 {
+    (awake_type as u8).saturating_sub(3) as i32
+}
+
+/// C# 觉醒材料 shape 约定 = `(int)AwakeType - 1`（`PlayerObject.cs:9076`/`:9131`），
+/// 与真实物品库一致：0=DC(BraveryGlyph) / 1=MC / 2=SC / 3=AC / 4=MAC / 5=HPMP(BodyGlyph)，100=通用。
+pub(crate) fn awake_type_shape(awake_type: mir2_shared::enums::AwakeType) -> i32 {
+    awake_type_csharp(awake_type) - 1
+}
+
+/// C# `Awake.AwakeMaterials` + `AwakeMaterialRate`（`PlayerObject.cs:9110-9119` / `:9053-9067`）：
+/// `need[slot] = base[type-1][slot][grade-1] + (byte)(material_rate[grade-1] * level)`
+/// （C# 先 float 相乘再截断成 byte，再按 byte 相加；本端用 `wrapping_add` 保持同样的溢出语义）。
+pub(crate) fn awakening_material_need(
+    cfg: &crate::util::ini::AwakeningIniSettings,
+    awake_type: mir2_shared::enums::AwakeType,
+    grade: i32,
+    level: u32,
+) -> [u8; 2] {
+    let type_idx = (awake_type_csharp(awake_type) - 1).clamp(0, 5) as usize;
+    let grade_idx = (grade - 1).clamp(0, 4) as usize;
+    let extra = (cfg.material_rate[grade_idx] * level as f32) as u8; // C# (byte) 截断
+    [
+        cfg.materials_base[type_idx][0][grade_idx].wrapping_add(extra),
+        cfg.materials_base[type_idx][1][grade_idx].wrapping_add(extra),
+    ]
+}
+
+/// C# `rand.Next(0,100) <= AwakeSuccessRate`（`Shared/Data/ItemData.cs:997`）：
+/// roll ∈ 0..=99，命中区间 = `0..=rate`（rate=70 → 71/100 成功）。
+pub(crate) fn awakening_roll_succeeds(roll: u8, success_rate: u8) -> bool {
+    roll <= success_rate
+}
+
 pub(crate) fn awake_value_from_hits(hit_count: u8, chance_max: u8, rate: u8) -> u8 {
     let step = chance_max as f32 / 5.0;
     let total = step * hit_count as f32;
@@ -1437,5 +1487,55 @@ mod tests {
         assert_eq!(awake_value_from_hits(3, 3, 1), 1);
         // chance_max=3（step=0.6）：4 命中 total=2.4 → floor=2
         assert_eq!(awake_value_from_hits(4, 3, 1), 2);
+    }
+
+    /// #2829：C# 材料 shape 约定 = `(int)AwakeType - 1`（真实物品库与之一致）
+    #[test]
+    fn awake_type_shape_matches_csharp_material_shapes() {
+        use mir2_shared::enums::AwakeType;
+        assert_eq!(awake_type_csharp(AwakeType::Dc), 1);
+        assert_eq!(awake_type_csharp(AwakeType::HpMp), 6);
+        assert_eq!(awake_type_shape(AwakeType::Dc), 0); // BraveryGlyph
+        assert_eq!(awake_type_shape(AwakeType::Mc), 1); // MagicGlyph
+        assert_eq!(awake_type_shape(AwakeType::Sc), 2); // SoulGlyph
+        assert_eq!(awake_type_shape(AwakeType::Ac), 3); // ProtectionGlyph
+        assert_eq!(awake_type_shape(AwakeType::Mac), 4); // EvilSlayerGlyph
+        assert_eq!(awake_type_shape(AwakeType::HpMp), 5); // BodyGlyph
+    }
+
+    /// #2829：需求数量 = ini 表 + 品级系数 × 等级（C# `:9115`）
+    #[test]
+    fn awakening_material_need_matches_csharp_table() {
+        use crate::util::ini::AwakeningIniSettings;
+        use mir2_shared::enums::AwakeType;
+
+        // 默认表（base=1、rate=1.0）：Lv0 → [1,1]，Lv3 → [4,4]
+        let cfg = AwakeningIniSettings::default();
+        assert_eq!(awakening_material_need(&cfg, AwakeType::Dc, 1, 0), [1, 1]);
+        assert_eq!(awakening_material_need(&cfg, AwakeType::Dc, 4, 3), [4, 4]);
+        // 不同类型/品级取各自表项：DC 与 HPMP 独立
+        let mut cfg = AwakeningIniSettings::default();
+        cfg.materials_base[0][0][0] = 5; // DC / slot0 / Common
+        cfg.materials_base[0][1][0] = 2; // DC / slot1 / Common
+        cfg.materials_base[5][0][3] = 7; // HPMP / slot0 / Mythical
+        cfg.material_rate[0] = 2.0; // Common 每级 +2
+        assert_eq!(awakening_material_need(&cfg, AwakeType::Dc, 1, 0), [5, 2]);
+        assert_eq!(awakening_material_need(&cfg, AwakeType::Dc, 1, 3), [11, 8]);
+        assert_eq!(awakening_material_need(&cfg, AwakeType::HpMp, 4, 0), [7, 1]);
+        // rate 非整数：截断（C# (byte)(float)）
+        cfg.material_rate[1] = 0.5; // Rare 每级 +0.5
+        assert_eq!(awakening_material_need(&cfg, AwakeType::Mc, 2, 1), [1, 1]);
+        assert_eq!(awakening_material_need(&cfg, AwakeType::Mc, 2, 3), [2, 2]);
+    }
+
+    /// #2829：成功率边界对齐 C# `rand.Next(0,100) <= rate`（rate=70 → 71/100）
+    #[test]
+    fn awakening_roll_succeeds_matches_csharp_boundary() {
+        assert!(awakening_roll_succeeds(0, 0)); // rate=0 仍有 1%（roll==0）
+        assert!(!awakening_roll_succeeds(1, 0));
+        assert!(awakening_roll_succeeds(70, 70)); // 边界：70 成功（C# <=）
+        assert!(!awakening_roll_succeeds(71, 70));
+        assert!(awakening_roll_succeeds(99, 99));
+        assert!(!awakening_roll_succeeds(99, 98));
     }
 }
