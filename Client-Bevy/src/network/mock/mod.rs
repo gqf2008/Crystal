@@ -2080,11 +2080,13 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                                     // 实机验证 `NewColour` 彩色叠加
                                                     description: (1..=8)
                                                         .map(|i| {
-                                                            if i == 3 {
-                                                                "任务描述第 3 行含{彩色段/Red}标记"
-                                                                    .to_string()
-                                                            } else {
-                                                                format!("任务描述第 {i} 行")
+                                                            match i {
+                                                                3 => "任务描述第 3 行含{彩色段/Red}标记"
+                                                                    .to_string(),
+                                                                // #2810 单元②：怪物/物品链接（实机验证换名 + 青色 + 悬停橙 + 提示）
+                                                                5 => "第 5 行：<$MONSTER:101>出现".to_string(),
+                                                                6 => "第 6 行：点[ITEM:1001|力量戒指]看物品".to_string(),
+                                                                _ => format!("任务描述第 {i} 行"),
                                                             }
                                                         })
                                                         .collect(),

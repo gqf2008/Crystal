@@ -313,6 +313,216 @@ pub struct QuestDetailSegment {
 /// #2810 单元①：每行叠加段池容量（C# 不限段数，实际脚本行 1-2 段；池化避免每帧增删实体）
 pub const QUEST_MSG_MAX_SEGMENTS: usize = 6;
 
+/// #2810 单元②：行内链接类型（C# `NPCDialog.MonsterLink/NPCLink/ItemLink` 三条正则，`NPCDialogs.cs:24-26`）
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum QuestLinkKind {
+    Monster,
+    Npc,
+    Item,
+}
+
+impl QuestLinkKind {
+    /// C# `GetDisplayNameForLink` 的 linkType 字面量（`:920-955`）
+    pub fn type_name(self) -> &'static str {
+        match self {
+            QuestLinkKind::Monster => "MONSTER",
+            QuestLinkKind::Npc => "NPC",
+            QuestLinkKind::Item => "ITEM",
+        }
+    }
+    /// C# 名字缺失时的回退字面量（`Item {idx}` / `Monster {idx}` / `Npc {idx}`，`:930-955`）
+    pub fn fallback_name(self, idx: &str) -> String {
+        match self {
+            QuestLinkKind::Monster => format!("Monster {idx}"),
+            QuestLinkKind::Npc => format!("Npc {idx}"),
+            QuestLinkKind::Item => format!("Item {idx}"),
+        }
+    }
+}
+
+/// #2810 单元②：一条链接标记（原文范围 + 类型 + 下标 + 可选内嵌名）
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct QuestLink {
+    pub kind: QuestLinkKind,
+    /// C# 捕获组 `idx`（字符串形态，原样参与名字回退拼接）
+    pub index: String,
+    /// C# 捕获组 `name`（`[ITEM:1|力量戒指]` 的内嵌名，优先于查表）
+    pub provided_name: Option<String>,
+    /// 在传入文本中的字节范围（含标记本身）
+    pub range: std::ops::Range<usize>,
+}
+
+/// #2810 单元②：扫描一行里的链接标记——三条 C# 正则的等价手写扫描（大小写不敏感）：
+/// `[KIND:idx(|name)]` 与 `<$KIND:idx>`（KIND ∈ MONSTER/NPC/ITEM，`NPCDialogs.cs:24-26`）。
+pub fn quest_line_links(line: &str) -> Vec<QuestLink> {
+    fn kind_of(s: &str) -> Option<QuestLinkKind> {
+        let up = s.to_ascii_uppercase();
+        match up.as_str() {
+            "MONSTER" => Some(QuestLinkKind::Monster),
+            "NPC" => Some(QuestLinkKind::Npc),
+            "ITEM" => Some(QuestLinkKind::Item),
+            _ => None,
+        }
+    }
+    let b = line.as_bytes();
+    let mut out = Vec::new();
+    let mut i = 0usize;
+    while i < b.len() {
+        // 形式 1：`[KIND:idx(|name)]`
+        if b[i] == b'[' {
+            let mut j = i + 1;
+            while j < b.len() && b[j] != b':' && b[j] != b']' && (j - i) < 12 {
+                j += 1;
+            }
+            if j < b.len() && b[j] == b':' {
+                if let Some(kind) = kind_of(&line[i + 1..j]) {
+                    let mut k = j + 1;
+                    let dstart = k;
+                    while k < b.len() && b[k].is_ascii_digit() {
+                        k += 1;
+                    }
+                    if k > dstart {
+                        let idx = line[dstart..k].to_string();
+                        let mut provided = None;
+                        if k < b.len() && b[k] == b'|' {
+                            let ns = k + 1;
+                            let mut ne = ns;
+                            while ne < b.len() && b[ne] != b']' {
+                                ne += 1;
+                            }
+                            provided = Some(line[ns..ne].to_string());
+                            k = ne;
+                        }
+                        if k < b.len() && b[k] == b']' {
+                            out.push(QuestLink {
+                                kind,
+                                index: idx,
+                                provided_name: provided,
+                                range: i..k + 1,
+                            });
+                            i = k + 1;
+                            continue;
+                        }
+                    }
+                }
+            }
+        }
+        // 形式 2：`<$KIND:idx>`
+        if b[i] == b'<' && i + 1 < b.len() && b[i + 1] == b'$' {
+            let mut j = i + 2;
+            while j < b.len() && b[j] != b':' && b[j] != b'>' && (j - i) < 13 {
+                j += 1;
+            }
+            if j < b.len() && b[j] == b':' {
+                if let Some(kind) = kind_of(&line[i + 2..j]) {
+                    let ds = j + 1;
+                    let mut k = ds;
+                    while k < b.len() && b[k].is_ascii_digit() {
+                        k += 1;
+                    }
+                    if k > ds && k < b.len() && b[k] == b'>' {
+                        out.push(QuestLink {
+                            kind,
+                            index: line[ds..k].to_string(),
+                            provided_name: None,
+                            range: i..k + 1,
+                        });
+                        i = k + 1;
+                        continue;
+                    }
+                }
+            }
+        }
+        i += 1;
+    }
+    out
+}
+
+/// #2810 单元②：把链接标记替换成显示名 →（显示文本, [(显示名在其中的字节偏移, 链接)]）。
+/// `name_of` 由调用方按 C# `GetDisplayNameForLink`（`:920-955`）解析：内嵌名 > 查表 > 回退字面量。
+pub fn quest_line_with_links(
+    line: &str,
+    mut name_of: impl FnMut(&QuestLink) -> String,
+) -> (String, Vec<(usize, QuestLink)>) {
+    let links = quest_line_links(line);
+    if links.is_empty() {
+        return (line.to_string(), Vec::new());
+    }
+    let mut out = String::with_capacity(line.len());
+    let mut placed = Vec::new();
+    let mut cursor = 0usize;
+    for link in links {
+        out.push_str(&line[cursor..link.range.start]);
+        let name = name_of(&link);
+        placed.push((out.len(), link.clone()));
+        out.push_str(&name);
+        cursor = link.range.end;
+    }
+    out.push_str(&line[cursor..]);
+    (out, placed)
+}
+
+/// #2810 单元②：C# `GetDisplayNameForLink`（`NPCDialogs.cs:920-955`）——
+/// 内嵌名（`[ITEM:1|力量戒指]`）优先；否则查表；查不到回退 `Item {idx}` / `Monster {idx}` / `Npc {idx}`。
+///
+/// 查表来源（本端无本地物品库、也无 C# 的按需 `RequestItemInfo/RequestMonsterInfo`）：
+/// 物品 → `QuestCatalog.item_names`（`UserInformation` 下发的物品名表）；
+/// 怪物/NPC → `InfoCache`（#279 `NewMonsterInfo/NewNPCInfo` 缓存）。缺失回退已记入 §7。
+pub fn quest_link_display_name(
+    link: &QuestLink,
+    catalog: &QuestCatalog,
+    info: &crate::game::object_state::InfoCache,
+) -> String {
+    if let Some(n) = link.provided_name.as_deref() {
+        if !n.is_empty() {
+            return n.to_string();
+        }
+    }
+    let idx = link.index.parse::<i32>().ok();
+    let looked_up = match link.kind {
+        QuestLinkKind::Monster => idx.and_then(|i| info.monsters.get(&i)).map(|m| {
+            if m.game_name.is_empty() {
+                m.name.clone()
+            } else {
+                m.game_name.clone()
+            }
+        }),
+        QuestLinkKind::Npc => idx
+            .and_then(|i| info.npcs.get(&(i.max(0) as u32)))
+            .map(|n| n.name.clone()),
+        QuestLinkKind::Item => idx.and_then(|i| catalog.item_names.get(&i).cloned()),
+    };
+    looked_up
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| link.kind.fallback_name(&link.index))
+}
+
+/// #2810 单元②：链接悬停提示内容（C# `NPCDialog.ShowTooltip`，`NPCDialogs.cs:608-700+`）。
+/// 本端按缓存可得的字段给最小对齐集：怪物给等级/经验，物品与 NPC 给名字（C# 的物品走完整
+/// `ItemLabel`、怪物另画形象图；本端缺按需请求与本地物品库，差异记入 §7）。
+pub fn quest_link_tooltip_lines(
+    kind: QuestLinkKind,
+    index: &str,
+    info: &crate::game::object_state::InfoCache,
+) -> Vec<String> {
+    let mut lines = Vec::new();
+    if kind == QuestLinkKind::Monster {
+        if let Some(m) = index
+            .parse::<i32>()
+            .ok()
+            .and_then(|i| info.monsters.get(&i))
+        {
+            if m.level > 0 {
+                lines.push(format!("等级: {}", m.level));
+            }
+            if m.experience > 0 {
+                lines.push(format!("经验: {}", m.experience));
+            }
+        }
+    }
+    lines
+}
+
 /// #2801 单元②：消息区标题行圆点（C# `QuestMessage_AfterDraw` 的 `Prguse[919]`，`:1066-1080`）
 #[derive(Component)]
 pub struct QuestDetailBullet(pub usize);
@@ -407,6 +617,12 @@ pub struct QuestDialogAccess<'w> {
 pub struct QuestDetailExtras<'w, 's> {
     /// 滚轮（C# `QuestMessage_MouseWheel`，`:1085-1100`）
     pub wheels: MessageReader<'w, 's, MouseWheel>,
+    /// #2810 单元②：怪物/NPC 信息缓存（链接换名 + 提示内容，C# `MonsterInfoList/NPCInfoList`）
+    pub info: Res<'w, crate::game::object_state::InfoCache>,
+    /// #2810 单元②：链接悬停提示（C# `NPCDialog.ShowTooltipForLink`，`NPCDialogs.cs:957-967`）
+    pub tooltip: ResMut<'w, crate::ui::tooltip::TooltipState>,
+    /// #2810 单元②：光标探针（自动化环境 winit 收不到真实光标，悬停命中走探针）
+    pub probe: Res<'w, crate::control::CursorProbe>,
     /// 彩色叠加段（C# `NewColour` 的叠加 `MirLabel`）
     pub segments: Query<
         'w,
@@ -638,6 +854,8 @@ pub struct QuestLineSegment {
     pub color_name: String,
     /// 段首在**去标记后整行**中的字节偏移（叠加标签定位用）
     pub byte_offset: usize,
+    /// #2810 单元②：标记在**原行**中的字节范围（与链接标记合并排序用，C# `OrderBy(match.Index)`）
+    pub range: std::ops::Range<usize>,
 }
 
 /// #2810 单元①：一行文本的标记解析 → （去标记后的整行文本, 彩色段列表）。
@@ -658,10 +876,15 @@ pub fn quest_line_markup(line: &str) -> (String, Vec<QuestLineSegment>) {
                     if close > i + 1 {
                         let text: String = chars[i + 1..slash].iter().collect();
                         let color_name: String = chars[slash + 1..close].iter().collect();
+                        // 原行字节范围：char 下标 → 字节下标（多字节字符下必须按字节算）
+                        let byte_at = |ci: usize| -> usize {
+                            chars[..ci].iter().map(|c| c.len_utf8()).sum::<usize>()
+                        };
                         segs.push(QuestLineSegment {
                             byte_offset: out.len(),
                             text: text.clone(),
                             color_name,
+                            range: byte_at(i)..byte_at(close + 1),
                         });
                         out.push_str(&text);
                         i = close + 1;
@@ -1270,7 +1493,11 @@ fn quest_detail_ui_system(
         .single()
         .map(|n| crate::ui::theme::node_origin(n, quest_detail_origin()))
         .unwrap_or_else(|_| quest_detail_origin());
-    let cursor = windows.single().ok().and_then(|w| w.cursor_position());
+    // #2810 单元②：光标优先取探针（自动化环境 winit 收不到真实光标，见 #2767）
+    let cursor = crate::control::resolve_cursor(
+        extras.probe.pos,
+        windows.single().ok().and_then(|w| w.cursor_position()),
+    );
 
     // ---- 滚轮（C# `QuestMessage_MouseWheel`，`:1082-1098`；仅光标在消息区内生效）----
     let mut wheel_count = 0i32;
@@ -1322,16 +1549,18 @@ fn quest_detail_ui_system(
                 .filter(|i| quest_line_is_title(*i, &all[*i]))
                 .count() as f32
     };
-    // #2810 单元①：可见行的（槽位, 行原点, 字号, 去标记整行, 彩色段）——供叠加段定位
-    let mut line_spans: Vec<(usize, f32, f32, f32, String, Vec<QuestLineSegment>)> = Vec::new();
+    // #2810 单元①②：可见行的（槽位, 行原点, 字号, 显示文本, 叠加部件）——供叠加段定位
+    let mut line_spans: Vec<(usize, f32, f32, f32, String, Vec<QuestOverlayPart>)> = Vec::new();
     for (mut text, mut color, mut font, mut node, line) in &mut lines {
         let idx = top + line.0;
-        let (s, segs, is_title, accent) = if idx < all.len() {
+        let (s, parts, is_title, accent) = if idx < all.len() {
             // 标题判定用**原文**（C# `NewText` 拿 `lines[i]` 与四个标题常量比对），
-            // 显示文本走 `{文本/颜色}` 去标记（`NewColour` 的彩色段由叠加池渲染）
+            // 显示文本走 `{文本/颜色}` 去标记 + 链接换名（叠加池渲染彩色段与链接）
             let is_title = quest_line_is_title(idx, &all[idx]);
-            let (s, segs) = quest_line_markup(&all[idx]);
-            (s, segs, is_title, idx == 0)
+            let (s, parts) = quest_line_overlays(&all[idx], |link| {
+                quest_link_display_name(link, &catalog, &extras.info)
+            });
+            (s, parts, is_title, idx == 0)
         } else {
             (String::new(), Vec::new(), false, false)
         };
@@ -1360,37 +1589,82 @@ fn quest_detail_ui_system(
         if color.0 != c {
             color.0 = c;
         }
-        line_spans.push((line.0, left, top_y, size, text.0.clone(), segs));
+        line_spans.push((line.0, left, top_y, size, text.0.clone(), parts));
     }
 
-    // ---- #2810 单元①：彩色叠加段（C# `NewColour`，`:1336-1353`）----
-    // C# 对每个 `{文本/颜色}` 段在原位叠加一个彩色 `MirLabel`；本端用固定池 + 逐帧显隐/落位。
+    // ---- #2810 单元①②：叠加部件（彩色段 `NewColour` + 链接 `NewLink`）----
+    // C# 对每个 `{文本/颜色}` 段叠加彩色 `MirLabel`（`:1336-1353`），对每个链接叠加青色
+    // `MirLabel` 并接 MouseEnter/Leave（`:1355-1382`）。本端用固定池 + 逐帧显隐/落位；
     // 颜色名走 `Color.FromName` 子集（`text_markup::known_color`）：未知名 C# 取到的是
     // 透明色（叠加层不可见），此处直接隐藏——基础白字已含该词，视觉等价。
+    let mut hovered_link: Option<(String, Vec<String>, f32, f32)> = None;
     for (mut text, mut color, mut font, mut node, mut vis, seg_marker) in &mut extras.segments {
-        let Some((_, left, top_y, size, stripped, segs)) = line_spans
+        let Some((_, left, top_y, size, stripped, parts)) = line_spans
             .iter()
             .find(|(slot, ..)| *slot == seg_marker.slot)
         else {
             *vis = Visibility::Hidden;
             continue;
         };
-        let Some(seg) = segs.get(seg_marker.seg) else {
+        let Some(part) = parts.get(seg_marker.seg) else {
             *vis = Visibility::Hidden;
             continue;
         };
-        let Some(col) = crate::ui::text_markup::known_color(&seg.color_name) else {
-            *vis = Visibility::Hidden;
-            continue;
+        let (part_text, part_offset, col) = match part {
+            QuestOverlayPart::Colour {
+                text,
+                color_name,
+                offset,
+            } => {
+                let Some(c) = crate::ui::text_markup::known_color(color_name) else {
+                    *vis = Visibility::Hidden;
+                    continue;
+                };
+                (text.clone(), *offset, c)
+            }
+            QuestOverlayPart::Link {
+                text,
+                kind,
+                index,
+                offset,
+            } => {
+                // 命中判定用与渲染同一套度量（绝对坐标 = 面板原点 + 行内位置）
+                let prefix = stripped.get(..*offset).unwrap_or("");
+                let (row, x) = quest_segment_offset(prefix, *size, QUEST_MSG_W);
+                let (x0, y0) = (
+                    panel_origin.0 + left + x,
+                    panel_origin.1 + top_y + row as f32 * (*size * 1.2),
+                );
+                let (x1, y1) = (
+                    x0 + crate::ui::text_markup::est_text_width(text, *size),
+                    y0 + *size * 1.2,
+                );
+                let hovered = cursor
+                    .map(|c| c.x >= x0 && c.x <= x1 && c.y >= y0 && c.y <= y1)
+                    .unwrap_or(false);
+                if hovered {
+                    // C# `temp.MouseEnter`：转橙 + `ShowTooltipForLink`（`:1368-1376`）
+                    hovered_link = Some((
+                        text.clone(),
+                        quest_link_tooltip_lines(*kind, index, &extras.info),
+                        x0,
+                        y1,
+                    ));
+                    (text.clone(), *offset, Color::srgb(1.0, 0.65, 0.0))
+                } else {
+                    // C# `NewLink` 初值 `ForeColour = Color.Cyan`（`:1360-1366`）
+                    (text.clone(), *offset, Color::srgb(0.0, 1.0, 1.0))
+                }
+            }
         };
-        let prefix = stripped.get(..seg.byte_offset).unwrap_or("");
+        let prefix = stripped.get(..part_offset).unwrap_or("");
         let (row, x) = quest_segment_offset(prefix, *size, QUEST_MSG_W);
         node.left = Val::Px(left + x);
         // 折行后的行高：bevy 文本默认行高 = 字号 × 1.2（与基础标签同一排版参数）
         node.top = Val::Px(top_y + row as f32 * (*size * 1.2));
         font.font_size = FontSize::Px(*size);
-        if text.0 != seg.text {
-            text.0 = seg.text.clone();
+        if text.0 != part_text {
+            text.0 = part_text;
         }
         if color.0 != col {
             color.0 = col;
@@ -1398,6 +1672,13 @@ fn quest_detail_ui_system(
         if *vis != Visibility::Visible {
             *vis = Visibility::Visible;
         }
+    }
+    // C# `HideTooltipForLink`（`NPCDialogs.cs:963-967`）：离开链接即清提示
+    match hovered_link {
+        Some((title, lines, x, y)) => extras.tooltip.update(13, true, title, lines, x, y),
+        None => extras
+            .tooltip
+            .update(13, false, String::new(), Vec::new(), 0.0, 0.0),
     }
 
     // ---- 标题圆点（C# `QuestMessage_AfterDraw`，`:1066-1080`）----
@@ -2246,6 +2527,10 @@ mod tests {
         world.insert_resource(crate::game::dialogs::npc::NpcDialogState::default());
         world.insert_resource(crate::network::NetConnection::default());
         world.init_resource::<bevy::ecs::message::Messages<MouseWheel>>();
+        // #2810 单元②：叠加段/链接悬停所需资源（与 QuestDetailExtras 字段一一对应）
+        world.insert_resource(crate::game::object_state::InfoCache::default());
+        world.insert_resource(crate::ui::tooltip::TooltipState::default());
+        world.insert_resource(crate::control::CursorProbe { pos: None });
         let root = world
             .spawn((
                 QuestDetailWidget,
@@ -2521,6 +2806,133 @@ mod tests {
         assert_eq!(segs[0].byte_offset, 1);
     }
 
+    /// #2810 单元②：链接标记扫描（C# `NPCDialogs.cs:24-26` 三条正则的等价手写扫描）
+    #[test]
+    fn quest_line_links_parse_csharp_forms() {
+        // 两种写法 + 内嵌名
+        let l = quest_line_links("去[ITEM:1001|力量戒指]看看");
+        assert_eq!(l.len(), 1);
+        assert_eq!(l[0].kind, QuestLinkKind::Item);
+        assert_eq!(l[0].index, "1001");
+        assert_eq!(l[0].provided_name.as_deref(), Some("力量戒指"));
+        assert_eq!(
+            &"去[ITEM:1001|力量戒指]看看"[l[0].range.clone()],
+            "[ITEM:1001|力量戒指]"
+        );
+
+        let l = quest_line_links("<$NPC:110>");
+        assert_eq!(l.len(), 1);
+        assert_eq!(l[0].kind, QuestLinkKind::Npc);
+        assert_eq!(l[0].index, "110");
+        assert_eq!(l[0].provided_name, None);
+
+        // 大小写不敏感（C# `RegexOptions.IgnoreCase`）
+        assert_eq!(
+            quest_line_links("[monster:101]")[0].kind,
+            QuestLinkKind::Monster
+        );
+        assert_eq!(quest_line_links("<$item:5>")[0].kind, QuestLinkKind::Item);
+
+        // 非标记 / 非法形式原样（不产生链接）
+        for s in [
+            "[ITEM:]",
+            "[ITEM:abc]",
+            "[FOO:1]",
+            "[ITEM:1", // 缺 `]`
+            "<$ITEM:>",
+            "<ITEM:1>", // 缺 `$`
+            "普通文本",
+        ] {
+            assert!(quest_line_links(s).is_empty(), "{s} 不应解析出链接");
+        }
+
+        // 多链接：按出现顺序 + 各自范围
+        let l = quest_line_links("[ITEM:1]与<$MONSTER:2>");
+        assert_eq!(l.len(), 2);
+        assert_eq!(l[0].range.start, 0);
+        assert_eq!(l[1].kind, QuestLinkKind::Monster);
+        assert!(l[0].range.end <= l[1].range.start);
+    }
+
+    /// #2810 单元②：彩色段与链接按 C# `OrderBy(match.Index)` 合并处理，
+    /// 部件偏移必须是**最终显示文本**内的字节偏移（颜色段在链接之后时易错）
+    #[test]
+    fn quest_line_overlays_merges_marks_in_order() {
+        let (text, parts) =
+            quest_line_overlays("前{红字/Red}[ITEM:7|剑]后{蓝字/Blue}", |l| {
+                format!("[{}]", l.kind.fallback_name(&l.index))
+            });
+        assert_eq!(text, "前红字[Item 7]后蓝字");
+        assert_eq!(parts.len(), 3);
+        let QuestOverlayPart::Colour {
+            text: t0,
+            color_name,
+            offset,
+        } = &parts[0]
+        else {
+            panic!("第 1 个应为彩色段");
+        };
+        assert_eq!(
+            (t0.as_str(), color_name.as_str(), *offset),
+            ("红字", "Red", "前".len())
+        );
+        let QuestOverlayPart::Link {
+            text: t1,
+            index,
+            offset,
+            ..
+        } = &parts[1]
+        else {
+            panic!("第 2 个应为链接");
+        };
+        assert_eq!(
+            (t1.as_str(), index.as_str(), *offset),
+            ("[Item 7]", "7", "前红字".len())
+        );
+        let QuestOverlayPart::Colour { offset: o2, .. } = &parts[2] else {
+            panic!("第 3 个应为彩色段");
+        };
+        assert_eq!(
+            *o2,
+            "前红字[Item 7]后".len(),
+            "链接之后的彩色段偏移要含链接名长度"
+        );
+    }
+
+    /// #2810 单元②：链接显示名（C# `GetDisplayNameForLink` `NPCDialogs.cs:920-955`）
+    /// —— 内嵌名 > 查表 > 回退字面量
+    #[test]
+    fn quest_link_display_name_prefers_provided_then_cache() {
+        let mut catalog = QuestCatalog::default();
+        catalog.item_names.insert(1001, "力量戒指".to_string());
+        let info = crate::game::object_state::InfoCache::default();
+
+        let link = |s: &str| quest_line_links(s).remove(0);
+        // 内嵌名优先（即便表里有名字）
+        assert_eq!(
+            quest_link_display_name(&link("[ITEM:1001|内嵌名]"), &catalog, &info),
+            "内嵌名"
+        );
+        // 查表
+        assert_eq!(
+            quest_link_display_name(&link("[ITEM:1001]"), &catalog, &info),
+            "力量戒指"
+        );
+        // 回退字面量（C# `Item {idx}` 等）
+        assert_eq!(
+            quest_link_display_name(&link("[ITEM:9999]"), &catalog, &info),
+            "Item 9999"
+        );
+        assert_eq!(
+            quest_link_display_name(&link("<$MONSTER:101>"), &catalog, &info),
+            "Monster 101"
+        );
+        assert_eq!(
+            quest_link_display_name(&link("[NPC:110]"), &catalog, &info),
+            "Npc 110"
+        );
+    }
+
     /// #2810 单元①：彩色段折行落位（前缀宽 = 同字体同尺寸的宋体双宽度量）
     #[test]
     fn quest_segment_offset_wraps_like_text() {
@@ -2581,6 +2993,10 @@ mod tests {
         world.insert_resource(crate::game::dialogs::npc::NpcDialogState::default());
         world.insert_resource(crate::network::NetConnection::default());
         world.init_resource::<bevy::ecs::message::Messages<MouseWheel>>();
+        // #2810 单元②：叠加段/链接悬停所需资源（与 QuestDetailExtras 字段一一对应）
+        world.insert_resource(crate::game::object_state::InfoCache::default());
+        world.insert_resource(crate::ui::tooltip::TooltipState::default());
+        world.insert_resource(crate::control::CursorProbe { pos: None });
         world.spawn((
             QuestDetailWidget,
             Node {
@@ -2656,6 +3072,112 @@ mod tests {
         );
     }
 
+    /// #2810 单元②：链接系统级渲染——常色青、探针命中转橙 + 弹提示（C# `NewLink` `:1355-1382`）
+    #[test]
+    fn quest_detail_link_hover_turns_orange_and_shows_tooltip() {
+        fn setup(probe: Option<Vec2>) -> (World, Vec<Entity>) {
+            let mut world = World::new();
+            let mut mgr = DialogManager::default();
+            mgr.open(DialogKind::QuestDetail);
+            world.insert_resource(mgr);
+            world.insert_resource(QuestDetailState {
+                quest_id: Some(1),
+                top_line: 0,
+                ..Default::default()
+            });
+            let mut q = info(1, 1, RequiredClass::from_bits_truncate(0));
+            q.name = "任务名".to_string();
+            q.description = vec!["看[ITEM:1001|剑]呀".to_string()];
+            q.task_description = vec![];
+            q.return_description = vec![];
+            q.completion_description = vec![];
+            q.time_limit_in_seconds = 0;
+            world.insert_resource(QuestCatalog {
+                infos: vec![q],
+                ..Default::default()
+            });
+            world.insert_resource(QuestLogState::default());
+            world.insert_resource(crate::game::dialogs::npc::NpcDialogState::default());
+            world.insert_resource(crate::network::NetConnection::default());
+            world.init_resource::<bevy::ecs::message::Messages<MouseWheel>>();
+            world.insert_resource(crate::game::object_state::InfoCache::default());
+            world.insert_resource(crate::ui::tooltip::TooltipState::default());
+            world.insert_resource(crate::control::CursorProbe { pos: probe });
+            world.spawn((
+                QuestDetailWidget,
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: Val::Px(532.0),
+                    top: Val::Px(60.0),
+                    ..default()
+                },
+            ));
+            for i in 0..QUEST_MSG_LINE_COUNT {
+                world.spawn((
+                    QuestDetailLine(i),
+                    Node::default(),
+                    Text::new(""),
+                    TextColor(Color::WHITE),
+                    TextFont::default(),
+                ));
+            }
+            // 行槽 1（描述首行）的段池
+            let segs: Vec<Entity> = (0..2)
+                .map(|s| {
+                    world
+                        .spawn((
+                            QuestDetailSegment { slot: 1, seg: s },
+                            Node::default(),
+                            Text::new(""),
+                            TextColor(Color::WHITE),
+                            TextFont::default(),
+                            Visibility::Hidden,
+                        ))
+                        .id()
+                })
+                .collect();
+            (world, segs)
+        }
+
+        // 探针不在链接上 → 青色（C# `Color.Cyan`）、无提示
+        let (mut world, segs) = setup(None);
+        world
+            .run_system_once(quest_detail_ui_system)
+            .expect("消息区系统应运行");
+        assert_eq!(
+            world.get::<Text>(segs[0]).unwrap().0,
+            "剑",
+            "链接换成内嵌名"
+        );
+        assert_eq!(
+            world.get::<TextColor>(segs[0]).unwrap().0,
+            Color::srgb(0.0, 1.0, 1.0),
+            "未悬停 → 青色"
+        );
+        assert!(!world.resource::<crate::ui::tooltip::TooltipState>().visible);
+
+        // 探针落在链接矩形内 → 橙色 + 提示（标题 = 链接名）
+        // 行槽 1 原点 = 面板(532,60) + (10, 35+15) + 前缀「看」宽 12 → (554,110)，链接框高 ≈ 12*1.2
+        let (mut world, segs) = setup(Some(Vec2::new(558.0, 116.0)));
+        world
+            .run_system_once(quest_detail_ui_system)
+            .expect("消息区系统应运行");
+        assert_eq!(
+            world.get::<TextColor>(segs[0]).unwrap().0,
+            Color::srgb(1.0, 0.65, 0.0),
+            "悬停 → 橙（C# `temp.ForeColour = Color.Orange`）"
+        );
+        let tip = world.resource::<crate::ui::tooltip::TooltipState>();
+        assert!(tip.visible, "悬停链接应弹提示");
+        assert_eq!(tip.source, 13, "归属方 = 任务链接（13）");
+        assert_eq!(tip.title, "剑");
+        assert_eq!(
+            tip.lines,
+            Vec::<String>::new(),
+            "物品链接本端只有名字（§7 记录）"
+        );
+    }
+
     /// #2801 单元②：消息区渲染落位——行位（行距 15 + 标题行额外 5 + 标题缩进 15）、
     /// 标题圆点、位置条显隐，逐条对 C# `NewText`（`:1260-1268`）/`QuestMessage_AfterDraw`
     /// （`:1066-1080`）/`UpdatePositionBar`（`:1120-1140`）
@@ -2685,6 +3207,10 @@ mod tests {
         world.insert_resource(crate::game::dialogs::npc::NpcDialogState::default());
         world.insert_resource(crate::network::NetConnection::default());
         world.init_resource::<bevy::ecs::message::Messages<MouseWheel>>();
+        // #2810 单元②：叠加段/链接悬停所需资源（与 QuestDetailExtras 字段一一对应）
+        world.insert_resource(crate::game::object_state::InfoCache::default());
+        world.insert_resource(crate::ui::tooltip::TooltipState::default());
+        world.insert_resource(crate::control::CursorProbe { pos: None });
 
         // 根面板（提供 `panel_origin`，滚轮命中区用）
         world.spawn((
@@ -2882,6 +3408,10 @@ mod tests {
         world.insert_resource(QuestCatalog::default());
         world.insert_resource(crate::game::dialogs::npc::NpcDialogState::default());
         world.init_resource::<bevy::ecs::message::Messages<MouseWheel>>();
+        // #2810 单元②：叠加段/链接悬停所需资源（与 QuestDetailExtras 字段一一对应）
+        world.insert_resource(crate::game::object_state::InfoCache::default());
+        world.insert_resource(crate::ui::tooltip::TooltipState::default());
+        world.insert_resource(crate::control::CursorProbe { pos: None });
         world.insert_resource(ButtonInput::<MouseButton>::default());
         let (tx, rx) = crossbeam_channel::unbounded::<Vec<u8>>();
         world.insert_resource(crate::network::NetConnection {
@@ -3493,4 +4023,83 @@ mod tests {
             vec![DiaryRow::Header(0), DiaryRow::Header(1), DiaryRow::Quest(1)]
         );
     }
+}
+/// #2810 单元②：一行里要叠加渲染的部件（彩色段 / 链接）——偏移均为**最终显示文本**内的字节偏移
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum QuestOverlayPart {
+    /// `{文本/颜色}` 段（C# `NewColour`，`QuestDialogs.cs:1336-1353`）
+    Colour {
+        text: String,
+        color_name: String,
+        offset: usize,
+    },
+    /// 链接（C# `NewLink`，`:1355-1382`；青色 + 悬停橙 + tooltip）
+    Link {
+        text: String,
+        kind: QuestLinkKind,
+        index: String,
+        offset: usize,
+    },
+}
+
+/// #2810 单元②：按 C# `NewText` 的 `matchList.OrderBy(o => o.Index)`（`:1326-1329`）顺序，
+/// 把彩色段与链接标记一次性处理为「最终显示文本 + 叠加部件」。
+/// `link_name` 由调用方按 C# `GetDisplayNameForLink`（`NPCDialogs.cs:920-955`）解析。
+pub fn quest_line_overlays(
+    line: &str,
+    mut link_name: impl FnMut(&QuestLink) -> String,
+) -> (String, Vec<QuestOverlayPart>) {
+    #[derive(Clone)]
+    enum Mark {
+        Colour(QuestLineSegment),
+        Link(QuestLink),
+    }
+    let (_, colours) = quest_line_markup(line);
+    let mut marks: Vec<Mark> = colours.into_iter().map(Mark::Colour).collect();
+    marks.extend(quest_line_links(line).into_iter().map(Mark::Link));
+    if marks.is_empty() {
+        return (line.to_string(), Vec::new());
+    }
+    marks.sort_by_key(|m| match m {
+        Mark::Colour(c) => c.range.start,
+        Mark::Link(l) => l.range.start,
+    });
+    let mut out = String::with_capacity(line.len());
+    let mut parts = Vec::new();
+    let mut cursor = 0usize;
+    for mark in marks {
+        let (start, end) = match &mark {
+            Mark::Colour(c) => (c.range.start, c.range.end),
+            Mark::Link(l) => (l.range.start, l.range.end),
+        };
+        if start < cursor {
+            continue; // 防御：标记不重叠（C# 同）
+        }
+        out.push_str(&line[cursor..start]);
+        match mark {
+            Mark::Colour(c) => {
+                let offset = out.len();
+                out.push_str(&c.text);
+                parts.push(QuestOverlayPart::Colour {
+                    text: c.text,
+                    color_name: c.color_name,
+                    offset,
+                });
+            }
+            Mark::Link(l) => {
+                let name = link_name(&l);
+                let offset = out.len();
+                out.push_str(&name);
+                parts.push(QuestOverlayPart::Link {
+                    text: name,
+                    kind: l.kind,
+                    index: l.index,
+                    offset,
+                });
+            }
+        }
+        cursor = end;
+    }
+    out.push_str(&line[cursor..]);
+    (out, parts)
 }
