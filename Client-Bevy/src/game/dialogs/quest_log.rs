@@ -300,6 +300,19 @@ pub struct QuestDetailClose;
 #[derive(Component)]
 pub struct QuestDetailLine(pub usize);
 
+/// #2810 单元①：消息区行的**彩色叠加段**（C# `NewColour` 每段一个叠加 `MirLabel`，`:1336-1353`）。
+/// 每行一个固定池（`QUEST_MSG_MAX_SEGMENTS`），按解析结果显隐/落位。
+#[derive(Component, Clone, Copy, PartialEq, Eq)]
+pub struct QuestDetailSegment {
+    /// 所属行槽（`QuestDetailLine` 的下标）
+    pub slot: usize,
+    /// 行内第几个彩色段（超出池容量或本行无段则隐藏）
+    pub seg: usize,
+}
+
+/// #2810 单元①：每行叠加段池容量（C# 不限段数，实际脚本行 1-2 段；池化避免每帧增删实体）
+pub const QUEST_MSG_MAX_SEGMENTS: usize = 6;
+
 /// #2801 单元②：消息区标题行圆点（C# `QuestMessage_AfterDraw` 的 `Prguse[919]`，`:1066-1080`）
 #[derive(Component)]
 pub struct QuestDetailBullet(pub usize);
@@ -385,6 +398,34 @@ pub struct QuestDialogAccess<'w> {
     pub mgr: ResMut<'w, DialogManager>,
     /// 详情窗当前任务（单元②渲染用；本单元承载"展示哪个任务"的事实源）
     pub detail: ResMut<'w, QuestDetailState>,
+}
+
+/// #2810 单元①：详情窗消息区的「滚轮 + 彩色叠加段」打包参数。
+/// `quest_detail_ui_system` 已到 Bevy 的 16 参上限（见 `QuestDialogAccess` 注释），
+/// 新增叠加段查询必须与既有参数合并。
+#[derive(SystemParam)]
+pub struct QuestDetailExtras<'w, 's> {
+    /// 滚轮（C# `QuestMessage_MouseWheel`，`:1085-1100`）
+    pub wheels: MessageReader<'w, 's, MouseWheel>,
+    /// 彩色叠加段（C# `NewColour` 的叠加 `MirLabel`）
+    pub segments: Query<
+        'w,
+        's,
+        (
+            &'static mut Text,
+            &'static mut TextColor,
+            &'static mut TextFont,
+            &'static mut Node,
+            &'static mut Visibility,
+            &'static QuestDetailSegment,
+        ),
+        (
+            Without<QuestDetailWidget>,
+            Without<QuestDetailLine>,
+            Without<QuestDetailBullet>,
+            Without<QuestDetailPositionBar>,
+        ),
+    >,
 }
 
 pub struct QuestLogPlugin;
@@ -588,15 +629,26 @@ pub fn quest_line_is_title(i: usize, line: &str) -> bool {
         || line == QUEST_TIME_LIMIT_TITLE
 }
 
-/// #2801 单元②：C# `NewText`（`:1276-1333`）对行文本的标记处理中**已移植的部分**——
-/// `{文本/颜色}` → `文本`（C# `:1321-1323`：取 `{` 后第一个 `/` 之前的内容，颜色名丢弃）。
+/// #2810 单元①：C# `QuestMessage` 的彩色段（`NewColour` 叠加对象，`QuestDialogs.cs:1336-1353`）
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct QuestLineSegment {
+    /// 段文本（`{` 后第一个 `/` 之前的内容，C# `:1321-1323` 的 `values[0]`）
+    pub text: String,
+    /// 颜色名（`/` 与 `}` 之间，交给 C# `Color.FromName(values[1])`）
+    pub color_name: String,
+    /// 段首在**去标记后整行**中的字节偏移（叠加标签定位用）
+    pub byte_offset: usize,
+}
+
+/// #2810 单元①：一行文本的标记解析 → （去标记后的整行文本, 彩色段列表）。
 ///
-/// 未移植（本单元不做，附 #2801）：`NewColour` 把取出的彩色文本叠画回原位置
-/// （`:1336-1353`）、`NewLink` 链接悬停提示（`:1355-1382`）、`NPCDialog` 的
-/// 怪物/NPC/物品链接名替换（`:1281-1319`）——含这类标记的行本端按原文显示。
-pub fn quest_line_display_text(line: &str) -> String {
+/// 标记语法逐字对齐 C# `NewText` 的 `private static readonly Regex C = new Regex(@"{(.*?/.*?)}")`
+/// （`QuestDialogs.cs:1008`）：`{` 之后遇的第一个 `/` 切文本、其后再遇 `}` 收尾；
+/// 段文本非空（`close > i + 1`）才成立——与 #2801 的 `quest_line_display_text` 同判据，两者现共用本函数。
+pub fn quest_line_markup(line: &str) -> (String, Vec<QuestLineSegment>) {
     let chars: Vec<char> = line.chars().collect();
     let mut out = String::with_capacity(line.len());
+    let mut segs = Vec::new();
     let mut i = 0usize;
     while i < chars.len() {
         if chars[i] == '{' {
@@ -604,7 +656,14 @@ pub fn quest_line_display_text(line: &str) -> String {
             if let Some(slash) = (i + 1..chars.len()).find(|&j| chars[j] == '/') {
                 if let Some(close) = (slash + 1..chars.len()).find(|&j| chars[j] == '}') {
                     if close > i + 1 {
-                        out.extend(chars[i + 1..slash].iter());
+                        let text: String = chars[i + 1..slash].iter().collect();
+                        let color_name: String = chars[slash + 1..close].iter().collect();
+                        segs.push(QuestLineSegment {
+                            byte_offset: out.len(),
+                            text: text.clone(),
+                            color_name,
+                        });
+                        out.push_str(&text);
                         i = close + 1;
                         continue;
                     }
@@ -614,7 +673,30 @@ pub fn quest_line_display_text(line: &str) -> String {
         out.push(chars[i]);
         i += 1;
     }
-    out
+    (out, segs)
+}
+
+/// #2801 单元②（#2810 起共用）：去标记后的整行文本（`{文本/颜色}` → `文本`）
+pub fn quest_line_display_text(line: &str) -> String {
+    quest_line_markup(line).0
+}
+
+/// #2810 单元①：彩色段在**折行后**的落位 →（行序, 行内 x 偏移）。
+///
+/// C# 用 `TextRenderer.MeasureText(前缀 + " ", font, label.Size, TextBoxControl)` 量前缀
+/// （`QuestDialogs.cs:1331-1334`），再以 `宽度 - 10` 定位叠加标签；本端复用
+/// `text_markup::wrap_text` 的同一套贪心折行 + `est_text_width`（宋体双宽度量，与基础标签同字体同尺寸），
+/// 多行时按「段所在可视行 + 行内前缀宽」定位（C# 的盒子量宽在换行场景只返回盒宽，属近似，§7 记录）。
+pub fn quest_segment_offset(prefix: &str, size: f32, max_w: f32) -> (usize, f32) {
+    let lines = crate::ui::text_markup::wrap_text(prefix, size, max_w);
+    let row = lines.len().saturating_sub(1);
+    (
+        row,
+        crate::ui::text_markup::est_text_width(
+            lines.last().map(String::as_str).unwrap_or(""),
+            size,
+        ),
+    )
 }
 
 /// #2801 单元②：C# `QuestMessage.UpdateQuest` + `AdjustDescription`（`:1142-1213`）→ 行模型。
@@ -883,6 +965,11 @@ fn spawn_quest_detail(
                     ..default()
                 },
             ));
+            // #2810 单元①：彩色叠加段池（C# `NewColour` 的叠加 `MirLabel`，`:1336-1353`）
+            for s in 0..QUEST_MSG_MAX_SEGMENTS {
+                spawn_label(p, &cjk, "", ox, y, QUEST_MSG_FONT_PX, Color::WHITE, 10)
+                    .insert((QuestDetailSegment { slot: i, seg: s }, Visibility::Hidden));
+            }
         }
         // 标题行圆点 Prguse[919]（12x10；初始藏在面板上方，逐帧按标题行落位）
         if let Some(h) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 919) {
@@ -1100,7 +1187,8 @@ fn quest_detail_ui_system(
     >,
     close: Query<(Entity, &Interaction), With<QuestDetailClose>>,
     net: Res<NetConnection>,
-    mut wheels: MessageReader<MouseWheel>,
+    // #2810 单元①：滚轮 + 彩色叠加段查询打包（本系统参数已到 Bevy 上限 16）
+    mut extras: QuestDetailExtras,
     panels: Query<
         &Node,
         (
@@ -1186,7 +1274,7 @@ fn quest_detail_ui_system(
 
     // ---- 滚轮（C# `QuestMessage_MouseWheel`，`:1082-1098`；仅光标在消息区内生效）----
     let mut wheel_count = 0i32;
-    for ev in wheels.read() {
+    for ev in extras.wheels.read() {
         // C# `count = e.Delta / MouseWheelScrollDelta`：LineDelta 即行数，PixelDelta 按符号归一
         let c = match ev.unit {
             MouseScrollUnit::Line => ev.y.round() as i32,
@@ -1234,25 +1322,28 @@ fn quest_detail_ui_system(
                 .filter(|i| quest_line_is_title(*i, &all[*i]))
                 .count() as f32
     };
+    // #2810 单元①：可见行的（槽位, 行原点, 字号, 去标记整行, 彩色段）——供叠加段定位
+    let mut line_spans: Vec<(usize, f32, f32, f32, String, Vec<QuestLineSegment>)> = Vec::new();
     for (mut text, mut color, mut font, mut node, line) in &mut lines {
         let idx = top + line.0;
-        let (s, is_title, accent) = if idx < all.len() {
+        let (s, segs, is_title, accent) = if idx < all.len() {
             // 标题判定用**原文**（C# `NewText` 拿 `lines[i]` 与四个标题常量比对），
-            // 显示文本走 `{文本/颜色}` 去标记
+            // 显示文本走 `{文本/颜色}` 去标记（`NewColour` 的彩色段由叠加池渲染）
             let is_title = quest_line_is_title(idx, &all[idx]);
-            let s = quest_line_display_text(&all[idx]);
-            (s, is_title, idx == 0)
+            let (s, segs) = quest_line_markup(&all[idx]);
+            (s, segs, is_title, idx == 0)
         } else {
-            (String::new(), false, false)
+            (String::new(), Vec::new(), false, false)
         };
-        node.top = Val::Px(oy + line.0 as f32 * QUEST_MSG_LINE_DY + adjust_at(idx));
-        node.left = Val::Px(
-            ox + if is_title {
+        let top_y = oy + line.0 as f32 * QUEST_MSG_LINE_DY + adjust_at(idx);
+        node.top = Val::Px(top_y);
+        let left = ox
+            + if is_title {
                 QUEST_MSG_TITLE_INDENT
             } else {
                 0.0
-            },
-        );
+            };
+        node.left = Val::Px(left);
         let size = if is_title {
             QUEST_MSG_TITLE_FONT_PX
         } else {
@@ -1268,6 +1359,44 @@ fn quest_detail_ui_system(
         };
         if color.0 != c {
             color.0 = c;
+        }
+        line_spans.push((line.0, left, top_y, size, text.0.clone(), segs));
+    }
+
+    // ---- #2810 单元①：彩色叠加段（C# `NewColour`，`:1336-1353`）----
+    // C# 对每个 `{文本/颜色}` 段在原位叠加一个彩色 `MirLabel`；本端用固定池 + 逐帧显隐/落位。
+    // 颜色名走 `Color.FromName` 子集（`text_markup::known_color`）：未知名 C# 取到的是
+    // 透明色（叠加层不可见），此处直接隐藏——基础白字已含该词，视觉等价。
+    for (mut text, mut color, mut font, mut node, mut vis, seg_marker) in &mut extras.segments {
+        let Some((_, left, top_y, size, stripped, segs)) = line_spans
+            .iter()
+            .find(|(slot, ..)| *slot == seg_marker.slot)
+        else {
+            *vis = Visibility::Hidden;
+            continue;
+        };
+        let Some(seg) = segs.get(seg_marker.seg) else {
+            *vis = Visibility::Hidden;
+            continue;
+        };
+        let Some(col) = crate::ui::text_markup::known_color(&seg.color_name) else {
+            *vis = Visibility::Hidden;
+            continue;
+        };
+        let prefix = stripped.get(..seg.byte_offset).unwrap_or("");
+        let (row, x) = quest_segment_offset(prefix, *size, QUEST_MSG_W);
+        node.left = Val::Px(left + x);
+        // 折行后的行高：bevy 文本默认行高 = 字号 × 1.2（与基础标签同一排版参数）
+        node.top = Val::Px(top_y + row as f32 * (*size * 1.2));
+        font.font_size = FontSize::Px(*size);
+        if text.0 != seg.text {
+            text.0 = seg.text.clone();
+        }
+        if color.0 != col {
+            color.0 = col;
+        }
+        if *vis != Visibility::Visible {
+            *vis = Visibility::Visible;
         }
     }
 
@@ -2347,7 +2476,66 @@ mod tests {
         assert_eq!(quest_msg_top_line_at_bar(261, 17, 16), 1);
     }
 
-    /// #2801 单元②：`{文本/颜色}` 去标记（C# `NewText` `:1321-1323`；颜色叠加与链接未移植）
+    /// #2810 单元①：`{文本/颜色}` 段解析（C# `NewText` 的 `C` 正则 `:1008` + `:1321-1323`）
+    #[test]
+    fn quest_line_markup_splits_colour_segments() {
+        // 无标记
+        let (text, segs) = quest_line_markup("普通文本");
+        assert_eq!(text, "普通文本");
+        assert!(segs.is_empty());
+
+        // 单段：正文去掉 `{...}`、段记录文本/颜色/偏移
+        let (text, segs) = quest_line_markup("前{红字/Red}后");
+        assert_eq!(text, "前红字后");
+        assert_eq!(segs.len(), 1);
+        assert_eq!(segs[0].text, "红字");
+        assert_eq!(segs[0].color_name, "Red");
+        assert_eq!(
+            segs[0].byte_offset,
+            "前".len(),
+            "段首偏移 = 去标记后整行内的字节位置"
+        );
+
+        // 多段 + 行首/行尾
+        let (text, segs) = quest_line_markup("{A/Red}中{B/Green}");
+        assert_eq!(text, "A中B");
+        assert_eq!(segs.len(), 2);
+        assert_eq!(
+            (segs[0].byte_offset, segs[0].color_name.as_str()),
+            (0, "Red")
+        );
+        assert_eq!(
+            (segs[1].byte_offset, segs[1].color_name.as_str()),
+            ("A中".len(), "Green")
+        );
+
+        // 非标记原样保留（与 #2801 判据一致）
+        assert_eq!(quest_line_markup("{无斜杠}").0, "{无斜杠}");
+        assert_eq!(quest_line_markup("<链接/@key>").0, "<链接/@key>");
+        // 空段文本 `{/Red}`：C# `close > i+1` 只要求 `}` 在 `{` 后至少两格，故仍成立——
+        // `values[0]` 为空串 → 原地插入空串（整段被删掉），段文本为空（叠加层画空字，无视觉）
+        let (text, segs) = quest_line_markup("a{/Red}b");
+        assert_eq!(text, "ab");
+        assert_eq!(segs.len(), 1);
+        assert_eq!(segs[0].text, "");
+        assert_eq!(segs[0].byte_offset, 1);
+    }
+
+    /// #2810 单元①：彩色段折行落位（前缀宽 = 同字体同尺寸的宋体双宽度量）
+    #[test]
+    fn quest_segment_offset_wraps_like_text() {
+        // 单行：x = 前缀估宽（CJK 1.0em / ASCII 0.5em）
+        assert_eq!(quest_segment_offset("ab", 12.0, 280.0), (0, 12.0));
+        assert_eq!(quest_segment_offset("古", 12.0, 280.0), (0, 12.0));
+        assert_eq!(quest_segment_offset("a古", 12.0, 280.0), (0, 18.0));
+        // 折行：前缀超过 280 → 段落在第 2 行，x 用行内前缀宽
+        let prefix = "古".repeat(24); // 24*12 = 288 > 280 → 折行
+        let (row, x) = quest_segment_offset(&prefix, 12.0, 280.0);
+        assert_eq!(row, 1, "越过一行的前缀把段推到第 2 行");
+        assert_eq!(x, 12.0, "第 2 行内只剩 4 个字之前的偏移（23 字前缀跨行）");
+    }
+
+    /// #2801 单元②（#2810 起共用解析）：`{文本/颜色}` 去标记
     #[test]
     fn quest_line_display_text_strips_colour_markup() {
         assert_eq!(quest_line_display_text("普通文本"), "普通文本");
@@ -2362,6 +2550,109 @@ mod tests {
             quest_line_display_text("<链接/@key>"),
             "<链接/@key>",
             "链接标记本单元不处理（见函数注释的未移植清单）"
+        );
+    }
+
+    /// #2810 单元①：彩色叠加段系统级渲染（C# `NewColour` 叠加标签，`:1336-1353`）
+    #[test]
+    fn quest_detail_colour_segments_render_over_line() {
+        let mut world = World::new();
+        let mut mgr = DialogManager::default();
+        mgr.open(DialogKind::QuestDetail);
+        world.insert_resource(mgr);
+        world.insert_resource(QuestDetailState {
+            quest_id: Some(1),
+            top_line: 0,
+            ..Default::default()
+        });
+        let mut q = info(1, 1, RequiredClass::from_bits_truncate(0));
+        q.name = "任务名".to_string();
+        // 描述首行（= 行槽 1）含一个彩色段；第 2 段不存在 → 池内第 2 个应保持隐藏
+        q.description = vec!["前{红字/Red}后".to_string()];
+        q.task_description = vec![];
+        q.return_description = vec![];
+        q.completion_description = vec![];
+        q.time_limit_in_seconds = 0;
+        world.insert_resource(QuestCatalog {
+            infos: vec![q],
+            ..Default::default()
+        });
+        world.insert_resource(QuestLogState::default());
+        world.insert_resource(crate::game::dialogs::npc::NpcDialogState::default());
+        world.insert_resource(crate::network::NetConnection::default());
+        world.init_resource::<bevy::ecs::message::Messages<MouseWheel>>();
+        world.spawn((
+            QuestDetailWidget,
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(532.0),
+                top: Val::Px(60.0),
+                ..default()
+            },
+        ));
+        let lines: Vec<Entity> = (0..QUEST_MSG_LINE_COUNT)
+            .map(|i| {
+                world
+                    .spawn((
+                        QuestDetailLine(i),
+                        Node::default(),
+                        Text::new(""),
+                        TextColor(Color::WHITE),
+                        TextFont::default(),
+                    ))
+                    .id()
+            })
+            .collect();
+        // 行槽 1 的段池：0 = 真实段、1 = 空槽
+        let segs: Vec<Entity> = (0..2)
+            .map(|s| {
+                world
+                    .spawn((
+                        QuestDetailSegment { slot: 1, seg: s },
+                        Node::default(),
+                        Text::new(""),
+                        TextColor(Color::WHITE),
+                        TextFont::default(),
+                        Visibility::Hidden,
+                    ))
+                    .id()
+            })
+            .collect();
+
+        world
+            .run_system_once(quest_detail_ui_system)
+            .expect("详情窗消息区系统应运行");
+
+        // 基线行文本：去标记后的 `前红字后`
+        assert_eq!(world.get::<Text>(lines[1]).unwrap().0, "前红字后");
+        assert_eq!(
+            world.get::<Visibility>(segs[0]).copied(),
+            Some(Visibility::Visible),
+            "彩色段应可见"
+        );
+        assert_eq!(world.get::<Text>(segs[0]).unwrap().0, "红字");
+        assert_eq!(
+            world.get::<TextColor>(segs[0]).unwrap().0,
+            crate::ui::text_markup::known_color("Red").unwrap(),
+            "颜色名走 C# Color.FromName 子集"
+        );
+        let line_left = match world.get::<Node>(lines[1]).unwrap().left {
+            Val::Px(v) => v,
+            other => panic!("行 left 应为 Px，实为 {other:?}"),
+        };
+        let seg_left = match world.get::<Node>(segs[0]).unwrap().left {
+            Val::Px(v) => v,
+            other => panic!("段 left 应为 Px，实为 {other:?}"),
+        };
+        assert_eq!(
+            seg_left,
+            line_left + crate::ui::text_markup::est_text_width("前", QUEST_MSG_FONT_PX),
+            "段 x = 行原点 + 前缀估宽"
+        );
+        assert_eq!(
+            world.get::<Visibility>(segs[1]).copied(),
+            Some(Visibility::Hidden),
+            "本行无第 2 段 → 池内空槽保持隐藏"
         );
     }
 
