@@ -76,17 +76,41 @@ impl Packet for MockCreatureList {
 
     fn write_body<W: std::io::Write>(&self, writer: &mut W) -> mir2_shared::data::stats::SharedResult<()> {
         use byteorder::{LittleEndian, WriteBytesExt};
-        writer.write_i32::<LittleEndian>(1)?; // count
-        writer.write_u8(mir2_shared::enums::IntelligentCreatureType::BabyPig as u8)?;
+        // #2757：两条样本覆盖 C# 规则表两种形态（默认选中第 1 条 = 三行信息全非空）：
+        // ① `Chick` 行（Mouse 11 / Auto 7 / Semi 7 + 产黑石）② `BabyPig` 行（只开 Semi 3 / 满 4000）。
+        writer.write_i32::<LittleEndian>(2)?; // count
+        writer.write_u8(mir2_shared::enums::IntelligentCreatureType::Chick as u8)?;
         writer.write_u8(1)?; // pickup
         writer.write_u8(1)?; // enabled
         writer.write_u8(0)?; // hunger
-        mir2_shared::binary::write_dotnet_string(writer, "小猪")?;
+        mir2_shared::binary::write_dotnet_string(writer, "小鸡")?;
         writer.write_u8(1)?; // active
-        for _ in 0..9 { writer.write_u8(0)?; } // filter（默认全部关闭）
+        for _ in 0..9 {
+            writer.write_u8(0)?;
+        } // filter（默认全部关闭）
         writer.write_u8(0)?; // grade
-        // #2757：宠物规则（C# `IntelligentCreatureInfo` 的 BabyPig 行：Semi 3 / MinimalFullness 4000）。
         // 与 ServerRust 共用 `IntelligentCreatureRules::write_to`，不手写字段布局。
+        mir2_shared::data::client_data::IntelligentCreatureRules {
+            mouse_pickup_enabled: true,
+            mouse_pickup_range: 11,
+            auto_pickup_enabled: true,
+            auto_pickup_range: 7,
+            semi_auto_pickup_enabled: true,
+            semi_auto_pickup_range: 7,
+            can_produce_black_stone: true,
+            ..Default::default()
+        }
+        .write_to(writer)?;
+        writer.write_u8(mir2_shared::enums::IntelligentCreatureType::BabyPig as u8)?;
+        writer.write_u8(1)?; // pickup
+        writer.write_u8(1)?; // enabled
+        writer.write_u8(42)?; // hunger
+        mir2_shared::binary::write_dotnet_string(writer, "小猪")?;
+        writer.write_u8(0)?; // active
+        for _ in 0..9 {
+            writer.write_u8(0)?;
+        } // filter（默认全部关闭）
+        writer.write_u8(0)?; // grade
         mir2_shared::data::client_data::IntelligentCreatureRules {
             minimal_fullness: 4000,
             semi_auto_pickup_enabled: true,

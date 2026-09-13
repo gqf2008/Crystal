@@ -1212,21 +1212,38 @@ mod tests {
         let _ = handle_progress(&mut events, payload);
     }
 
-    /// #2757：mock 必须与真实服务端同格式——mock 的 BabyPig 条目解码出 Semi 3 / MinimalFullness 4000
-    /// （C# `IntelligentCreatureInfo` 的 BabyPig 行），否则实机截图验证不具备说服力。
+    /// #2757：mock 必须与真实服务端同格式——mock 的两条样本解码出 C# `IntelligentCreatureInfo`
+    /// 的 Chick 行（M11/A7/S7 + 黑石）与 BabyPig 行（Semi 3 / 满 4000），
+    /// 否则实机截图验证不具备说服力。
     #[test]
-    fn mock_creature_list_decodes_baby_pig_rules() {
+    fn mock_creature_list_matches_csharp_rules() {
         let mut app = App::new();
         app.init_resource::<Messages<ServerEvent>>();
         app.add_systems(Update, decode_mock_creature_list);
         app.update();
 
         let creatures = drain_creatures(&mut app);
-        assert_eq!(creatures.len(), 1);
+        assert_eq!(creatures.len(), 2);
         let c = &creatures[0];
-        assert_eq!(c.name, "小猪");
+        assert_eq!(c.name, "小鸡");
+        assert!(c.active);
         assert_eq!(
             c.rules,
+            mir2_shared::data::client_data::IntelligentCreatureRules {
+                mouse_pickup_enabled: true,
+                mouse_pickup_range: 11,
+                auto_pickup_enabled: true,
+                auto_pickup_range: 7,
+                semi_auto_pickup_enabled: true,
+                semi_auto_pickup_range: 7,
+                can_produce_black_stone: true,
+                ..Default::default()
+            }
+        );
+        let pig = &creatures[1];
+        assert_eq!(pig.name, "小猪");
+        assert_eq!(
+            pig.rules,
             mir2_shared::data::client_data::IntelligentCreatureRules {
                 minimal_fullness: 4000,
                 semi_auto_pickup_enabled: true,
