@@ -1336,8 +1336,11 @@ pub struct InvLockedSlots {
     by_reason: std::collections::HashMap<InvLockReason, std::collections::HashSet<usize>>,
 }
 
-/// C# `Color.DimGray`
-pub const LOCKED_ITEM_COLOR: Color = Color::srgb_u8(105, 105, 105);
+/// C# `MirItemCell.DrawControl` 锁定格：`Library.Draw(image, pos, Color.DimGray, UseOffSet, 0.8F)`
+/// —— `MLibrary.Draw` → `DXManager.DrawOpaque` 把 `color.Alpha = opacity`（0.8），
+/// 即 **RGB 乘 DimGray(105,105,105) 且 alpha 乘 0.8**。Bevy 用一个颜色同时表达两者
+/// （`ImageNode.color` 对贴图做逐通道相乘，含 alpha）：0.8 × 255 = 204。
+pub const LOCKED_ITEM_COLOR: Color = Color::srgba_u8(105, 105, 105, 204);
 
 impl InvLockedSlots {
     pub fn lock(&mut self, reason: InvLockReason, slot: usize) {
@@ -2477,8 +2480,9 @@ mod tests {
     use super::*;
     use mir2_shared::enums::ItemType;
 
-    /// #2736：背包格锁定（C# `MirItemCell.Locked`）——锁定期间图标按 `Color.DimGray`（105,105,105）
-    /// 绘制，`ResetCells()` 等价的全清后恢复原色。
+    /// #2736/#2747：背包格锁定（C# `MirItemCell.Locked`）——锁定期间图标按
+    /// `Color.DimGray`（105,105,105）× 0.8 不透明度绘制（C# `DrawOpaque` 把 alpha 置 0.8），
+    /// `ResetCells()` 等价的全清后恢复原色。
     #[test]
     fn inv_locked_slots_match_csharp() {
         let mut locked = InvLockedSlots::default();
@@ -2490,8 +2494,14 @@ mod tests {
         assert!(locked.is_locked(3) && locked.is_locked(7));
         assert_eq!(
             locked.icon_color(3),
-            Color::srgb_u8(105, 105, 105),
-            "C# `Color.DimGray`"
+            Color::srgba_u8(105, 105, 105, 204),
+            "C# `Color.DimGray` + 0.8 opacity"
+        );
+        // alpha 必须是 0.8（C# `DrawOpaque` 的 `color.Alpha = opacity`），不是 1.0
+        assert_eq!(
+            locked.icon_color(3).to_srgba().alpha(),
+            0.8,
+            "C# `Library.Draw(..., 0.8F)`"
         );
 
         // C# `ResetCells()`：全部解锁 → 恢复原色
