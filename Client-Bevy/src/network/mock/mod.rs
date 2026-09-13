@@ -294,6 +294,28 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                                 heroes: vec![hero_info],
                                             },
                                         );
+                                        // #2801 单元②：登录同步已接任务（与真实服务端同构——
+                                        // `send_game_entry_sequence` 会为 Accepted/InProgress 的任务
+                                        // 补发 `S.ChangeQuest`）。mock 原先登录不发 → 任务日记只有
+                                        // 「可接」段，详情窗的已接行进不去、进度段也看不到。
+                                        quest.taken = true;
+                                        quest.kills = 0;
+                                        quest.completed = false;
+                                        send(
+                                            &to_client,
+                                            &server::quest::ChangeQuest {
+                                                quest: ClientQuestProgress {
+                                                    id: QUEST_ID,
+                                                    task_list: vec![format!(
+                                                        "击杀 稻草人 0/{}",
+                                                        QUEST_KILL_TARGET
+                                                    )],
+                                                    taken: true,
+                                                    completed: false,
+                                                    new: false,
+                                                },
+                                            },
+                                        );
                                         in_game = true;
                                         mock_in_game_since = Some(std::time::Instant::now());
                                     }
@@ -2052,16 +2074,27 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                                     npc_index: 0,
                                                     name: "消灭稻草人".to_string(),
                                                     group: String::new(),
-                                                    description: vec![],
-                                                    task_description: vec!["击杀 稻草人 3/3".to_string()],
-                                                    return_description: vec![],
+                                                    // #2801 单元②：描述给足行数，实机才能验证
+                                                    // 消息区分页（16 行一页）+ 位置条显隐
+                                                    description: (1..=8)
+                                                        .map(|i| format!("任务描述第 {i} 行"))
+                                                        .collect(),
+                                                    task_description: vec![
+                                                        "击杀 稻草人 3/3".to_string(),
+                                                        "带回 稻草人的头 0/1".to_string(),
+                                                        "把 稻草人的头 交给 比奇老兵".to_string(),
+                                                    ],
+                                                    return_description: vec![
+                                                        "回到比奇城找 比奇老兵".to_string(),
+                                                        "把任务物品交给他".to_string(),
+                                                    ],
                                                     completion_description: vec![],
                                                     min_level_needed: 1,
                                                     max_level_needed: 99,
                                                     quest_needed: 0,
                                                     class_needed: mir2_shared::enums::RequiredClass::WAR_WIZ_TAO,
                                                     quest_type: mir2_shared::enums::QuestType::General,
-                                                    time_limit_in_seconds: 0,
+                                                    time_limit_in_seconds: 3661,
                                                     reward_gold: 100,
                                                     reward_exp: 50,
                                                     reward_credit: 0,

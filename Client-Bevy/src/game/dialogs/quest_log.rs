@@ -12,6 +12,7 @@
 // ============================================================================
 
 use bevy::ecs::system::SystemParam;
+use bevy::input::mouse::{MouseScrollUnit, MouseWheel};
 use bevy::prelude::*;
 use std::collections::{HashMap, HashSet};
 
@@ -70,12 +71,13 @@ pub struct QuestCatalog {
 
 /// #2801 单元①：任务详情窗状态（C# `QuestDetailDialog.Quest`，`QuestDialogs.cs:469`）。
 ///
-/// 窗口内容（消息区/奖励区）在单元②③补；本单元只承载"展示哪个任务"这一事实源，
-/// 与 `DialogManager.open(QuestDetail)` 一起决定窗口显隐。
+/// 窗口内容（奖励区）在单元③补；单元②已接入消息区分页（`top_line`）。
 #[derive(Resource, Default)]
 pub struct QuestDetailState {
     /// 当前展示的任务 id（None=未展示过）
     pub quest_id: Option<i32>,
+    /// C# `QuestMessage.TopLine`（`:1013`；分页首行下标，换任务时归零）
+    pub top_line: usize,
 }
 
 /// #2535 C# QuestListDialog.ReDisplayButtons 按钮状态机（纯函数）
@@ -289,6 +291,26 @@ pub struct QuestDetailWidget;
 #[derive(Component)]
 pub struct QuestDetailClose;
 
+/// #2801 单元②：消息区行标签槽 0..16（C# `QuestMessage._textLabel[LineCount]`，`:1036`）
+#[derive(Component)]
+pub struct QuestDetailLine(pub usize);
+
+/// #2801 单元②：消息区标题行圆点（C# `QuestMessage_AfterDraw` 的 `Prguse[919]`，`:1066-1080`）
+#[derive(Component)]
+pub struct QuestDetailBullet(pub usize);
+
+/// #2801 单元②：消息区上滚键（C# `upButton` `Prguse2[197/198/199]` @(293,33)，`:489-500`）
+#[derive(Component)]
+pub struct QuestDetailScrollUp;
+
+/// #2801 单元②：消息区下滚键（C# `downButton` `Prguse2[207/208/209]` @(293,280)，`:502-513`）
+#[derive(Component)]
+pub struct QuestDetailScrollDown;
+
+/// #2801 单元②：消息区位置条（C# `positionBar` `Prguse2[205/206]` @(293,48)，`:515-526`）
+#[derive(Component)]
+pub struct QuestDetailPositionBar;
+
 /// #2801 单元①：任务日志 UI 的对话框状态打包。
 /// `quest_log_ui_system` 原本已是 16 个系统参数（Bevy `SystemParam` 上限，
 /// 同 `<control.rs>` 的 `ControlQueries`），新增「详情窗状态」必须与 `DialogManager` 打包，
@@ -424,14 +446,205 @@ fn spawn_quest_log(
 // #2801 任务详情窗（C# `QuestDetailDialog`，`Client/MirScenes/Dialogs/QuestDialogs.cs:463-628`）
 // 坐标/精灵逐条对 C#：
 //   面板 `Prguse[960]` 316x466 @(ScreenWidth/2+20, 60) = (532,60)（`QuestDialogs.cs:471-479`）
-//   标题 `Title[16]` @(18,9)（`:481-487`）
-//   关闭键 `Prguse2[360/361/362]` @(289,3)（`:600-611`）
+//   标题 `Title[16]` @(18,9)（`:479-485`）
+//   关闭键 `Prguse2[360/361/362]` @(289,3)（`:604-614`，`Click += Hide()` 在 `:614`）
 // 打开入口：任务日记行左键（`QuestSingleQuestItem._questLabel.Click` → `DisplayQuestDetails`，
-// `QuestDialogs.cs:1928-1935`）。`Movable = true`（`:475`）→ 独立 `DialogKind::QuestDetail`
+// `QuestDialogs.cs:1925-1955`，左键分支 `:1933-1935`）。`Movable = true`（`:475`）→ 独立 `DialogKind::QuestDetail`
 // 独立拖动，不复用 `QuestLog`（复用会被 kind 级拖动/置顶连带）。
 // 单元②补消息区（上 `Prguse2[197..199]` @(293,33)、下 `Prguse2[207..209]` @(293,280)、
 // 位置条 `Prguse2[205/206]` @(293,48)），单元③补分享/取消按钮与奖励区。
 // ============================================================================
+// ---------------------------------------------------------------------------
+// #2801 单元②：消息区（C# `QuestMessage`，`QuestDialogs.cs:1003-1390`）
+// 行模型 = `UpdateQuest` + `AdjustDescription`；翻页 = 上/下键 + 滚轮 + 位置条拖动。
+// ---------------------------------------------------------------------------
+
+/// C# `QuestDetailDialog` 传给 `QuestMessage` 的 `lineCount = 16`（`QuestDialogs.cs:528`）
+pub const QUEST_MSG_LINE_COUNT: usize = 16;
+/// C# `QuestMessage.PosMinY / PosMaxY`（`QuestDialogs.cs:534-535`；面板内相对 y）
+pub const QUEST_MSG_POS_MIN_Y: i32 = 46;
+pub const QUEST_MSG_POS_MAX_Y: i32 = 261;
+/// 消息区原点（C# `Message.Location = new Point(10, 35)`，`:533`）
+pub const QUEST_MSG_ORIGIN: (f32, f32) = (10.0, 35.0);
+/// 消息区宽（C# `Size = new Size(280, 320)` 的宽，`:532`；`MirLabel` Size 宽 = WordBreak 折行宽）
+pub const QUEST_MSG_W: f32 = 280.0;
+/// 行高（C# `MirLabel.Size = new Size(Size.Width, 20)`，`:1260`；折行溢出被裁，同 C#）
+pub const QUEST_MSG_LINE_H: f32 = 20.0;
+/// 行距 15（C# `0 + (i - TopLine) * 15 + adjust`，`:1261`）
+pub const QUEST_MSG_LINE_DY: f32 = 15.0;
+/// 标题行额外占位 5（C# `adjust += 5`，`:1267`）
+pub const QUEST_MSG_TITLE_DY: f32 = 5.0;
+/// 标题行缩进 15（C# `title ? 15 : 0`，`:1261`）
+pub const QUEST_MSG_TITLE_INDENT: f32 = 15.0;
+/// 正文字号：C# `new Font(Settings.FontName, 9F)`（`:530`）。GDI `Font(name, pt)` 在
+/// 96dpi 下 ≈ pt×4/3 px（9F≈12px），与本文件任务行标签同口径。
+pub const QUEST_MSG_FONT_PX: f32 = 12.0;
+/// 标题字号：C# `new Font(Settings.FontName, 10F, FontStyle.Bold)`（`:1244`）。Bevy
+/// `TextFont.weight` 仅对可变字重字体生效（SimSun 无可变轴），故以 +1px 近似粗体。
+pub const QUEST_MSG_TITLE_FONT_PX: f32 = 13.0;
+
+/// 消息区四个本地化标题（C# `QuestMessage.TaskTitle/ProgressTitle/ReturnTitle/TimeLimitTitle`，
+/// `:1023`；取 `Client/Localization/Chinese.json` 的 Tasks/Progress/QuestReturn/TimeLimit）
+pub const QUEST_TASK_TITLE: &str = "任务";
+pub const QUEST_PROGRESS_TITLE: &str = "进度";
+pub const QUEST_RETURN_TITLE: &str = "任务交付";
+pub const QUEST_TIME_LIMIT_TITLE: &str = "时间限制";
+
+/// C# `NewText`（`:1242-1251`）：`i == 0` 或行文本命中四个标题之一 → 标题行
+/// （标题行：粗体 10F、缩进 15、额外 +5 行距；`i == 0` 另加黄色）
+pub fn quest_line_is_title(i: usize, line: &str) -> bool {
+    i == 0
+        || line == QUEST_TASK_TITLE
+        || line == QUEST_PROGRESS_TITLE
+        || line == QUEST_RETURN_TITLE
+        || line == QUEST_TIME_LIMIT_TITLE
+}
+
+/// #2801 单元②：C# `NewText`（`:1276-1333`）对行文本的标记处理中**已移植的部分**——
+/// `{文本/颜色}` → `文本`（C# `:1321-1323`：取 `{` 后第一个 `/` 之前的内容，颜色名丢弃）。
+///
+/// 未移植（本单元不做，附 #2801）：`NewColour` 把取出的彩色文本叠画回原位置
+/// （`:1336-1353`）、`NewLink` 链接悬停提示（`:1355-1382`）、`NPCDialog` 的
+/// 怪物/NPC/物品链接名替换（`:1281-1319`）——含这类标记的行本端按原文显示。
+pub fn quest_line_display_text(line: &str) -> String {
+    let chars: Vec<char> = line.chars().collect();
+    let mut out = String::with_capacity(line.len());
+    let mut i = 0usize;
+    while i < chars.len() {
+        if chars[i] == '{' {
+            // C# 非贪婪 `{(.*?/.*?)}`：`{` 之后遇的第一个 `/` 切文本，其后再遇 `}` 收尾
+            if let Some(slash) = (i + 1..chars.len()).find(|&j| chars[j] == '/') {
+                if let Some(close) = (slash + 1..chars.len()).find(|&j| chars[j] == '}') {
+                    if close > i + 1 {
+                        out.extend(chars[i + 1..slash].iter());
+                        i = close + 1;
+                        continue;
+                    }
+                }
+            }
+        }
+        out.push(chars[i]);
+        i += 1;
+    }
+    out
+}
+
+/// #2801 单元②：C# `QuestMessage.UpdateQuest` + `AdjustDescription`（`:1142-1213`）→ 行模型。
+///
+/// 顺序逐条照抄：首行 = 任务名；`Taken && !SameFinishNPC && 有完成描述 && 当前 NPC 是交付 NPC`
+/// 时显示完成描述，否则显示描述 + `AdjustDescription`（任务 / 任务交付 / 时间限制 / 进度）。
+/// `same_finish_npc` = C# `QuestInfo.SameFinishNPC`（`Shared/Data/ClientData.cs:377`，
+/// `NPCIndex == FinishNPCIndex`）。
+pub fn quest_message_lines(
+    info: &ClientQuestInfo,
+    taken: bool,
+    task_list: &[String],
+    current_npc_at_finish: bool,
+    display_progress: bool,
+) -> Vec<String> {
+    let mut lines = vec![info.name.clone()];
+    let same_finish_npc = info.npc_index == info.finish_npc_index;
+    if taken && !same_finish_npc && !info.completion_description.is_empty() && current_npc_at_finish
+    {
+        lines.extend(info.completion_description.iter().cloned());
+        return lines;
+    }
+    lines.extend(info.description.iter().cloned());
+    if !info.task_description.is_empty() {
+        lines.push(" ".to_string());
+        lines.push(QUEST_TASK_TITLE.to_string());
+        lines.extend(info.task_description.iter().cloned());
+    }
+    if !info.return_description.is_empty() {
+        lines.push(" ".to_string());
+        lines.push(QUEST_RETURN_TITLE.to_string());
+        lines.extend(info.return_description.iter().cloned());
+    }
+    if info.time_limit_in_seconds > 0 {
+        lines.push(" ".to_string());
+        lines.push(QUEST_TIME_LIMIT_TITLE.to_string());
+        lines.push(crate::game::time_format::format_time_span(
+            info.time_limit_in_seconds as f64,
+        ));
+    }
+    if taken && !task_list.is_empty() && display_progress {
+        lines.push(" ".to_string());
+        lines.push(QUEST_PROGRESS_TITLE.to_string());
+        lines.extend(task_list.iter().cloned());
+    }
+    lines
+}
+
+/// C# `ScrollUpButton.Click`（`:1042-1050`）：`TopLine <= 0` 不动
+pub fn quest_msg_scroll_up(top: usize) -> usize {
+    top.saturating_sub(1)
+}
+
+/// C# `ScrollDownButton.Click`（`:1052-1060`）：`TopLine + LineCount >= 行数` 不动
+pub fn quest_msg_scroll_down(top: usize, len: usize, line_count: usize) -> usize {
+    if top + line_count >= len {
+        top
+    } else {
+        top + 1
+    }
+}
+
+/// C# `QuestMessage_MouseWheel`（`:1082-1098`）：`count = delta / 120`（本端归一到 ±1），
+/// 含「末行钳位用 `Count - 1`」这一原版怪癖（逐字照抄，不"修正"）
+pub fn quest_msg_wheel_top_line(top: usize, count: i32, len: usize, line_count: usize) -> usize {
+    if len <= line_count || count == 0 {
+        return top;
+    }
+    if top == 0 && count >= 0 {
+        return top;
+    }
+    if top + 1 == len && count <= 0 {
+        return top;
+    }
+    let mut t = top as i64 - count as i64;
+    if t < 0 {
+        t = 0;
+    }
+    if t + line_count as i64 > len as i64 - 1 {
+        t = len as i64 - line_count as i64;
+    }
+    t.max(0) as usize
+}
+
+/// C# `UpdatePositionBar`（`:1120-1140`）的整数区间（`(PosMaxY-PosMinY) / (Count-LineCount)`，
+/// 整数除法 = 向下取整，与 C# 同；`len <= line_count` 时返回 0）
+fn quest_msg_bar_interval(len: usize, line_count: usize) -> i32 {
+    let span = len as i64 - line_count as i64;
+    if span <= 0 {
+        return 0;
+    }
+    (QUEST_MSG_POS_MAX_Y - QUEST_MSG_POS_MIN_Y) / span as i32
+}
+
+/// C# `UpdatePositionBar`（`:1120-1140`）：`None` = 位置条隐藏（行数不足一页）；
+/// 否则返回位置条顶端的**面板内相对 y**
+pub fn quest_msg_bar_y(top: usize, len: usize, line_count: usize) -> Option<i32> {
+    if len <= line_count {
+        return None;
+    }
+    let interval = quest_msg_bar_interval(len, line_count);
+    let y = QUEST_MSG_POS_MIN_Y + top as i32 * interval;
+    Some(y.clamp(QUEST_MSG_POS_MIN_Y, QUEST_MSG_POS_MAX_Y))
+}
+
+/// C# `PositionBar_OnMoving`（`:1100-1118`）：位置条 y（面板内相对）→ `TopLine`
+pub fn quest_msg_top_line_at_bar(y: i32, len: usize, line_count: usize) -> usize {
+    if len <= line_count {
+        return 0;
+    }
+    let interval = quest_msg_bar_interval(len, line_count);
+    if interval <= 0 {
+        return 0;
+    }
+    let location = y.clamp(QUEST_MSG_POS_MIN_Y, QUEST_MSG_POS_MAX_Y) - QUEST_MSG_POS_MIN_Y;
+    (location / interval).max(0) as usize
+}
+
 /// #2801 单元①：详情窗面板原点（C# `QuestDialogs.cs:476`
 /// `Location = new Point(Settings.ScreenWidth / 2 + 20, 60)`；1024/2+20 = 532）
 pub fn quest_detail_origin() -> (f32, f32) {
@@ -442,8 +655,11 @@ fn spawn_quest_detail(
     mut commands: Commands,
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
+    mut fonts: ResMut<Assets<Font>>,
+    mut cjk_font: ResMut<UiCjkFont>,
 ) {
     libs.0.ensure_initialized();
+    let cjk = shared_cjk_font(&mut fonts, &mut cjk_font);
     // 面板 Prguse[960]（316x466）@(532,60)
     let Some(bg) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 960) else {
         return;
@@ -470,18 +686,128 @@ fn spawn_quest_detail(
         ) {
             spawn_icon_button(p, n, h, pr, 289.0, 3.0, 24.0, 21.0, 10).insert(QuestDetailClose);
         }
+        // ===== 消息区（C# `QuestMessage`，`:528-536`）=====
+        // 上滚 Prguse2[197/198/199] @(293,33)（C# 显式 Size=(16,14)）
+        if let (Some(n), Some(h), Some(pr)) = (
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 197),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 198),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 199),
+        ) {
+            spawn_icon_button(p, n, h, pr, 293.0, 33.0, 16.0, 14.0, 11).insert(QuestDetailScrollUp);
+        }
+        // 下滚 Prguse2[207/208/209] @(293,280)
+        if let (Some(n), Some(h), Some(pr)) = (
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 207),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 208),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 209),
+        ) {
+            spawn_icon_button(p, n, h, pr, 293.0, 280.0, 16.0, 14.0, 11)
+                .insert(QuestDetailScrollDown);
+        }
+        // 位置条 Prguse2[205/206] @(293,48) 12x18（C# `Visible=false` 起始；行数不足一页恒隐）
+        if let (Some(n), Some(h), Some(pr)) = (
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 205),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 206),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 206),
+        ) {
+            spawn_icon_button(p, n, h, pr, 293.0, 48.0, 12.0, 18.0, 12)
+                .insert((QuestDetailPositionBar, Visibility::Hidden));
+        }
+        // 16 行标签：宽 280 折行（C# `MirLabel.Size=(Size.Width,20)` + WordBreak），
+        // 高 20 裁剪溢出——位置/字号/颜色每帧由 `quest_detail_ui_system` 重算
+        for i in 0..QUEST_MSG_LINE_COUNT {
+            let (ox, oy) = QUEST_MSG_ORIGIN;
+            let y = oy + i as f32 * QUEST_MSG_LINE_DY;
+            spawn_label(p, &cjk, "", ox, y, QUEST_MSG_FONT_PX, Color::WHITE, 9).insert((
+                QuestDetailLine(i),
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: Val::Px(ox),
+                    top: Val::Px(y),
+                    width: Val::Px(QUEST_MSG_W),
+                    height: Val::Px(QUEST_MSG_LINE_H),
+                    overflow: Overflow::clip(),
+                    ..default()
+                },
+            ));
+        }
+        // 标题行圆点 Prguse[919]（12x10；初始藏在面板上方，逐帧按标题行落位）
+        if let Some(h) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 919) {
+            for i in 0..QUEST_MSG_LINE_COUNT {
+                spawn_image(p, h.clone(), QUEST_MSG_ORIGIN.0 + 5.0, -60.0, 12.0, 10.0, 8)
+                    .insert((QuestDetailBullet(i), Visibility::Hidden));
+            }
+        }
     });
 }
 
-/// #2801 单元①：任务详情窗显隐 + 关闭键（C# `closeButton.Click += Hide()`，`QuestDialogs.cs:611`）。
-/// 显隐真值只看 `DialogManager`（同 QuestLog）；任务数据在单元②接入。
+/// #2801 单元①②：任务详情窗显隐 + 关闭键（C# `closeButton.Click += Hide()`，`QuestDialogs.cs:611`）
+/// + 消息区渲染/翻页（C# `QuestMessage`，`:1003-1390`）。
+///
+/// 查询两两用 `With`/`Without` 显式隔离（`&mut Visibility`/`&mut Node` 三处共用，
+/// Bevy 无法自行证明不相交 → B0001 运行期冲突）。
+#[allow(clippy::too_many_arguments)]
 fn quest_detail_ui_system(
-    mut mgr: ResMut<DialogManager>,
+    mut dialogs: QuestDialogAccess,
+    log: Res<QuestLogState>,
+    catalog: Res<QuestCatalog>,
+    npc: Res<crate::game::dialogs::npc::NpcDialogState>,
     mut widgets: Query<&mut Visibility, With<QuestDetailWidget>>,
+    mut lines: Query<
+        (
+            &mut Text,
+            &mut TextColor,
+            &mut TextFont,
+            &mut Node,
+            &QuestDetailLine,
+        ),
+        Without<QuestDetailWidget>,
+    >,
+    mut bullets: Query<
+        (&mut Node, &mut Visibility, &QuestDetailBullet),
+        (
+            Without<QuestDetailLine>,
+            Without<QuestDetailPositionBar>,
+            Without<QuestDetailWidget>,
+        ),
+    >,
+    mut bar: Query<
+        (
+            &Interaction,
+            &mut Node,
+            &mut Visibility,
+            &QuestDetailPositionBar,
+        ),
+        (
+            Without<QuestDetailLine>,
+            Without<QuestDetailBullet>,
+            Without<QuestDetailWidget>,
+        ),
+    >,
+    scroll: Query<
+        (
+            Entity,
+            &Interaction,
+            Option<&QuestDetailScrollUp>,
+            Option<&QuestDetailScrollDown>,
+        ),
+        Or<(With<QuestDetailScrollUp>, With<QuestDetailScrollDown>)>,
+    >,
     close: Query<(Entity, &Interaction), With<QuestDetailClose>>,
+    mut wheels: MessageReader<MouseWheel>,
+    panels: Query<
+        &Node,
+        (
+            With<QuestDetailWidget>,
+            Without<QuestDetailLine>,
+            Without<QuestDetailBullet>,
+            Without<QuestDetailPositionBar>,
+        ),
+    >,
+    windows: Query<&Window>,
     mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
 ) {
-    let open = mgr.is_open(DialogKind::QuestDetail);
+    let open = dialogs.mgr.is_open(DialogKind::QuestDetail);
     for mut vis in widgets.iter_mut() {
         *vis = if open {
             Visibility::Visible
@@ -495,8 +821,162 @@ fn quest_detail_ui_system(
     for (e, inter) in &close {
         let was = prev_inter.insert(e, *inter);
         if *inter == Interaction::Pressed && was != Some(Interaction::Pressed) {
-            mgr.close(DialogKind::QuestDetail);
+            dialogs.mgr.close(DialogKind::QuestDetail);
             tracing::info!("📜 关闭任务详情窗");
+        }
+    }
+
+    // ---- 行模型（C# `QuestMessage.UpdateQuest` + `AdjustDescription`）----
+    let info = dialogs
+        .detail
+        .quest_id
+        .and_then(|id| catalog.infos.iter().find(|c| c.index == id));
+    let taken_entry = info.and_then(|i| log.quests.iter().find(|q| q.id == i.index));
+    let taken = taken_entry.is_some();
+    let task_list: &[String] = taken_entry.map(|q| q.tasks.as_slice()).unwrap_or(&[]);
+    // C# `QuestListDialog.CurrentNPCID == Quest.QuestInfo.FinishNPCIndex`（`:1151`）——
+    // 本端当前 NPC 记在 `NpcDialogState.npc_object_id`（0 = 未开对话）
+    let at_finish_npc = match info {
+        Some(i) => npc.npc_object_id != 0 && npc.npc_object_id == i.finish_npc_index,
+        None => false,
+    };
+    let all: Vec<String> = match info {
+        Some(i) => quest_message_lines(i, taken, task_list, at_finish_npc, true),
+        None => Vec::new(),
+    };
+    let line_count = QUEST_MSG_LINE_COUNT;
+    // C# `TopLine` 只在 NewText(resetIndex=true) 归零，其余路径靠各自钳位；
+    // 本端每帧统一钳一次，避免换任务/行数变少后越界留下空页
+    if dialogs.detail.top_line + line_count > all.len() {
+        dialogs.detail.top_line = all.len().saturating_sub(line_count);
+    }
+
+    let (ox, oy) = QUEST_MSG_ORIGIN;
+    let panel_origin = panels
+        .single()
+        .map(|n| crate::ui::theme::node_origin(n, quest_detail_origin()))
+        .unwrap_or_else(|_| quest_detail_origin());
+    let cursor = windows.single().ok().and_then(|w| w.cursor_position());
+
+    // ---- 滚轮（C# `QuestMessage_MouseWheel`，`:1082-1098`；仅光标在消息区内生效）----
+    let mut wheel_count = 0i32;
+    for ev in wheels.read() {
+        // C# `count = e.Delta / MouseWheelScrollDelta`：LineDelta 即行数，PixelDelta 按符号归一
+        let c = match ev.unit {
+            MouseScrollUnit::Line => ev.y.round() as i32,
+            MouseScrollUnit::Pixel => ev.y.signum() as i32,
+        };
+        if c == 0 {
+            continue;
+        }
+        let inside = cursor
+            .map(|cur| {
+                cur.x >= panel_origin.0 + ox
+                    && cur.x <= panel_origin.0 + ox + QUEST_MSG_W
+                    && cur.y >= panel_origin.1 + oy
+                    && cur.y <= panel_origin.1 + oy + 320.0
+            })
+            .unwrap_or(false);
+        if inside {
+            wheel_count += c;
+        }
+    }
+    if wheel_count != 0 {
+        dialogs.detail.top_line =
+            quest_msg_wheel_top_line(dialogs.detail.top_line, wheel_count, all.len(), line_count);
+    }
+
+    // ---- 上/下滚键（C# `ScrollUpButton.Click` / `ScrollDownButton.Click`）----
+    for (e, inter, is_up, is_down) in &scroll {
+        let was = prev_inter.insert(e, *inter);
+        if !(*inter == Interaction::Pressed && was != Some(Interaction::Pressed)) {
+            continue;
+        }
+        let t = dialogs.detail.top_line;
+        if is_up.is_some() {
+            dialogs.detail.top_line = quest_msg_scroll_up(t);
+        } else if is_down.is_some() {
+            dialogs.detail.top_line = quest_msg_scroll_down(t, all.len(), line_count);
+        }
+    }
+    let top = dialogs.detail.top_line;
+
+    // ---- 行渲染（C# `NewText`）：越界槽位清空；`adjust` = 可见区内之前的标题行数 × 5 ----
+    let adjust_at = |idx: usize| -> f32 {
+        QUEST_MSG_TITLE_DY
+            * (top..idx.min(all.len()))
+                .filter(|i| quest_line_is_title(*i, &all[*i]))
+                .count() as f32
+    };
+    for (mut text, mut color, mut font, mut node, line) in &mut lines {
+        let idx = top + line.0;
+        let (s, is_title, accent) = if idx < all.len() {
+            // 标题判定用**原文**（C# `NewText` 拿 `lines[i]` 与四个标题常量比对），
+            // 显示文本走 `{文本/颜色}` 去标记
+            let is_title = quest_line_is_title(idx, &all[idx]);
+            let s = quest_line_display_text(&all[idx]);
+            (s, is_title, idx == 0)
+        } else {
+            (String::new(), false, false)
+        };
+        node.top = Val::Px(oy + line.0 as f32 * QUEST_MSG_LINE_DY + adjust_at(idx));
+        node.left = Val::Px(
+            ox + if is_title {
+                QUEST_MSG_TITLE_INDENT
+            } else {
+                0.0
+            },
+        );
+        let size = if is_title {
+            QUEST_MSG_TITLE_FONT_PX
+        } else {
+            QUEST_MSG_FONT_PX
+        };
+        font.font_size = FontSize::Px(size);
+        text.0 = s;
+        // C# `i == 0` 用 `Color.Yellow`（`:1247-1250`）
+        let c = if accent {
+            Color::srgb(1.0, 1.0, 0.0)
+        } else {
+            Color::WHITE
+        };
+        if color.0 != c {
+            color.0 = c;
+        }
+    }
+
+    // ---- 标题圆点（C# `QuestMessage_AfterDraw`，`:1066-1080`）----
+    for (mut node, mut vis, bullet) in &mut bullets {
+        let idx = top + bullet.0;
+        let show = idx < all.len() && quest_line_is_title(idx, &all[idx]);
+        if show {
+            node.left = Val::Px(ox + 5.0);
+            node.top = Val::Px(oy + 5.0 + bullet.0 as f32 * QUEST_MSG_LINE_DY + adjust_at(idx));
+        }
+        *vis = if show {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
+    }
+
+    // ---- 位置条（C# `UpdatePositionBar` + `PositionBar_OnMoving`）----
+    for (inter, mut node, mut vis, _) in &mut bar {
+        let Some(y) = quest_msg_bar_y(top, all.len(), line_count) else {
+            *vis = Visibility::Hidden;
+            continue;
+        };
+        *vis = Visibility::Visible;
+        if *inter == Interaction::Pressed {
+            // 拖动中：条跟手（C# `PositionBar.Location = new Point(x, y)`，不做吸附）
+            if let Some(cur) = cursor {
+                let raw = (cur.y - panel_origin.1).round() as i32;
+                let clamped = raw.clamp(QUEST_MSG_POS_MIN_Y, QUEST_MSG_POS_MAX_Y);
+                dialogs.detail.top_line = quest_msg_top_line_at_bar(clamped, all.len(), line_count);
+                node.top = Val::Px(clamped as f32);
+            }
+        } else {
+            node.top = Val::Px(y as f32);
         }
     }
 }
@@ -816,9 +1296,13 @@ fn quest_log_ui_system(
                                 state.selected_reward = None;
                                 // #2801 单元①：C# 任务日记行左键 = 打开任务详情窗
                                 // （`QuestSingleQuestItem._questLabel.Click` → `DisplayQuestDetails`，
-                                //  `QuestDialogs.cs:1928-1935`；右键才是追踪开关 `:1936-1952`）
+                                //  `QuestDialogs.cs:1925-1955` 左键分支 `:1933-1935`；
+                                //  右键才是追踪开关 `:1936-1951`）
                                 let qid = state.quests[*qi].id;
                                 detail.quest_id = Some(qid);
+                                // C# `DisplayQuestDetails` → `Message.UpdateQuest` →
+                                // `NewText(resetIndex: true)` 把 TopLine 归零（`:1130-1136`）
+                                detail.top_line = 0;
                                 mgr.open(DialogKind::QuestDetail);
                                 tracing::info!(
                                     "📜 打开任务详情: {}（任务 {}）",
@@ -1047,6 +1531,12 @@ mod tests {
     fn quest_detail_visibility_follows_manager_and_close_button() {
         let mut world = World::new();
         world.insert_resource(DialogManager::default());
+        // 单元②接入消息区后，本系统还需任务状态/目录/当前 NPC/滚轮消息
+        world.insert_resource(QuestDetailState::default());
+        world.insert_resource(QuestLogState::default());
+        world.insert_resource(QuestCatalog::default());
+        world.insert_resource(crate::game::dialogs::npc::NpcDialogState::default());
+        world.init_resource::<bevy::ecs::message::Messages<MouseWheel>>();
         let root = world
             .spawn((
                 QuestDetailWidget,
@@ -1159,6 +1649,276 @@ mod tests {
             "接受键按下必须发出 AcceptQuest（修复前边沿被 close 宽查询吞掉）"
         );
         assert_eq!(world.resource::<QuestLogState>().selected_avail, None);
+    }
+
+    /// #2801 单元②：行模型逐条对齐 C# `QuestMessage.UpdateQuest`/`AdjustDescription`
+    /// （`QuestDialogs.cs:1142-1213`）：名 → 描述 → 任务 → 任务交付 → 时间限制 → 进度
+    #[test]
+    fn quest_message_lines_match_csharp_order() {
+        let mut q = info(1, 1, RequiredClass::from_bits_truncate(0));
+        q.name = "消灭稻草人".to_string();
+        q.npc_index = 10;
+        q.finish_npc_index = 20;
+        q.description = vec!["说明一".to_string(), "说明二".to_string()];
+        q.task_description = vec!["击杀 稻草人 0/3".to_string()];
+        q.return_description = vec!["交给 张三".to_string()];
+        q.completion_description = vec!["完成描述".to_string()];
+        q.time_limit_in_seconds = 3661;
+
+        // 未接：无「进度」段（C# `Quest.Taken && TaskList.Count > 0 && DisplayProgress`）
+        assert_eq!(
+            quest_message_lines(&q, false, &[], false, true),
+            vec![
+                "消灭稻草人",
+                "说明一",
+                "说明二",
+                " ",
+                "任务",
+                "击杀 稻草人 0/3",
+                " ",
+                "任务交付",
+                "交给 张三",
+                " ",
+                "时间限制",
+                "1h 01m 01s",
+            ]
+        );
+        // 已接：尾部追加「进度 + 任务列表」
+        assert_eq!(
+            quest_message_lines(&q, true, &["击杀 稻草人 1/3".to_string()], false, true)
+                .iter()
+                .rev()
+                .take(3)
+                .cloned()
+                .collect::<Vec<_>>(),
+            vec!["击杀 稻草人 1/3", "进度", " "]
+        );
+        // 未接：即便带任务列表也不出「进度」段（C# 条件含 `Quest.Taken`）
+        assert!(
+            !quest_message_lines(&q, false, &["击杀 稻草人 1/3".to_string()], false, true)
+                .contains(&"进度".to_string())
+        );
+        // 已接 + 非同一交付 NPC + 在交付 NPC 处 → 只显示完成描述（C# `:1151-1157`）
+        assert_eq!(
+            quest_message_lines(&q, true, &[], true, true),
+            vec!["消灭稻草人", "完成描述"]
+        );
+        // `SameFinishNPC`（NPCIndex == FinishNPCIndex）→ 即便在交付 NPC 处也走普通分支
+        let same = ClientQuestInfo {
+            finish_npc_index: 10,
+            ..q.clone()
+        };
+        assert!(quest_message_lines(&same, true, &[], true, true).contains(&"任务".to_string()));
+    }
+
+    /// #2801 单元②：标题行判定（C# `NewText` `:1242-1251`）
+    #[test]
+    fn quest_line_title_detection() {
+        assert!(
+            quest_line_is_title(0, "消灭稻草人"),
+            "首行恒为标题（黄色粗体）"
+        );
+        assert!(quest_line_is_title(5, "任务"));
+        assert!(quest_line_is_title(5, "进度"));
+        assert!(quest_line_is_title(5, "任务交付"));
+        assert!(quest_line_is_title(5, "时间限制"));
+        assert!(!quest_line_is_title(5, "击杀 稻草人 0/3"));
+        assert!(!quest_line_is_title(1, " "), "空行不是标题行");
+    }
+
+    /// #2801 单元②：上/下滚键（C# `:1042-1060`）与滚轮（`:1082-1098`，含原版 `Count-1` 怪癖）
+    #[test]
+    fn quest_message_scroll_helpers_match_csharp() {
+        assert_eq!(quest_msg_scroll_up(0), 0, "已在首行不再上滚");
+        assert_eq!(quest_msg_scroll_up(3), 2);
+        assert_eq!(quest_msg_scroll_down(0, 16, 16), 0, "一页放得下不滚");
+        assert_eq!(quest_msg_scroll_down(0, 20, 16), 1);
+        assert_eq!(quest_msg_scroll_down(4, 20, 16), 4, "已到末页不滚");
+        // 滚轮：count=+1 = 上滚一行；末行钳位用 `Count - 1`（C# 原样）
+        assert_eq!(quest_msg_wheel_top_line(0, 1, 20, 16), 0);
+        assert_eq!(quest_msg_wheel_top_line(5, 3, 20, 16), 2);
+        assert_eq!(quest_msg_wheel_top_line(0, -3, 20, 16), 3);
+        assert_eq!(quest_msg_wheel_top_line(3, -5, 20, 16), 4);
+        assert_eq!(
+            quest_msg_wheel_top_line(9, 1, 16, 16),
+            9,
+            "行数不足一页不动"
+        );
+    }
+
+    /// #2801 单元②：位置条换算（C# `UpdatePositionBar` `:1120-1140` / `PositionBar_OnMoving` `:1100-1118`）
+    #[test]
+    fn quest_message_position_bar_matches_csharp() {
+        assert_eq!(quest_msg_bar_y(0, 16, 16), None, "不足一页隐藏位置条");
+        // len=20 → interval = (261-46)/(20-16) = 53（整数除法）
+        assert_eq!(quest_msg_bar_y(0, 20, 16), Some(46));
+        assert_eq!(quest_msg_bar_y(1, 20, 16), Some(99));
+        assert_eq!(quest_msg_bar_y(4, 20, 16), Some(258));
+        assert_eq!(quest_msg_top_line_at_bar(46, 20, 16), 0);
+        assert_eq!(quest_msg_top_line_at_bar(99, 20, 16), 1);
+        assert_eq!(quest_msg_top_line_at_bar(261, 20, 16), 4);
+        assert_eq!(
+            quest_msg_top_line_at_bar(0, 20, 16),
+            0,
+            "越界向下钳到 PosMinY"
+        );
+        // len=17 → interval = 215 → 第二页贴底 PosMaxY
+        assert_eq!(quest_msg_bar_y(1, 17, 16), Some(261));
+        assert_eq!(quest_msg_top_line_at_bar(261, 17, 16), 1);
+    }
+
+    /// #2801 单元②：`{文本/颜色}` 去标记（C# `NewText` `:1321-1323`；颜色叠加与链接未移植）
+    #[test]
+    fn quest_line_display_text_strips_colour_markup() {
+        assert_eq!(quest_line_display_text("普通文本"), "普通文本");
+        assert_eq!(quest_line_display_text("{红字/Red}尾巴"), "红字尾巴");
+        assert_eq!(quest_line_display_text("前{绿/Green}后"), "前绿后");
+        assert_eq!(
+            quest_line_display_text("{无斜杠}"),
+            "{无斜杠}",
+            "无 `/` 的不是颜色标记，原样保留"
+        );
+        assert_eq!(
+            quest_line_display_text("<链接/@key>"),
+            "<链接/@key>",
+            "链接标记本单元不处理（见函数注释的未移植清单）"
+        );
+    }
+
+    /// #2801 单元②：消息区渲染落位——行位（行距 15 + 标题行额外 5 + 标题缩进 15）、
+    /// 标题圆点、位置条显隐，逐条对 C# `NewText`（`:1260-1268`）/`QuestMessage_AfterDraw`
+    /// （`:1066-1080`）/`UpdatePositionBar`（`:1120-1140`）
+    #[test]
+    fn quest_detail_message_area_lays_out_lines_and_bullets() {
+        let mut world = World::new();
+        let mut mgr = DialogManager::default();
+        mgr.open(DialogKind::QuestDetail);
+        world.insert_resource(mgr);
+        world.insert_resource(QuestDetailState {
+            quest_id: Some(1),
+            top_line: 0,
+        });
+        let mut q = info(1, 1, RequiredClass::from_bits_truncate(0));
+        q.name = "消灭稻草人".to_string();
+        q.description = vec!["说明".to_string()];
+        q.task_description = vec!["击杀 稻草人 0/3".to_string()];
+        q.return_description = vec![];
+        q.completion_description = vec![];
+        q.time_limit_in_seconds = 0;
+        world.insert_resource(QuestCatalog {
+            infos: vec![q],
+            ..Default::default()
+        });
+        world.insert_resource(QuestLogState::default());
+        world.insert_resource(crate::game::dialogs::npc::NpcDialogState::default());
+        world.init_resource::<bevy::ecs::message::Messages<MouseWheel>>();
+
+        // 根面板（提供 `panel_origin`，滚轮命中区用）
+        world.spawn((
+            QuestDetailWidget,
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(532.0),
+                top: Val::Px(60.0),
+                ..default()
+            },
+        ));
+        let slots: Vec<Entity> = (0..QUEST_MSG_LINE_COUNT)
+            .map(|i| {
+                world
+                    .spawn((
+                        QuestDetailLine(i),
+                        Node::default(),
+                        Text::new(""),
+                        TextColor(Color::WHITE),
+                        TextFont::default(),
+                    ))
+                    .id()
+            })
+            .collect();
+        let bullets: Vec<Entity> = (0..QUEST_MSG_LINE_COUNT)
+            .map(|i| {
+                world
+                    .spawn((QuestDetailBullet(i), Node::default(), Visibility::Hidden))
+                    .id()
+            })
+            .collect();
+        let bar = world
+            .spawn((
+                QuestDetailPositionBar,
+                Interaction::None,
+                Node::default(),
+                Visibility::Visible,
+            ))
+            .id();
+
+        world
+            .run_system_once(quest_detail_ui_system)
+            .expect("详情窗消息区系统应运行");
+
+        let text = |i: usize| world.get::<Text>(slots[i]).expect("行槽存在").0.clone();
+        let px = |v: &Val| match v {
+            Val::Px(v) => *v,
+            other => panic!("期望 Px，实际 {other:?}"),
+        };
+        let top = |i: usize| px(&world.get::<Node>(slots[i]).expect("行槽有 Node").top);
+        let left = |i: usize| px(&world.get::<Node>(slots[i]).expect("行槽有 Node").left);
+
+        // C# 行模型：名称 / 说明 / 空行 / 任务 / 任务正文（未接任务 → 无「进度」段）
+        assert_eq!(text(0), "消灭稻草人");
+        assert_eq!(text(1), "说明");
+        assert_eq!(text(2), " ");
+        assert_eq!(text(3), "任务");
+        assert_eq!(text(4), "击杀 稻草人 0/3");
+        assert_eq!(
+            text(5),
+            "",
+            "越界槽位清空（C# `i >= lines.Count` 分支 `:1290-1293`）"
+        );
+
+        // 落位：oy=35、行距 15、标题行额外 +5、标题行缩进 15（C# `:1261`）
+        assert_eq!((left(0), top(0)), (25.0, 35.0), "首行=标题：缩进 15");
+        assert_eq!(top(1), 55.0, "首行标题自身占 5 → 第 2 行 35+15+5");
+        assert_eq!(top(2), 70.0, "空行自身不加占位，仍带首行标题的 +5");
+        assert_eq!(
+            (left(3), top(3)),
+            (25.0, 85.0),
+            "「任务」标题行：前 1 个标题占 5"
+        );
+        assert_eq!(
+            (left(4), top(4)),
+            (10.0, 105.0),
+            "正文行无缩进，前 2 个标题共占 10"
+        );
+        // 字号/颜色：标题 13px、正文 12px；首行黄色（C# `Color.Yellow` `:1249`）
+        let size = |i: usize| {
+            world
+                .get::<TextFont>(slots[i])
+                .expect("行槽有字体")
+                .font_size
+        };
+        assert_eq!(size(0), FontSize::Px(QUEST_MSG_TITLE_FONT_PX));
+        assert_eq!(size(4), FontSize::Px(QUEST_MSG_FONT_PX));
+        assert_eq!(
+            world.get::<TextColor>(slots[0]).map(|c| c.0),
+            Some(Color::srgb(1.0, 1.0, 0.0)),
+            "首行标题黄色"
+        );
+        assert_eq!(
+            world.get::<TextColor>(slots[1]).map(|c| c.0),
+            Some(Color::WHITE)
+        );
+
+        // 标题圆点：只画标题行，位置 = 行位 +5（C# `AfterDraw` `:1076`）
+        let bvis = |i: usize| world.get::<Visibility>(bullets[i]).copied();
+        let btop = |i: usize| px(&world.get::<Node>(bullets[i]).expect("圆点有 Node").top);
+        assert_eq!((bvis(0), btop(0)), (Some(Visibility::Visible), 40.0));
+        assert_eq!((bvis(3), btop(3)), (Some(Visibility::Visible), 90.0));
+        assert_eq!(bvis(1), Some(Visibility::Hidden), "非标题行不画圆点");
+        assert_eq!(bvis(5), Some(Visibility::Hidden), "越界槽位不画圆点");
+
+        // 位置条：5 行 < 一页 16 行 → 隐藏（C# `UpdatePositionBar` `:1122-1126`）
+        assert_eq!(world.get::<Visibility>(bar), Some(&Visibility::Hidden));
     }
 
     /// 任务行命中：初始原点等价于原固定坐标，拖动后跟随面板
