@@ -3538,7 +3538,7 @@ impl WorldActor {
         if !self.tick_count.is_multiple_of(5) {
             return;
         }
-        for (_, m) in self.monsters.iter_mut() {
+        for m in self.monsters.values_mut() {
             if exp_owner_expired(m.exp_owner_tick, self.tick_count) {
                 m.exp_owner_session = None;
                 m.exp_owner_tick = 0;

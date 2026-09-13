@@ -598,10 +598,7 @@ impl PlayerInventory {
             }
         }
         let idx = src_idx?;
-        let item_data = match &self.backpack[idx] {
-            Some(s) => s.item.clone(),
-            None => return None,
-        };
+        let item_data = self.backpack.get(idx)?.as_ref()?.item.clone();
         let mut new_grid = None;
         for g in 0..self.backpack.len() {
             if self.backpack[g].is_none() && g != idx {

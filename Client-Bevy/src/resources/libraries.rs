@@ -167,6 +167,18 @@ pub fn resolve_data_path() -> PathBuf {
     PathBuf::from(format!("{}/Data", manifest_dir))
 }
 
+/// 游戏资产（`Data/`，核心标志 `Items.Lib`）是否可用。
+///
+/// CI 只 checkout 仓库：`Data/` 是本地保留、不入库的游戏资源，因此依赖真实 `.Lib` 精灵的
+/// 单测应据此**跳过**而不是 FAILED（本函数就是那份判据）。
+/// 设 `CRYSTAL_NO_DATA_ASSETS=1` 可强制判定为"无资产"，用于在本机复现 CI 的跳过路径。
+pub fn data_assets_present() -> bool {
+    if std::env::var_os("CRYSTAL_NO_DATA_ASSETS").is_some() {
+        return false;
+    }
+    resolve_data_path().join("Items.Lib").exists()
+}
+
 /// 全局库管理器
 pub struct Libraries {
     /// 单体库

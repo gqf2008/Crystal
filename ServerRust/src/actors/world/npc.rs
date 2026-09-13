@@ -2340,7 +2340,7 @@ impl WorldActor {
         if !state.is_gm {
             return;
         }
-        for (_, s) in self.siege_structures.iter_mut() {
+        for s in self.siege_structures.values_mut() {
             if s.conquest_id == conquest_index {
                 s.repair_full();
             }
