@@ -197,6 +197,42 @@ impl DialogManager {
     }
 }
 
+/// #2825 单元①：测试用辅助 —— 给 world 装上「光标按下」状态后跑一次真实
+/// [`dialog_drag_system`]，断言没有窗口起拖。用于「C# `Movable = false` 的窗口」的
+/// 行为级验证（结构断言只保证挂了 `NotDraggable`，这里验证拖动系统真的不动它）。
+#[cfg(test)]
+pub(crate) mod test_support {
+    use super::*;
+    use bevy::ecs::system::RunSystemOnce;
+    use bevy::window::{PrimaryWindow, Window};
+
+    /// 在 `cursor`（逻辑视口坐标）处按下左键跑一次拖动系统，断言未起拖。
+    pub(crate) fn assert_no_drag_start(world: &mut World, cursor: Vec2) {
+        // 对话框 spawn 时都是 Hidden（由 DialogManager 显示）——拖动系统只处理 Visible 根，
+        // 故先把所有 `DialogRoot` 置为 Visible，否则断言会「假绿」
+        let mut roots = world.query_filtered::<&mut Visibility, With<DialogRoot>>();
+        for mut v in roots.iter_mut(world) {
+            *v = Visibility::Visible;
+        }
+        let mut window = Window::default();
+        window.set_cursor_position(Some(cursor));
+        world.spawn((window, PrimaryWindow));
+        let mut mouse = ButtonInput::<MouseButton>::default();
+        mouse.press(MouseButton::Left);
+        world.insert_resource(mouse);
+        world.insert_resource(DialogDrag::default());
+        world.insert_resource(crate::game::dialogs::inventory::InventoryOrigin(0.0, 0.0));
+        world
+            .run_system_once(dialog_drag_system)
+            .expect("drag 系统应运行");
+        assert_eq!(
+            world.resource::<DialogDrag>().dragging,
+            None,
+            "Movable = false 的窗口在光标 {cursor:?} 处不应起拖"
+        );
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
