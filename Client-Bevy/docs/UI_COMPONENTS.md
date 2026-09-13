@@ -168,7 +168,7 @@
 ## 6. 验证基线
 
 - `cargo check --tests`（Client-Bevy）通过。
-- `cargo test`（Client-Bevy）：**513 lib** + 2 bin + 1 smoke + 24 alignment 通过（批24 单元③ 后基线）；ServerRust **680 lib** + 6 integration（批24 单元③ 后，含 `QuestItemReward` ItemInfo 协议）；SharedRust **187 + 11**（2 ignored，含 `QuestItemReward` 往返无损）。
+- `cargo test`（Client-Bevy）：**513 lib** + 2 bin + 1 smoke + 24 alignment 通过（批24 单元③ 后基线，合并前在 `fix/bevy-questdetail24u3` 本机复跑实测）；ServerRust **680 lib** + 6 integration（同上，含 `QuestItemReward` ItemInfo 协议）；SharedRust **187 + 11**（2 ignored，含 `QuestItemReward` 往返无损）。
 - Report 的 C# `Prguse[1633]` 在当前本地 Data 包缺失；已使用按 C# 控件边界推导的 360x244 深色兜底面板并保留对应子控件坐标，待资源包更新后自动加载正确背景。
 - ServerRust：680 lib + 6 integration 通过（批24 单元③ 后；批16 基线为 673 lib）；SharedRust 187 + 11（2 ignored）；`MapEditor/SharedRust` `cargo check` 通过（副本同步，批24 单元③ 改 `QuestItemReward` 时同步）。
 - 关键实机/定向验证：UI 子树泄漏截图、Character 技能页、AssignKey 模态输入、Timer 穿透、登录安全键盘资源；批7 复验 Mail/Buff；批8 复验 Center 窗口。
@@ -226,8 +226,8 @@
 - 批22 实机/JPG 复验（2026-09-13，`--auto-enter`（+`--buff-test`）与 Control API `cursor` 探针/真实光标点击；`DialogKind::HeroManage` 与 `dialog hero_manage` 控制入口）：① 英雄管理窗 `Prguse[1688]` @(350,350) + 8 槽头像（占用槽 36x30 @+5,+5、超名额槽 `Prguse[1689]` 空框）→ 悬停槽 0 得「英雄小刀 / Level 30 male warrior」，点槽 → MakeActiveHero 确认框 → YES 发 `C.ChangeHero` 且左侧当前头像同步；② 商城付款行 @(250/340,449) 金币/积分互斥勾选、余额标签 0 / 10,000，三种购买分支（金币成交、积分不可购、积分余额不足）日志逐条对账；③ 同一视口坐标下对话框开着无世界头顶提示、全关后恢复；④ Buff 图标行右缘 898（贴小地图左缘）+ 逐图标 Hint（`魔法盾/增加 伤害减免 ： 15%/过期: 19s` 等）+ 收起态「3」与 `当前增益效果` 合计。
 
 - 批23 实机/JPG 复验（2026-09-13，`--auto-enter`（含 `--buff-test`）+ 真实鼠标右键/拖拽 + `cursor` 探针）：① 使用双倍经验药水/掉率加成药水（mock 按 shape 4/5 回发 AddBuff）→ Buff 窗出现 `BuffIcon[260]/[162]` 两枚图标，悬停分别得「经验加成 / 增加 经验 ： 50% / 过期: 29m 23s」与「掉率加成 / 增加 物品掉落 ： 120% / 过期: 29m 58s」；② 展开态 3 个 buff 下从面板内真实拖拽 → 面板仍锚右缘 898（无「拖动对话框 Buff」日志）。
-- 批24 实机/JPG 复验（2026-09-14，`--auto-enter --quest-data-test` + Control API；机器全程停在 Windows 锁屏（前台 = `Windows 默认锁屏界面`），`SetCursorPos`/`SendInput`/`PostMessage` 三种注入到不了 winit，故渲染类证据走 **RPC 等价入口** `quest_detail {quest_id[,top_line][,confirm]}`（写同一份 `QuestDetailState`，与点日记已接行/点滚动键/点取消键同状态），点击类语义由系统级单测钉住）：
-  - **单元①**（锁屏前取得，真实左键）：点任务日记「已接」行 → `QuestDetail` 进管理栈开窗；点关闭键 @(833,73) → 关窗；修复 `close` 宽查询后点 ACCEPT 实测收到 `C.AcceptQuest` → mock 回 `ChangeQuest` → 任务进入已接列表。
+- 批24 实机/JPG 复验（2026-09-14，`--auto-enter --quest-data-test` + Control API；机器全程停在 Windows 锁屏（前台 = `Windows 默认锁屏界面`），`SetCursorPos`/`SendInput`/`PostMessage` 三种注入到不了 winit；**画面证据改用应用内 GPU 截图**——`screenshot` RPC = Bevy `Screenshot::primary_window()` 抓渲染结果，锁屏下仍能出图，三单元插图均出自对应分支的实机进程；**交互状态走 RPC 等价入口** `quest_detail {quest_id[,top_line][,confirm]}`（写同一份 `QuestDetailState`，与点日记已接行/点滚动键/点取消键同状态），点击类语义由系统级单测注入 `Interaction::Pressed` 钉住）：
+  - **单元①**（锁屏前取得，真实左键）：点任务日记「已接」行 → `QuestDetail` 进管理栈开窗；点关闭键 @(833,73) → 关窗；修复 `close` 宽查询后点 ACCEPT，日志实测 `📜 接受任务 #1 消灭稻草人（NPC 0）` → mock 回 `📜 ChangeQuest: id=1 completed=false` → 任务进入已接列表。
   - **单元②**：任务日记（「未分组」组头 + `Lv1 击杀 稻草人 0/3（进行中）` + 追踪钮）与详情窗 `Prguse[960]` @(532,60) + `Title[16]` + `Prguse2[360..362]` 并排；第 1 页 = 首行黄任务名 + 8 行描述 + 「任务」标题（圆点 `Prguse[919]` + 缩进 15）+ 3 条任务条目 + 「任务交付」标题；第 2 页（`top_line=16`）= `任务描述第 8 行` / 任务 / 任务交付 / **时间限制 1h 01m 01s** / **进度 击杀 稻草人 0/3**，右侧位置条随页下移；两页在消息区 (790,90)-(1270,510) 的像素差 bbox = `(0,54,466,420)`（非空即翻页生效）。
   - **单元③**：同一窗奖励区 = `Exp. 50` + 金币图标 `100`（信用 0 隐藏）+ `Title[17]`「SELECT ITEM」+ 固定排 2 格（`Prguse[989]` 40x34 底 + 物品图标）+ 可选排 3 格（未选中无底图）；底栏 `SHARE`/`CANCEL` 两键就位；`confirm=true` 弹取消询问框 = `Prguse[360]` 456x190 @(284,289) + 「你确定要取消这个任务吗？」+ YES(`Title[206..208]` @260,157)/NO(`Title[210..212]` @360,157)。
   - 未覆盖（输入注入被锁屏阻断，留待解锁后补真点击 JPG）：滚轮/位置条拖动、分享/取消/多选一真实点击、奖励格悬停物品说明。
