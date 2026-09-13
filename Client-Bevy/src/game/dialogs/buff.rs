@@ -155,6 +155,9 @@ const D_DMG_RED: &[Stat] = &[Stat::DamageReductionPercent];
 const D_TELE_PENALTY: &[Stat] = &[Stat::TeleportManaPenaltyPercent];
 const D_CRIT_RATE: &[Stat] = &[Stat::MaxDCRatePercent];
 const D_RHINO: &[Stat] = &[Stat::MaxDC, Stat::MaxMC, Stat::MaxSC];
+/// 批23 单元①：倍率类加成（C# `UseItem` Buff 药水 case 4/5 的 `Stats`）
+const D_EXP_RATE: &[Stat] = &[Stat::ExpRatePercent];
+const D_DROP_RATE: &[Stat] = &[Stat::ItemDropRatePercent];
 const D_NONE: &[Stat] = &[];
 
 pub(crate) fn buff_display(tag: u8) -> BuffDisplay {
@@ -230,6 +233,21 @@ pub(crate) fn buff_display(tag: u8) -> BuffDisplay {
             icon: 161,
             stats: D_HP,
             percent: false,
+        },
+        // ===== 倍率类（服务端 `SetExpMultiplier`/`SetDropMultiplier` 发 AddBuff；C# `BuffType.Exp/Drop`）=====
+        29 => BuffDisplay {
+            name: "经验加成",
+            description: "",
+            icon: 260,
+            stats: D_EXP_RATE,
+            percent: true,
+        },
+        30 => BuffDisplay {
+            name: "掉率加成",
+            description: "",
+            icon: 162,
+            stats: D_DROP_RATE,
+            percent: true,
         },
         // ===== 法术系 =====
         4 => BuffDisplay {
@@ -404,6 +422,8 @@ pub(crate) fn stat_name(stat: Stat) -> &'static str {
         Stat::SpellRecovery => "魔法恢复",
         Stat::CriticalRate => "暴击",
         Stat::MaxDCRatePercent => "最大攻击",
+        Stat::ExpRatePercent => "经验",
+        Stat::ItemDropRatePercent => "物品掉落",
         Stat::DamageReductionPercent => "伤害减免",
         Stat::TeleportManaPenaltyPercent => "传送魔法惩罚",
         _ => "未知",
@@ -571,7 +591,8 @@ fn spawn_buff(
     for (i, _) in PANEL_SIZES.iter().enumerate() {
         assets.panels[i] = load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 20 + i);
     }
-    for tag in 0..=28u8 {
+    // 0..=28 = Rust `buff_tag` 全量；29/30 = 倍率类（Exp/Drop，批23 单元①）
+    for tag in 0..=30u8 {
         let icon = buff_display(tag).icon;
         if !assets.icons.contains_key(&icon) {
             if let Some(h) = load_lib_image(&mut libs, &mut images, LibraryName::BuffIcon, icon) {
@@ -1015,5 +1036,29 @@ mod tests {
             "缓慢（C# PoisonType.Slow → BuffIcon 225）"
         );
         assert_eq!(buff_display(20).icon, 223, "冰冷");
+        // 批23 单元①：倍率类加成（C# `BuffType.Exp/Drop` → `BuffIcon 260/162`）
+        let d = buff_display(29);
+        assert_eq!(
+            (d.name, d.icon, d.stats, d.percent),
+            ("经验加成", 260, D_EXP_RATE, true)
+        );
+        let d = buff_display(30);
+        assert_eq!(
+            (d.name, d.icon, d.stats, d.percent),
+            ("掉率加成", 162, D_DROP_RATE, true)
+        );
+    }
+
+    /// #2797 单元①：倍率类加成的 Hint（C# `BuffString`：名称 + 属性行 + 过期；Exp/Drop 无类型描述 case）
+    #[test]
+    fn multiplier_buff_hint_matches_csharp() {
+        assert_eq!(
+            buff_hint(&entry(29, 1_800_000, vec![50])),
+            "经验加成\n增加 经验 ：50%\n过期: 30m 00s"
+        );
+        assert_eq!(
+            buff_hint(&entry(30, 120_000, vec![120])),
+            "掉率加成\n增加 物品掉落 ：120%\n过期: 2m 00s"
+        );
     }
 }

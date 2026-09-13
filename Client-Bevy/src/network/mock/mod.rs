@@ -96,6 +96,9 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                 inv[4] = Some(potion_item(1)); // 金创药（可喝）
                 inv[5] = Some(book_item(34)); // 技能书：FireBall（#212）
                 inv[6] = Some(socketed_sword_item()); // 带孔铁剑（#557 镶嵌验收）
+                // 批23 单元①：Buff 药水（shape 4/5）供实机验证 Exp/Drop 加成进 Buff 窗
+                inv[7] = Some(potion_item(3)); // 双倍经验药水（Luck 50 → 经验加成 50%）
+                inv[8] = Some(potion_item(4)); // 掉率加成药水（Luck 120 → 掉率加成 120%）
                 inv
             };
             let mut player_gold: u32 = 10000;
@@ -2763,6 +2766,32 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                                     player_stats.mp = (player_stats.mp + 200).min(600);
                                                 } else {
                                                     player_stats.hp = 1000;
+                                                }
+                                                // 批23 单元①：Buff 药水（shape 4/5）→ S.AddBuff（与服务端
+                                                // `SetExpMultiplier`/`SetDropMultiplier` 的显示载荷一致：
+                                                // tag 29/30 + 时长 + `Stat.Luck` 百分比）
+                                                let shape = item.info.as_ref().map(|i| i.shape).unwrap_or(0);
+                                                if shape == 4 || shape == 5 {
+                                                    let tag = if shape == 4 { 29u8 } else { 30 };
+                                                    let luck = item
+                                                        .info
+                                                        .as_ref()
+                                                        .map(|i| i.stats.get(Stat::Luck))
+                                                        .unwrap_or(0);
+                                                    send(
+                                                        &to_client,
+                                                        &MockAddBuff {
+                                                            tag,
+                                                            remaining_ms: 30 * 60 * 1000,
+                                                            values: vec![luck],
+                                                        },
+                                                    );
+                                                    tracing::info!(
+                                                        "✨ [MOCK] Buff 药水 → AddBuff tag={} {}%（shape {}）",
+                                                        tag,
+                                                        luck,
+                                                        shape
+                                                    );
                                                 }
                                                 send(&to_client, &server::combat::HealthChanged { hp: player_stats.hp, mp: player_stats.mp });
                                                 tracing::info!("💊 [MOCK] 使用物品: {} (uid={}) hp={} mp={}", item.info.as_ref().map(|i| i.name.clone()).unwrap_or_default(), p.unique_id, player_stats.hp, player_stats.mp);
