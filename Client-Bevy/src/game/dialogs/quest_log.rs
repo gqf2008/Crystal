@@ -23,7 +23,8 @@ use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
 use crate::ui::sprite_ui::{shared_cjk_font, UiCjkFont, UiFont};
 use crate::ui::theme::{
-    load_lib_image, spawn_container, spawn_icon_button, spawn_image, spawn_label, spawn_panel,
+    load_lib_image, spawn_container, spawn_icon_button, spawn_image, spawn_label,
+    spawn_label_plain, spawn_panel,
 };
 use mir2_shared::data::client_data::ClientQuestInfo;
 use mir2_shared::data::shared_data::QuestItemReward;
@@ -1320,7 +1321,9 @@ fn spawn_quest_detail(
                     }
                     spawn_image(c, Handle::default(), 0.0, 0.0, 0.0, 0.0, 2)
                         .insert((QuestRewardPart::CellItem(cell), Visibility::Hidden));
-                    spawn_label(
+                    // #2817：奖励格数量黄字 = C# `QuestCell.CountLabel`，显式 `OutLine = false`
+                    // （`QuestDialogs.cs:1721-1728`，与 `MirItemCell.cs:2610-2617` 同款）→ 无描边
+                    spawn_label_plain(
                         c,
                         &cjk,
                         "",

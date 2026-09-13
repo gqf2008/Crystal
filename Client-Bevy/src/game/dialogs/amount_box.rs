@@ -16,7 +16,9 @@ use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
 use crate::ui::pinyin_ime::PinyinIme;
 use crate::ui::sprite_ui::{shared_cjk_font, UiCjkFont, UiFont};
-use crate::ui::theme::{load_lib_image, spawn_icon_button, spawn_label, spawn_panel};
+use crate::ui::theme::{
+    load_lib_image, spawn_icon_button, spawn_label, spawn_label_plain, spawn_panel,
+};
 
 /// 数量输入结果事件（OK 时携带数量）
 #[derive(Message, Debug)]
@@ -205,7 +207,10 @@ fn spawn_amount_box(
         ))
         .with_children(|ib| {
             // 数量值（C# 文本框内文字；相对输入框 (3,2) = 绝对 (60,44)）
-            spawn_label(ib, &cjk, "", 3.0, 2.0, 14.0, Color::WHITE, 10).insert(AmountValueText);
+            // #2817：输入框文本 = C# `InputTextBox`（`MirTextBox`，原生 WinForms TextBox，
+            // `MirTextBox.cs:143`）→ 无描边（`MirLabel` 的默认描边不适用）
+            spawn_label_plain(ib, &cjk, "", 3.0, 2.0, 14.0, Color::WHITE, 10)
+                .insert(AmountValueText);
         });
         // 物品图标（C# `ItemImage` @(15,34) 38x34；无图标时隐藏）
         p.spawn((
