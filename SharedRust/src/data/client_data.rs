@@ -1481,6 +1481,31 @@ mod tests {
     use super::*;
     use std::io::Cursor;
 
+    /// #2801 单元③：`QuestItemReward` 按 C# 携带**完整 ItemInfo**（`Shared/Data/SharedData.cs:75-93`），
+    /// 奖励区图标/名称/性别过滤都靠它；钉住 wire 往返不丢字段。
+    #[test]
+    fn test_quest_item_reward_roundtrip_with_item_info() {
+        let reward = crate::data::shared_data::QuestItemReward {
+            item: crate::data::item::ItemInfo {
+                index: 42,
+                name: "金币袋".to_string(),
+                image: 120,
+                required_gender: crate::enums::RequiredGender::NONE,
+                ..Default::default()
+            },
+            count: 3,
+        };
+        let mut buffer = Vec::new();
+        reward.write_to(&mut buffer).unwrap();
+        let mut cursor = Cursor::new(buffer);
+        let decoded = crate::data::shared_data::QuestItemReward::read_from(&mut cursor).unwrap();
+        assert_eq!(decoded.item.index, 42);
+        assert_eq!(decoded.item.name, "金币袋");
+        assert_eq!(decoded.item.image, 120);
+        assert_eq!(decoded.count, 3);
+        assert_eq!(decoded, reward, "ItemInfo 其余字段也必须往返无损");
+    }
+
     #[test]
     fn test_guild_buff_info_roundtrip() {
         let mut info = GuildBuffInfo::new();

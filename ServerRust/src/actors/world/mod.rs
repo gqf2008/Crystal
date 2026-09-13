@@ -11430,8 +11430,13 @@ fn build_client_recipe_info(
     }
 }
 
-/// C# CheckQuestInfo：DB QuestInfo → 客户端 ClientQuestInfo（登录下发 NewQuestInfo 的任务定义）
-fn build_client_quest_info(q: &db::QuestInfo) -> mir2_shared::data::client_data::ClientQuestInfo {
+/// C# CheckQuestInfo：DB QuestInfo → 客户端 ClientQuestInfo（登录下发 NewQuestInfo 的任务定义）。
+/// `item_infos` 用于补奖励物品的完整 `ItemInfo`（C# `QuestItemReward.Item`，
+/// `Shared/Data/SharedData.cs:77`；客户端无本地物品库，#2801 单元③ 奖励区图标/名称/性别过滤依赖它）
+fn build_client_quest_info(
+    q: &db::QuestInfo,
+    item_infos: &std::collections::HashMap<i32, db::ItemInfo>,
+) -> mir2_shared::data::client_data::ClientQuestInfo {
     use mir2_shared::enums::{QuestType, RequiredClass};
     // C# QuestType：General=0 Daily=1 Repeatable=2 Story=3；SharedRust 枚举 +3
     let quest_type = QuestType::try_from(q.quest_type as u8 + 3).unwrap_or(QuestType::General);
@@ -11461,7 +11466,15 @@ fn build_client_quest_info(q: &db::QuestInfo) -> mir2_shared::data::client_data:
             .fixed_rewards
             .iter()
             .map(|r| mir2_shared::data::shared_data::QuestItemReward {
-                item_index: r.item_index,
+                item: item_infos
+                    .get(&r.item_index)
+                    .map(client_item_info_from_db)
+                    .unwrap_or_else(|| {
+                        mir2_shared::data::item::ItemInfo {
+                            index: r.item_index,
+                            ..Default::default()
+                        }
+                    }),
                 count: r.count,
             })
             .collect(),
@@ -11469,7 +11482,15 @@ fn build_client_quest_info(q: &db::QuestInfo) -> mir2_shared::data::client_data:
             .select_rewards
             .iter()
             .map(|r| mir2_shared::data::shared_data::QuestItemReward {
-                item_index: r.item_index,
+                item: item_infos
+                    .get(&r.item_index)
+                    .map(client_item_info_from_db)
+                    .unwrap_or_else(|| {
+                        mir2_shared::data::item::ItemInfo {
+                            index: r.item_index,
+                            ..Default::default()
+                        }
+                    }),
                 count: r.count,
             })
             .collect(),
@@ -11561,7 +11582,7 @@ async fn send_game_entry_sequence(
 
     // C# StartGame GetQuestInfo（:1185）：登录下发全部任务定义（客户端任务日志依赖 NewQuestInfo）
     for q in quest_infos.values() {
-        let client_quest = build_client_quest_info(q);
+        let client_quest = build_client_quest_info(q, item_infos);
         let packet = mir2_shared::packets::server::quest::NewQuestInfo {
             quest: client_quest,
         };
@@ -12068,7 +12089,14 @@ pub(crate) fn enrich_item_info(
     }
     item.info = item_infos
         .get(&item.item_index)
-        .map(|info| mir2_shared::data::item::ItemInfo {
+        .map(client_item_info_from_db);
+}
+
+/// DB 配置 → SharedRust `ItemInfo`（编号差 3 的枚举统一在此转换）。
+/// 物品入包（`enrich_item_info`）与任务奖励（#2801 单元③，C# `QuestItemReward.Item`
+/// 随任务定义下发完整 ItemInfo）共用，避免两处字段漂移。
+pub(crate) fn client_item_info_from_db(info: &db::ItemInfo) -> mir2_shared::data::item::ItemInfo {
+    mir2_shared::data::item::ItemInfo {
             index: info.index,
             name: info.name.clone(),
             item_type: shared_item_type(info.item_type),
@@ -12126,7 +12154,7 @@ pub(crate) fn enrich_item_info(
                 s
             },
             ..Default::default()
-        });
+    }
 }
 
 /// PlayerMagic + magic_infos → 客户端 ClientMagic（#212；DB 用 C# 编号，客户端用 SharedRust +3）

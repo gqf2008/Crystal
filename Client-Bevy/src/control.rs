@@ -14,9 +14,10 @@
 //   cursor {x,y} | {clear:true}  注入/清除「光标探针」（#2767：自动化环境 winit 收不到真实
 //                               光标 → 悬停类系统用探针坐标驱动；`nearby` 的 vp 字段给出目标视口坐标）
 //   player_menu {object_id}  以该玩家的视口坐标打开右键菜单（#2771：悬停 Hint 的实机验证入口）
-//   quest_detail {quest_id[,top_line]}  打开任务详情窗展示指定任务（#2801 单元②：等价于点任务
-//                 日记「已接任务」行 + 点消息区上/下滚键；`top_line` 指定消息区首行（翻页取证，
-//                 与滚轮/滚动键同一状态字段）；quest_id<=0 = 关闭）
+//   quest_detail {quest_id[,top_line][,confirm]}  打开任务详情窗展示指定任务（#2801：等价于点
+//                 任务日记「已接任务」行 + 点消息区滚动键 + 点取消键；`top_line` 指定消息区
+//                 首行（翻页取证，与滚轮/滚动键同一状态字段）、`confirm=true` 弹取消询问框；
+//                 quest_id<=0 = 关闭）
 // ============================================================================
 
 use std::io::{BufRead, BufReader, Write};
@@ -100,11 +101,13 @@ enum ControlCommand {
         object_id: u32,
         reply: Sender<String>,
     },
-    /// #2801 单元②：打开任务详情窗展示指定任务/分页首行（等价于点任务日记「已接任务」行
-    /// 与点消息区滚动键；自动化无光标时点击链路不可用，见 `dialogs/quest_log.rs`）
+    /// #2801 单元②③：打开任务详情窗展示指定任务/分页首行/取消询问框（等价于点任务日记
+    /// 「已接任务」行、点消息区滚动键、点取消键；自动化无光标时点击链路不可用，
+    /// 见 `dialogs/quest_log.rs`）
     QuestDetail {
         quest_id: i32,
         top_line: usize,
+        confirm: bool,
         reply: Sender<String>,
     },
     /// #2775：切换角色窗页（0=装备 1=状态 2=State 3=技能）——技能页 Hint 的实机验证入口
@@ -191,7 +194,7 @@ struct ControlQueries<'w, 's> {
     /// #2791：`hero_manage` 是状态驱动窗（不经 `DialogManager.open`，见 dialogs/mod.rs
     /// 的 `DialogKind::HeroManage`），RPC 直接切 `HeroState.managing`
     hero: ResMut<'w, crate::game::dialogs::hero::HeroState>,
-    /// #2801 单元②：任务详情窗状态（`quest_detail` RPC 直接指定要展示的任务与分页首行）
+    /// #2801 单元②③：任务详情窗状态（`quest_detail` RPC 直接指定任务/分页首行/询问框）
     quest_detail: ResMut<'w, crate::game::dialogs::quest_log::QuestDetailState>,
     map_cameras: Query<
         'w,
@@ -377,17 +380,22 @@ fn handle_conn(mut stream: std::net::TcpStream, tx: Sender<ControlCommand>) {
                 }
             }
             "quest_detail" => {
-                // #2801 单元②：{quest_id[,top_line]} → 打开任务详情窗并直接指定「展示哪个任务 /
-                // 消息区首行」——分别等价于点日记已接行、点/滚消息区（`top_line` 就是滚动状态
-                // 字段本身）；自动化无光标时点击不可用；quest_id<=0 关闭
+                // #2801 单元②③：{quest_id[,top_line][,confirm]} → 打开任务详情窗并直接指定
+                // 「展示哪个任务 / 消息区首行 / 是否弹取消询问框」——分别等价于点日记已接行、
+                // 点/滚消息区、点取消键（都写同一份 `QuestDetailState`）；quest_id<=0 关闭
                 let quest_id = params.get("quest_id").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
                 let top_line =
                     params.get("top_line").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+                let confirm = params
+                    .get("confirm")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
                 let (reply_tx, reply_rx) = bounded::<String>(1);
                 if tx
                     .send(ControlCommand::QuestDetail {
                         quest_id,
                         top_line,
+                        confirm,
                         reply: reply_tx,
                     })
                     .is_ok()
@@ -756,10 +764,11 @@ fn apply_control_commands(
             ControlCommand::QuestDetail {
                 quest_id,
                 top_line,
+                confirm,
                 reply,
             } => {
-                // #2801 单元②：等价于点日记已接行（打开入口）+ 点/滚消息区（`top_line`）；
-                // `quest_id <= 0` 关闭窗口
+                // #2801 单元②③：等价于点日记已接行（打开入口）+ 点/滚消息区（`top_line`）+
+                // 点取消键（`confirm`）；`quest_id <= 0` 关闭窗口
                 if quest_id <= 0 {
                     mgr.close(DialogKind::QuestDetail);
                     q.quest_detail.quest_id = None;
@@ -767,12 +776,22 @@ fn apply_control_commands(
                 } else {
                     q.quest_detail.quest_id = Some(quest_id);
                     q.quest_detail.top_line = top_line;
+                    q.quest_detail.confirm_cancel = confirm;
+                    q.quest_detail.selected_reward = None;
                     mgr.open(DialogKind::QuestDetail);
                     let _ = reply.send(
-                        json!({"ok": true, "quest_id": quest_id, "top_line": top_line}).to_string(),
+                        json!({
+                            "ok": true,
+                            "quest_id": quest_id,
+                            "top_line": top_line,
+                            "confirm": confirm
+                        })
+                        .to_string(),
                     );
                 }
-                tracing::info!("🎮 control quest_detail: quest={quest_id} top_line={top_line}");
+                tracing::info!(
+                    "🎮 control quest_detail: quest={quest_id} top_line={top_line} confirm={confirm}"
+                );
             }
             ControlCommand::GetDialogs { reply } => {
                 let list: Vec<String> = mgr.open.iter().map(|k| format!("{k:?}")).collect();
