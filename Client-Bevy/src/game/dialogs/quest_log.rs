@@ -759,8 +759,9 @@ pub fn quest_reward_offsets(reward_exp: u32, reward_gold: u32) -> QuestRewardOff
     QuestRewardOffsets { gold, credit }
 }
 
-/// C# `QuestRewards.FilterRewards`（`:1330-1350`）：只保留与玩家性别匹配的奖励物品
-/// （`None`/未设位不显示——C# 用 `RequiredGender.HasFlag`，位掩码 0 对任何性别都是 false）
+/// C# `QuestRewards.FilterRewards`（定义 `:1588-1610`）：只保留与玩家性别匹配的奖励物品
+/// （`None`/未设位不显示——C# 用 `RequiredGender.HasFlag`，位掩码 0 对任何性别都是 false）。
+/// **只在可选排调用**（`:1551-1553`）；固定排不过滤（见 `quest_detail_reward_system`）。
 pub fn quest_reward_visible_for_gender(
     item: &mir2_shared::data::item::ItemInfo,
     gender: mir2_shared::enums::MirGender,
@@ -1385,13 +1386,11 @@ fn quest_detail_reward_system(
         .map(|i| (i.reward_exp, i.reward_gold, i.reward_credit))
         .unwrap_or((0, 0, 0));
     let offs = quest_reward_offsets(exp, gold);
+    // 固定排**不做**性别过滤：C# `UpdateInterface` 的固定排直接用 `quest.RewardsFixedItem`
+    // （`:1533-1548`），`FilterRewards` 那一行在 `:1534` 被注释掉了——只有可选排在 `:1551-1553`
+    // 过滤。照抄原版：固定排原样显示（含性别不符的物品），且槽位下标不因过滤前移。
     let fixed: Vec<&QuestItemReward> = info
-        .map(|i| {
-            i.rewards_fixed_item
-                .iter()
-                .filter(|r| quest_reward_visible_for_gender(&r.item, gender))
-                .collect()
-        })
+        .map(|i| i.rewards_fixed_item.iter().collect())
         .unwrap_or_default();
     // 可选排：过滤后的显示序 + 原（未过滤）下标——C# `SelectedItemIndex` 用原下标
     let select: Vec<(usize, &QuestItemReward)> = info
@@ -2673,7 +2672,7 @@ mod tests {
     }
 
     /// #2801 单元③：奖励区系统级渲染 + 多选一
-    /// （C# `QuestRewards.UpdateInterface` `:1420-1530` / `FilterRewards` `:1330-1350`）
+    /// （C# `QuestRewards.UpdateInterface` `:1420-1530` / `FilterRewards` `:1588-1610`）
     #[test]
     fn quest_detail_reward_area_lays_out_and_selects() {
         use mir2_shared::enums::{MirClass, MirGender, RequiredGender};
@@ -2827,6 +2826,102 @@ mod tests {
             Some(Visibility::Visible),
             "选中后底图切 `Prguse[979]`"
         );
+    }
+
+    /// #2801 后续修复：固定排**不做**性别过滤
+    /// （C# `QuestRewards.UpdateInterface` `:1533-1548` 直接用 `quest.RewardsFixedItem`，
+    /// `FilterRewards` 那一行在 `:1534` 被注释掉；只有可选排 `:1551-1553` 过滤）。
+    /// 玩家女 + 固定奖励仅限男性 → 仍必须显示；对照：可选排同样仅限男性 → 过滤后不可选。
+    #[test]
+    fn quest_detail_fixed_rewards_ignore_gender_filter() {
+        use mir2_shared::enums::{MirClass, MirGender, RequiredGender};
+
+        let mut world = World::new();
+        let mut mgr = DialogManager::default();
+        mgr.open(DialogKind::QuestDetail);
+        world.insert_resource(mgr);
+        world.insert_resource(QuestDetailState {
+            quest_id: Some(1),
+            ..Default::default()
+        });
+        world.spawn((
+            crate::actor::ActorAppearance {
+                class: MirClass::Warrior,
+                gender: MirGender::Female,
+                armour: 0,
+                hair: 0,
+                weapon: 0,
+                weapon_effect: 0,
+                wing_effect: 0,
+            },
+            crate::actor::LocalPlayer,
+        ));
+        world.insert_resource(GameLibraries::default());
+        world.insert_resource(Assets::<Image>::default());
+        world.insert_resource(crate::ui::sprite_ui::UiImageCache::default());
+
+        let mut q = info(1, 1, RequiredClass::from_bits_truncate(0));
+        q.reward_exp = 0;
+        q.reward_gold = 0;
+        q.reward_credit = 0;
+        q.rewards_fixed_item = vec![reward_gendered(10, RequiredGender::MALE, 3)];
+        q.rewards_select_item = vec![reward_gendered(20, RequiredGender::MALE, 1)];
+        world.insert_resource(QuestCatalog {
+            infos: vec![q],
+            ..Default::default()
+        });
+
+        let fixed_cell = QuestRewardCell {
+            fixed: true,
+            slot: 0,
+        };
+        let fixed_bg = world
+            .spawn((
+                QuestRewardPart::CellBg(fixed_cell),
+                Visibility::Hidden,
+                Node::default(),
+            ))
+            .id();
+        let fixed_count = world
+            .spawn((
+                QuestRewardPart::CellCount(fixed_cell),
+                Visibility::Hidden,
+                Node::default(),
+                Text::new(""),
+            ))
+            .id();
+        let select_cell = QuestRewardCell {
+            fixed: false,
+            slot: 0,
+        };
+        let select_bg = world
+            .spawn((
+                QuestRewardPart::CellBg(select_cell),
+                Visibility::Hidden,
+                Node::default(),
+            ))
+            .id();
+        world
+            .spawn((Button, select_cell, Interaction::Pressed, Node::default()))
+            .id();
+
+        world
+            .run_system_once(quest_detail_reward_system)
+            .expect("奖励区系统应运行");
+
+        let vis = |w: &World, e: Entity| w.get::<Visibility>(e).copied();
+        assert_eq!(
+            vis(&world, fixed_bg),
+            Some(Visibility::Visible),
+            "固定排不过滤性别（C# `:1534` 注释掉的 FilterRewards）"
+        );
+        assert_eq!(world.get::<Text>(fixed_count).unwrap().0, "3");
+        assert_eq!(
+            world.resource::<QuestDetailState>().selected_reward,
+            None,
+            "可选排仍按性别过滤：过滤后无可选项，点击不改选择"
+        );
+        assert_eq!(vis(&world, select_bg), Some(Visibility::Hidden));
     }
 
     /// 任务行命中：初始原点等价于原固定坐标，拖动后跟随面板
