@@ -505,18 +505,26 @@ pub(crate) fn handle_progress(    server_events: &mut MessageWriter<ServerEvent>
         // ---- M46: 查看玩家 ----
         x if x == ServerPacketIds::PlayerInspect as i16 => {
             // [object_id u32][name dotnet][guild dotnet][level u16][class u8][gender u8]
-            // [allow_observe u8][count u8][per: slot u8][uid u64][index i32][image i32][dura i32][max_dura i32]
-            // （#2607：slot/image 新增；#2611：allow_observe 新增——Observe 按钮门控）
+            // [lover_name dotnet][allow_observe u8][count u8][per: slot u8][uid u64][index i32][image i32][dura i32][max_dura i32]
+            // （#2607：slot/image 新增；#2611：allow_observe 新增——Observe 按钮门控；
+            //  #2786：lover_name 新增——观察窗伴侣钮 Hint，服务端 `inspect_identity_bytes` 同序）
             let body = &payload[PacketHeader::HEADER_SIZE..];
             let mut cur = std::io::Cursor::new(body);
             use byteorder::{LittleEndian, ReadBytesExt};
-            let _oid = match cur.read_u32::<LittleEndian>() { Ok(v) => v, Err(_) => { tracing::warn!("⚠️ PlayerInspect 解析失败"); return true; } };
-            let name = mir2_shared::binary::read_dotnet_string(&mut cur).unwrap_or_default();
-            let guild = mir2_shared::binary::read_dotnet_string(&mut cur).unwrap_or_default();
-            let level = match cur.read_u16::<LittleEndian>() { Ok(v) => v, Err(_) => { tracing::warn!("⚠️ PlayerInspect 解析失败"); return true; } };
-            let class = cur.read_u8().unwrap_or(0);
-            let gender = cur.read_u8().unwrap_or(0);
-            let allow_observe = cur.read_u8().unwrap_or(0) == 1;
+            let Some(id) = parse_inspect_identity(&mut cur) else {
+                tracing::warn!("⚠️ PlayerInspect 解析失败");
+                return true;
+            };
+            let InspectIdentity {
+                name,
+                guild,
+                level,
+                class,
+                gender,
+                lover_name,
+                allow_observe,
+                ..
+            } = id;
             let count = cur.read_u8().unwrap_or(0) as usize;
             let mut items = Vec::with_capacity(count);
             let mut ok = true;
@@ -537,6 +545,7 @@ pub(crate) fn handle_progress(    server_events: &mut MessageWriter<ServerEvent>
                     level,
                     class,
                     gender,
+                    lover_name,
                     allow_observe,
                     items,
                 });
@@ -1020,6 +1029,42 @@ pub(crate) fn handle_progress(    server_events: &mut MessageWriter<ServerEvent>
     handled
 }
 
+/// #2786：`PlayerInspect` 身份段（服务端 `world::inspect_identity_bytes` 的对应解析）。
+/// 两端各写一份手写字节契约，互为依据（批15/16 惯例）。
+#[derive(Debug, PartialEq, Eq)]
+struct InspectIdentity {
+    object_id: u32,
+    name: String,
+    guild: String,
+    level: u16,
+    class: u8,
+    gender: u8,
+    lover_name: String,
+    allow_observe: bool,
+}
+
+fn parse_inspect_identity<R: std::io::Read>(cur: &mut R) -> Option<InspectIdentity> {
+    use byteorder::{LittleEndian, ReadBytesExt};
+    let object_id = cur.read_u32::<LittleEndian>().ok()?;
+    let name = mir2_shared::binary::read_dotnet_string(cur).ok()?;
+    let guild = mir2_shared::binary::read_dotnet_string(cur).ok()?;
+    let level = cur.read_u16::<LittleEndian>().ok()?;
+    let class = cur.read_u8().ok()?;
+    let gender = cur.read_u8().ok()?;
+    let lover_name = mir2_shared::binary::read_dotnet_string(cur).ok()?;
+    let allow_observe = cur.read_u8().ok()? == 1;
+    Some(InspectIdentity {
+        object_id,
+        name,
+        guild,
+        level,
+        class,
+        gender,
+        lover_name,
+        allow_observe,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1028,6 +1073,53 @@ mod tests {
     use mir2_shared::data::item::UserItem;
     use mir2_shared::packets::base::{Packet, PacketHeader};
     use mir2_shared::packets::server::hero::HeroInformation;
+
+    /// #2786：`PlayerInspect` 身份段字节契约——同一串字节（服务端
+    /// `inspect_identity_bytes` 的测试里手推的同值）必须解出期望字段，
+    /// 特别是 `lover_name` 在 `gender` 与 `allow_observe` 之间。
+    #[test]
+    fn player_inspect_identity_wire_contract() {
+        // object_id=7, name="abc", guild="行会", level=30, class=0, gender=1,
+        // lover_name="老婆", allow_observe=1（UTF-8 字面量手推；dotnet 字符串 = 7bit 长度 + UTF-8）
+        let bytes: Vec<u8> = vec![
+            7, 0, 0, 0, // object_id
+            3, b'a', b'b', b'c', // name
+            6, 0xe8, 0xa1, 0x8c, 0xe4, 0xbc, 0x9a, // guild 行会
+            30, 0, // level
+            0, // class
+            1, // gender
+            6, 0xe8, 0x80, 0x81, 0xe5, 0xa9, 0x86, // lover_name 老婆
+            1,    // allow_observe
+        ];
+        let mut cur = std::io::Cursor::new(bytes.as_slice());
+        let id = parse_inspect_identity(&mut cur).expect("身份段应可解析");
+        assert_eq!(
+            id,
+            InspectIdentity {
+                object_id: 7,
+                name: "abc".to_string(),
+                guild: "行会".to_string(),
+                level: 30,
+                class: 0,
+                gender: 1,
+                lover_name: "老婆".to_string(),
+                allow_observe: true,
+            }
+        );
+        assert_eq!(cur.position() as usize, bytes.len(), "身份段应恰好读完");
+
+        // 负控：少写 lover_name（旧格式）→ 后续字节被当成 lover_name，字段必错
+        let old: Vec<u8> = vec![
+            7, 0, 0, 0, 3, b'a', b'b', b'c', 6, 0xe8, 0xa1, 0x8c, 0xe4, 0xbc, 0x9a, 30, 0, 0, 1,
+            1, // 这里直接是 allow_observe
+        ];
+        let mut cur = std::io::Cursor::new(old.as_slice());
+        let parsed = parse_inspect_identity(&mut cur);
+        assert!(
+            parsed.is_none() || parsed.unwrap().lover_name != "老婆",
+            "旧格式（无 lover_name）不得解析出配偶名"
+        );
+    }
 
     /// 构造 S.HeroInformation 全量包并走 handle_progress 解码（#203）
     fn build_hero_info_payload() -> Vec<u8> {

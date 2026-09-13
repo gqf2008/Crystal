@@ -313,6 +313,8 @@ pub enum ServerEvent {
         level: u16,
         class: u8,
         gender: u8,
+        /// #2786：配偶名（C# `S.PlayerInspect.LoverName`；观察窗伴侣钮 Hint）
+        lover_name: String,
         /// #2611：允许观察（Observe 按钮门控）
         allow_observe: bool,
         items: Vec<InspectItem>,
