@@ -22,7 +22,7 @@ use crate::scenes::AppState;
 use crate::ui::sprite_ui::{shared_cjk_font, UiCjkFont, UiFont};
 use crate::ui::theme::{
     load_lib_image, spawn_container, spawn_icon_button, spawn_image, spawn_label,
-    spawn_label_center, spawn_panel,
+    spawn_label_center, spawn_panel, ImageButton,
 };
 
 /// 宠物条目
@@ -204,6 +204,31 @@ struct CreatureDeadlineLabel;
 #[derive(Component)]
 struct CreaturePearlsLabel;
 
+/// C# `CreatureImage` 面板宠物动画（@50,110，帧表见 `creature_anim_frames`）
+#[derive(Component)]
+struct CreatureAnimImage {
+    /// 已加载帧表对应的宠物类型（`0` = 未设置）
+    loaded_type: u8,
+    /// default / ex 两套帧句柄
+    frames: (Vec<Handle<Image>>, Vec<Handle<Image>>),
+    /// 当前是否播放 ex 套（C# `AnimSwitched`）
+    switched: bool,
+    frame: usize,
+    acc: f32,
+    /// 面板打开后的累计秒数与「允许切换」的时间点（C# `SwitchAnimTime`，8 秒交替）
+    elapsed: f32,
+    switch_at: f32,
+}
+
+/// C# `SummonButton` 的两套帧：`Title[576..578]`（可召唤）与 `Title[593..595]`
+/// （「已召唤其它种类」时的禁用态，`:651-653`）
+#[derive(Component)]
+struct CreatureSummonFrames {
+    base: (Handle<Image>, Handle<Image>, Handle<Image>),
+    alt: (Handle<Image>, Handle<Image>, Handle<Image>),
+    current_alt: bool,
+}
+
 pub struct CreaturePlugin;
 
 impl Plugin for CreaturePlugin {
@@ -224,6 +249,7 @@ app.add_systems(OnEnter(AppState::Game), spawn_creature);
                 creature_bars_system,
                 creature_slots_system,
                 creature_labels_system,
+                creature_anim_system,
             )
                 .chain()
                 .run_if(in_state(AppState::Game)),
@@ -314,10 +340,17 @@ pub enum CreatureOp {
 /// 未选中宠物 → 全部 `Enabled = false`（但 **`Visible` 不变**，即按钮仍在、只是灰掉）；
 /// 选中后 改名/选项/自动/半自动可用；召唤仅在未激活时可用；解散仅在该宠已激活（召唤中）时可用；
 /// 释放仅在该宠未召唤时可用（C# :647 `ReleaseButton.Enabled = false`）。
-pub fn creature_op_enabled(op: CreatureOp, has_selection: bool, is_active: bool) -> bool {
+pub fn creature_op_enabled(
+    op: CreatureOp,
+    has_selection: bool,
+    is_active: bool,
+    other_summoned: bool,
+) -> bool {
     match op {
         CreatureOp::Dismiss => has_selection && is_active,
-        CreatureOp::Summon | CreatureOp::Release => has_selection && !is_active,
+        // C# :649-656：已召唤其它种类时 `SummonButton.Enabled = false`（该键此时显示 593..595 帧）
+        CreatureOp::Summon => has_selection && !is_active && !other_summoned,
+        CreatureOp::Release => has_selection && !is_active,
         _ => has_selection,
     }
 }
@@ -438,6 +471,56 @@ fn creature_deadline_text(selected: Option<&CreatureEntry>) -> String {
 /// 槽位图标索引（C# `PetButton.Index = pet.Icon`；无宠物或本端无对应图标 → 0 = 不绘制）。
 fn creature_slot_icon_index(entry: Option<&CreatureEntry>) -> u16 {
     entry.map(|c| c.icon.max(0) as u16).unwrap_or(0)
+}
+
+/// C# `SetCreatureFrames()`（`IntelligentCreatureDialogs.cs:983-1126`）帧表：
+/// `(默认起始索引, 默认帧数, 默认间隔 ms, ex 起始索引, ex 帧数, ex 间隔 ms)`。
+/// 按名称对应 C# 的 `IntelligentCreatureType`；本端独有类型（Panda/Oma/Sheep/Gorilla/Custom）
+/// 在 C# `switch` 里没有 case → 沿用 `CreatureButton` 构造默认值（540/6/400 + 550/5/400）。
+fn creature_anim_frames(creature_type: u8) -> (usize, usize, f32, usize, usize, f32) {
+    match creature_type {
+        2 => (540, 6, 200.0, 550, 5, 300.0),  // BabyPig
+        5 => (600, 6, 250.0, 610, 10, 200.0), // Kitten
+        6 => (570, 4, 350.0, 580, 10, 200.0), // Chick
+        4 => (630, 11, 200.0, 650, 7, 250.0), // BabySkeleton
+        9 => (750, 6, 300.0, 760, 7, 250.0),  // BabyDragon
+        0 => (539, 1, 0.0, 539, 1, 0.0),      // None：单帧占位
+        _ => (540, 6, 400.0, 550, 5, 400.0),  // C# 构造默认（本端独有类型）
+    }
+}
+
+/// 单步推进动画（C# `MirAnimatedControl` 帧推进 + `DrawCreatureAnimation`:776-790 的换套判定）：
+/// 返回 `(switched, frame, acc_ms, switch_at)`。
+fn anim_tick(
+    switched: bool,
+    frame: usize,
+    acc: f32,
+    count: usize,
+    delay: f32,
+    elapsed: f32,
+    switch_at: f32,
+    dt: f32,
+) -> (bool, usize, f32, f32) {
+    if count == 0 || delay <= 0.0 {
+        return (switched, frame, acc, switch_at);
+    }
+    let mut switched = switched;
+    let mut frame = frame;
+    let mut acc = acc + dt * 1000.0;
+    let mut switch_at = switch_at;
+    while acc >= delay {
+        acc -= delay;
+        frame += 1;
+        if frame >= count {
+            frame = 0;
+            // C#：动画播完 + 已过 8 秒 → 换套，并把下一次允许切换推到 +8 秒
+            if elapsed >= switch_at {
+                switched = !switched;
+                switch_at = elapsed + 8.0;
+            }
+        }
+    }
+    (switched, frame, acc, switch_at)
 }
 
 /// 槽位文字宽度估算（对话框 12px 字体：CJK 按 12px、半角按 6px）。
@@ -681,6 +764,25 @@ fn spawn_creature(
             spawn_image(p, img, 29.0, 348.0, 144.0, 17.0, 10);
         }
         spawn_label(p, &cjk, "0", 53.0, 348.0, 12.0, Color::WHITE, 11).insert(CreaturePearlsLabel);
+        // #2761 C# `CreatureImage`（@50,110，`Prguse2` 帧动画，8 秒在默认/ex 两套间交替）
+        spawn_image(
+            p,
+            images.add(crate::map_renderer::make_image(vec![0, 0, 0, 0], 1, 1)),
+            50.0,
+            110.0,
+            72.0,
+            68.0,
+            8,
+        )
+        .insert(CreatureAnimImage {
+            loaded_type: 0,
+            frames: (Vec::new(), Vec::new()),
+            switched: false,
+            frame: 0,
+            acc: 0.0,
+            elapsed: 0.0,
+            switch_at: 8.0,
+        });
         // Bevy 扩展行（C# 无对应控件）：紧随 C# 三行信息之后的同间距第四行（191+15=206）放数量
         // 摘要；操作反馈放宠物槽底与面板底纹之间的空档（第二行图标底 331、黑石条顶 348）。
         // （#2761 起槽位名字标签移到 C# `NameLabel` 位置 @(sx-22, sy-12)，占用了原 243 行。）
@@ -739,7 +841,7 @@ fn spawn_creature(
             ) else {
                 continue;
             };
-            let mut cmds = spawn_icon_button(p, n, hv, pr, x, y, w, h, 10);
+            let mut cmds = spawn_icon_button(p, n.clone(), hv.clone(), pr.clone(), x, y, w, h, 10);
             match marker {
                 "rename" => {
                     cmds.insert(CreatureRenameBtn);
@@ -748,7 +850,20 @@ fn spawn_creature(
                     cmds.insert(CreatureDismissBtn);
                 }
                 "summon" => {
+                    // C# `RefreshUI`:651-653 / 663-665：召唤键在「已召唤其它种类」时切到 593..595
+                    let alt = (
+                        load_lib_image(&mut libs, &mut images, LibraryName::Title, 593),
+                        load_lib_image(&mut libs, &mut images, LibraryName::Title, 594),
+                        load_lib_image(&mut libs, &mut images, LibraryName::Title, 595),
+                    );
                     cmds.insert((CreatureSummonBtn, Visibility::Hidden));
+                    if let (Some(a), Some(b), Some(c)) = alt {
+                        cmds.insert(CreatureSummonFrames {
+                            base: (n.clone(), hv.clone(), pr.clone()),
+                            alt: (a, b, c),
+                            current_alt: false,
+                        });
+                    }
                 }
                 "release" => {
                     cmds.insert(CreatureReleaseBtn);
@@ -1193,6 +1308,92 @@ fn creature_slots_system(
     }
 }
 
+/// #2761：面板宠物动画（C# `DrawCreatureAnimation`:754-790 + `SetCreatureFrames`:983-1126）。
+///
+/// C# 用 `MirAnimatedControl` 播当前动画套；每当动画播完且已过 8 秒，就在 default/ex 两套间切换
+/// （`SwitchAnimTime = CMain.Time + 8000`）。本系统同语义：帧推进按 `SetCreatureFrames` 的 ms 间隔，
+/// 播完一轮时若 `elapsed >= switch_at` 则切套并把 `switch_at` 推到 +8 秒。
+fn creature_anim_system(
+    mgr: Res<DialogManager>,
+    state: Res<CreatureState>,
+    time: Res<Time>,
+    mut libs: ResMut<GameLibraries>,
+    mut images: ResMut<Assets<Image>>,
+    mut anim: Query<(&mut CreatureAnimImage, &mut ImageNode, &mut Node)>,
+) {
+    if !mgr.is_open(DialogKind::Creature) {
+        return;
+    }
+    let dt = time.delta_secs();
+    let creature_type = state
+        .creatures
+        .get(state.selected)
+        .map(|c| c.creature_type)
+        .unwrap_or(0);
+    for (mut anim, mut image, mut node) in &mut anim {
+        anim.elapsed += dt;
+        if anim.loaded_type != creature_type {
+            // 换宠物：按 `SetCreatureFrames` 帧表重建两套帧句柄
+            let (idx, count, _d0, ex_idx, ex_count, _d1) = creature_anim_frames(creature_type);
+            let mut load = |start: usize, n: usize| {
+                let mut out = Vec::with_capacity(n);
+                for k in 0..n {
+                    if let Some(h) =
+                        load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, start + k)
+                    {
+                        out.push(h);
+                    }
+                }
+                out
+            };
+            let frames = (load(idx, count), load(ex_idx, ex_count));
+            if let Some(first) = frames.0.first() {
+                image.image = first.clone();
+            }
+            if let Some(info) = libs.0.get_image(LibraryName::Prguse2, idx) {
+                node.width = Val::Px(info.width.max(1) as f32);
+                node.height = Val::Px(info.height.max(1) as f32);
+            }
+            anim.frames = frames;
+            anim.loaded_type = creature_type;
+            anim.switched = false;
+            anim.frame = 0;
+            anim.acc = 0.0;
+            anim.switch_at = anim.elapsed + 8.0;
+        }
+        let (_, _, delay0, _, _, delay1) = creature_anim_frames(creature_type);
+        let (count, delay) = if anim.switched {
+            (anim.frames.1.len(), delay1)
+        } else {
+            (anim.frames.0.len(), delay0)
+        };
+        let (switched, frame, acc, switch_at) = anim_tick(
+            anim.switched,
+            anim.frame,
+            anim.acc,
+            count,
+            delay,
+            anim.elapsed,
+            anim.switch_at,
+            dt,
+        );
+        anim.switched = switched;
+        anim.frame = frame;
+        anim.acc = acc;
+        anim.switch_at = switch_at;
+        let set = if anim.switched {
+            &anim.frames.1
+        } else {
+            &anim.frames.0
+        };
+        if let Some(handle) = set.get(anim.frame) {
+            if image.image != *handle {
+                image.image = handle.clone();
+            }
+        }
+    }
+}
+
 /// #2761：C# `CreatureName`(170,50) / `CreatureDeadline`(140,85) / `CreaturePearls`(53,348) 文案
 /// （`DrawCreatureAnimation`:732-746 与 `RefreshDialog`:569）。
 fn creature_labels_system(
@@ -1252,6 +1453,8 @@ fn creature_action_system(
         Entity,
         &Interaction,
         &mut ImageNode,
+        &mut ImageButton,
+        Option<&mut CreatureSummonFrames>,
         Has<CreatureRenameBtn>,
         Has<CreatureDismissBtn>,
         Has<CreatureSummonBtn>,
@@ -1295,6 +1498,8 @@ fn creature_action_system(
     let pet_mode = selected.as_ref().map(|c| c.pickup_mode).unwrap_or(0);
     let is_active = selected.as_ref().map(|c| c.active).unwrap_or(false);
     let sel_name = selected.as_ref().map(|c| c.name.clone()).unwrap_or_default();
+    // C# `RefreshUI`:640-657：已召唤**其它种类**宠物时召唤键禁用并换成 593..595 帧
+    let other_summoned = state.summoned && creature_type != state.summoned_type;
 
     // 解散仅对激活宠物显示；召唤对未激活的选中宠物显示（C# Summon/Dismiss 同位置切换）
     let (auto_visible, semi_visible) = creature_mode_buttons_visible(selected.is_some(), pet_mode);
@@ -1335,6 +1540,8 @@ fn creature_action_system(
         e,
         inter,
         mut node,
+        mut frame_button,
+        summon_frames,
         is_rename,
         is_dismiss,
         is_summon,
@@ -1365,10 +1572,26 @@ fn creature_action_system(
             None
         };
         let enabled = match op {
-            Some(op) => creature_op_enabled(op, selected.is_some(), is_active),
+            Some(op) => creature_op_enabled(op, selected.is_some(), is_active, other_summoned),
             // 改名/释放确认键与其它按钮（关闭等）不参与 C# 的 `Enabled` 开关
             None => true,
         };
+        // C# `RefreshUI`:640-657：已召唤「其它种类」时召唤键切到 `Title[593..595]`（禁用态帧）
+        if is_summon {
+            if let Some(mut frames) = summon_frames {
+                if frames.current_alt != other_summoned {
+                    let (n, hv, pr) = if other_summoned {
+                        frames.alt.clone()
+                    } else {
+                        frames.base.clone()
+                    };
+                    frame_button.normal = n;
+                    frame_button.hover = hv;
+                    frame_button.pressed = pr;
+                    frames.current_alt = other_summoned;
+                }
+            }
+        }
         // C# `MirButton` 禁用时 `Index` 回落 `base.Index`（`DisabledIndex` 未设 = -1），且
         // `IntelligentCreatureDialog` 从未设置 `GrayScale` → **禁用态外观与可用态相同**，
         // 只是点击被 `MirControl` 的 `!Enabled` 拦掉（:831-885）。此前用 `ImageNode.color`
@@ -1751,24 +1974,24 @@ mod tests {
         // 未选中：全部禁用
         for op in [Rename, Dismiss, Summon, Release, Options, Auto, Semi] {
             assert!(
-                !creature_op_enabled(op, false, false),
+                !creature_op_enabled(op, false, false, false),
                 "{op:?} 未选中宠物时应禁用"
             );
         }
         // 选中且未召唤：改名/选项/自动/半自动/召唤/释放可用，解散禁用
         for op in [Rename, Options, Auto, Semi, Summon, Release] {
             assert!(
-                creature_op_enabled(op, true, false),
+                creature_op_enabled(op, true, false, false),
                 "{op:?} 选中未召唤时应可用"
             );
         }
-        assert!(!creature_op_enabled(Dismiss, true, false));
+        assert!(!creature_op_enabled(Dismiss, true, false, false));
         // 选中且已召唤（激活）：解散可用；召唤/释放禁用（C# :647 ReleaseButton.Enabled = false）
-        assert!(creature_op_enabled(Dismiss, true, true));
-        assert!(!creature_op_enabled(Summon, true, true));
-        assert!(!creature_op_enabled(Release, true, true));
-        assert!(creature_op_enabled(Rename, true, true));
-        assert!(creature_op_enabled(Options, true, true));
+        assert!(creature_op_enabled(Dismiss, true, true, false));
+        assert!(!creature_op_enabled(Summon, true, true, false));
+        assert!(!creature_op_enabled(Release, true, true, false));
+        assert!(creature_op_enabled(Rename, true, true, false));
+        assert!(creature_op_enabled(Options, true, true, false));
     }
 
     /// #2736：C# `RefreshMode()` 早返回 → 未选中宠物时两个模式按钮都保持可见（都禁用）
@@ -1882,8 +2105,8 @@ mod layout_tests {
         // C# 非 Automatic 一律按 SemiAuto 显示
         assert_eq!(creature_mode_buttons_visible(true, 7), (false, true));
         // 未选中时两者都禁用（`Enabled = false`），故不会误点
-        assert!(!creature_op_enabled(CreatureOp::Auto, false, false));
-        assert!(!creature_op_enabled(CreatureOp::Semi, false, false));
+        assert!(!creature_op_enabled(CreatureOp::Auto, false, false, false));
+        assert!(!creature_op_enabled(CreatureOp::Semi, false, false, false));
     }
 
     /// 槽位标签必须放得进 76px 列（自 sx+4 起，72px 内），否则相邻槽互相压叠。
@@ -2079,5 +2302,55 @@ mod layout_tests {
         c.expire_secs = 3661;
         assert_eq!(creature_deadline_text(Some(&c)), "过期: 1h 01m 01s");
         assert_eq!(creature_deadline_text(None), "");
+    }
+
+    /// #2761：动画帧表按 C# `SetCreatureFrames`（名称对应），本端独有类型取 `CreatureButton`
+    /// 构造默认值（540/6/400 + 550/5/400）。
+    #[test]
+    fn creature_anim_frames_match_csharp() {
+        assert_eq!(creature_anim_frames(2), (540, 6, 200.0, 550, 5, 300.0)); // BabyPig
+        assert_eq!(creature_anim_frames(5), (600, 6, 250.0, 610, 10, 200.0)); // Kitten
+        assert_eq!(creature_anim_frames(6), (570, 4, 350.0, 580, 10, 200.0)); // Chick
+        assert_eq!(creature_anim_frames(4), (630, 11, 200.0, 650, 7, 250.0)); // BabySkeleton
+        assert_eq!(creature_anim_frames(9), (750, 6, 300.0, 760, 7, 250.0)); // BabyDragon
+        assert_eq!(creature_anim_frames(0), (539, 1, 0.0, 539, 1, 0.0)); // None
+        for t in [1u8, 3, 7, 8, 100] {
+            assert_eq!(
+                creature_anim_frames(t),
+                (540, 6, 400.0, 550, 5, 400.0),
+                "类型 {t} 应取 C# 构造默认帧表"
+            );
+        }
+    }
+
+    /// #2761：帧推进 + 8 秒换套（C# `MirAnimatedControl` + `:776-790`）。
+    #[test]
+    fn creature_anim_tick_advances_and_switches() {
+        // 4 帧 @350ms：350ms 走 1 帧，未到换套时间不切
+        let (sw, f, acc, sw_at) = anim_tick(false, 0, 0.0, 4, 350.0, 1.0, 8.0, 0.35);
+        assert_eq!((sw, f, sw_at), (false, 1, 8.0));
+        assert!(acc.abs() < 1e-3);
+        // 播完一轮（第 4 帧后回 0）且已过 switch 时间 → 换套并把 switch_at 推到 elapsed+8
+        let (sw, f, _acc, sw_at) = anim_tick(false, 3, 0.0, 4, 350.0, 9.0, 8.0, 0.35);
+        assert_eq!((sw, f), (true, 0));
+        assert_eq!(sw_at, 17.0);
+        // 播完但未到 switch 时间 → 不换套
+        let (sw, f, _, sw_at) = anim_tick(false, 3, 0.0, 4, 350.0, 5.0, 8.0, 0.35);
+        assert_eq!((sw, f, sw_at), (false, 0, 8.0));
+        // 单帧/零间隔（C# `None` 分支）不推进
+        let (sw, f, _, _) = anim_tick(false, 0, 0.0, 1, 0.0, 100.0, 8.0, 1.0);
+        assert_eq!((sw, f), (false, 0));
+    }
+
+    /// #2761：`CreatureSummonBtn` 在「已召唤其它种类」时禁用（C# `:649-656`）。
+    #[test]
+    fn creature_summon_disabled_when_other_type_summoned() {
+        use CreatureOp::*;
+        // 其它种类召唤中：召唤禁用（该键显示 593..595 帧），解散仍按本宠是否召唤
+        assert!(!creature_op_enabled(Summon, true, false, true));
+        assert!(!creature_op_enabled(Dismiss, true, false, true));
+        // 没有其它种类召唤：与既有语义一致
+        assert!(creature_op_enabled(Summon, true, false, false));
+        assert!(!creature_op_enabled(Summon, true, true, false));
     }
 }
