@@ -4656,13 +4656,21 @@ impl Message<SetItemAwake> for PlayerActor {
         msg: SetItemAwake,
         _ctx: &mut Context<Self, Self::Reply>,
     ) -> Self::Reply {
-        if let Some(item) = self.state.inventory.get_item_mut(msg.unique_id) {
-            item.awake = msg.awake;
-            self.send_inventory_changed();
-            true
-        } else {
-            false
-        }
+        let snapshot = match self.state.inventory.get_item_mut(msg.unique_id) {
+            Some(item) => {
+                item.awake = msg.awake;
+                Some(item.clone())
+            }
+            None => None,
+        };
+        let Some(snapshot) = snapshot else {
+            return false;
+        };
+        self.send_inventory_changed();
+        // #2832：C# Awakening 成功 `Enqueue(new S.RefreshItem { Item = item })`（PlayerObject.cs:8868）
+        // —— 只发 UserInformation 时客户端物品格/提示里的觉醒值不会即时刷新
+        self.send_refresh_item(&snapshot);
+        true
     }
 }
 

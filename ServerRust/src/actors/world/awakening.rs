@@ -733,6 +733,76 @@ pub struct AwakeningRequest {
     pub awake_type: u8,
 }
 
+impl WorldActor {
+    /// C# `PlayerObject.AwakeningEffect`（`PlayerObject.cs:9094-9104`）：
+    /// 5 次 `S.ObjectEffect{Effect = isHit[i] ? AwakeningHit : AwakeningMiss, EffectType = 0, DelayTime = i*500}`
+    /// + 1 次 `S.ObjectEffect{Effect = isSuccess ? AwakeningSuccess : AwakeningFail, DelayTime = 2500}`；
+    /// C# 是 `Enqueue`（自己）+ `Broadcast`（同图他人）——这里折叠成「同图全体各一次」。
+    async fn send_awakening_effects(
+        &self,
+        object_id: u32,
+        map_index: u16,
+        is_success: bool,
+        hits: &[bool; 5],
+    ) {
+        use mir2_shared::enums::SpellEffect;
+        for (i, hit) in hits.iter().enumerate() {
+            let effect = if *hit {
+                SpellEffect::AwakeningHit
+            } else {
+                SpellEffect::AwakeningMiss
+            };
+            self.send_object_effect_to_map(object_id, effect, i as u32 * 500, map_index)
+                .await;
+        }
+        let final_effect = if is_success {
+            SpellEffect::AwakeningSuccess
+        } else {
+            SpellEffect::AwakeningFail
+        };
+        self.send_object_effect_to_map(object_id, final_effect, 2500, map_index)
+            .await;
+    }
+
+    /// 发一条 `S.ObjectEffect` 给同图全体（含自己一次；C# Enqueue + Broadcast 去重的等价结果）
+    async fn send_object_effect_to_map(
+        &self,
+        object_id: u32,
+        effect: mir2_shared::enums::SpellEffect,
+        delay_time: u32,
+        map_index: u16,
+    ) {
+        let packet = mir2_shared::packets::server::magic_combat::ObjectEffect {
+            object_id,
+            effect,
+            effect_type: 0,
+            delay_time,
+            time: 0,
+        };
+        let mut body = Vec::new();
+        if packet.write_body(&mut body).is_err() {
+            return;
+        }
+        let data = build_packet_bytes(
+            mir2_shared::enums::ServerPacketIds::ObjectEffect as i16,
+            &body,
+        );
+        for (sid, r) in &self.players {
+            if let Ok(Some(os)) = r.actor_ref.ask(GetPlayerState).await {
+                if os.map_index == map_index {
+                    let _ = self
+                        .gate_ref
+                        .tell(SendToClient {
+                            session_id: *sid,
+                            data: data.clone(),
+                        })
+                        .await;
+                }
+            }
+        }
+    }
+}
+
 impl Message<AwakeningRequest> for WorldActor {
     type Reply = ();
 
@@ -940,7 +1010,7 @@ impl Message<AwakeningRequest> for WorldActor {
                 2 => self.awakening_cfg.armor_rate,  // Armour
                 _ => 1,
             };
-            let value = awake_roll_value(chance_max, self.awakening_cfg.hit_rate, rate);
+            let (value, hits) = awake_roll(chance_max, self.awakening_cfg.hit_rate, rate);
 
             let mut awake = item.awake.clone();
             awake.awake_type = awake_type;
@@ -960,6 +1030,9 @@ impl Message<AwakeningRequest> for WorldActor {
                     "Awakening success: {} item={} type={:?} value={}",
                     state.name, msg.unique_id, awake_type, value
                 );
+                // C# :8869 AwakeningEffect(true, isHit)——命中/成败特效广播
+                self.send_awakening_effects(state.object_id, state.map_index, true, &hits)
+                    .await;
                 self.send_awakening_result(msg.session_id, AWAKE_RESULT_SUCCESS, -1);
                 send_system_message(
                     &self.gate_ref,
@@ -971,6 +1044,8 @@ impl Message<AwakeningRequest> for WorldActor {
             }
         } else {
             // 失败：物品被摧毁
+            // C# `UpgradeAwake` 失败分支 `isHit = MakeHit(1, out _)`（ItemData.cs:1004）→ 同样播 5 次命中/未命中
+            let (_, hits) = awake_roll(1, self.awakening_cfg.hit_rate, 1);
             let removed = record
                 .actor_ref
                 .ask(crate::actors::player::RemoveItemFromInventory {
@@ -984,6 +1059,9 @@ impl Message<AwakeningRequest> for WorldActor {
                     "Awakening destroy: {} item={} destroyed",
                     state.name, msg.unique_id
                 );
+                // C# :8863 AwakeningEffect(false, isHit)
+                self.send_awakening_effects(state.object_id, state.map_index, false, &hits)
+                    .await;
                 self.send_awakening_result(
                     msg.session_id,
                     AWAKE_RESULT_DESTROYED,
@@ -1182,13 +1260,21 @@ pub(crate) fn awake_value_from_hits(hit_count: u8, chance_max: u8, rate: u8) -> 
 
 /// C# Awake.MakeHit：5 次 Bernoulli(hit_rate) 命中累加，返回最终觉醒值。
 pub(crate) fn awake_roll_value(chance_max: u8, hit_rate: u8, rate: u8) -> u8 {
-    let mut hits = 0u8;
-    for _ in 0..5 {
+    awake_roll(chance_max, hit_rate, rate).0
+}
+
+/// C# `Awake.MakeHit`（`Shared/Data/ItemData.cs:1036-1058`）：5 次 Bernoulli(hit_rate) 命中，
+/// 返回 `(觉醒值, 逐次命中表)`——命中表用于客户端表现（`AwakeningEffect` 的 Hit/Miss 序列）。
+pub(crate) fn awake_roll(chance_max: u8, hit_rate: u8, rate: u8) -> (u8, [bool; 5]) {
+    let mut ordered = [false; 5];
+    let mut count = 0u8;
+    for slot in ordered.iter_mut() {
         if fastrand::u8(0..100) < hit_rate {
-            hits += 1;
+            *slot = true;
+            count += 1;
         }
     }
-    awake_value_from_hits(hits, chance_max, rate)
+    (awake_value_from_hits(count, chance_max, rate), ordered)
 }
 
 pub struct ResetAddedItemRequest {
@@ -1537,5 +1623,23 @@ mod tests {
         assert!(!awakening_roll_succeeds(71, 70));
         assert!(awakening_roll_succeeds(99, 99));
         assert!(!awakening_roll_succeeds(99, 98));
+    }
+
+    /// #2832：`awake_roll` 的命中表与觉醒值自洽（表现层 Hit/Miss 序列直接用这张表）
+    #[test]
+    fn awake_roll_hits_match_value() {
+        for _ in 0..200 {
+            let (value, hits) = awake_roll(5, 70, 1);
+            let count = hits.iter().filter(|h| **h).count() as u8;
+            assert_eq!(value, awake_value_from_hits(count, 5, 1));
+            assert!(value >= 1);
+        }
+        // hit_rate=0 → 全不命中；hit_rate=100 → 全命中（C# `rand < rate` 语义）
+        let (value, hits) = awake_roll(5, 0, 1);
+        assert!(hits.iter().all(|h| !*h));
+        assert_eq!(value, awake_value_from_hits(0, 5, 1));
+        let (value, hits) = awake_roll(5, 100, 1);
+        assert!(hits.iter().all(|h| *h));
+        assert_eq!(value, awake_value_from_hits(5, 5, 1));
     }
 }
