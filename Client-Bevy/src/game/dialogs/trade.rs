@@ -222,6 +222,7 @@ impl Plugin for TradePlugin {
             Update,
             (
                 trade_ui_system,
+                trade_locked_icon_system,
                 trade_action_system,
                 trade_invite_system,
                 // 描边文本副本同步须排在正文写方之后（同 quest_tracking 先例）
@@ -384,6 +385,7 @@ fn trade_ui_system(
     mut confirm: Query<&mut ImageButton, With<TradeConfirmBtn>>,
     // 开窗瞬间通知背包右移让位（#2631：背包实体/Origin 归 inventory 所有，这里只发 Message）
     mut shift_right: MessageWriter<InventoryShiftRight>,
+    mut locked: ResMut<crate::game::dialogs::inventory::InvLockedSlots>,
     mut was_visible: Local<bool>,
 ) {
     // Trade/GuestTrade 由服务端会话驱动；同步管理栈后，PostUpdate 的通用
@@ -401,6 +403,10 @@ fn trade_ui_system(
     // #2631：解耦为发 InventoryShiftRight，由背包自我重排（可见行为不变：交易开时背包右移）
     if trade.visible && !*was_visible {
         shift_right.write(InventoryShiftRight);
+    }
+    // 关窗/交易结束：清交易来源的锁（C# `TradeReset` 后各格 `Locked` 复位）
+    if !trade.visible && *was_visible {
+        locked.unlock_all(crate::game::dialogs::inventory::InvLockReason::Trade);
     }
     *was_visible = trade.visible;
 
@@ -498,6 +504,7 @@ fn trade_action_system(
     panels: Query<(&Node, &DialogRoot), With<TradeWidget>>,
     gold_hit: Query<(), With<TradeGoldHit>>,
     inv_origin: Res<InventoryOrigin>,
+    mut locked: ResMut<crate::game::dialogs::inventory::InvLockedSlots>,
     mut amount: ResMut<AmountBoxState>,
     mut result: MessageReader<AmountBoxResult>,
     mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
@@ -560,6 +567,10 @@ fn trade_action_system(
         let x = tx + sx;
         let y = ty + sy;
         if cursor.x >= x && cursor.x <= x + CELL_W && cursor.y >= y && cursor.y <= y + CELL_H {
+            // 被锁的交易槽不响应（C# `MirItemCell.Locked` 早返回）
+            if locked.is_locked_in(crate::game::dialogs::inventory::LockGrid::Trade, i) {
+                return;
+            }
             if !trade.my_locked
                 && trade
                     .my_items
@@ -571,7 +582,13 @@ fn trade_action_system(
                     from: i as i32,
                     to: 0,
                 });
-                trade.my_items[i] = None;
+                // C# `MirItemCell.cs:1071-1076`：发包锁来源交易槽（目标背包格由服务端定）
+                locked.lock_in(
+                    crate::game::dialogs::inventory::InvLockReason::Trade,
+                    crate::game::dialogs::inventory::LockGrid::Trade,
+                    i,
+                );
+                // C# 语义：物品留在槽里（灰化锁定），由 `S.RetrieveTradeItem` 回包决定去留
                 trade.my_locked = false;
                 tracing::info!("↩️ 取回交易物品 槽{}", i);
             }
@@ -600,7 +617,9 @@ fn trade_action_system(
             0,
             items.len(),
             (inv_origin.0, inv_origin.1),
-        );
+        )
+        // 被其它来源锁定的背包格不作为存入来源（C# `MirItemCell.Locked` 早返回）
+        .filter(|i| !locked.is_locked_in(crate::game::dialogs::inventory::LockGrid::Inventory, *i));
         if let Some(idx) = hit {
             if let Some(item) = items.get(idx).and_then(|s| s.as_ref()) {
                 if let Some(to) = trade.my_items.iter().position(|s| s.is_none()) {
@@ -608,6 +627,17 @@ fn trade_action_system(
                         from: idx as i32,
                         to: to as i32,
                     });
+                    // C# `MirItemCell.cs:1554-1557`：发包锁来源背包格 + 目标交易槽
+                    locked.lock_in(
+                        crate::game::dialogs::inventory::InvLockReason::Trade,
+                        crate::game::dialogs::inventory::LockGrid::Inventory,
+                        idx,
+                    );
+                    locked.lock_in(
+                        crate::game::dialogs::inventory::InvLockReason::Trade,
+                        crate::game::dialogs::inventory::LockGrid::Trade,
+                        to,
+                    );
                     trade.pending_deposit = Some((idx, to));
                     tracing::info!(
                         "📦 放入交易: {} (uid={}) 背包{} -> 槽{}",
@@ -667,11 +697,33 @@ fn trade_invite_system(
     }
 }
 
+/// 锁定交易槽灰化（C# `MirItemCell.DrawControl`：`Locked` → `Color.DimGray` × 0.8，
+/// 同一 `LOCKED_ITEM_COLOR` 源）。只作用于**我方**槽（`TradeSlot.0 == 0`）。
+fn trade_locked_icon_system(
+    locked: Res<crate::game::dialogs::inventory::InvLockedSlots>,
+    slots: Query<&TradeSlot>,
+    mut icons: Query<(&ChildOf, &mut ImageNode), With<UiItemCellIcon>>,
+) {
+    for (child_of, mut node) in &mut icons {
+        let Ok(slot) = slots.get(child_of.parent()) else {
+            continue;
+        };
+        if slot.0 != 0 {
+            continue;
+        }
+        let want = locked.color_at(crate::game::dialogs::inventory::LockGrid::Trade, slot.1);
+        if node.color != want {
+            node.color = want;
+        }
+    }
+}
+
 /// 消费服务端交易事件（网络层只广播 ServerEvent；关闭/金币由本模块应用）
 fn trade_server_events(
     mut events: MessageReader<crate::network::server_event::ServerEvent>,
     mut trade: ResMut<TradeState>,
     inv_q: Query<&Inventory, With<LocalPlayer>>,
+    mut locked: ResMut<crate::game::dialogs::inventory::InvLockedSlots>,
 ) {
     use crate::network::server_event::ServerEvent;
     let items = inv_q.single().map(|inv| inv.items.as_slice()).unwrap_or(&[]);
@@ -742,6 +794,8 @@ fn trade_server_events(
                 }
             }
             ServerEvent::TradeDeposit { from, to, success } => {
+                // C# `GameScene.DepositTradeItem`（:2804-2820）：回包解锁来源格与交易槽
+                locked.unlock_all(crate::game::dialogs::inventory::InvLockReason::Trade);
                 if *success {
                     if let Some((from2, to2)) = trade.pending_deposit.take() {
                         let from = (*from).max(from2 as i32) as usize;
@@ -756,6 +810,15 @@ fn trade_server_events(
                     trade.pending_deposit = None;
                 }
             }
+            // C# `GameScene.RetrieveTradeItem`（:2821-2836）：回包解锁交易槽；成功才清空该槽
+            ServerEvent::TradeItemRetrieved { from_slot, success } => {
+                locked.unlock_all(crate::game::dialogs::inventory::InvLockReason::Trade);
+                if *success {
+                    if let Some(slot) = trade.my_items.get_mut(*from_slot as usize) {
+                        *slot = None;
+                    }
+                }
+            }
             _ => {}
         }
     }
@@ -764,6 +827,7 @@ fn trade_server_events(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::game::dialogs::inventory::InvLockedSlots;
 
     /// 批38-40 评审 P0（B0001 实证）：`labels`/`invite_texts` 两查询同写
     /// &mut Text 且 With 标记不同、无互斥过滤——B0001 在调度器初始化时
@@ -793,6 +857,100 @@ mod tests {
         assert!(
             msg.as_ref().map(|m| !m.contains("B0001")).unwrap_or(true),
             "trade_ui_system 查询冲突：{msg:?}"
+        );
+    }
+
+    /// 交易事件测试装配（`trade_server_events` + 所需资源）
+    fn trade_test_app() -> App {
+        use crate::network::server_event::ServerEvent;
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_message::<ServerEvent>();
+        app.init_resource::<TradeState>();
+        app.init_resource::<crate::game::dialogs::inventory::InvLockedSlots>();
+        app.world_mut().spawn((
+            LocalPlayer,
+            Inventory {
+                items: vec![None, None],
+                ..Default::default()
+            },
+        ));
+        app.add_systems(Update, trade_server_events);
+        app
+    }
+
+    /// #2752：交易放入/取回回包解锁（C# `GameScene.DepositTradeItem`:2804-2820 /
+    /// `RetrieveTradeItem`:2821-2836 —— 两格都 `Locked = false`，失败也解锁）。
+    #[test]
+    fn trade_receipts_release_locks() {
+        use crate::game::dialogs::inventory::{InvLockReason, LockGrid};
+        use crate::network::server_event::ServerEvent;
+
+        // 放入回包：清 Trade 来源（背包格 + 交易槽），其它来源不受影响
+        let mut app = trade_test_app();
+        app.update();
+        {
+            let mut locked = app.world_mut().resource_mut::<InvLockedSlots>();
+            locked.lock_in(InvLockReason::Trade, LockGrid::Inventory, 5);
+            locked.lock_in(InvLockReason::Trade, LockGrid::Trade, 2);
+            locked.lock_in(InvLockReason::Craft, LockGrid::Inventory, 1);
+        }
+        app.world_mut().write_message(ServerEvent::TradeDeposit {
+            from: 5,
+            to: 2,
+            success: false,
+        });
+        app.update();
+        {
+            let locked = app.world().resource::<InvLockedSlots>();
+            assert!(!locked.is_locked_in(LockGrid::Inventory, 5));
+            assert!(!locked.is_locked_in(LockGrid::Trade, 2));
+            assert!(
+                locked.is_locked_in(LockGrid::Inventory, 1),
+                "Craft 来源的锁不受交易回包影响"
+            );
+        }
+
+        // 取回回包：成功才清空该交易槽（失败保留物品），两种都解锁
+        let mut app = trade_test_app();
+        app.world_mut().resource_mut::<TradeState>().my_items[3] = Some(TradeItem {
+            uid: 9,
+            item_index: 1,
+            name: "t".to_string(),
+            image: 1,
+            count: 1,
+        });
+        app.update();
+        {
+            let mut locked = app.world_mut().resource_mut::<InvLockedSlots>();
+            locked.lock_in(InvLockReason::Trade, LockGrid::Trade, 3);
+        }
+        app.world_mut()
+            .write_message(ServerEvent::TradeItemRetrieved {
+                from_slot: 3,
+                success: false,
+            });
+        app.update();
+        {
+            let trade = app.world().resource::<TradeState>();
+            assert!(
+                trade.my_items[3].is_some(),
+                "取回失败应保留槽内物品（C# 仅在 success 时搬走）"
+            );
+            assert!(!app
+                .world()
+                .resource::<InvLockedSlots>()
+                .is_locked_in(LockGrid::Trade, 3));
+        }
+        app.world_mut()
+            .write_message(ServerEvent::TradeItemRetrieved {
+                from_slot: 3,
+                success: true,
+            });
+        app.update();
+        assert!(
+            app.world().resource::<TradeState>().my_items[3].is_none(),
+            "取回成功清空槽（C# `GameScene.RetrieveTradeItem` 成功分支）"
         );
     }
 
