@@ -1035,6 +1035,8 @@ pub(crate) fn handle_progress(
                     level: p.level,
                     hp: p.hp,
                     mp: p.mp,
+                    max_hp: p.max_hp,
+                    max_mp: p.max_mp,
                     exp: p.experience,
                     max_exp: p.max_experience.max(1),
                     inventory,
@@ -1459,6 +1461,8 @@ mod tests {
             hair: 2,
             hp: 300,
             mp: 150,
+            max_hp: 600,
+            max_mp: 300,
             experience: 1000,
             max_experience: 5000,
             inventory: Some(vec![Some(item.clone()), None]),
@@ -1505,6 +1509,8 @@ mod tests {
                 auto_mp_percent,
                 hp_item_index,
                 mp_item_index,
+                max_hp,
+                max_mp,
                 ..
             } => {
                 assert_eq!(name, "HeroX");
@@ -1517,6 +1523,7 @@ mod tests {
                 assert_eq!(*auto_mp_percent, 30);
                 assert_eq!(*hp_item_index, 5);
                 assert_eq!(*mp_item_index, 6);
+                assert_eq!((*max_hp, *max_mp), (600, 300), "最大 HP/MP 应随包解出");
             }
             other => panic!("unexpected event: {:?}", other),
         }

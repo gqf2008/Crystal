@@ -916,6 +916,9 @@ pub enum ServerEvent {
         level: u16,
         hp: i32,
         mp: i32,
+        /// #2892 批C：英雄最大 HP/MP（HUD `HeroInfoPanel` 百分比条；C# `Stats[Stat.HP/MP]`）
+        max_hp: i32,
+        max_mp: i32,
         exp: i64,
         max_exp: i64,
         inventory: Vec<Option<InvItem>>,

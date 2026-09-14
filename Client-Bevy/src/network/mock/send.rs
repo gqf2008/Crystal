@@ -351,6 +351,9 @@ pub(crate) fn send_hero_information(
             hair: 0,
             hp: 600,
             mp: 100,
+            // #2892 批C：mock 给足上限，便于核对 HUD 百分比条（600/800=75%、100/200=50%）
+            max_hp: 800,
+            max_mp: 200,
             experience: 8000,
             max_experience: 30000,
             inventory: Some(inventory.to_vec()),

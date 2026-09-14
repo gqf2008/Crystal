@@ -2360,3 +2360,113 @@ fn hero_behaviour_panel_aligned() {
         "  ✓ 英雄行为条 64x17 @HUD+(165,37)：4 个 16x17 图标 Prguse[1840..1843]/禁用[1844..1847]"
     );
 }
+
+/// #2892 批C：`HeroInfoPanel` 对齐 C#（`HeroDialogs.cs:464-700`）——
+/// 面板 `Prguse[14]` 135x78 @(95,48)、头像 `Prguse[1400]`(危险 1750 / 死亡 1379) 52x45 @(14,19)、
+/// 名字容器 `Prguse[10]` 104x31 @(26,60)、血量容器 `Prguse[11]` 72x45 @(57,26) +
+/// 三条 `Prguse[1951..1953]` 52x8 @(18,6/19/32)。
+#[test]
+fn hero_info_panel_aligned() {
+    use client_bevy::game::hud;
+    require_assets!("hero_info_panel_aligned");
+    let mut libs = Libs::new();
+
+    // HUD 背景 = `Prguse[1]`
+    let (bg_w, bg_h) = libs.size(LibraryName::Prguse, 1);
+    let (main_x, main_y) = ((SW - bg_w) / 2.0, SH - bg_h);
+    let px = main_x + hud::HERO_PANEL_ORIGIN.0;
+    let py = main_y + hud::HERO_PANEL_ORIGIN.1;
+
+    // 面板尺寸取真实精灵
+    let (pw, ph) = libs.size(LibraryName::Prguse, 14);
+    assert_eq!(
+        (pw, ph),
+        hud::HERO_PANEL_SIZE,
+        "[尺寸] 面板应取 Prguse[14] 135x78"
+    );
+    assert_in_canvas("英雄面板", px, py, pw, ph);
+
+    // 头像三态同尺寸同坐标
+    let (aw, ah) = libs.size(LibraryName::Prguse, 1400);
+    assert_eq!((aw, ah), (52.0, 45.0), "[尺寸] 头像 Prguse[1400] 52x45");
+    for idx in [1750usize, 1379] {
+        assert_eq!(
+            libs.size(LibraryName::Prguse, idx),
+            (aw, ah),
+            "[尺寸] 头像变体 Prguse[{idx}] 应与基础头像同尺寸"
+        );
+    }
+    assert_inside(
+        "头像",
+        px + hud::HERO_AVATAR_POS.0,
+        py + hud::HERO_AVATAR_POS.1,
+        aw,
+        ah,
+        px,
+        py,
+        pw,
+        ph,
+    );
+
+    // 名字容器 `Prguse[10]` 104x31 @(26,60)（精灵自带 offset 但 C# 未开 UseOffSet）。
+    // 注意：C# `MirImageControl` 不裁剪子控件——(26,60)+31 = 91 > 面板高 78，原版就是越界的，
+    // 故这里只断言坐标/尺寸与「在屏幕内」，不做「包含于面板」断言。
+    let (nw, nh, _, _) = libs.size_off(LibraryName::Prguse, 10);
+    assert_eq!((nw, nh), (104.0, 31.0), "[尺寸] 名字容器 104x31");
+    assert_in_canvas(
+        "名字容器",
+        px + hud::HERO_NAME_BOX_POS.0,
+        py + hud::HERO_NAME_BOX_POS.1,
+        nw,
+        nh,
+    );
+
+    // 血量容器 `Prguse[11]` 72x45 + 三条 52x8
+    let (cw, ch) = libs.size(LibraryName::Prguse, 11);
+    assert_eq!((cw, ch), (72.0, 45.0), "[尺寸] 血量容器 72x45");
+    assert_inside(
+        "血量容器",
+        px + hud::HERO_HEALTH_BOX_POS.0,
+        py + hud::HERO_HEALTH_BOX_POS.1,
+        cw,
+        ch,
+        px,
+        py,
+        pw,
+        ph,
+    );
+    for i in 0..3usize {
+        let (bw, bh) = libs.size(LibraryName::Prguse, 1951 + i);
+        assert_eq!(
+            (bw, bh),
+            hud::HERO_BAR_SIZE,
+            "[尺寸] 百分比条 Prguse[{}] 应为 52x8",
+            1951 + i
+        );
+        assert_inside(
+            &format!("条{i}"),
+            px + hud::HERO_HEALTH_BOX_POS.0 + hud::HERO_BAR_POS[i].0,
+            py + hud::HERO_HEALTH_BOX_POS.1 + hud::HERO_BAR_POS[i].1,
+            bw,
+            bh,
+            px,
+            py,
+            pw,
+            ph,
+        );
+    }
+
+    // 文本锚点也在面板内（HP/MP/EXP）
+    for (name, pos) in [
+        ("HP 文本", hud::HERO_HP_LABEL_POS),
+        ("MP 文本", hud::HERO_MP_LABEL_POS),
+        ("EXP 文本", hud::HERO_EXP_LABEL_POS),
+    ] {
+        // EXP 文本 (71,54)+65 宽 → 136 > 面板宽 135：原版同样越界，故只断言屏幕内
+        assert_in_canvas(name, px + pos.0, py + pos.1, 55.0, 18.0);
+    }
+
+    println!(
+        "  ✓ HeroInfoPanel Prguse[14] 135x78 @(95,48)：头像 52x45@(14,19)、名字容器 104x31@(26,60)、血量容器 72x45@(57,26) + 三 52x8 条"
+    );
+}
