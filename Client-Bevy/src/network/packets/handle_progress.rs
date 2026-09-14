@@ -312,8 +312,14 @@ pub(crate) fn handle_progress(
             if let Ok(p) = ui_events::ResizeStorage::read_body(&mut cur) {
                 server_events.write(ServerEvent::StorageResized {
                     size: p.size.max(0) as usize,
+                    has_expanded_storage: p.has_expanded_storage,
+                    expiry_time: p.expiry_time,
                 });
-                tracing::info!("📦 仓库扩容: {}", p.size);
+                tracing::info!(
+                    "📦 仓库扩容: {} 格（扩容状态={}）",
+                    p.size,
+                    p.has_expanded_storage
+                );
             }
         }
         x if x == ServerPacketIds::ResizeInventory as i16 => {

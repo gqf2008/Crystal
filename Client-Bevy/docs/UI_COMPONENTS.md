@@ -121,7 +121,7 @@
 | BigMap | `dialogs/big_map.rs` | `BigMapDialog.cs` | 实现；批2 |
 | ChatNotice | `dialogs/chat_notice.rs` | `ChatNoticeDialog.cs` | 实现；批5/批8（位置） |
 | Market | `dialogs/market.rs` | `TrustMerchantDialog.cs` | 实现；批4 |
-| Storage | `dialogs/storage.rs` | `InventoryDialog.cs` Storage | 实现；批3 |
+| Storage | `dialogs/storage.rs` | `NPCDialogs.cs` `StorageDialog` | 实现；批3；子控件层 + 两页 160 格 批33（#2892 批B 单元6） |
 | Skills | `game/skills.rs` / Character SkillPage | `MainDialogs.cs` MagicWindow | 实现；批2 |
 
 ## 4. 登录、选角与账号流程
@@ -172,11 +172,12 @@
 | 批30 #2892 批A（逐窗复核 + 修错位） | ① 排行榜窗定位改回 C# `Center`（`Prguse[820]` 760x500 实测 → 原点 (350,163)，此前自造偏移）② 排行榜子控件按 C# 精灵/坐标重排（页签/行/滚动条）③ 计时器窗整窗重做（`TimerDialog` 沙漏 + 数字位 + 拖动），协议补 `SetTimer.kind`（区分正/倒计时）④ 游戏内 `MirInputBox`（`Client/MirControls/MirInputBox.cs`）落地并接 `S.GuildNameRequest`/`S.GuildRequestWar` ⑤ 行会领地窗按 C# 重建 + `GuildTerritoryPage` 协议补 `ClientGTMap` 字段（服务端 Leader/Leader2 同改） | #2893 #2894 #2895 #2896 #2897 |
 | 批31 #2892 批B（面板精灵断言全覆盖 1-4） | 目的：把「本端坐标/尺寸常量」与「`.Lib` 实测像素」钉成可执行断言，并顺手修断言暴露的真实偏差。① 8 窗（Group/Friend/Mentor/Relationship/Help/Notice/Mail/Creature）② 11 窗/元素 + **修坐骑 4 孔面板拉伸**（`Prguse[160]` 272x378 vs `[167]` 324x377）③ 9 处 + **修任务日记 8px 偏移**（C# `(ScreenWidth/2-300-20,60)`=192,60，本端曾写 200）④ 两条腰带（`Prguse[1932]` 240x38 / `Prguse[1921]` 100x38，格 `(12+35i,3)` 32x32、序号 `(8+35i,2)`）+ 耐久面板（`Prguse[2105]` 64x85 @(963,200)；**顺带修「内层只画外框、中间透出游戏世界」**：`GrayBackground`=`Prguse[2161]` Opacity 0.4 + `Background`=`Prguse[2162]`，均 56x80 @(3,3)，此前误记为 `Title[2161]` 且完全未渲染）。新增断言工具 `assert_centered`/`assert_inside`/`assert_in_canvas`/`Libs::size_off`/`Libs::pixels` + `require_assets!`（CI 无 `Data/` 时跳过）。**本批记录未修**：行会窗高度 740 ≠ C# 432（见 §7）。 | #2904 #2905 #2906 + 本 PR |
 | 批32 #2892 批B（单元5：掷骰窗整窗 + 租借浏览断言） | ① 掷骰窗按 C# `RollDialog` 重做三段相位（`Idle` 点图开掷 → `Rolling` 播放帧序列 → `Result` 点图关闭），帧表照抄：空闲 `Prguse[282]`/`Items[2581]`、动画 `Prguse[290..293]`（4 帧×6 轮=2.4s）/`Items[2581..2586]`（6 帧=0.6s）、结果 `Prguse[281+result]`/`Items[2587+result]`；动画结束即发 `C.CallNPC`（C# `ReturnResult`）。**修两处真实偏差**：(a) 尤茨此前沿用骰子原点、只把尺寸改成 180x130 → 位置整体偏 (+52,+25)，现按 C# `((SW/2)-90, (SH/2)-65)`=(422,319)；(b) 两个控件 `UseOffSet = true` + C# `Size` 只是命中框 → 此前把 64x61/180x126 的帧拉伸到 65x65/180x130，现按**帧原生尺寸 + 帧自带 offset**绘制（尤茨动画帧高度 127/127/180/210/199/171 不齐，拉伸会压扁）。② 租借浏览窗常量全部 pub 化并接断言（`Prguse3[0..6]`、`Prguse2[360..362]`、`Location = Center`）。 | #2908 |
+| 批33 #2892 批B（单元6：仓库窗子控件层 + 两页 160 格，批B 收官） | 仓库窗从「自造单层」改回 C# 结构：标题 `Title[0]`@(18,8)；页码钮 `Title[743/744]`@(8,36)+`Title[746/745]`@(80,36)（帧随页切换）；租用扩容钮 `Title[483..485]`@(283,33)（仅第 2 页）→ `MirMessageBox`（中文文案逐字取 `Localization/Chinese.json`）→ Yes 发 `@ADDSTORAGE`；密码钮由自造 `Title[206..208]`@(18,330) 改回 C# `ProtectButton` `Title[113..115]`@(328,33)；关闭钮 20x20→C# 24x21@(363,3)；未扩容遮罩 `Prguse[2443]`@(8,59)；提示行 `RentalLabel`@(40,322)（红/白两态）。**功能性补齐**：`StorageState` 上限 80→160，第 1/2 页 = 槽位 0..79 / 80..159（页内 `y%8` 回绕复用 10×8 版面），未扩容时第 2 页整页隐藏；`ServerEvent::StorageResized` 补 `has_expanded_storage`/`expiry_time`（此前客户端只取 `size`，扩容页无从判断）。C# 死控件 `StoragePasswordLabel` 同坐标恒隐藏。 | #2909 |
 
 ## 6. 验证基线
 
 - `cargo check --tests`（Client-Bevy）通过。
-- `cargo test`（Client-Bevy）：**576 lib** + 2 bin + 1 smoke + **38 alignment** 通过（批32 单元⑤ 后基线；批31 单元④ 时为 571 lib + 37 alignment，批28 单元③ 时为 542 lib + 24 alignment，批27 收尾时 535 lib，批26 收尾时 528 lib，批25 收尾时 523 lib，批24 收尾时 514 lib）；ServerRust **739 lib** + 6 integration（同上，含 `QuestItemReward` ItemInfo 协议 + `ClientGTMap` 字段）；SharedRust **187 + 11**（2 ignored，含 `QuestItemReward` 往返无损）。三侧 `cargo fmt -- --check` 净零差异。
+- `cargo test`（Client-Bevy）：**579 lib** + 2 bin + 1 smoke + **39 alignment** 通过（批33 单元⑥ 后基线；批32 单元⑤ 时为 576 lib + 38 alignment，批31 单元④ 时为 571 lib + 37 alignment，批28 单元③ 时为 542 lib + 24 alignment，批27 收尾时 535 lib，批26 收尾时 528 lib，批25 收尾时 523 lib，批24 收尾时 514 lib）；ServerRust **739 lib** + 6 integration（同上，含 `QuestItemReward` ItemInfo 协议 + `ClientGTMap` 字段）；SharedRust **187 + 11**（2 ignored，含 `QuestItemReward` 往返无损）。三侧 `cargo fmt -- --check` 净零差异。
 - 批31（#2892 批B）门禁：`cargo fmt -- --check` 0 差异；`cargo test --test ui_alignment` 37 passed；`cargo test` 全量 571+2+1+37 passed。**阳性对照**：把耐久内层灰底的 alpha 由 0.4 改成 1.0（去掉 C# `Opacity = 0.4F`）→ `game::dialogs::dura_status::tests::spawned_panel_renders_inner_layers` 如期 FAILED（"下层 = C# `GrayBackground.Opacity = 0.4F`，实际 alpha 1"），改回即绿。
 - 批31 断言覆盖口径：每个窗口断言「**面板精灵索引 → `.Lib` 实测尺寸**」+「**本端常量坐标 = C# `Location`**」+ 面板不越画布 / 子控件在父矩形内；用 `Libs::pixels` 做精灵身份守卫（不同索引像素必须不同）防止「索引写错但尺寸巧合相同」。
 - 批32（#2892 批B 单元5）门禁：`cargo fmt -- --check` 0 差异；`cargo test` 576 lib + 2 bin + 1 smoke + 38 alignment 全绿
@@ -186,6 +187,10 @@
   → `roll_duration_matches_csharp_loops` 与真实驱动 `roll_ui_system` 的
   `roll_phase_machine_runs_through_rolling_to_result`（断言「autoRoll 应直接进 Rolling / 1.0s 仍在转动」）
   双双如期 FAILED；两处改回即绿。
+- 批33（#2892 批B 单元6）门禁：`cargo fmt -- --check` 0 差异；`cargo test` 579 lib + 2 bin + 1 smoke + 39 alignment 全绿
+  （`storage::tests` 14 passed）。**阳性对照**：把第 2 页的 `rent_vis` 门控改成恒 `Visible`
+  （= 忽略 C# `RefreshStorage1/2` 的页门控，修正前本端根本没有第 2 页）→
+  `storage_chrome_pages_gate_like_csharp` 如期 FAILED（"第 1 页不显示租用钮"），改回即绿。
 - Report 的 C# `Prguse[1633]` 在当前本地 Data 包缺失；已使用按 C# 控件边界推导的 360x244 深色兜底面板并保留对应子控件坐标，待资源包更新后自动加载正确背景。
 - ServerRust：680 lib + 6 integration 通过（批24 单元③ 后；批16 基线为 673 lib）；SharedRust 187 + 11（2 ignored）；`MapEditor/SharedRust` `cargo check` 通过（副本同步，批24 单元③ 改 `QuestItemReward` 时同步）。
 - 关键实机/定向验证：UI 子树泄漏截图、Character 技能页、AssignKey 模态输入、Timer 穿透、登录安全键盘资源；批7 复验 Mail/Buff；批8 复验 Center 窗口。
@@ -384,12 +389,7 @@
   （`GrayBackground` = `Prguse[2161]`，C# `Opacity = 0.4F`；`Background` = `Prguse[2162]`；
   均 `Size = 56x80 @(3,3)`，`MainDialogs.cs:3951-3968`）→ 面板中间直接透出游戏世界。
   同时更正文档级误记：内层在 `Libraries.Prguse` 而**不是** `Libraries.Title`。
-  **批B 尚未覆盖**（后续单元）：仓库窗的**子控件层**（面板/格阵坐标已核对；C# 的标题 `Title[0]` @(18,8)、
-  页码钮 `Title[743]/[746]` @(8,36)/(80,36)、租用钮 `Title[483..485]` @(283,33)、
-  密码钮 `Title[113..115]` @(328,33)、锁定页 `Prguse[2443]` @(8,59)、两行提示 `@(40,322)/(40,304)`
-  本端均未按 C# 落位——本端用的是自造「仓库密码」按钮 `Title[206..208]` @(18,330) 与文字标题），
-  以及随之而来的**两页 160 格**（C# `Grid = new MirItemCell[10*16]` + `Storage1/2Button` 切页；
-  本端 `COLS*ROWS = 80` 且 `StorageState::resize` 上限夹在 80，扩容用户看不到第 2 页）。
+  **批B 尚未覆盖**（后续单元）：无（仓库子控件层已在批33 收口，见下条）。
   **批B 记录但未修**：行会窗高度——C# `Prguse[180]` 实测 590x432 + `Location = Center` → 原点 (217,168)，
   本端 `GUILD_H = 740`（自造加高、内容按 740 排）→ 原点 (217,14)。这是结构性偏差，需要独立单元
   按 C# 590x432 重排行会窗内容（同类工作已在批C 的 GT/Hero 做过）。测试用 `assert_ne!` 显式钉住
@@ -402,3 +402,25 @@
   + `VisiblePixel` 像素级判定，本端不复刻像素判定；② `autoRoll` 的结果态在 2s 后自动关闭
   （C# 一律等玩家点图关闭）——这是为自动化链路 `--roll-test`（无点击注入）保留的行为，
   手动掷骰仍等点击；③ 结果图下方「点击掷骰／掷骰中...／点击关闭」提示是 **Bevy 扩展**（C# 无文字控件）。
+
+- 仓库窗（批33 / #2892 批B 单元6 已对齐）：C# `StorageDialog`（`NPCDialogs.cs:2815-2955`）的**子控件层**与
+  **两页 160 格**已落地，替换掉此前的自造层：
+  - 标题由自造文字「仓库」改为 `Title[0]` @(18,8)；
+  - 页码钮 `Title[743/744]` @(8,36) + `Title[746/745]` @(80,36)（帧按当前页切换，
+    与 C# `RefreshStorage1`→743/746、`RefreshStorage2`→744/745 一致）；
+  - 租用扩容钮 `Title[483/484/485]` @(283,33)（仅第 2 页可见）→ `MirMessageBox`
+    （文案逐字取 `Localization/Chinese.json`：「是否租用额外仓库 10 天，费用为 1,000,000 金币？」/
+    「是否延长租期 10 天，费用为 1,000,000 金币？」）→ Yes 发 `C.Chat{Message="@ADDSTORAGE"}`；
+  - 密码钮由自造「仓库密码」`Title[206..208]` @(18,330) 改回 C# `ProtectButton` `Title[113/114/115]` @(328,33)；
+  - 关闭钮尺寸由自造 20x20 改为 C# 24x21 @(363,3)；
+  - 未扩容遮罩 `Prguse[2443]` 372x265 @(8,59)（仅第 2 页未扩容时显示）；
+  - 提示行 `RentalLabel` @(40,322)（未扩容红字「扩展仓库已锁定」，扩容中白字「扩展仓库到期时间…」）；
+  - 格阵按 C# `Grid = new MirItemCell[10*16]`：`StorageState` 上限由 80 放宽到 160，
+    第 1 页 = 槽位 0..79、第 2 页 = 80..159（页内坐标 `y%8` 回绕，即两页复用同一 10×8 版面），
+    未扩容时第 2 页整页隐藏（C# `grid.ItemSlot < StorageGridSize || !HasExpandedStorage`）。
+  - 协议：`ServerEvent::StorageResized` 补 `has_expanded_storage`/`expiry_time`
+    （C# `S.ResizeStorage` 三字段；此前客户端只取 `size`，扩容页无从判断）。
+  **C# 死控件**：`StoragePasswordLabel`（`NPCDialogs.cs:2924`）全仓只被置 `Visible = false`
+  （`:3035/3261/3297`）→ 本端同坐标建实体但恒隐藏，不接线。
+  **残余偏差**：`RentButton` 的 `MirMessageBox` 用本端通用确认框（`Prguse[360]` 456x190 @(284,289)，
+  与 C# 同一面板与 Yes/No 坐标），未逐像素复刻原版消息框内部排版。

@@ -53,9 +53,14 @@ pub enum ServerEvent {
     },
     /// #200 NPCStorage：仓库对话框打开信号（有密码时客户端先弹解锁框，C# S.NPCStorage）
     StoragePrompt,
-    /// #281 ResizeStorage：仓库扩容（size = 新格数，C# S.ResizeStorage → Array.Resize）
+    /// #281/#2892 批B ResizeStorage：仓库扩容
+    /// （C# `S.ResizeStorage{Size, HasExpandedStorage, ExpiryTime}` → `Array.Resize` + `RefreshStorage2`）
     StorageResized {
         size: usize,
+        /// 是否仍处于扩容状态（C# `UserInformation.HasExpandedStorage`）→ 决定第 2 页是否放行
+        has_expanded_storage: bool,
+        /// 扩容到期时间（C# `DateTime.ToBinary`；0 = 无）
+        expiry_time: i64,
     },
     /// #283 ObjectLeveled：对象升级（C# S.ObjectLeveled → Magic2[1180] 升级特效 + LevelUp 音效）
     ObjectLeveled {
