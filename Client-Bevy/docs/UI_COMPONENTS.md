@@ -92,7 +92,7 @@
 | GuestTrade | `dialogs/trade.rs` | `TradeDialogs.cs` | 实现；批4 |
 | Inspect | `dialogs/inspect.rs` | `CharacterDialog.cs` Inspect | 实现；批3 |
 | NpcGoods | `dialogs/npc_goods.rs` | `NPCDialogs.cs` | 实现；批4 |
-| Guild | `dialogs/guild.rs` | `GuildDialog.cs` | 实现；批4/批8（Center） |
+| Guild | `dialogs/guild.rs` | `GuildDialog.cs` | 实现；批4/批8（Center）；外壳按 C# 拆回「6 页签 + 6 页」批34（#2892 批B 单元7），页内细节见 §7 |
 | Mail | `dialogs/mail.rs` | `MailDialogs.cs` | 实现；批4/批7（列表布局） |
 | Ranking | `dialogs/ranking.rs` | `RankingDialog.cs` | 实现；批4 |
 | Mentor | `dialogs/mentor.rs` | `MentorDialog.cs` | 实现；批4/批8（Center） |
@@ -173,11 +173,12 @@
 | 批31 #2892 批B（面板精灵断言全覆盖 1-4） | 目的：把「本端坐标/尺寸常量」与「`.Lib` 实测像素」钉成可执行断言，并顺手修断言暴露的真实偏差。① 8 窗（Group/Friend/Mentor/Relationship/Help/Notice/Mail/Creature）② 11 窗/元素 + **修坐骑 4 孔面板拉伸**（`Prguse[160]` 272x378 vs `[167]` 324x377）③ 9 处 + **修任务日记 8px 偏移**（C# `(ScreenWidth/2-300-20,60)`=192,60，本端曾写 200）④ 两条腰带（`Prguse[1932]` 240x38 / `Prguse[1921]` 100x38，格 `(12+35i,3)` 32x32、序号 `(8+35i,2)`）+ 耐久面板（`Prguse[2105]` 64x85 @(963,200)；**顺带修「内层只画外框、中间透出游戏世界」**：`GrayBackground`=`Prguse[2161]` Opacity 0.4 + `Background`=`Prguse[2162]`，均 56x80 @(3,3)，此前误记为 `Title[2161]` 且完全未渲染）。新增断言工具 `assert_centered`/`assert_inside`/`assert_in_canvas`/`Libs::size_off`/`Libs::pixels` + `require_assets!`（CI 无 `Data/` 时跳过）。**本批记录未修**：行会窗高度 740 ≠ C# 432（见 §7）。 | #2904 #2905 #2906 + 本 PR |
 | 批32 #2892 批B（单元5：掷骰窗整窗 + 租借浏览断言） | ① 掷骰窗按 C# `RollDialog` 重做三段相位（`Idle` 点图开掷 → `Rolling` 播放帧序列 → `Result` 点图关闭），帧表照抄：空闲 `Prguse[282]`/`Items[2581]`、动画 `Prguse[290..293]`（4 帧×6 轮=2.4s）/`Items[2581..2586]`（6 帧=0.6s）、结果 `Prguse[281+result]`/`Items[2587+result]`；动画结束即发 `C.CallNPC`（C# `ReturnResult`）。**修两处真实偏差**：(a) 尤茨此前沿用骰子原点、只把尺寸改成 180x130 → 位置整体偏 (+52,+25)，现按 C# `((SW/2)-90, (SH/2)-65)`=(422,319)；(b) 两个控件 `UseOffSet = true` + C# `Size` 只是命中框 → 此前把 64x61/180x126 的帧拉伸到 65x65/180x130，现按**帧原生尺寸 + 帧自带 offset**绘制（尤茨动画帧高度 127/127/180/210/199/171 不齐，拉伸会压扁）。② 租借浏览窗常量全部 pub 化并接断言（`Prguse3[0..6]`、`Prguse2[360..362]`、`Location = Center`）。 | #2908 |
 | 批33 #2892 批B（单元6：仓库窗子控件层 + 两页 160 格，批B 收官） | 仓库窗从「自造单层」改回 C# 结构：标题 `Title[0]`@(18,8)；页码钮 `Title[743/744]`@(8,36)+`Title[746/745]`@(80,36)（帧随页切换）；租用扩容钮 `Title[483..485]`@(283,33)（仅第 2 页）→ `MirMessageBox`（中文文案逐字取 `Localization/Chinese.json`）→ Yes 发 `@ADDSTORAGE`；密码钮由自造 `Title[206..208]`@(18,330) 改回 C# `ProtectButton` `Title[113..115]`@(328,33)；关闭钮 20x20→C# 24x21@(363,3)；未扩容遮罩 `Prguse[2443]`@(8,59)；提示行 `RentalLabel`@(40,322)（红/白两态）。**功能性补齐**：`StorageState` 上限 80→160，第 1/2 页 = 槽位 0..79 / 80..159（页内 `y%8` 回绕复用 10×8 版面），未扩容时第 2 页整页隐藏；`ServerEvent::StorageResized` 补 `has_expanded_storage`/`expiry_time`（此前客户端只取 `size`，扩容页无从判断）。C# 死控件 `StoragePasswordLabel` 同坐标恒隐藏。 | #2909 |
+| 批34 #2892 批B（单元7：行会窗外壳按 C# 拆回「6 页签 + 6 页」） | 行会窗由自造 **590x740 @(217,14)** 单窗垂直堆叠改回 C# `GuildDialog`：面板 `Prguse[180]` 590x432 @ `Center`(217,168)（背景图作根面板贴图，删掉「下方深色延伸区」）；标题 `Title[25]`@(18,9)；6 个页签按 C# 精灵/坐标（`Title[93/99/105/101/103/95]` + pressed 帧，间距 71px）；关闭钮 `Prguse2[360..362]`@(565,4) 24x21（原为自造 20x20 @(340,3)）；六页矩形与底图照抄（左侧四页 @(0,60) 352x372、Status @(355,60) 230x372、Buff @(360,61) 352x372；底图 `Prguse[1852]/[1851]/[1850]/[1853]`）；新增 `guild_page_system` 切页；内容按 C# 归属搬进各页（成员/显示离线 → Members、公告 → Notice、职务 → Rank、金币+物品+翻页 → Storage、行会名+招募 → Status、Buff 槽 → Buff）；Buff 行改用独立 `GuildBuffLine(0..8)`（不再复用成员行），命中区随页面原点重算。残余页内偏差见 §7。 | #2910 |
 
 ## 6. 验证基线
 
 - `cargo check --tests`（Client-Bevy）通过。
-- `cargo test`（Client-Bevy）：**579 lib** + 2 bin + 1 smoke + **39 alignment** 通过（批33 单元⑥ 后基线；批32 单元⑤ 时为 576 lib + 38 alignment，批31 单元④ 时为 571 lib + 37 alignment，批28 单元③ 时为 542 lib + 24 alignment，批27 收尾时 535 lib，批26 收尾时 528 lib，批25 收尾时 523 lib，批24 收尾时 514 lib）；ServerRust **739 lib** + 6 integration（同上，含 `QuestItemReward` ItemInfo 协议 + `ClientGTMap` 字段）；SharedRust **187 + 11**（2 ignored，含 `QuestItemReward` 往返无损）。三侧 `cargo fmt -- --check` 净零差异。
+- `cargo test`（Client-Bevy）：**579 lib** + 2 bin + 1 smoke + **40 alignment** 通过（批34 单元⑦ 后基线；批33 单元⑥ 时为 579 lib + 39 alignment，批32 单元⑤ 时为 576 lib + 38 alignment，批31 单元④ 时为 571 lib + 37 alignment，批28 单元③ 时为 542 lib + 24 alignment，批27 收尾时 535 lib，批26 收尾时 528 lib，批25 收尾时 523 lib，批24 收尾时 514 lib）；ServerRust **739 lib** + 6 integration（同上，含 `QuestItemReward` ItemInfo 协议 + `ClientGTMap` 字段）；SharedRust **187 + 11**（2 ignored，含 `QuestItemReward` 往返无损）。三侧 `cargo fmt -- --check` 净零差异。
 - 批31（#2892 批B）门禁：`cargo fmt -- --check` 0 差异；`cargo test --test ui_alignment` 37 passed；`cargo test` 全量 571+2+1+37 passed。**阳性对照**：把耐久内层灰底的 alpha 由 0.4 改成 1.0（去掉 C# `Opacity = 0.4F`）→ `game::dialogs::dura_status::tests::spawned_panel_renders_inner_layers` 如期 FAILED（"下层 = C# `GrayBackground.Opacity = 0.4F`，实际 alpha 1"），改回即绿。
 - 批31 断言覆盖口径：每个窗口断言「**面板精灵索引 → `.Lib` 实测尺寸**」+「**本端常量坐标 = C# `Location`**」+ 面板不越画布 / 子控件在父矩形内；用 `Libs::pixels` 做精灵身份守卫（不同索引像素必须不同）防止「索引写错但尺寸巧合相同」。
 - 批32（#2892 批B 单元5）门禁：`cargo fmt -- --check` 0 差异；`cargo test` 576 lib + 2 bin + 1 smoke + 38 alignment 全绿
@@ -191,6 +192,10 @@
   （`storage::tests` 14 passed）。**阳性对照**：把第 2 页的 `rent_vis` 门控改成恒 `Visible`
   （= 忽略 C# `RefreshStorage1/2` 的页门控，修正前本端根本没有第 2 页）→
   `storage_chrome_pages_gate_like_csharp` 如期 FAILED（"第 1 页不显示租用钮"），改回即绿。
+- 批34（#2892 批B 单元7）门禁：`cargo fmt -- --check` 0 差异；`cargo test` 579 lib + 2 bin + 1 smoke + 40 alignment 全绿
+  （`guild::tests` 21 passed、`panel_sprites_batch_b7_match_csharp` 1 passed；三个命中区用例的期望值已随页面原点重算）。
+  **阳性对照**：把 `GUILD_H` 改回 740（= 修正前的自造加高）→ `panel_sprites_batch_b3_match_csharp`
+  如期 FAILED（"[尺寸] 本端面板 = C# 590x432（对齐后不再加高）"），改回即绿。
 - Report 的 C# `Prguse[1633]` 在当前本地 Data 包缺失；已使用按 C# 控件边界推导的 360x244 深色兜底面板并保留对应子控件坐标，待资源包更新后自动加载正确背景。
 - ServerRust：680 lib + 6 integration 通过（批24 单元③ 后；批16 基线为 673 lib）；SharedRust 187 + 11（2 ignored）；`MapEditor/SharedRust` `cargo check` 通过（副本同步，批24 单元③ 改 `QuestItemReward` 时同步）。
 - 关键实机/定向验证：UI 子树泄漏截图、Character 技能页、AssignKey 模态输入、Timer 穿透、登录安全键盘资源；批7 复验 Mail/Buff；批8 复验 Center 窗口。
@@ -390,10 +395,7 @@
   均 `Size = 56x80 @(3,3)`，`MainDialogs.cs:3951-3968`）→ 面板中间直接透出游戏世界。
   同时更正文档级误记：内层在 `Libraries.Prguse` 而**不是** `Libraries.Title`。
   **批B 尚未覆盖**（后续单元）：无（仓库子控件层已在批33 收口，见下条）。
-  **批B 记录但未修**：行会窗高度——C# `Prguse[180]` 实测 590x432 + `Location = Center` → 原点 (217,168)，
-  本端 `GUILD_H = 740`（自造加高、内容按 740 排）→ 原点 (217,14)。这是结构性偏差，需要独立单元
-  按 C# 590x432 重排行会窗内容（同类工作已在批C 的 GT/Hero 做过）。测试用 `assert_ne!` 显式钉住
-  「本端 740 ≠ C# 432」，避免被误读成已对齐（`tests/ui_alignment.rs::panel_sprites_batch_b3_match_csharp`）。
+  **行会窗外壳已在批34 收口**（见下条）；页内细节仍有偏差，逐页记录在案。
 
 - 掷骰窗（批32 已对齐）：C# `RollDialog` 三段相位与帧表已照抄，
   布局按 `Setup` 的 `((SW/2)-38, (SH/2)-40)` / `((SW/2)-90, (SH/2)-65)`，
@@ -423,4 +425,28 @@
   **C# 死控件**：`StoragePasswordLabel`（`NPCDialogs.cs:2924`）全仓只被置 `Visible = false`
   （`:3035/3261/3297`）→ 本端同坐标建实体但恒隐藏，不接线。
   **残余偏差**：`RentButton` 的 `MirMessageBox` 用本端通用确认框（`Prguse[360]` 456x190 @(284,289)，
-  与 C# 同一面板与 Yes/No 坐标），未逐像素复刻原版消息框内部排版。
+ 与 C# 同一面板与 Yes/No 坐标），未逐像素复刻原版消息框内部排版。
+
+- 行会窗（批34 / #2892 批B 单元7：**外壳已按 C# 拆回「标题 + 6 页签 + 6 页」**）：
+  面板由自造 **590x740 @(217,14)** 改回 C# `Prguse[180]` **590x432 @ `Center`(217,168)**，
+  背景图直接作为根面板贴图（不再有「下方深色延伸区」）；标题 `Title[25]` @(18,9)；
+  页签按 C# 精灵与坐标落地（`Title[93/94]`@(20,38)、`[99/100]`@(91,38)、`[105/106]`@(162,38)、
+  `[101]`@(233,38)、`[103]`@(501,38)、`[95]`@(430,38)，同排间距 71px、帧宽 72 → 相邻压 1px 与 C# 一致）；
+  关闭钮由自造 (340,3) 20x20 改回 C# `Prguse2[360/361/362]` @(565,4) 24x21；
+  六页矩形与底图照抄（Notice/Members/Storage/Rank @(0,60) 352x372、Status @(355,60) 230x372、
+  Buff @(360,61) 352x372；底图 Members `Prguse[1852]`@(13,1)、Storage `[1851]`@(30,19)、
+  Status `[1850]`@(10,2)、Buff `[1853]`@(0,0)）；`guild_page_system` 按页签切页；
+  Buff 行由 `GuildBuffLine(0..8)` 独立承载（不再复用成员行 `GuildLine(1..=8)`），
+  `PointsLeft` @(118,3) 与 ↑↓ @(337,1)/(337,318) 进 BuffPage；成员/仓库/Buff 三个命中区随页面原点重算。
+  **本单元仍未对齐的页内细节**（后续单元）：
+  ① MembersPage 仍是 10 行 × 20px（C# `MemberPageRows = 18`、`MembersName[i] @(125, 30+i*15)`），
+     且未建删除钮 `Prguse[917]`（本端踢人走「选中行 + 踢出钮」）与 `MembersRanks` 职务下拉；
+  ② StoragePage 物品仍是 8 行单列（C# `StorageGrid = new MirItemCell[8*14]`，35x35 步进 36、
+     `StorageIndex` 行窗口 0..6）；金币输入是 Bevy 扩展（C# 只有 `StorageGoldText` + 加减钮）；
+  ③ NoticePage 是单行输入 + 保存钮（C# `Notice` 为 322x330 多行文本框 + 编辑/保存 + 滚动条）；
+  ④ RankPage 的权限位用 `Prguse[1346/1347]` 复选框图 + 文字标签（C# 文案由 `RanksOptionsTexts` 给），
+     但「加职务」「调职」是本端扩展（C# 职务由服务端定义）；
+  ⑤ 页签可见性未按玩家行会权限门控（C#：`CanStoreItem|CanRetrieveItem → StorageButton`、
+     `CanChangeRank → RankButton`、`CanChangeNotice → NoticeButton`、缓存非空 → `BuffButton`），
+     本端 `GuildState` 尚无 `my_options` 字段；
+  ⑥ `StatusLevel`/`StatusMembers`（`:539/548`）在 C# 里从未被赋值 —— 本端同坐标建空标签（死控件）。
