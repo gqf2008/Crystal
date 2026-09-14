@@ -165,6 +165,12 @@ pub enum ServerEvent {
     HeroBehaviourSet {
         behaviour: u8,
     },
+    /// #2892 批C：UpdateHeroSpawnState——英雄出战状态
+    /// （C# `HeroSpawnState`：None=3/Unsummoned=4/Summoned=5/Dead=6；
+    /// `HeroBehaviourPanel.Visible = p.State > Unsummoned`，`GameScene.cs:6190`）
+    HeroSpawnStateChanged {
+        state: mir2_shared::enums::HeroSpawnState,
+    },
     /// SetAutoPotValue：英雄自动药阈值（C# S.SetAutoPotValue；stat 12=HP 13=MP）
     HeroAutoPotSet {
         stat: u8,
