@@ -609,6 +609,11 @@ mod tests {
         use crate::game::dialogs::{DialogKind, DialogRoot, NotDraggable};
         use bevy::ecs::system::RunSystemOnce;
 
+        // CI 无游戏资产（Data/ 不入库）→ 跳过（详见 libraries::data_assets_present）
+        if !crate::resources::libraries::data_assets_present() {
+            eprintln!("skip minimap_root_is_not_draggable: 无 Data 资产");
+            return;
+        }
         let mut world = World::new();
         world.insert_resource(crate::map_renderer::GameLibraries(Libraries::new(
             resolve_data_path(),
