@@ -160,6 +160,43 @@ pub const STORAGE_HEADER_LINE: usize = STORAGE_LINE_BASE + 8;
 #[derive(Component)]
 pub struct GuildMemberDelete(pub usize);
 
+/// 成员行职务下拉（C# `MembersRanks[i]` @(24, 30 + i*15) 100x14）
+#[derive(Component)]
+pub struct GuildMemberRankDrop(pub usize);
+
+/// 成员行状态列（C# `MembersStatus[i]` @(225, 30 + i*15) 100x14：在线 LimeGreen / 离线 White）
+#[derive(Component)]
+pub struct GuildMemberStatusLine(pub usize);
+
+/// C# `UpdateMembers`：某行能否改职务 —— `CanChangeRank && 该成员职务下标 >= 自己职务下标`
+/// （C# 职务 0 最高，故 `>=` 表示「同级或更低」）
+pub fn can_change_member_rank(opts: Option<u8>, my_rank_id: u8, member_rank_index: u8) -> bool {
+    opts.is_some_and(|o| o & GUILD_OPT_CHANGE_RANK != 0) && member_rank_index >= my_rank_id
+}
+
+/// C# `UpdateMembers`：某行能否踢人 —— `CanKick && 该成员职务下标 >= 自己 && 不是自己`
+pub fn can_kick_member(
+    opts: Option<u8>,
+    my_rank_id: u8,
+    member_rank_index: u8,
+    member_name: &str,
+    my_name: Option<&str>,
+) -> bool {
+    opts.is_some_and(|o| o & GUILD_OPT_KICK != 0)
+        && member_rank_index >= my_rank_id
+        && Some(member_name) != my_name
+}
+
+/// 本地玩家自己的职务下标（C# `GuildDialog.MyRankId` 的等价推导）
+pub fn guild_my_rank_index(guild: &GuildState, my_name: Option<&str>) -> Option<u8> {
+    let me = my_name?;
+    guild
+        .members
+        .iter()
+        .find(|m| m.name == me)
+        .map(|m| m.rank_index)
+}
+
 /// StoragePage 格阵（C# `StorageGrid = new MirItemCell[8 * 14]`）
 pub const STORAGE_COLS: usize = 8;
 /// 数据行数（C# 14 行）
@@ -481,6 +518,7 @@ impl Plugin for GuildPlugin {
             (
                 guild_page_system,
                 guild_notice_system,
+                guild_member_rows_system,
                 guild_ui_system,
                 guild_buff_system,
                 guild_storage_system,
@@ -787,6 +825,38 @@ fn spawn_guild(
                 )
                 .insert(GuildMemberDelete(i));
             }
+        }
+        // C# `MembersStatus[i]` @(225, 30 + i*15) 100x14（在线 LimeGreen / 离线 White）
+        for i in 0..MEMBER_ROWS {
+            spawn_label(
+                p,
+                &cjk,
+                "",
+                MEMBER_COL_STATUS,
+                MEMBER_ROW_Y0 + i as f32 * MEMBER_ROW_DY,
+                11.0,
+                Color::WHITE,
+                8,
+            )
+            .insert(GuildMemberStatusLine(i));
+        }
+        // C# `MembersRanks[i]` = `MirDropDownBox` @(24, 30 + i*15) 100x14
+        // （`Enabled = CanChangeRank && 成员职务下标 >= 自己`；`SelectedIndex` = 该成员职务）
+        for i in 0..MEMBER_ROWS {
+            spawn_dropdown_ui(
+                p,
+                &font,
+                Vec::new(),
+                None,
+                (GUILD_X, GUILD_Y + PAGE_LEFT.1),
+                24.0,
+                MEMBER_ROW_Y0 + i as f32 * MEMBER_ROW_DY,
+                100.0,
+                14.0,
+                3,
+                8,
+            )
+            .insert((GuildMemberRankDrop(i), Visibility::Hidden));
         }
         // C# `MembersShowOfflineButton` `Prguse[1346]` + `MembersShowOfflineStatus` `Prguse[1347]`
         // @(230,310)，标签 `MembersShowOffline` @(245,309)
@@ -1242,6 +1312,136 @@ fn spawn_guild(
 }
 
 /// #2892 批B 单元7：页签切换（C# `GuildDialog.LeftDialog(0..3)` / `RightDialog(0..1)`）。
+/// #2892 批B 单元12：MembersPage 行内职务下拉 / 状态列 / 删除钮可见性
+/// （C# `GuildDialog.UpdateMembers`，`:1596-1640`）：
+/// 超出成员数的行整体隐藏；`MembersRanks[i].Enabled = CanChangeRank && 成员职务下标 >= MyRankId`；
+/// `MembersDelete[i].Visible = CanKick && 职务下标 >= MyRankId && 不是自己`；
+/// `MembersStatus[i]` 在线 `LimeGreen` / 离线 `White`；下拉改选 → `EditGuildMember{change_type=2}`。
+fn guild_member_rows_system(
+    mut guild: ResMut<GuildState>,
+    net: Res<NetConnection>,
+    mgr: Res<DialogManager>,
+    local_name: Query<&crate::actor::PlayerName, With<crate::actor::LocalPlayer>>,
+    scroll: Query<&UiScrollList, With<GuildWidget>>,
+    mut status: Query<(&GuildMemberStatusLine, &mut Text, &mut TextColor)>,
+    mut del: Query<
+        (&GuildMemberDelete, &mut Visibility),
+        (Without<GuildMemberStatusLine>, Without<GuildMemberRankDrop>),
+    >,
+    mut drops: Query<
+        (&GuildMemberRankDrop, &mut UiDropDown, &mut Visibility),
+        (Without<GuildMemberStatusLine>, Without<GuildMemberDelete>),
+    >,
+    mut last_sent: Local<HashMap<usize, usize>>,
+) {
+    // 只在「行会窗打开 + 停在成员页」时同步行内容（其它页隐藏时不必逐帧写）
+    if !mgr.is_open(DialogKind::Guild) || guild.page != GuildPage::Members {
+        return;
+    }
+    let me = local_name.iter().next().map(|n| n.0.clone());
+    let opts = guild_my_options(&guild, me.as_deref());
+    let my_rank = guild_my_rank_index(&guild, me.as_deref());
+    let scroll_offset = scroll.iter().next().map(|s| s.offset).unwrap_or(0);
+    let visible = guild.visible_member_indices();
+    let rank_names: Vec<String> = guild.rank_defs.iter().map(|(n, _)| n.clone()).collect();
+
+    for (row, mut text, mut color) in &mut status {
+        let idx = scroll_offset + row.0;
+        let member = visible.get(idx).and_then(|&mi| guild.members.get(mi));
+        match member {
+            Some(m) => {
+                let want = if m.online { "在线" } else { "离线" }.to_string();
+                if text.0 != want {
+                    text.0 = want;
+                }
+                // C#：在线 `Color.LimeGreen`，离线 `Color.White`
+                let want_color = if m.online {
+                    Color::srgb(0.196, 0.804, 0.196)
+                } else {
+                    Color::WHITE
+                };
+                if color.0 != want_color {
+                    color.0 = want_color;
+                }
+            }
+            None => {
+                if !text.0.is_empty() {
+                    text.0.clear();
+                }
+            }
+        }
+    }
+
+    for (btn, mut vis) in &mut del {
+        let idx = scroll_offset + btn.0;
+        let member = visible.get(idx).and_then(|&mi| guild.members.get(mi));
+        let want = member.is_some_and(|m| {
+            can_kick_member(
+                opts,
+                my_rank.unwrap_or(u8::MAX),
+                m.rank_index,
+                &m.name,
+                me.as_deref(),
+            )
+        });
+        let want_vis = if want {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
+        if *vis != want_vis {
+            *vis = want_vis;
+        }
+    }
+
+    for (row, mut dd, mut vis) in &mut drops {
+        let idx = scroll_offset + row.0;
+        let member = visible.get(idx).and_then(|&mi| guild.members.get(mi));
+        let want_vis = if member.is_some() {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
+        if *vis != want_vis {
+            *vis = want_vis;
+        }
+        let Some(m) = member else {
+            dd.open = false;
+            continue;
+        };
+        if dd.items != rank_names {
+            dd.items = rank_names.clone();
+        }
+        let enabled = can_change_member_rank(opts, my_rank.unwrap_or(u8::MAX), m.rank_index);
+        if !enabled {
+            // C# `Enabled = false`：本端下拉控件没有 enabled 态 → 强制收起弹层
+            dd.open = false;
+        }
+        let want_sel = m.rank_index as usize;
+        match dd.selected {
+            Some(sel) if sel != want_sel => {
+                // 用户刚改选：发 `C.EditGuildMember{ChangeType = 2}`（C# `OnNewRank`）
+                if enabled && last_sent.get(&row.0).copied() != Some(sel) {
+                    net.send_packet(&mir2_shared::packets::client::guild::EditGuildMember {
+                        change_type: 2,
+                        rank_index: sel as u8,
+                        name: m.name.clone(),
+                        rank_name: rank_names.get(sel).cloned().unwrap_or_default(),
+                    });
+                    tracing::info!("🏰 调整成员职务: {} -> {}（第 {} 行）", m.name, sel, row.0);
+                    last_sent.insert(row.0, sel);
+                }
+            }
+            _ => {
+                last_sent.insert(row.0, want_sel);
+            }
+        }
+        if dd.selected != Some(want_sel) {
+            dd.selected = Some(want_sel);
+        }
+    }
+}
+
 /// #2892 批B 单元11：NoticePage 正文与翻页（C# `Notice` + `NoticeUpButton`/`NoticeDownButton`，
 /// `NoticeScrollIndex` 语义：首行下标，up 到 0 停、down 到 `len-1` 停）。
 fn guild_notice_system(
@@ -1585,24 +1785,11 @@ fn guild_ui_system(
                 }
             }
             i if (MEMBER_LINE_BASE..MEMBER_LINE_BASE + MEMBER_ROWS).contains(&i) => {
-                // C# `MembersName[i]`/`MembersStatus[i]`（本端合并为一行）
+                // C# `MembersName[i].Text = 成员名`（状态另由 `MembersStatus[i]` 渲染）
                 let idx = scroll_offset + i - MEMBER_LINE_BASE;
                 // #1348：按 show_offline 过滤后的可见成员映射
                 match visible.get(idx).and_then(|&mi| guild.members.get(mi)) {
-                    Some(m) => {
-                        // #1395：按 rank_index 显示职务名（C# 按职务分组）
-                        let rank = guild
-                            .rank_defs
-                            .get(m.rank_index as usize)
-                            .map(|(n, _)| n.clone())
-                            .unwrap_or_else(|| "成员".to_string());
-                        format!(
-                            "{}{} ({})",
-                            m.name,
-                            if m.online { "" } else { "（离线）" },
-                            rank
-                        )
-                    }
+                    Some(m) => m.name.clone(),
                     None => String::new(),
                 }
             }
@@ -2627,5 +2814,50 @@ mod tests {
             NOTICE_ROWS as f32 * NOTICE_ROW_DY <= 330.0,
             "[越界] 公告 20 行不越出 C# `Notice` 文本框高 330"
         );
+    }
+    /// #2892 批B 单元12：成员行「能否改职务 / 能否踢人」规则（C# `UpdateMembers`，`:1611-1618`）。
+    ///
+    /// 阳性对照：把 `can_kick_member` 的「不是自己」判断去掉 → 本测试的「不能踢自己」断言 FAILED。
+    #[test]
+    fn member_row_permission_rules_match_csharp() {
+        let full = Some(GUILD_OPT_CHANGE_RANK | GUILD_OPT_KICK);
+        // 改职务：CanChangeRank && 成员职务下标 >= 自己
+        assert!(can_change_member_rank(full, 2, 2), "同级可改");
+        assert!(can_change_member_rank(full, 2, 3), "更低可改");
+        assert!(!can_change_member_rank(full, 2, 1), "更高不可改");
+        assert!(
+            !can_change_member_rank(Some(GUILD_OPT_KICK), 2, 3),
+            "无 CanChangeRank 不可改"
+        );
+        assert!(
+            !can_change_member_rank(None, 2, 3),
+            "拿不到权限位时不放行（与页签门控的「不隐藏」策略相反，见 §7）"
+        );
+        // 踢人：CanKick && 成员职务下标 >= 自己 && 不是自己
+        assert!(can_kick_member(full, 2, 2, "alice", Some("bob")));
+        assert!(can_kick_member(full, 2, 3, "alice", Some("bob")));
+        assert!(
+            !can_kick_member(full, 2, 1, "alice", Some("bob")),
+            "更高不可踢"
+        );
+        assert!(
+            !can_kick_member(full, 2, 3, "bob", Some("bob")),
+            "不能踢自己（C# `Members[j].Name != MapControl.User.Name`）"
+        );
+        assert!(
+            !can_kick_member(Some(GUILD_OPT_CHANGE_RANK), 2, 3, "alice", Some("bob")),
+            "无 CanKick 不可踢"
+        );
+        // 自己的职务下标推导（C# `MyRankId`）
+        let mut st = GuildState::default();
+        st.members = vec![GuildMember {
+            name: "bob".to_string(),
+            rank: 0,
+            rank_index: 2,
+            online: true,
+        }];
+        assert_eq!(guild_my_rank_index(&st, Some("bob")), Some(2));
+        assert_eq!(guild_my_rank_index(&st, Some("carol")), None);
+        assert_eq!(guild_my_rank_index(&st, None), None);
     }
 }
