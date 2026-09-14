@@ -11,6 +11,7 @@ use bevy::input::mouse::{MouseScrollUnit, MouseWheel};
 use bevy::prelude::*;
 use bevy::sprite::Anchor;
 
+use crate::game::dialogs::window_drag::{DragWindow, WindowDragState};
 use crate::map_renderer::GameLibraries;
 use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
@@ -269,6 +270,8 @@ pub struct ChatState {
     pub prefix: String,
     /// #813：最近私聊对象（C# ChatPanel LastPM；/ 键召回）
     pub last_pm: Option<String>,
+    /// #2892 批D 单元①：已应用的聊天窗拖动偏移（C# `ChatDialog.Movable = true`）
+    pub applied_drag: (f32, f32),
 }
 
 impl Default for ChatState {
@@ -284,6 +287,7 @@ impl Default for ChatState {
             size: 0,
             prefix: String::new(),
             last_pm: None,
+            applied_drag: (0.0, 0.0),
         }
     }
 }
@@ -517,7 +521,7 @@ impl Plugin for ChatPlugin {
         // #2781：滚动条滑块随滚动位置移动（C# ChatDialog.Update 的比例公式）
         app.add_systems(
             Update,
-            chat_scroll_knob_system.run_if(in_state(AppState::Game)),
+            (chat_scroll_knob_system, chat_drag_system).run_if(in_state(AppState::Game)),
         );
         app.add_systems(OnExit(AppState::Game), cleanup_chat);
         app.add_systems(
@@ -914,6 +918,7 @@ fn chat_bar_system(
 /// （Bevy 生成期即为绝对值，无需处理）；控制栏整体随顶边上移（C# `SizeButton.Click`）。
 fn chat_size_system(
     chat: Res<ChatState>,
+    mut drag: ResMut<crate::game::dialogs::window_drag::WindowDragState>,
     images: Res<Assets<Image>>,
     mut applied: Local<Option<usize>>,
     mut panel: Query<(&mut Sprite, &ChatSizeImages), With<ChatPanelBg>>,
@@ -958,6 +963,15 @@ fn chat_size_system(
         if let Some(cs) = sp.custom_size.as_mut() {
             *cs = natural;
         }
+        // #2892 批D 单元①：登记聊天窗基准矩形（C# `ChatDialog` @(230, ScreenHeight-97)，尺寸随档位）
+        drag.register(
+            DragWindow::Chat,
+            // C# `ChatDialog.Location = (MainDialog.X + 230, ScreenHeight - 97)`（`MainDialogs.cs:587`）
+            230.0,
+            top,
+            natural.x,
+            natural.y,
+        );
     }
     let visible_lines = chat_size_lines(size);
     for (mut tf, mut vis, line) in &mut lines {
@@ -996,9 +1010,117 @@ fn chat_size_system(
     }
 }
 
+/// #2892 批D 单元①：`ChatDialog` 拖动偏移应用（C# `ChatDialog.Movable = true`）。
+///
+/// C# 的 `ChatDialog` 是一个容器：面板 + 消息行 + 滚动钮 + 滚动条 + 输入框（`ChatTextBox`，
+/// `MainDialogs.cs:594-601`）都随它一起移动；`ChatControlBar` 是**另一个**控件（批20 落地），不随动。
+/// 本端聊天窗是 sprite 层的一堆独立实体（没有父子层级），故按「与上一帧的偏移差」整体平移，
+/// 记录在 `ChatState::applied_drag` 里避免重复累加。
+fn chat_drag_system(
+    mut chat: ResMut<ChatState>,
+    drag: Res<WindowDragState>,
+    mut parts: Query<
+        &mut Transform,
+        Or<(
+            With<ChatPanelBg>,
+            With<ChatLine>,
+            With<ChatScrollBtn>,
+            With<ChatScrollTrack>,
+            With<ChatScrollKnob>,
+            With<ChatInputBg>,
+            With<ChatInputText>,
+            With<ChatInputCursor>,
+        )>,
+    >,
+) {
+    let want = drag.offset(DragWindow::Chat);
+    let dx = want.0 - chat.applied_drag.0;
+    let dy = want.1 - chat.applied_drag.1;
+    if dx == 0.0 && dy == 0.0 {
+        return;
+    }
+    for mut tf in &mut parts {
+        tf.translation.x += dx;
+        // sprite 层 y 轴朝上（屏幕 y 向下），故屏幕位移取负
+        tf.translation.y -= dy;
+    }
+    chat.applied_drag = want;
+    tracing::debug!("💬 聊天窗拖动偏移 -> ({:.0},{:.0})", want.0, want.1);
+}
+
 /// #2781：滚动条滑块位置（C# `ChatDialog.Update()`：
 /// `h = (CountBar.高 - PositionBar.高) * StartIndex / (History.Count - 1)`，`PositionBar.Y = 16 + h`）。
 /// Bevy 侧 `scroll_up` 是「距最新行向上滚了几行」，故 `StartIndex ≈ 总行数 - 可见行数 - scroll_up`。
+/// #2892 批D 单元①：`ChatDialog` 拖动 —— 面板/消息行/输入框**一起**按偏移平移，
+/// 且同一偏移只应用一次（`ChatState::applied_drag` 记录差值）。
+///
+/// 阳性对照：去掉 `chat.applied_drag = want;`（不记录已应用偏移）→ 第二次运行会再平移一次，
+/// 本测试的「重复应用不移动」断言 FAILED。
+#[test]
+fn chat_drag_offset_moves_all_parts_once() {
+    use bevy::ecs::system::RunSystemOnce;
+
+    let mut world = World::new();
+    world.insert_resource(ChatState::default());
+    let mut drag = crate::game::dialogs::window_drag::WindowDragState::default();
+    drag.set_offset(
+        crate::game::dialogs::window_drag::DragWindow::Chat,
+        10.0,
+        -20.0,
+    );
+    world.insert_resource(drag);
+    // 面板 + 一行 + 输入框：三者都属 `ChatDialog`
+    let panel = world
+        .spawn((ChatPanelBg, Transform::from_xyz(230.0, -671.0, 2.05)))
+        .id();
+    let line = world
+        .spawn((ChatLine(0), Transform::from_xyz(231.0, -672.0, 4.0)))
+        .id();
+    let input = world
+        .spawn((ChatInputBg, Transform::from_xyz(231.0, -740.0, 2.1)))
+        .id();
+    // 控制栏**不属于** `ChatDialog`（C# 是另一个控件，批20），不该被拖走
+    let bar = world
+        .spawn((ChatBarBg, Transform::from_xyz(230.0, -656.0, 2.4)))
+        .id();
+
+    world
+        .run_system_once(chat_drag_system)
+        .expect("chat_drag_system 应成功");
+    // 屏幕 y 向下、sprite translation.y 向上 → dy=-20 表示上移 20 → translation.y += 20
+    assert_eq!(world.get::<Transform>(panel).unwrap().translation.x, 240.0);
+    assert_eq!(world.get::<Transform>(panel).unwrap().translation.y, -651.0);
+    assert_eq!(world.get::<Transform>(line).unwrap().translation.y, -652.0);
+    assert_eq!(world.get::<Transform>(input).unwrap().translation.x, 241.0);
+    assert_eq!(
+        world.get::<Transform>(bar).unwrap().translation,
+        Transform::from_xyz(230.0, -656.0, 2.4).translation,
+        "控制栏是独立控件，不随 ChatDialog 拖动"
+    );
+
+    // 同一偏移重复运行：不再移动（幂等）
+    world
+        .run_system_once(chat_drag_system)
+        .expect("chat_drag_system 应成功");
+    assert_eq!(world.get::<Transform>(panel).unwrap().translation.x, 240.0);
+    assert_eq!(world.get::<Transform>(line).unwrap().translation.y, -652.0);
+
+    // 偏移归零：整体回到原位
+    world
+        .resource_mut::<crate::game::dialogs::window_drag::WindowDragState>()
+        .set_offset(
+            crate::game::dialogs::window_drag::DragWindow::Chat,
+            0.0,
+            0.0,
+        );
+    world
+        .run_system_once(chat_drag_system)
+        .expect("chat_drag_system 应成功");
+    assert_eq!(world.get::<Transform>(panel).unwrap().translation.x, 230.0);
+    assert_eq!(world.get::<Transform>(panel).unwrap().translation.y, -671.0);
+    assert_eq!(world.get::<Transform>(line).unwrap().translation.y, -672.0);
+}
+
 fn chat_scroll_knob_system(
     chat: Res<ChatState>,
     mut applied: Local<Option<(usize, usize, usize)>>,
@@ -2397,6 +2519,8 @@ mod whisper_partner_tests {
         chat.visible_lines = chat_size_lines(1);
         world.insert_resource(chat);
         world.insert_resource(Assets::<Image>::default());
+        // #2892 批D 单元①：`chat_size_system` 会登记拖动基准矩形
+        world.insert_resource(crate::game::dialogs::window_drag::WindowDragState::default());
         let h = Handle::<Image>::default();
         let panel = world
             .spawn((
