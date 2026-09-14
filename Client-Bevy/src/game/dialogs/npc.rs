@@ -30,6 +30,10 @@ use crate::ui::theme::{
     spawn_panel, spawn_scroll_bar_ui, UiScrollList,
 };
 
+/// #2892 批B：面板精灵与 C# 原生尺寸/原点（C# `NPCDialog.Index = 995; Library = Libraries.Prguse`，
+/// 实测与 `Prguse[384]` 同为 440x224 的同一张图；无 Location → 默认 (0,0)）
+pub const PANEL: (LibraryName, usize) = (LibraryName::Prguse, 384);
+
 /// 面板尺寸（Prguse[384] 实测 440x224）
 pub const PANEL_W: f32 = 440.0;
 pub const PANEL_H: f32 = 224.0;

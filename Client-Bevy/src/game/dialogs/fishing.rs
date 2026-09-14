@@ -23,6 +23,10 @@ use crate::ui::theme::{
     spawn_panel,
 };
 
+/// #2892 批B：面板精灵与 C# 原生尺寸（C# `FishingDialog.Index = 1340; Location = Center`）
+pub const PANEL: (LibraryName, usize) = (LibraryName::Prguse, 1340);
+pub const PANEL_SIZE: (f32, f32) = (200.0, 287.0);
+
 /// 钓鱼状态（FishingUpdate 写入）
 #[derive(Resource, Default)]
 pub struct FishingState {

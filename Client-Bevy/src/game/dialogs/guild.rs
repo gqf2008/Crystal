@@ -29,6 +29,9 @@ use crate::ui::theme::{
     spawn_label, spawn_panel, spawn_scroll_bar_ui, UiDropDown, UiScrollList,
 };
 
+/// #2892 批B：面板精灵（C# `GuildDialog.Index = 180; Library = Libraries.Prguse`；实测 590x432）
+pub const PANEL: (LibraryName, usize) = (LibraryName::Prguse, 180);
+
 /// 根容器尺寸（容纳堆叠的成员/职务/仓库/金币区块；背景图保持自然尺寸）
 pub const GUILD_X: f32 = 217.0;
 pub const GUILD_Y: f32 = 14.0;

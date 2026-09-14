@@ -28,6 +28,9 @@ use crate::ui::theme::{
     load_lib_image, spawn_container, spawn_icon_button, spawn_image, spawn_label, spawn_panel,
 };
 
+/// #2892 批B：面板精灵（C# `BigMapDialog.Index = 820; Library = Libraries.Title; Location = Center`）
+pub const PANEL: (LibraryName, usize) = (LibraryName::Title, 820);
+
 /// 面板尺寸（Title[820] 实测 760x500）
 pub const PANEL_W: f32 = 760.0;
 pub const PANEL_H: f32 = 500.0;
