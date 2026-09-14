@@ -180,12 +180,13 @@
 | 批38 #2892 批B（单元11：行会 NoticePage 正文 + 翻页） | NoticePage 补公告正文渲染（服务端 `GuildNotice` 行数组 → `(13, 1 + i*16)` 20 行，覆盖 C# `Notice` 文本框 322x330 区域）与 C# 滚动语义（新增纯函数 `notice_next_scroll`：`NoticeScrollIndex` 首行下标，上 0 停/下 `len-1` 停、公告变短自动收敛，接 `guild_notice_system`）；翻页钮改用 C# `Prguse2[197/198/199]`@(337,1)、`Prguse2[207/208/209]`@(337,318)；`StatusPage` 标题行收回为只显示行会名（C# `StatusGuildName`，金币/公告各有归属）。残留：编辑仍是单行输入框（C# `Notice` 为可编辑多行框）。 | #2914 |
 | 批39 #2892 批B（单元12：行会成员行内控件按 C# `UpdateMembers`） | 新增 `guild_member_rows_system` 逐帧同步 4 项：① `MembersRanks[i]` 职务下拉（100x14 @(24, 30+i*15)，`Items=Ranks`、`SelectedIndex=成员职务`、`Enabled = CanChangeRank && 成员职务下标 >= MyRankId`，改选发 `EditGuildMember{change_type=2}`）② `MembersName[i]` 只显示成员名（此前拼「名字（离线）(职务)」）③ `MembersStatus[i]`@(225,·) 在线 `LimeGreen`/离线 `White` ④ `MembersDelete[i].Visible = CanKick && 职务下标 >= MyRankId && 不是自己`（此前 18 个恒可见）。新增纯函数 `can_change_member_rank` / `can_kick_member` / `guild_my_rank_index` 并逐个钉断言。差异：`UiDropDown` 无 enabled 态（禁用时强制收起）、离线状态无「上次登录时间」（服务端自定义信息体未带 `LastLogin`）、改职无确认框（C# `OnNewRank` 有）。 | #2915 |
 | 批40 #2892 批D 单元②（三种隐身显示粒度） | 服务端 `combat/buff.rs` 把单一 `Invisibility` 拆成 C# 的 `Hiding`/`MoonLight`/`DarkBody` 三个变体，新增 `is_invisible_type`；`player.rs` tag 由「全部 10」改为 31/10/32（↔ C# `BuffDialog.cs:435-460` 图标 17/65/70），`buff_values`/死亡清理/破隐移除同步（`RemoveBuff` 对三种隐身一并清除并逐个下发 `S.RemoveBuff`）；`npc_script.rs` 脚本关键字 `HIDING`/`INVISIBILITY`/`MOONLIGHT`/`DARKBODY` 分别映射；`combat.rs` `SPELL_HIDING`+MassHiding→`Hiding`、`SPELL_MOON_LIGHT`+MoonMist→`MoonLight`；`tick.rs`/`session.rs`/`world/mod.rs` 的隐身判定统一走 `is_invisible_type`；客户端 `buff_display` 补 tag 31「隐身」(17)/32「暗身术」(70)（文案逐字取 `Chinese.json`）。未拆：`Rage`/`Impact` 仍共用 `AttackBoost`；三者的**可见性规则**仍共用一套（C# 各不相同）。 | #2916 |
+| 批42 #2892 批D 单元①（可拖窗口：拖动模型 + 两条腰带） | 新增 `dialogs/window_drag.rs`：`DragWindow`（6 个 C# `Movable=true` 窗口）、`WindowDragState`（基准矩形 + 偏移 + 抓取点）、`window_drag_system`（按下命中→跟随→松开结束；钳在 1024x768；与技能栏同一套 `viewport_to_world_2d` 光标换算 #2517）、命中优先级表；**已接**药水腰带 `BeltDialog`（`InventoryDialog.cs:610`）与英雄腰带 `HeroBeltDialog`（`HeroDialogs.cs:258`）—— 面板 + 子控件（格/数字/旋转/关闭）按同一偏移整体平移、命中测试同步带偏移；未接：聊天窗/好友备注/钓鱼状态/下拉框（见 §7）。C# 侧这 6 个窗口的位置**不落盘**（`Settings` 只存技能栏），本端同样只在会话内保留。 | #2918 |
 | 批41 #2892 批D 单元②续（`Impact`/`Rage` 拆档） | 服务端 `combat/buff.rs` 新增 `Impact{bonus}`（C# 药水攻击加成，图标 249）与 `Rage{bonus}`（C# 战士怒气，图标 49，`HumanObject.cs:4970` 加 MinDC/MaxDC），`get_stat_bonus`/`is_debuff` 同步；`player.rs` tag 拆为 2/14/33（第三档 33 = 英雄 `UltimateEnhancer` 走的 `AttackBoost`，C# 图标 35「终极强化」），`CriticalRateBoost` 移到 tag 34（Rust 扩展）；药水两条路径（`item.rs:870` 背包 / `:2007` 英雄）改发 `Impact`；脚本关键字 `ATTACKBOOST`/`ATTACK`/`IMPACT`→`Impact`、`RAGE`→`Rage`、`FURY`→`AttackBoost`；客户端 `buff_display` 补 14「怒气」(49)/33「终极强化」(35)/34「暴击率提升」。 | #2917 |
 
 ## 6. 验证基线
 
 - `cargo check --tests`（Client-Bevy）通过。
-- `cargo test`（Client-Bevy）：**583 lib** + 2 bin + 1 smoke + **42 alignment** 通过（批41 批D 单元②续 后基线；批40 时为 583 lib + 42 alignment（ServerRust 740 lib），批39 单元⑫ 时为 583 lib + 42 alignment（ServerRust 739 lib），批38 单元⑪ 时为 582 lib + 42 alignment，批37 单元⑩ 时为 581 lib + 42 alignment，批36 单元⑨ 时为 579 lib + 42 alignment，批35 单元⑧ 时为 579 lib + 41 alignment，批34 单元⑦ 时为 579 lib + 40 alignment，批33 单元⑥ 时为 579 lib + 39 alignment，批32 单元⑤ 时为 576 lib + 38 alignment，批31 单元④ 时为 571 lib + 37 alignment，批28 单元③ 时为 542 lib + 24 alignment，批27 收尾时 535 lib，批26 收尾时 528 lib，批25 收尾时 523 lib，批24 收尾时 514 lib）；ServerRust **741 lib** + 6 integration（同上，含 `QuestItemReward` ItemInfo 协议 + `ClientGTMap` 字段）；SharedRust **187 + 11**（2 ignored，含 `QuestItemReward` 往返无损）。三侧 `cargo fmt -- --check` 净零差异。
+- `cargo test`（Client-Bevy）：**585 lib** + 2 bin + 1 smoke + **42 alignment** 通过（批42 批D 单元① 后基线；批41 时为 583 lib + 42 alignment，批40 时为 583 lib + 42 alignment（ServerRust 740 lib），批39 单元⑫ 时为 583 lib + 42 alignment（ServerRust 739 lib），批38 单元⑪ 时为 582 lib + 42 alignment，批37 单元⑩ 时为 581 lib + 42 alignment，批36 单元⑨ 时为 579 lib + 42 alignment，批35 单元⑧ 时为 579 lib + 41 alignment，批34 单元⑦ 时为 579 lib + 40 alignment，批33 单元⑥ 时为 579 lib + 39 alignment，批32 单元⑤ 时为 576 lib + 38 alignment，批31 单元④ 时为 571 lib + 37 alignment，批28 单元③ 时为 542 lib + 24 alignment，批27 收尾时 535 lib，批26 收尾时 528 lib，批25 收尾时 523 lib，批24 收尾时 514 lib）；ServerRust **741 lib** + 6 integration（同上，含 `QuestItemReward` ItemInfo 协议 + `ClientGTMap` 字段）；SharedRust **187 + 11**（2 ignored，含 `QuestItemReward` 往返无损）。三侧 `cargo fmt -- --check` 净零差异。
 - 批31（#2892 批B）门禁：`cargo fmt -- --check` 0 差异；`cargo test --test ui_alignment` 37 passed；`cargo test` 全量 571+2+1+37 passed。**阳性对照**：把耐久内层灰底的 alpha 由 0.4 改成 1.0（去掉 C# `Opacity = 0.4F`）→ `game::dialogs::dura_status::tests::spawned_panel_renders_inner_layers` 如期 FAILED（"下层 = C# `GrayBackground.Opacity = 0.4F`，实际 alpha 1"），改回即绿。
 - 批31 断言覆盖口径：每个窗口断言「**面板精灵索引 → `.Lib` 实测尺寸**」+「**本端常量坐标 = C# `Location`**」+ 面板不越画布 / 子控件在父矩形内；用 `Libs::pixels` 做精灵身份守卫（不同索引像素必须不同）防止「索引写错但尺寸巧合相同」。
 - 批32（#2892 批B 单元5）门禁：`cargo fmt -- --check` 0 差异；`cargo test` 576 lib + 2 bin + 1 smoke + 38 alignment 全绿
@@ -338,6 +339,11 @@
   **阳性对照**：把 `Rage` 的 tag 改回 2（= 修正前与 `Impact` 共用）→ `attack_boost_trio_uses_distinct_tags`
   如期 FAILED（`(2, 2, 33) != (2, 14, 33)`），改回即绿。
 
+- 批42（#2892 批D 单元①）门禁：`cargo fmt -- --check` 0 差异；Client-Bevy `cargo test` 585 lib + 2 bin + 1 smoke + 42 alignment 全绿
+  （新增 `window_drag::tests::offsets_are_per_window` / `drag_clamp_stays_on_screen`）。
+  **阳性对照**：把拖动钳位去掉（只取 `x` 不 clamp）→ `drag_clamp_stays_on_screen` 如期 FAILED
+  （`(-50.0, 0.0) != (0.0, 0.0)`），改回即绿。
+
 ## 7. 已知有意偏差
 
 - Creature：C# `CreatureRenameButton` 构造即 `Visible = false` 且再无置真处（原版死控件，改名入口点不到）；Bevy 保留可用的「改名」按钮（功能补齐见 #1281），仅坐标/精灵与 C# 对齐。
@@ -438,6 +444,18 @@
     「并入同窗的状态行」「模态输入框」「UI 弹层」，都没有独立的可拖窗口与位置状态；补齐需先引入
     「窗口拖动偏移 + 持久化」模型（`hero_belt.rs` 头部已单独记录同样理由）。技能栏（`SkillBarDialog`，
     `MainDialogs.cs:1535`）**已对齐**：本端技能栏有自己的拖动 + 位置持久化（#1235）。
+
+- 窗口可拖动性（批42 / #2892 批D 单元① 起）：上一条列的「结构性差异」开始收口。
+  C# 这 6 个控件都是 `Movable = true`，拖动是 `MirControl.OnMouseMove` 直接把 `Location` 加上鼠标位移，
+  且 **`Settings` 只持久化技能栏**（`Settings.cs:163/269/380` 的 `Skillbar{i}X/Y`）——这些窗口的位置
+  原版**不落盘**，重进游戏回默认位。
+  本端新增 `dialogs/window_drag.rs`：`WindowDragState`（每窗口的基准矩形 + 拖动偏移 + 抓取点）
+  + `window_drag_system`（按下命中 → 跟随光标 → 松开结束；位置钳在 1024x768 画布内，与技能栏同一套
+  `viewport_to_world_2d` 光标换算），命中优先级 `DropDown > Memo > Chat > FishingStatus > PotionBelt > HeroBelt`。
+  **已接**：药水腰带 `BeltDialog`（`InventoryDialog.cs:610`）、英雄腰带 `HeroBeltDialog`（`HeroDialogs.cs:258`）——
+  面板与子控件（格/数字/旋转/关闭）按同一偏移整体平移，命中测试同步带上偏移。
+  **未接**（后续单元）：聊天窗 `ChatDialog`（sprite 层，需给 panel/lines/bar 的 `Transform` 一并加偏移）、
+  好友备注 `MemoDialog`、钓鱼状态 `FishingStatusDialog`、下拉框 `MirDropDownBox`。
 
 - 快捷键语义（批28 已对齐；基准 `GameScene.cs:532-711` 的键盘 `switch`）：
   - **页感知**：`Equipment/Equipment2` 与英雄装备/技能键在 C# 是「不在该页 → 切到该页；在该页 → 关窗」

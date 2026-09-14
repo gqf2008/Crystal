@@ -14,6 +14,7 @@ use bevy::prelude::*;
 
 use crate::actor::LocalPlayer;
 use crate::game::dialogs::inventory::{try_use_belt_item, InvClickState, InvItem, ItemUseFeedback};
+use crate::game::dialogs::window_drag::{DragWindow, WindowDragState};
 use crate::game::player_state::{Inventory, StatusFlags};
 use crate::game::sets::GameSet;
 use crate::map_renderer::GameLibraries;
@@ -354,6 +355,8 @@ fn potion_belt_ui_system(
     time: Res<Time>,
     mouse: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window>,
+    // #2892 批D 单元①：C# `BeltDialog.Movable = true` → 拖动偏移
+    mut drag: ResMut<WindowDragState>,
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
     mut items: Query<
@@ -403,6 +406,11 @@ fn potion_belt_ui_system(
         // `BeltDialog.Location.Y = 控制栏顶边 - 腰带高`；控制栏顶边 = 656 - 48*档位）
         (BELT_X, BELT_Y - chat_belt_lift(chat.size), 240.0, 38.0)
     };
+    // #2892 批D 单元①：C# `BeltDialog.Movable = true` —— 登记基准矩形 + 叠加拖动偏移
+    // （子控件是面板的相对坐标，因此只挪面板即可整条腰带跟随）
+    drag.register(DragWindow::PotionBelt, px, py, pw, ph);
+    let (dx, dy) = drag.offset(DragWindow::PotionBelt);
+    let (px, py) = (px + dx, py + dy);
 
     for (e, mut node, _, mut img, inter, bg, overlay, slot, num, rot, cls) in &mut items {
         if bg.is_some() {
@@ -444,10 +452,12 @@ fn potion_belt_ui_system(
             node.height = Val::Px(ph);
         } else if let Some(s) = slot {
             let (x, y) = if vert { v_slot(s.0) } else { h_slot(s.0) };
+            let (x, y) = (x + dx, y + dy);
             node.left = Val::Px(x - px);
             node.top = Val::Px(y - py);
         } else if let Some(n) = num {
             let (x, y) = if vert { v_num(n.0) } else { h_num(n.0) };
+            let (x, y) = (x + dx, y + dy);
             node.left = Val::Px(x - px);
             node.top = Val::Px(y - py);
         } else if rot.is_some() {
@@ -456,6 +466,7 @@ fn potion_belt_ui_system(
             } else {
                 (BELT_X + 222.0, BELT_Y + 3.0)
             };
+            let (x, y) = (x + dx, y + dy);
             node.left = Val::Px(x - px);
             node.top = Val::Px(y - py);
             if let Some(inter) = inter {
@@ -470,6 +481,7 @@ fn potion_belt_ui_system(
             } else {
                 (BELT_X + 222.0, BELT_Y + 19.0)
             };
+            let (x, y) = (x + dx, y + dy);
             node.left = Val::Px(x - px);
             node.top = Val::Px(y - py);
             if let Some(inter) = inter {
@@ -492,6 +504,8 @@ fn potion_belt_ui_system(
     for (_, _, _, _, _, _, _, slot, _, _, _) in &items {
         if let Some(s) = slot {
             let (x, y) = if vert { v_slot(s.0) } else { h_slot(s.0) };
+            // #2892 批D 单元①：命中带拖动偏移（与绘制用同一套坐标）
+            let (x, y) = (x + dx, y + dy);
             if cursor.x >= x
                 && cursor.x <= x + CELL_SIZE
                 && cursor.y >= y
