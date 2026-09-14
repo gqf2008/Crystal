@@ -817,6 +817,8 @@ fn dialog_hotkey_system(
     mut page: ResMut<CharPage>,
     mut opt: ResMut<crate::game::dialogs::option::OptionState>,
     mut potion_belt_visible: ResMut<crate::game::dialogs::potion_belt::PotionBeltVisible>,
+    // #2836 单元②：英雄三键的 `Hero == null` 守卫（C# `GameScene.cs:581-606`）
+    hero: Res<crate::game::dialogs::hero::HeroState>,
     windows: Query<&Window>,
 ) {
     use crate::game::input_gate::forwarded_while_typing;
@@ -831,13 +833,11 @@ fn dialog_hotkey_system(
     // #2595：该绑定在当前聚焦状态下是否应让路
     let blocked = |b: &KeyBinding| gate.0 && !forwarded_while_typing(b.key);
     // #795：主/次绑定（对齐 C# KeyBindSettings 主键 + 备用键）
-    let map: [(&str, DialogKind); 22] = [
+    let map: [(&str, DialogKind); 19] = [
         ("背包", DialogKind::Inventory),
         ("背包2", DialogKind::Inventory),
         // #2836 单元①：「角色/角色2」不在此表 —— C# 是**页感知**切换（见下方循环）
-        ("英雄背包", DialogKind::HeroInventory),
-        ("英雄装备", DialogKind::HeroEquipment),
-        ("英雄技能", DialogKind::HeroSkill),
+        // #2836 单元②：英雄三键也不在此表 —— C# 有 `Hero == null` 守卫 + 英雄页感知（见下方循环）
         ("好友", DialogKind::Friend),
         ("宠物", DialogKind::Creature),
         ("坐骑", DialogKind::Mount),
@@ -925,6 +925,44 @@ fn dialog_hotkey_system(
                     page.0 = CHAR_PAGE_EQUIPMENT;
                 }
                 tracing::info!("🎯 装备快捷键（{}）→ 角色页", action);
+            }
+        }
+    }
+    // #2836 单元②：英雄三键（C# `GameScene.cs:581-606`）：
+    //   HeroInventory: `if (Hero == null) break;` + 纯 toggle
+    //   HeroEquipment: 守卫 + `!HeroDialog.Visible || !CharacterPage.Visible → Show()+ShowCharacterPage()` else Hide()
+    //   HeroSkills   : 守卫 + 同上（SkillPage）
+    // 本端英雄装备/技能是**两个独立窗**（C# 是同属 `HeroDialog` 的两页）→ 打开目标页时关掉另一页，
+    // 「Hero == null」对应 `HeroState.current.is_none()`（与 HUD 英雄按钮显隐同一判据）。
+    let has_hero = hero.current.is_some();
+    if has_hero {
+        for action in ["英雄背包"] {
+            if let Some(b) = kb.bindings.iter().find(|b| b.action == action) {
+                if blocked(b) {
+                    continue;
+                }
+                if b.matches(&keys) {
+                    mgr.toggle(DialogKind::HeroInventory);
+                }
+            }
+        }
+        for (action, target, other) in [
+            ("英雄装备", DialogKind::HeroEquipment, DialogKind::HeroSkill),
+            ("英雄技能", DialogKind::HeroSkill, DialogKind::HeroEquipment),
+        ] {
+            if let Some(b) = kb.bindings.iter().find(|b| b.action == action) {
+                if blocked(b) {
+                    continue;
+                }
+                if b.matches(&keys) {
+                    if mgr.is_open(target) {
+                        mgr.close(target);
+                    } else {
+                        mgr.close(other);
+                        mgr.open(target);
+                    }
+                    tracing::info!("🎯 英雄页快捷键（{}）→ {target:?}", action);
+                }
             }
         }
     }
@@ -1174,6 +1212,8 @@ mod tests {
         app.init_resource::<CharPage>();
         app.init_resource::<crate::game::dialogs::option::OptionState>();
         app.init_resource::<crate::game::dialogs::potion_belt::PotionBeltVisible>();
+        // #2836 单元②：`dialog_hotkey_system` 新增 `Res<HeroState>`（英雄三键守卫）
+        app.init_resource::<crate::game::dialogs::hero::HeroState>();
         // #2771：`dialog_hotkey_system` 新增 `Res<NetConnection>`（交易快捷键发 C.TradeRequest）
         app.insert_resource(crate::network::NetConnection::default());
         app.insert_resource(crate::game::input_gate::TextInputGate(gate_on));
@@ -1249,6 +1289,79 @@ mod tests {
                 .resource::<DialogManager>()
                 .is_open(DialogKind::Character),
             "已在角色页按装备键应关窗"
+        );
+    }
+
+    /// #2720：租赁浏览窗快捷键（Bevy 扩展；C# `KeybindOptions.Rental` 有枚举成员但
+    /// `KeyBindSettings` 无默认绑定行）
+    ///
+    /// #2836 单元②：英雄三键（C# `GameScene.cs:581-606`）—— `Hero == null` 守卫（无英雄时按键不做事）
+    /// + 英雄装备/技能的**页感知**（英雄装备/技能是本端两个独立窗；C# 是同一 `HeroDialog` 的两页）。
+    #[test]
+    fn hero_hotkeys_require_hero_and_are_page_aware() {
+        use crate::game::dialogs::hero::HeroState;
+        use crate::game::dialogs::{DialogKind, DialogManager};
+        use bevy::input::ButtonInput;
+        use mir2_shared::data::client_data::ClientHeroInformation;
+
+        // 默认键：Ctrl+I 英雄背包 / Ctrl+C 英雄装备 / Ctrl+S 英雄技能（require_ctrl = 1）
+        let press_ctrl = |app: &mut App, key: KeyCode| {
+            let mut inp = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+            inp.reset_all();
+            inp.press(KeyCode::ControlLeft);
+            inp.press(key);
+            app.update();
+        };
+
+        // ① 无英雄（`HeroState::default()` 的 `current = None`）→ 三键都不开窗
+        let mut app = hotkey_app(false, KeyCode::KeyI);
+        press_ctrl(&mut app, KeyCode::KeyI);
+        assert!(
+            !app.world()
+                .resource::<DialogManager>()
+                .is_open(DialogKind::HeroInventory),
+            "无英雄时英雄背包键应无动作（C# `if (Hero == null) break;`）"
+        );
+
+        // ② 有英雄 → 英雄背包 toggle；英雄技能页开着时按装备键 = 切页（关技能、开装备）
+        let hero = ClientHeroInformation {
+            index: 1,
+            name: "示范英雄".to_string(),
+            level: 20,
+            class: mir2_shared::enums::MirClass::Warrior,
+            gender: mir2_shared::enums::MirGender::Male,
+        };
+        app.world_mut().resource_mut::<HeroState>().current = Some(hero);
+
+        press_ctrl(&mut app, KeyCode::KeyI);
+        assert!(
+            app.world()
+                .resource::<DialogManager>()
+                .is_open(DialogKind::HeroInventory),
+            "有英雄时英雄背包键应开窗"
+        );
+
+        press_ctrl(&mut app, KeyCode::KeyS);
+        assert!(
+            app.world()
+                .resource::<DialogManager>()
+                .is_open(DialogKind::HeroSkill),
+            "英雄技能键应开技能页"
+        );
+        press_ctrl(&mut app, KeyCode::KeyC);
+        let mgr = app.world().resource::<DialogManager>();
+        assert!(
+            mgr.is_open(DialogKind::HeroEquipment) && !mgr.is_open(DialogKind::HeroSkill),
+            "在英雄技能页按装备键应「切到装备页」而不是两个窗并存"
+        );
+
+        // ③ 已在装备页再按 → 关窗（C# else Hide()）
+        press_ctrl(&mut app, KeyCode::KeyC);
+        assert!(
+            !app.world()
+                .resource::<DialogManager>()
+                .is_open(DialogKind::HeroEquipment),
+            "已在英雄装备页按装备键应关窗"
         );
     }
 
