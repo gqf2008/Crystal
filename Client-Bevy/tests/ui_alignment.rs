@@ -2954,9 +2954,8 @@ fn panel_sprites_batch_b3_match_csharp() {
     );
     assert_eq!(buff::PANEL_Y, 0.0);
 
-    // Guild：C# `Prguse[180]` 实测 590x432 + `Location = Center` → (217,168)。
-    // **已知偏差（本批只记录，未修）**：本端 `GUILD_H = 740`（自造加高，内容布局按 740 排），
-    // 故原点为 (217,14) 而非 (217,168) —— 需要独立单元按 C# 590x432 重排行会窗内容。
+    // Guild：C# `Prguse[180]` 实测 590x432 + `Location = Center` → (217,168)
+    // （#2892 批B 单元7 已修：此前为自造 590x740 @(217,14) 单窗堆叠）
     let (gw, gh) = libs.size(guild::PANEL.0, guild::PANEL.1);
     assert_eq!(
         (gw, gh),
@@ -2964,14 +2963,14 @@ fn panel_sprites_batch_b3_match_csharp() {
         "[尺寸] 行会窗面板 Prguse[180] 590x432"
     );
     assert_eq!(
-        guild::GUILD_W,
-        gw,
-        "[尺寸] 本端宽度与 C# 一致（高度 740 vs 432 为已知偏差）"
+        (guild::GUILD_W, guild::GUILD_H),
+        (gw, gh),
+        "[尺寸] 本端面板 = C# 590x432（对齐后不再加高）"
     );
-    assert_ne!(
-        guild::GUILD_H,
-        gh,
-        "记录：本端高度仍为 740（≠C# 432）→ 行会窗待按 C# 尺寸重排（#2892 批B 后续单元）"
+    assert_eq!(
+        (guild::GUILD_X, guild::GUILD_Y),
+        ((SW - gw) / 2.0, (SH - gh) / 2.0),
+        "[坐标] C# `Location = Center`"
     );
 
     println!("  ✓ 批B 面板精灵核对（三）：Npc/ChatNotice/MiniMap/BigMap/Fishing/QuestDiary+Detail/Buff(11 档)");
@@ -3450,4 +3449,149 @@ fn panel_sprites_batch_b6_match_csharp() {
     assert_eq!((st::PAGE_CELLS, st::MAX_CELLS), (80, 160));
 
     println!("  ✓ 批B 面板精灵核对（六）：仓库 Title[0/743/744/746/745/483..485/113..115] + Prguse[2443] + Prguse2[360..362]（两页 160 格）");
+}
+
+/// #2892 批B（七）：行会窗按 C# `GuildDialog` 拆回「标题 + 6 页签 + 6 页」。
+///
+/// 面板 = `Prguse[180]` 590x432 @ `Center`(217,168)；标题 `Title[25]` @(18,9)；
+/// 页签（`Libraries.Title`，72x24）：Notice`[93/94]`@(20,38)、Members`[99/100]`@(91,38)、
+/// Storage`[105/106]`@(162,38)、Rank`[101]`@(233,38)、Status`[103]`@(501,38)、Buff`[95]`@(430,38)；
+/// 关闭 `Prguse2[360/361/362]` @(565,4) 24x21；
+/// 页矩形：左侧四页 @(0,60) 352x372、`StatusPage` @(355,60) 230x372、`BuffPage` @(360,61) 352x372；
+/// 页底图：Members `Prguse[1852]`、Storage `[1851]`、Status `[1850]`、Buff `[1853]`。
+#[test]
+fn panel_sprites_batch_b7_match_csharp() {
+    use client_bevy::game::dialogs::guild as g;
+    require_assets!("panel_sprites_batch_b7_match_csharp");
+    let mut libs = Libs::new();
+
+    let (pw, ph) = libs.size(g::PANEL.0, g::PANEL.1);
+    assert_eq!((pw, ph), (590.0, 432.0), "[尺寸] Prguse[180]");
+    assert_eq!((g::GUILD_W, g::GUILD_H), (pw, ph));
+
+    // 标题
+    let (tw, th) = libs.size(g::TITLE_SPRITE.0 .0, g::TITLE_SPRITE.0 .1);
+    assert_eq!((tw, th), (49.0, 15.0), "[尺寸] Title[25] 标题");
+    assert_inside(
+        "行会标题",
+        g::TITLE_SPRITE.1,
+        g::TITLE_SPRITE.2,
+        tw,
+        th,
+        0.0,
+        0.0,
+        pw,
+        ph,
+    );
+
+    // 页签：精灵尺寸 + C# 坐标 + 都在面板内 + 互不重叠
+    let mut boxes: Vec<(f32, f32, f32, f32)> = Vec::new();
+    for (page, normal, pressed, x, y) in g::GUILD_TABS {
+        let (nw, nh) = libs.size(normal.0, normal.1);
+        let (pwd, phd) = libs.size(pressed.0, pressed.1);
+        assert_eq!(
+            (nw, nh),
+            g::TAB_SIZE,
+            "[尺寸] {page:?} 页签 Title[{}]",
+            normal.1
+        );
+        assert_eq!((pwd, phd), g::TAB_SIZE, "[尺寸] {page:?} pressed 帧");
+        assert_inside("行会页签", x, y, nw, nh, 0.0, 0.0, pw, ph);
+        for &(bx, by, bw, bh) in &boxes {
+            // C# 页签按 71px 间距摆放、帧宽 72 → **相邻压 1px**（原版即如此，不是本端误差）
+            let overlap_x = (bx + bw).min(x + nw) - bx.max(x);
+            let overlap_y = (by + bh).min(y + nh) - by.max(y);
+            assert!(
+                overlap_x <= 1.5 || overlap_y <= 0.0,
+                "[重叠] {page:?} 页签与前一页交叠 {overlap_x}px（C# 同排仅允许 1px 压边）"
+            );
+        }
+        boxes.push((x, y, nw, nh));
+    }
+    // C# 逐字坐标（`GuildDialog.cs:138-199`）
+    let pos: Vec<(f32, f32)> = g::GUILD_TABS.iter().map(|t| (t.3, t.4)).collect();
+    assert_eq!(
+        pos,
+        vec![
+            (20.0, 38.0),
+            (91.0, 38.0),
+            (162.0, 38.0),
+            (233.0, 38.0),
+            (501.0, 38.0),
+            (430.0, 38.0)
+        ]
+    );
+    // 同排页签按 71px 间距（帧宽 72 → 相邻压 1px，C# 原样）
+    for i in 0..4 {
+        assert!(
+            (g::GUILD_TABS[i].3 - (20.0 + 71.0 * i as f32)).abs() < 0.5,
+            "[间距] 左排页签 {i} 应为 20+71i"
+        );
+    }
+    assert!(
+        (g::GUILD_TABS[5].3 - 430.0).abs() < 0.5 && (g::GUILD_TABS[4].3 - 501.0).abs() < 0.5,
+        "[间距] 右排页签 Buff@430 / Status@501（差 71）"
+    );
+
+    // 关闭钮
+    let (cw2, ch2) = libs.size(LibraryName::Prguse2, g::CLOSE_SPRITE.1);
+    assert_eq!((cw2, ch2), (24.0, 21.0), "[尺寸] Prguse2[360] 关闭钮");
+    assert_inside(
+        "行会关闭钮",
+        g::CLOSE_POS.0,
+        g::CLOSE_POS.1,
+        cw2,
+        ch2,
+        0.0,
+        0.0,
+        pw,
+        ph,
+    );
+    assert!(
+        (g::CLOSE_POS.0 - 565.0).abs() < 0.5 && (g::CLOSE_POS.1 - 4.0).abs() < 0.5,
+        "[坐标] C# `CloseButton` @(565,4)"
+    );
+
+    // 页矩形
+    assert_eq!(g::PAGE_LEFT, (0.0, 60.0, 352.0, 372.0));
+    assert_eq!(g::PAGE_STATUS, (355.0, 60.0, 230.0, 372.0));
+    assert_eq!(g::PAGE_BUFF, (360.0, 61.0, 352.0, 372.0));
+    for rect in [g::PAGE_LEFT, g::PAGE_STATUS] {
+        assert_inside("行会页", rect.0, rect.1, rect.2, rect.3, 0.0, 0.0, pw, ph);
+    }
+    // C# `BuffPage` 自身越出面板右缘（360+352=712 > 590），靠面板裁剪——按原样保留
+    assert!(
+        g::PAGE_BUFF.0 + g::PAGE_BUFF.2 > pw,
+        "[记录] C# `BuffPage` 右缘 {} > 面板宽 {pw}（原版即越界，靠面板裁剪）",
+        g::PAGE_BUFF.0 + g::PAGE_BUFF.2
+    );
+
+    // 页底图
+    let bases: [((LibraryName, usize), (f32, f32), (f32, f32)); 4] = [
+        (g::PAGE_BASE, (13.0, 1.0), (324.0, 332.0)),
+        (
+            (g::STORAGE_BASE.0, g::STORAGE_BASE.1),
+            (g::STORAGE_BASE.2, g::STORAGE_BASE.3),
+            (292.0, 308.0),
+        ),
+        (
+            (g::STATUS_BASE.0, g::STATUS_BASE.1),
+            (g::STATUS_BASE.2, g::STATUS_BASE.3),
+            (208.0, 316.0),
+        ),
+        (g::BUFF_BASE, (0.0, 0.0), (216.0, 332.0)),
+    ];
+    for ((lib, idx), pos, size) in bases {
+        let (w, h) = libs.size(lib, idx);
+        assert_eq!((w, h), size, "[尺寸] 页底图 {lib:?}[{idx}]");
+        let _ = pos;
+    }
+
+    // Buff 槽：C# `GuildBuffButton[i] @ (4, 27 + i*38)`，8 槽末行 27+7*38=293 ≤ 372
+    assert!(
+        27.0 + 7.0 * 38.0 + 36.0 <= g::PAGE_BUFF.3,
+        "[布局] Buff 8 槽在页内"
+    );
+
+    println!("  ✓ 批B 面板精灵核对（七）：行会窗 590x432@Center + 6 页签 + 6 页（1850/1851/1852/1853 页底）");
 }

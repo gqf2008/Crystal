@@ -34,12 +34,130 @@ pub const PANEL: (LibraryName, usize) = (LibraryName::Prguse, 180);
 
 /// 根容器尺寸（容纳堆叠的成员/职务/仓库/金币区块；背景图保持自然尺寸）
 pub const GUILD_X: f32 = 217.0;
-pub const GUILD_Y: f32 = 14.0;
+/// C# `GuildDialog.Location = Center` → `((1024-590)/2, (768-432)/2)` = (217,168)
+pub const GUILD_Y: f32 = 168.0;
 pub const GUILD_W: f32 = 590.0;
-pub const GUILD_H: f32 = 740.0;
+/// C# 面板 `Prguse[180]` 实测 590x432（旧值为自造 740：背景图 + 下方深色延伸区）
+pub const GUILD_H: f32 = 432.0;
 /// 背景图 Prguse[180] 自然尺寸
 pub const BG_W: f32 = 590.0;
 pub const BG_H: f32 = 432.0;
+
+// ============================================================================
+// #2892 批B 单元7：按 C# `GuildDialog`（`GuildDialog.cs:120-905`）拆回「6 页签 + 6 页」。
+// 页签精灵/坐标逐字取自 `:130-215`；页矩形取自 Notice/Members/Storage/Rank（@(0,60) 352x372）、
+// StatusPage（@(355,60) 230x372）、BuffPage（@(360,61) 352x372）。
+// ============================================================================
+
+/// 页签（C# `NoticeButton`/`MembersButton`/`StorageButton`/`RankButton`/`StatusButton`/`BuffButton`）
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum GuildPage {
+    #[default]
+    Notice,
+    Members,
+    Storage,
+    Rank,
+    Status,
+    Buff,
+}
+
+/// 页签实体
+#[derive(Component)]
+pub struct GuildTab(pub GuildPage);
+
+/// 页面容器实体（切换页签时显隐）
+#[derive(Component)]
+pub struct GuildPageRoot(pub GuildPage);
+
+/// 页签定义：`(页, 正常帧, pressed 帧, x, y)`（C# `GuildDialog.cs:138-199`，均 `Libraries.Title`）
+pub const GUILD_TABS: [(
+    GuildPage,
+    (LibraryName, usize),
+    (LibraryName, usize),
+    f32,
+    f32,
+); 6] = [
+    (
+        GuildPage::Notice,
+        (LibraryName::Title, 93),
+        (LibraryName::Title, 94),
+        20.0,
+        38.0,
+    ),
+    (
+        GuildPage::Members,
+        (LibraryName::Title, 99),
+        (LibraryName::Title, 100),
+        91.0,
+        38.0,
+    ),
+    (
+        GuildPage::Storage,
+        (LibraryName::Title, 105),
+        (LibraryName::Title, 106),
+        162.0,
+        38.0,
+    ),
+    (
+        GuildPage::Rank,
+        (LibraryName::Title, 101),
+        (LibraryName::Title, 101),
+        233.0,
+        38.0,
+    ),
+    (
+        GuildPage::Status,
+        (LibraryName::Title, 103),
+        (LibraryName::Title, 103),
+        501.0,
+        38.0,
+    ),
+    (
+        GuildPage::Buff,
+        (LibraryName::Title, 95),
+        (LibraryName::Title, 95),
+        430.0,
+        38.0,
+    ),
+];
+/// 页签精灵尺寸（`Title[93..106]` 实测 72x24，C# 未设 Size → 用 art 尺寸）
+pub const TAB_SIZE: (f32, f32) = (72.0, 24.0);
+/// 标题 `Title[25]` @(18,9)（实测 49x15）
+pub const TITLE_SPRITE: ((LibraryName, usize), f32, f32) = ((LibraryName::Title, 25), 18.0, 9.0);
+/// 关闭钮 `Prguse2[360/361/362]` @(565,4) 24x21
+pub const CLOSE_SPRITE: (LibraryName, usize, usize, usize) = (LibraryName::Prguse2, 360, 361, 362);
+pub const CLOSE_POS: (f32, f32) = (565.0, 4.0);
+pub const CLOSE_SIZE: (f32, f32) = (24.0, 21.0);
+/// 左侧四页矩形（Notice/Members/Storage/Rank 共用）
+pub const PAGE_LEFT: (f32, f32, f32, f32) = (0.0, 60.0, 352.0, 372.0);
+/// 右侧 `StatusPage`
+pub const PAGE_STATUS: (f32, f32, f32, f32) = (355.0, 60.0, 230.0, 372.0);
+/// `BuffPage`
+pub const PAGE_BUFF: (f32, f32, f32, f32) = (360.0, 61.0, 352.0, 372.0);
+/// 页面底图：`MembersPageBase`=`Prguse[1852]`@(13,1)、`StoragePageBase`=`[1851]`@(30,19)、
+/// `StatusPageBase`=`[1850]`@(10,2)、`BuffPage.Index`=`[1853]`@(0,0)
+pub const PAGE_BASE: (LibraryName, usize) = (LibraryName::Prguse, 1852);
+pub const STORAGE_BASE: (LibraryName, usize, f32, f32) = (LibraryName::Prguse, 1851, 30.0, 19.0);
+pub const STATUS_BASE: (LibraryName, usize, f32, f32) = (LibraryName::Prguse, 1850, 10.0, 2.0);
+pub const BUFF_BASE: (LibraryName, usize) = (LibraryName::Prguse, 1853);
+/// C# `RanksOptionsTexts[i]` 文案（`:859-871` 的顺序：改/招/踢/存/取/盟/告/益）
+pub const GUILD_PERM_LABELS: [&str; 8] = ["改", "招", "踢", "存", "取", "盟", "告", "益"];
+
+/// 显示离线复选框图（C# `MembersShowOfflineButton` = `Prguse[1346]`）
+#[derive(Component)]
+pub struct GuildShowOfflineCheck;
+/// 显示离线选中态图（C# `MembersShowOfflineStatus` = `Prguse[1347]`）
+#[derive(Component)]
+pub struct GuildShowOfflineStatus;
+/// 职务权限位选中态图（C# `RanksOptionsStatus[i]` = `Prguse[1347]`）
+#[derive(Component)]
+pub struct GuildRankPermCheck(pub u8);
+/// Buff 槽行（C# `GuildBuffButton[i].Name`，8 槽 @(4, 27+i*38)）
+#[derive(Component)]
+pub struct GuildBuffLine(pub usize);
+/// Buff 页剩余点数（C# `PointsLeft` @(118,3)）
+#[derive(Component)]
+pub struct GuildBuffPoints;
 
 /// 行会成员
 #[derive(Debug, Clone, Default)]
@@ -93,6 +211,8 @@ pub struct GuildState {
     pub active_buffs: Vec<i32>,
     /// #2537：Buff 页显示开关（C# BuffButton/BuffPage 切换）
     pub show_buff_page: bool,
+    /// #2892 批B 单元7：当前页（C# `LeftDialog`/`RightDialog` 选中的 `*Page`）
+    pub page: GuildPage,
     /// #2537：Buff 页滚动起点（C# StartIndex，8 行/页）
     pub buff_start: usize,
 }
@@ -255,6 +375,7 @@ impl Plugin for GuildPlugin {
         app.add_systems(
             Update,
             (
+                guild_page_system,
                 guild_ui_system,
                 guild_buff_system,
                 guild_storage_system,
@@ -290,9 +411,12 @@ fn spawn_guild(
     let font = ui_font.0.clone();
     let cjk = shared_cjk_font(&mut fonts, &mut cjk_font);
 
-    // 根容器（bevy_ui Node + Overflow::clip）：扩展版 590x740，按自身尺寸居中 @(217,14)
-    // 背景 Prguse[180]（实测 590x432）以自然尺寸作子图，下方 432..740 为深色延伸区，
-    // 容纳移植版堆叠的职务/仓库/金币区块（原 sprite 版这些区块溢出面板裸奔）。
+    // 根面板 = C# `GuildDialog`：`Prguse[180]`（实测 590x432）+ `Location = Center` → (217,168)。
+    // 旧实现是自造 590x740（背景图 + 下方深色延伸区）单窗垂直堆叠，本单元按 C# 拆回
+    // 「标题 + 6 页签 + 6 页」，内容按归属搬进各页容器（页面底图用 C# 的 1850/1851/1852/1853）。
+    let Some(bg) = load_lib_image(&mut libs, &mut images, PANEL.0, PANEL.1) else {
+        return;
+    };
     let root = commands
         .spawn((
             Node {
@@ -304,206 +428,280 @@ fn spawn_guild(
                 overflow: Overflow::clip(),
                 ..default()
             },
+            ImageNode::new(bg),
             DialogRoot(DialogKind::Guild),
             GuildWidget,
             GlobalZIndex(30),
             Visibility::Hidden,
-            // #89 可滚动成员列表：10 行 × 20px（滚动条/滚轮区域相对根容器）
+            // #89 成员列表滚动（C# `MembersPage` 内 (125,30) 起；行高见 §7 偏差记录）
             UiScrollList {
-                rect_rel: (18.0, 60.0, 200.0, 200.0),
+                rect_rel: (125.0, 90.0, 200.0, 200.0),
                 row_h: 20.0,
                 visible: 10,
                 total: 0,
                 offset: 0,
                 step: 3,
-                track_rel: (218.0, 60.0, 4.0, 200.0),
+                track_rel: (337.0, 61.0, 16.0, 200.0),
                 thumb: None,
                 z: 8,
             },
         ))
         .id();
 
+    // 标题 `Title[25]` @(18,9) + 6 页签 + 关闭钮（C# `GuildDialog.cs:130-215`，全挂面板）
     commands.entity(root).with_children(|p| {
-        // 背景图（自然尺寸）+ 下方深色延伸区
-        if let Some(h) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 180) {
-            spawn_image(p, h, 0.0, 0.0, BG_W, BG_H, 0);
+        if let Some(h) =
+            load_lib_image(&mut libs, &mut images, TITLE_SPRITE.0 .0, TITLE_SPRITE.0 .1)
+        {
+            spawn_image(p, h, TITLE_SPRITE.1, TITLE_SPRITE.2, 49.0, 15.0, 1);
         }
-        spawn_container(p, 0.0, BG_H, GUILD_W, GUILD_H - BG_H, 0)
-            .insert(BackgroundColor(crate::ui::theme::colors::PANEL_BG));
-        // 标题 Title[15] @(18,8)
-        if let Some(h) = load_lib_image(&mut libs, &mut images, LibraryName::Title, 15) {
-            spawn_image(p, h, 18.0, 8.0, 103.0, 17.0, 1);
+        for (page, normal, pressed, x, y) in GUILD_TABS {
+            if let (Some(n), Some(pr)) = (
+                load_lib_image(&mut libs, &mut images, normal.0, normal.1),
+                load_lib_image(&mut libs, &mut images, pressed.0, pressed.1),
+            ) {
+                spawn_icon_button(p, n.clone(), n, pr, x, y, TAB_SIZE.0, TAB_SIZE.1, 9)
+                    .insert(GuildTab(page));
+            }
         }
-        // 关闭 Prguse2[360-362] @(340,3)
         if let (Some(n), Some(h), Some(pr)) = (
-            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 360),
-            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 361),
-            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 362),
+            load_lib_image(&mut libs, &mut images, CLOSE_SPRITE.0, CLOSE_SPRITE.1),
+            load_lib_image(&mut libs, &mut images, CLOSE_SPRITE.0, CLOSE_SPRITE.2),
+            load_lib_image(&mut libs, &mut images, CLOSE_SPRITE.0, CLOSE_SPRITE.3),
         ) {
-            spawn_icon_button(p, n, h, pr, 340.0, 3.0, 20.0, 20.0, 9)
-                .insert(GuildBtn(GuildBtnKind::Close));
+            spawn_icon_button(
+                p,
+                n,
+                h,
+                pr,
+                CLOSE_POS.0,
+                CLOSE_POS.1,
+                CLOSE_SIZE.0,
+                CLOSE_SIZE.1,
+                9,
+            )
+            .insert(GuildBtn(GuildBtnKind::Close));
         }
-        // 滚动条（轨道 + 滑块）
-        spawn_scroll_bar_ui(p, (218.0, 60.0, 4.0, 200.0), 8);
-        // 行会名/会长文本（GuildLine 0 占位显示头部）@(18,40)
-        spawn_label(p, &cjk, "", 18.0, 40.0, 12.0, Color::srgb(1.0, 0.9, 0.5), 8)
-            .insert(GuildLine(0));
-        // 成员列表（10 行，1..=10）@(18,60+20i)
+    });
+
+    // 六个页面容器（C# 页矩形；非当前页由 `guild_page_system` 置 Hidden）
+    let mut page_entities: Vec<(GuildPage, Entity)> = Vec::new();
+    for (page, rect) in [
+        (GuildPage::Notice, PAGE_LEFT),
+        (GuildPage::Members, PAGE_LEFT),
+        (GuildPage::Storage, PAGE_LEFT),
+        (GuildPage::Rank, PAGE_LEFT),
+        (GuildPage::Status, PAGE_STATUS),
+        (GuildPage::Buff, PAGE_BUFF),
+    ] {
+        let e = commands
+            .spawn((
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: Val::Px(rect.0),
+                    top: Val::Px(rect.1),
+                    width: Val::Px(rect.2),
+                    height: Val::Px(rect.3),
+                    ..default()
+                },
+                ChildOf(root),
+                GuildPageRoot(page),
+                Visibility::Hidden,
+                ZIndex(8),
+            ))
+            .id();
+        page_entities.push((page, e));
+    }
+    let page_of = |want: GuildPage| -> Entity {
+        page_entities
+            .iter()
+            .find(|(p, _)| *p == want)
+            .map(|(_, e)| *e)
+            .expect("页面容器应已创建")
+    };
+    let page_notice = page_of(GuildPage::Notice);
+    let page_members = page_of(GuildPage::Members);
+    let page_storage = page_of(GuildPage::Storage);
+    let page_rank = page_of(GuildPage::Rank);
+    let page_status = page_of(GuildPage::Status);
+    let page_buff = page_of(GuildPage::Buff);
+
+    // 页面底图（C#：Members=`Prguse[1852]`@(13,1)、Storage=`[1851]`@(30,19)、
+    // Status=`[1850]`@(10,2)、Buff=页面自身 `[1853]`@(0,0)；NoticePage 无底图）
+    for (page, lib, idx, x, y, w, h) in [
+        (
+            page_members,
+            PAGE_BASE.0,
+            PAGE_BASE.1,
+            13.0,
+            1.0,
+            324.0,
+            332.0,
+        ),
+        (
+            page_storage,
+            STORAGE_BASE.0,
+            STORAGE_BASE.1,
+            STORAGE_BASE.2,
+            STORAGE_BASE.3,
+            292.0,
+            308.0,
+        ),
+        (
+            page_status,
+            STATUS_BASE.0,
+            STATUS_BASE.1,
+            STATUS_BASE.2,
+            STATUS_BASE.3,
+            208.0,
+            316.0,
+        ),
+        (page_buff, BUFF_BASE.0, BUFF_BASE.1, 0.0, 0.0, 216.0, 332.0),
+    ] {
+        if let Some(handle) = load_lib_image(&mut libs, &mut images, lib, idx) {
+            commands.entity(page).with_children(|p| {
+                spawn_image(p, handle, x, y, w, h, 0);
+            });
+        }
+    }
+
+    // ---- NoticePage：公告（C# `Notice` 文本框 @(13,1) 322x330，本端为单行输入 + 保存钮）----
+    commands.entity(page_notice).with_children(|p| {
+        spawn_container(p, 13.0, 1.0, 322.0, 40.0, 2)
+            .insert((
+                BackgroundColor(Color::srgba(0.10, 0.10, 0.13, 0.95)),
+                GuildNoticeField,
+                TextInputField(2),
+                TextInputRect(GUILD_X + 13.0, GUILD_Y + 61.0, 322.0, 40.0),
+                Visibility::Hidden,
+            ))
+            .with_children(|ic| {
+                ic.spawn((
+                    Node {
+                        position_type: PositionType::Absolute,
+                        left: Val::Px(4.0),
+                        top: Val::Px(2.0),
+                        ..default()
+                    },
+                    Text::new(String::new()),
+                    TextFont {
+                        font: FontSource::Handle(font.clone()),
+                        font_size: FontSize::Px(12.0),
+                        ..default()
+                    },
+                    TextColor(Color::WHITE),
+                    ZIndex(9),
+                    TextInputDisplay(2),
+                ));
+            });
+        // C# `NoticeSaveButton` = `Prguse[554/555/556]` @(20,342)（`NoticeEditButton` 560..562 同位置，二选一显示）
+        if let (Some(n), Some(h), Some(pr)) = (
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 554),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 555),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 556),
+        ) {
+            spawn_icon_button(p, n, h, pr, 20.0, 342.0, 28.0, 25.0, 9)
+                .insert(GuildBtn(GuildBtnKind::Notice));
+        }
+    });
+
+    // ---- MembersPage：成员列表 + 滚动条 + 显示离线（C# `GuildDialog.cs:318-487`）----
+    commands.entity(page_members).with_children(|p| {
+        spawn_scroll_bar_ui(p, (337.0, 1.0, 16.0, 331.0), 8);
         for i in 1..=10usize {
             spawn_label(
                 p,
                 &cjk,
                 "",
-                18.0,
-                60.0 + (i - 1) as f32 * 20.0,
+                125.0,
+                30.0 + (i - 1) as f32 * 20.0,
                 12.0,
                 Color::WHITE,
                 8,
             )
             .insert(GuildLine(i));
         }
-        // #1348：显示离线成员切换（C# MembersShowOfflineButton）@(265,310) 70x20
-        spawn_container(p, 265.0, 310.0, 70.0, 20.0, 8)
+        // C# `MembersShowOfflineButton` `Prguse[1346]` + `MembersShowOfflineStatus` `Prguse[1347]`
+        // @(230,310)，标签 `MembersShowOffline` @(245,309)
+        if let Some(h) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 1346) {
+            spawn_image(p, h, 230.0, 310.0, 12.0, 12.0, 8).insert(GuildShowOfflineCheck);
+        }
+        if let Some(h) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 1347) {
+            spawn_image(p, h, 230.0, 310.0, 16.0, 12.0, 9)
+                .insert((GuildShowOfflineStatus, Visibility::Hidden));
+        }
+        spawn_container(p, 228.0, 308.0, 120.0, 16.0, 9)
             .insert((Button, GuildShowOfflineBtn))
             .with_children(|b| {
-                spawn_label(b, &font, "显示离线", 0.0, 0.0, 12.0, Color::WHITE, 1)
+                spawn_label(b, &cjk, "显示离线", 17.0, 1.0, 11.0, Color::WHITE, 1)
                     .insert(GuildShowOfflineText);
             });
-        // #2537：Buff 页开关（C# BuffButton）+ 翻页（C# UpButton/DownButton）
-        spawn_container(p, 190.0, 310.0, 60.0, 20.0, 8)
-            .insert((Button, GuildBuffToggleBtn))
-            .with_children(|b| {
-                spawn_label(b, &font, "技能", 0.0, 0.0, 12.0, Color::WHITE, 1);
-            });
-        spawn_container(p, 225.0, 60.0, 16.0, 14.0, 8)
-            .insert((Button, GuildBuffUp))
-            .with_children(|b| {
-                spawn_label(b, &font, "▲", 0.0, 0.0, 11.0, Color::WHITE, 1);
-            });
-        spawn_container(p, 225.0, 244.0, 16.0, 14.0, 8)
-            .insert((Button, GuildBuffDown))
-            .with_children(|b| {
-                spawn_label(b, &font, "▼", 0.0, 0.0, 11.0, Color::WHITE, 1);
-            });
+    });
 
-        // #1362：职务改名（C# RanksSelectBox + RanksName + RanksSaveName @(18,340)）
-        spawn_dropdown_ui(
-            p,
-            &font,
-            vec!["会长".to_string(), "副会长".to_string(), "成员".to_string()],
-            Some(0),
-            (GUILD_X, GUILD_Y),
-            18.0,
-            340.0,
-            64.0,
-            18.0,
-            3,
-            8,
-        )
-        .insert(GuildRankDrop);
-        spawn_container(p, 90.0, 340.0, 120.0, 20.0, 8)
-            .insert((
-                BackgroundColor(Color::srgba(0.2, 0.2, 0.25, 0.9)),
-                GuildRankRenameField,
-                TextInputField(4),
-                TextInputRect(370.0, 420.0, 120.0, 20.0),
-                Visibility::Hidden,
-            ))
-            .with_children(|ic| {
-                ic.spawn((
-                    Node {
-                        position_type: PositionType::Absolute,
-                        left: Val::Px(4.0),
-                        top: Val::Px(2.0),
-                        ..default()
-                    },
-                    Text::new(String::new()),
-                    TextFont {
-                        font: FontSource::Handle(font.clone()),
-                        font_size: FontSize::Px(12.0),
-                        ..default()
-                    },
-                    TextColor(Color::WHITE),
-                    ZIndex(9),
-                    TextInputDisplay(4),
-                ));
-            });
-        spawn_container(p, 220.0, 340.0, 40.0, 20.0, 8)
-            .insert((Button, GuildRankSaveBtn))
-            .with_children(|b| {
-                spawn_label(b, &font, "改名", 0.0, 0.0, 12.0, Color::WHITE, 1);
-            });
-
-        // #1395 子批2：加职务（TextInput id 7 @(60,368)）+ 按钮
-        spawn_label(p, &cjk, "加职务", 18.0, 368.0, 11.0, Color::WHITE, 8);
-        spawn_container(p, 60.0, 368.0, 100.0, 20.0, 8)
-            .insert((
-                BackgroundColor(Color::srgba(0.2, 0.2, 0.25, 0.9)),
-                GuildAddRankField,
-                TextInputField(7),
-                TextInputRect(340.0, 448.0, 100.0, 20.0),
-                Visibility::Hidden,
-            ))
-            .with_children(|ic| {
-                ic.spawn((
-                    Node {
-                        position_type: PositionType::Absolute,
-                        left: Val::Px(4.0),
-                        top: Val::Px(2.0),
-                        ..default()
-                    },
-                    Text::new(String::new()),
-                    TextFont {
-                        font: FontSource::Handle(font.clone()),
-                        font_size: FontSize::Px(12.0),
-                        ..default()
-                    },
-                    TextColor(Color::WHITE),
-                    ZIndex(9),
-                    TextInputDisplay(7),
-                ));
-            });
-        spawn_container(p, 170.0, 368.0, 36.0, 18.0, 8)
-            .insert((Button, GuildAddRankBtn))
-            .with_children(|b| {
-                spawn_label(b, &font, "添加", 0.0, 0.0, 11.0, Color::WHITE, 1);
-            });
-        // #1395 子批2：权限位（C# RanksOptionsButtons[8]：改/招/踢/存/取/盟/告/益）
-        spawn_label(p, &cjk, "权限", 18.0, 392.0, 11.0, Color::WHITE, 8);
-        for (i, label) in ["改", "招", "踢", "存", "取", "盟", "告", "益"]
-            .iter()
-            .enumerate()
-        {
-            spawn_container(p, 50.0 + i as f32 * 30.0, 392.0, 24.0, 16.0, 8)
-                .insert((Button, GuildRankPermBtn(i as u8)))
-                .with_children(|b| {
-                    spawn_label(b, &font, label, 0.0, 0.0, 11.0, Color::WHITE, 1);
-                });
-        }
+    // ---- StatusPage：行会名/等级/成员 + 招募/创建（C# `GuildDialog.cs:489-611`）----
+    commands.entity(page_status).with_children(|p| {
+        // C# `StatusHeaders` @(7,47) 75x300（行头列表）
         spawn_label(
             p,
             &cjk,
-            "权限:00000000",
-            18.0,
-            412.0,
-            10.0,
-            Color::srgb(0.8, 0.9, 0.6),
+            "行会\n等级\n成员",
+            7.0,
+            47.0,
+            11.0,
+            Color::WHITE,
             8,
-        )
-        .insert(GuildRankPermText);
-        spawn_container(p, 160.0, 412.0, 100.0, 18.0, 8)
-            .insert((Button, GuildPromoteBtn))
-            .with_children(|b| {
-                spawn_label(b, &font, "调职到下拉职务", 0.0, 0.0, 11.0, Color::WHITE, 1);
+        );
+        // C# `StatusGuildName` @(82,47)（行会名 + 会长 + 金币，由 `guild_ui_system` 填充）
+        spawn_label(p, &cjk, "", 82.0, 47.0, 11.0, Color::srgb(1.0, 0.9, 0.5), 8)
+            .insert(GuildLine(0));
+        // C# `StatusLevel` @(82,73) / `StatusMembers` @(82,99)：原版**从未被赋值**（死控件），同坐标建空标签
+        spawn_label(p, &cjk, "", 82.0, 73.0, 11.0, Color::WHITE, 8);
+        spawn_label(p, &cjk, "", 82.0, 99.0, 11.0, Color::WHITE, 8);
+        // 招募行（C# `RecruitMemberLabel` @(36,283)、`MembersRecruitName` @(40,300) 130x21、
+        // `RecruitMemberButton` = `Title[356/357/358]` @(170,298) 24x24）
+        spawn_label(p, &cjk, "招募成员", 36.0, 283.0, 11.0, Color::WHITE, 8);
+        spawn_container(p, 40.0, 300.0, 130.0, 21.0, 8)
+            .insert((
+                BackgroundColor(Color::srgba(0.2, 0.2, 0.25, 0.9)),
+                GuildInviteField,
+                TextInputField(1),
+                TextInputRect(GUILD_X + 355.0 + 40.0, GUILD_Y + 60.0 + 300.0, 130.0, 21.0),
+                Visibility::Hidden,
+            ))
+            .with_children(|ic| {
+                ic.spawn((
+                    Node {
+                        position_type: PositionType::Absolute,
+                        left: Val::Px(4.0),
+                        top: Val::Px(2.0),
+                        ..default()
+                    },
+                    Text::new(String::new()),
+                    TextFont {
+                        font: FontSource::Handle(font.clone()),
+                        font_size: FontSize::Px(12.0),
+                        ..default()
+                    },
+                    TextColor(Color::WHITE),
+                    ZIndex(9),
+                    TextInputDisplay(1),
+                ));
             });
-
-        // 创建行会：输入框（TextInput id 0）+ 创建按钮（原版 C# GuildDialog 创建流程）
-        spawn_container(p, 60.0, 250.0, 200.0, 20.0, 8)
+        if let (Some(n), Some(h), Some(pr)) = (
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 356),
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 357),
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 358),
+        ) {
+            spawn_icon_button(p, n, h, pr, 170.0, 298.0, 24.0, 24.0, 9)
+                .insert(GuildBtn(GuildBtnKind::Invite));
+        }
+        // ↓ 以下两行是 **Bevy 扩展**（C# `GuildDialog` 无「创建行会」「踢出」控件，见 §7）
+        spawn_container(p, 36.0, 330.0, 130.0, 21.0, 8)
             .insert((
                 BackgroundColor(Color::srgba(0.2, 0.2, 0.25, 0.9)),
                 GuildNameField,
                 TextInputField(0),
-                TextInputRect(340.0, 330.0, 200.0, 20.0),
+                TextInputRect(GUILD_X + 355.0 + 36.0, GUILD_Y + 60.0 + 330.0, 130.0, 21.0),
                 Visibility::Hidden,
             ))
             .with_children(|ic| {
@@ -520,7 +718,7 @@ fn spawn_guild(
                         font_size: FontSize::Px(12.0),
                         ..default()
                     },
-                    TextColor(Color::srgb(1.0, 1.0, 1.0)),
+                    TextColor(Color::WHITE),
                     ZIndex(9),
                     TextInputDisplay(0),
                 ));
@@ -530,197 +728,305 @@ fn spawn_guild(
             load_lib_image(&mut libs, &mut images, LibraryName::Title, 207),
             load_lib_image(&mut libs, &mut images, LibraryName::Title, 208),
         ) {
-            spawn_icon_button(p, n, h, pr, 20.0, 280.0, 76.0, 25.0, 9).insert(GuildCreateBtn);
-        }
-        // 邀请玩家：输入框（TextInput id 1）+ 邀请按钮
-        spawn_container(p, 60.0, 310.0, 200.0, 20.0, 8)
-            .insert((
-                BackgroundColor(Color::srgba(0.2, 0.2, 0.25, 0.9)),
-                GuildInviteField,
-                TextInputField(1),
-                TextInputRect(340.0, 390.0, 200.0, 20.0),
-                Visibility::Hidden,
-            ))
-            .with_children(|ic| {
-                ic.spawn((
-                    Node {
-                        position_type: PositionType::Absolute,
-                        left: Val::Px(4.0),
-                        top: Val::Px(2.0),
-                        ..default()
-                    },
-                    Text::new(String::new()),
-                    TextFont {
-                        font: FontSource::Handle(font.clone()),
-                        font_size: FontSize::Px(12.0),
-                        ..default()
-                    },
-                    TextColor(Color::srgb(1.0, 1.0, 1.0)),
-                    ZIndex(9),
-                    TextInputDisplay(1),
-                ));
-            });
-        if let (Some(n), Some(h), Some(pr)) = (
-            load_lib_image(&mut libs, &mut images, LibraryName::Title, 206),
-            load_lib_image(&mut libs, &mut images, LibraryName::Title, 207),
-            load_lib_image(&mut libs, &mut images, LibraryName::Title, 208),
-        ) {
-            spawn_icon_button(p, n, h, pr, 20.0, 340.0, 76.0, 25.0, 9)
-                .insert(GuildBtn(GuildBtnKind::Invite));
-        }
-        if let (Some(n), Some(h), Some(pr)) = (
-            load_lib_image(&mut libs, &mut images, LibraryName::Title, 210),
-            load_lib_image(&mut libs, &mut images, LibraryName::Title, 211),
-            load_lib_image(&mut libs, &mut images, LibraryName::Title, 212),
-        ) {
-            spawn_icon_button(p, n, h, pr, 110.0, 340.0, 76.0, 25.0, 9)
+            spawn_icon_button(
+                p,
+                n.clone(),
+                h.clone(),
+                pr.clone(),
+                170.0,
+                328.0,
+                76.0,
+                25.0,
+                9,
+            )
+            .insert(GuildCreateBtn);
+            spawn_icon_button(p, n, h, pr, 106.0, 328.0, 60.0, 25.0, 9)
                 .insert(GuildBtn(GuildBtnKind::Kick));
         }
-        // 公告输入框（TextInput id 2）+ 设置按钮
-        spawn_container(p, 60.0, 380.0, 200.0, 20.0, 8)
-            .insert((
-                BackgroundColor(Color::srgba(0.2, 0.2, 0.25, 0.9)),
-                GuildNoticeField,
-                TextInputField(2),
-                TextInputRect(340.0, 460.0, 200.0, 20.0),
-                Visibility::Hidden,
-            ))
-            .with_children(|ic| {
-                ic.spawn((
-                    Node {
-                        position_type: PositionType::Absolute,
-                        left: Val::Px(4.0),
-                        top: Val::Px(2.0),
-                        ..default()
-                    },
-                    Text::new(String::new()),
-                    TextFont {
-                        font: FontSource::Handle(font.clone()),
-                        font_size: FontSize::Px(12.0),
-                        ..default()
-                    },
-                    TextColor(Color::srgb(1.0, 1.0, 1.0)),
-                    ZIndex(9),
-                    TextInputDisplay(2),
-                ));
-            });
-        if let (Some(n), Some(h), Some(pr)) = (
-            load_lib_image(&mut libs, &mut images, LibraryName::Title, 206),
-            load_lib_image(&mut libs, &mut images, LibraryName::Title, 207),
-            load_lib_image(&mut libs, &mut images, LibraryName::Title, 208),
-        ) {
-            spawn_icon_button(p, n, h, pr, 20.0, 410.0, 76.0, 25.0, 9)
-                .insert(GuildBtn(GuildBtnKind::Notice));
+    });
+
+    // ---- StoragePage：金币 + 物品格 + 翻页（C# `GuildDialog.cs:617-750`）----
+    commands.entity(page_storage).with_children(|p| {
+        // C# `StorageGoldText` @(194,312) 125x12（本端由 `GuildLine(19)` 填充）
+        spawn_label(p, &cjk, "", 194.0, 312.0, 11.0, Color::WHITE, 8).insert(GuildLine(19));
+        // C# `StorageGoldAdd` `Prguse[918]` @(158,313) / `StorageGoldRemove` `Prguse[917]` @(142,313)
+        if let Some(h) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 918) {
+            spawn_icon_button(p, h.clone(), h.clone(), h, 158.0, 313.0, 16.0, 14.0, 9)
+                .insert(GuildBtn(GuildBtnKind::GoldDeposit));
         }
-        // 仓库金币：输入框（TextInput id 3）+ 存入/取出
-        spawn_container(p, 60.0, 450.0, 200.0, 20.0, 8)
+        if let Some(h) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 917) {
+            spawn_icon_button(p, h.clone(), h.clone(), h, 142.0, 313.0, 16.0, 14.0, 9)
+                .insert(GuildBtn(GuildBtnKind::GoldWithdraw));
+        }
+        // 金币输入（**Bevy 扩展**：C# 无输入框，金币数由 C# 的 `StorageGoldText` 直接展示）
+        spawn_container(p, 60.0, 313.0, 78.0, 14.0, 8)
             .insert((
                 BackgroundColor(Color::srgba(0.2, 0.2, 0.25, 0.9)),
                 GuildGoldField,
                 TextInputField(3),
-                TextInputRect(340.0, 530.0, 200.0, 20.0),
+                TextInputRect(GUILD_X + 60.0, GUILD_Y + 60.0 + 313.0, 78.0, 14.0),
                 Visibility::Hidden,
             ))
             .with_children(|ic| {
                 ic.spawn((
                     Node {
                         position_type: PositionType::Absolute,
-                        left: Val::Px(4.0),
-                        top: Val::Px(2.0),
+                        left: Val::Px(3.0),
+                        top: Val::Px(1.0),
                         ..default()
                     },
                     Text::new(String::new()),
                     TextFont {
                         font: FontSource::Handle(font.clone()),
-                        font_size: FontSize::Px(12.0),
+                        font_size: FontSize::Px(11.0),
                         ..default()
                     },
-                    TextColor(Color::srgb(1.0, 1.0, 1.0)),
+                    TextColor(Color::WHITE),
                     ZIndex(9),
                     TextInputDisplay(3),
                 ));
             });
-        if let (Some(n), Some(h), Some(pr)) = (
-            load_lib_image(&mut libs, &mut images, LibraryName::Title, 206),
-            load_lib_image(&mut libs, &mut images, LibraryName::Title, 207),
-            load_lib_image(&mut libs, &mut images, LibraryName::Title, 208),
-        ) {
-            spawn_icon_button(p, n, h, pr, 20.0, 480.0, 76.0, 25.0, 9)
-                .insert(GuildBtn(GuildBtnKind::GoldDeposit));
-        }
-        if let (Some(n), Some(h), Some(pr)) = (
-            load_lib_image(&mut libs, &mut images, LibraryName::Title, 210),
-            load_lib_image(&mut libs, &mut images, LibraryName::Title, 211),
-            load_lib_image(&mut libs, &mut images, LibraryName::Title, 212),
-        ) {
-            spawn_icon_button(p, n, h, pr, 110.0, 480.0, 76.0, 25.0, 9)
-                .insert(GuildBtn(GuildBtnKind::GoldWithdraw));
-        }
-
-        // 仓库物品（M32）：8 行列表 + 页签 + 存入/取出/翻页 @(18,515+18i)
+        // C# 格阵起点 (31,20)，步进 36（`StorageGrid[idx].Location = (x*35+31+x, y*35+20+y)`）；
+        // 本端沿用 8 行单列列表（deviation，见 §7），行高 18
         for i in 0..8usize {
             spawn_label(
                 p,
                 &cjk,
                 "",
-                18.0,
-                515.0 + i as f32 * 18.0,
-                12.0,
+                31.0,
+                20.0 + i as f32 * 18.0,
+                11.0,
                 Color::WHITE,
                 8,
             )
             .insert(GuildLine(11 + i));
         }
-        spawn_label(
-            p,
-            &cjk,
-            "",
-            18.0,
-            665.0,
-            12.0,
-            Color::srgb(1.0, 0.9, 0.5),
-            8,
-        )
-        .insert(GuildLine(19));
+        // 存入/取出（**Bevy 扩展**；C# 靠点击格子搬运）
         if let (Some(n), Some(h), Some(pr)) = (
             load_lib_image(&mut libs, &mut images, LibraryName::Title, 206),
             load_lib_image(&mut libs, &mut images, LibraryName::Title, 207),
             load_lib_image(&mut libs, &mut images, LibraryName::Title, 208),
         ) {
-            spawn_icon_button(p, n, h, pr, 20.0, 690.0, 76.0, 25.0, 9).insert(GuildItemDeposit);
+            spawn_icon_button(
+                p,
+                n.clone(),
+                h.clone(),
+                pr.clone(),
+                31.0,
+                200.0,
+                76.0,
+                25.0,
+                9,
+            )
+            .insert(GuildItemDeposit);
+            spawn_label(p, &cjk, "存入", 51.0, 205.0, 11.0, Color::WHITE, 10);
+            spawn_icon_button(p, n, h, pr, 120.0, 200.0, 76.0, 25.0, 9).insert(GuildItemWithdraw);
+            spawn_label(p, &cjk, "取出", 140.0, 205.0, 11.0, Color::WHITE, 10);
         }
-        if let (Some(n), Some(h), Some(pr)) = (
-            load_lib_image(&mut libs, &mut images, LibraryName::Title, 210),
-            load_lib_image(&mut libs, &mut images, LibraryName::Title, 211),
-            load_lib_image(&mut libs, &mut images, LibraryName::Title, 212),
-        ) {
-            spawn_icon_button(p, n, h, pr, 110.0, 690.0, 76.0, 25.0, 9).insert(GuildItemWithdraw);
-        }
-        // 翻页（原版 C# Prguse2 197/198/199 上、207/208/209 下）@(20/40,722)
+        // C# 翻页 `Prguse2[197/198/199]` @(337,1)、`[207/208/209]` @(337,318)、`[206]` @(337,16)
         if let (Some(n), Some(h), Some(pr)) = (
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 197),
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 198),
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 199),
         ) {
-            spawn_icon_button(p, n, h, pr, 20.0, 722.0, 16.0, 14.0, 9).insert(GuildStorageUp);
+            spawn_icon_button(p, n, h, pr, 337.0, 1.0, 16.0, 14.0, 9).insert(GuildStorageUp);
         }
         if let (Some(n), Some(h), Some(pr)) = (
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 207),
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 208),
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 209),
         ) {
-            spawn_icon_button(p, n, h, pr, 40.0, 722.0, 16.0, 14.0, 9).insert(GuildStorageDown);
+            spawn_icon_button(p, n, h, pr, 337.0, 318.0, 16.0, 14.0, 9).insert(GuildStorageDown);
         }
     });
 
-    // 邀请提示（MirMessageBox，独立覆盖层 Prguse[360] 456x190 @ (284,289)）
+    // ---- RankPage：职务下拉/改名/权限位（C# `GuildDialog.cs:752-872`）----
+    commands.entity(page_rank).with_children(|p| {
+        // C# `RanksSelectTextL` @(42,18) / `RanksSelectTextR` @(198,18)
+        spawn_label(p, &cjk, "名称", 42.0, 18.0, 11.0, Color::WHITE, 8);
+        spawn_label(p, &cjk, "职务", 198.0, 18.0, 11.0, Color::WHITE, 8);
+        // C# `RanksName` 文本框 @(42,36) 130x16
+        spawn_container(p, 42.0, 36.0, 130.0, 16.0, 8)
+            .insert((
+                BackgroundColor(Color::srgba(0.2, 0.2, 0.25, 0.9)),
+                GuildRankRenameField,
+                TextInputField(4),
+                TextInputRect(GUILD_X + 42.0, GUILD_Y + 60.0 + 36.0, 130.0, 16.0),
+                Visibility::Hidden,
+            ))
+            .with_children(|ic| {
+                ic.spawn((
+                    Node {
+                        position_type: PositionType::Absolute,
+                        left: Val::Px(3.0),
+                        top: Val::Px(1.0),
+                        ..default()
+                    },
+                    Text::new(String::new()),
+                    TextFont {
+                        font: FontSource::Handle(font.clone()),
+                        font_size: FontSize::Px(11.0),
+                        ..default()
+                    },
+                    TextColor(Color::WHITE),
+                    ZIndex(9),
+                    TextInputDisplay(4),
+                ));
+            });
+        // C# `RanksSelectBox` @(198,36) 130x16
+        spawn_dropdown_ui(
+            p,
+            &font,
+            vec!["会长".to_string(), "副会长".to_string(), "成员".to_string()],
+            Some(0),
+            (GUILD_X, GUILD_Y + 60.0),
+            198.0,
+            36.0,
+            130.0,
+            16.0,
+            3,
+            8,
+        )
+        .insert(GuildRankDrop);
+        // C# `RanksSaveName` = `Title[90/91/92]` @(155,290) 40x25
+        if let (Some(n), Some(h), Some(pr)) = (
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 90),
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 91),
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 92),
+        ) {
+            spawn_icon_button(p, n, h, pr, 155.0, 290.0, 40.0, 25.0, 9).insert(GuildRankSaveBtn);
+        }
+        // C# `RanksOptionsButtons[i]` `Prguse[1346]` + `RanksOptionsStatus[i]` `Prguse[1347]`，
+        // 位置 `(i%2==0 ? 42 : 202, 120 + i*20 / 120 + (i-1)*20)`，标签 @(+17, -2)
+        spawn_label(p, &cjk, "权限位", 42.0, 96.0, 11.0, Color::WHITE, 8);
+        for i in 0..8usize {
+            let x = if i % 2 == 0 { 42.0 } else { 202.0 };
+            let y = if i % 2 == 0 {
+                120.0 + i as f32 * 20.0
+            } else {
+                120.0 + (i - 1) as f32 * 20.0
+            };
+            if let Some(h) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 1346) {
+                spawn_image(p, h, x, y, 12.0, 12.0, 8);
+            }
+            if let Some(h) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 1347) {
+                spawn_image(p, h, x, y, 16.0, 12.0, 9)
+                    .insert((GuildRankPermCheck(i as u8), Visibility::Hidden));
+            }
+            spawn_container(p, x - 2.0, y - 2.0, 90.0, 16.0, 9)
+                .insert((Button, GuildRankPermBtn(i as u8)))
+                .with_children(|b| {
+                    spawn_label(
+                        b,
+                        &cjk,
+                        GUILD_PERM_LABELS[i],
+                        19.0,
+                        2.0,
+                        11.0,
+                        Color::WHITE,
+                        1,
+                    );
+                });
+        }
+        // C# `PointsLeft` 同级：权限位汇总（Bevy 扩展）
+        spawn_label(
+            p,
+            &cjk,
+            "",
+            42.0,
+            258.0,
+            10.0,
+            Color::srgb(0.8, 0.9, 0.6),
+            8,
+        )
+        .insert(GuildRankPermText);
+        // **Bevy 扩展**：加职务（C# 职务由服务端定义，无新建入口）
+        spawn_container(p, 42.0, 80.0, 130.0, 16.0, 8)
+            .insert((
+                BackgroundColor(Color::srgba(0.2, 0.2, 0.25, 0.9)),
+                GuildAddRankField,
+                TextInputField(7),
+                TextInputRect(GUILD_X + 42.0, GUILD_Y + 60.0 + 80.0, 130.0, 16.0),
+                Visibility::Hidden,
+            ))
+            .with_children(|ic| {
+                ic.spawn((
+                    Node {
+                        position_type: PositionType::Absolute,
+                        left: Val::Px(3.0),
+                        top: Val::Px(1.0),
+                        ..default()
+                    },
+                    Text::new(String::new()),
+                    TextFont {
+                        font: FontSource::Handle(font.clone()),
+                        font_size: FontSize::Px(11.0),
+                        ..default()
+                    },
+                    TextColor(Color::WHITE),
+                    ZIndex(9),
+                    TextInputDisplay(7),
+                ));
+            });
+        if let (Some(n), Some(h), Some(pr)) = (
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 206),
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 207),
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 208),
+        ) {
+            spawn_icon_button(
+                p,
+                n.clone(),
+                h.clone(),
+                pr.clone(),
+                200.0,
+                290.0,
+                60.0,
+                25.0,
+                9,
+            )
+            .insert(GuildPromoteBtn);
+            spawn_label(p, &cjk, "调职", 219.0, 295.0, 11.0, Color::WHITE, 10);
+            spawn_icon_button(p, n, h, pr, 200.0, 320.0, 60.0, 25.0, 9).insert(GuildAddRankBtn);
+            spawn_label(p, &cjk, "加职务", 219.0, 325.0, 11.0, Color::WHITE, 10);
+        }
+    });
+
+    // ---- BuffPage：C# `BuffPage` @(360,61) + `PointsLeft` + 8 槽 ----
+    commands.entity(page_buff).with_children(|p| {
+        spawn_label(p, &cjk, "", 118.0, 3.0, 11.0, Color::WHITE, 8).insert(GuildBuffPoints);
+        for i in 0..8usize {
+            spawn_label(
+                p,
+                &cjk,
+                "",
+                4.0,
+                27.0 + i as f32 * 38.0,
+                11.0,
+                Color::WHITE,
+                8,
+            )
+            .insert(GuildBuffLine(i));
+        }
+        // C# `UpButton`/`DownButton` @(337,1)/(337,318)
+        spawn_container(p, 337.0, 1.0, 16.0, 14.0, 8)
+            .insert((Button, GuildBuffUp))
+            .with_children(|b| {
+                spawn_label(b, &font, "▲", 0.0, 0.0, 11.0, Color::WHITE, 1);
+            });
+        spawn_container(p, 337.0, 318.0, 16.0, 14.0, 8)
+            .insert((Button, GuildBuffDown))
+            .with_children(|b| {
+                spawn_label(b, &font, "▼", 0.0, 0.0, 11.0, Color::WHITE, 1);
+            });
+    });
+
+    // 邀请提示（MirMessageBox，独立覆盖层 `Prguse[360]` 456x190 @ (284,289)）
     let (bx, by) = (284.0, 289.0);
     if let Some(h) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 360) {
         let popup = spawn_panel(&mut commands, h, bx, by, 456.0, 190.0, 45);
         commands.entity(popup).insert((
             DialogRoot(DialogKind::Guild),
             // 独立弹窗不随 Guild 开关门控；挂 DialogRoot 仅为 OnExit 时随行会窗口一起清理
-            // （否则重进 Game 会重复生成弹窗）
             AlwaysVisible,
             GuildInviteWidget,
             Visibility::Hidden,
@@ -745,6 +1051,38 @@ fn spawn_guild(
     }
 }
 
+/// #2892 批B 单元7：页签切换（C# `GuildDialog.LeftDialog(0..3)` / `RightDialog(0..1)`）。
+/// 非当前页整页 `Visibility::Hidden`（页面是根面板的子实体，关闭窗口时随根一起不渲染）。
+fn guild_page_system(
+    mut guild: ResMut<GuildState>,
+    mut pages: Query<(&GuildPageRoot, &mut Visibility)>,
+    tabs: Query<(Entity, &GuildTab, &Interaction)>,
+    mut prev_inter: Local<HashMap<Entity, Interaction>>,
+) {
+    fn edge(e: Entity, inter: &Interaction, prev: &mut HashMap<Entity, Interaction>) -> bool {
+        let was = prev.insert(e, *inter);
+        *inter == Interaction::Pressed && was != Some(Interaction::Pressed)
+    }
+    for (e, tab, inter) in &tabs {
+        if edge(e, inter, &mut prev_inter) {
+            guild.page = tab.0;
+            // C#：`BuffPage` 就是 `BuffButton` 切出来的页，Buff 行的渲染分支沿用 `show_buff_page`
+            guild.show_buff_page = tab.0 == GuildPage::Buff;
+        }
+    }
+    let want_page = guild.page;
+    for (root, mut vis) in &mut pages {
+        let want = if root.0 == want_page {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
+        if *vis != want {
+            *vis = want;
+        }
+    }
+}
+
 /// 显隐 + 渲染 + 打开时请求行会信息 + 创建按钮
 #[allow(clippy::too_many_arguments)]
 fn guild_ui_system(
@@ -761,6 +1099,16 @@ fn guild_ui_system(
         (With<GuildWidget>, Without<GuildCreateBtn>),
     >,
     mut lines: Query<(&mut Text, &mut TextColor, &GuildLine)>,
+    // #2892 批B 单元7：Buff 槽行与剩余点数（C# `BuffPage` 的 `GuildBuffButton[i].Name`/`PointsLeft`）
+    mut buff_lines: Query<(&mut Text, &mut TextColor, &GuildBuffLine), Without<GuildLine>>,
+    mut buff_points: Query<
+        &mut Text,
+        (
+            With<GuildBuffPoints>,
+            Without<GuildLine>,
+            Without<GuildBuffLine>,
+        ),
+    >,
     mut prev_inter: Local<HashMap<Entity, Interaction>>,
     mut requested: Local<bool>,
     panel_origin: Query<&Node, With<GuildWidget>>,
@@ -923,17 +1271,43 @@ fn guild_ui_system(
         .unwrap_or(0);
     // #1348：可见成员下标（过滤离线）
     let visible = guild.visible_member_indices();
+    // #2892 批B 单元7：BuffPage 的 8 个槽 + 剩余点数（C# `GuildBuffButton[i].Name` / `PointsLeft`）
+    for (mut text, mut color, bl) in &mut buff_lines {
+        let idx = guild.buff_start + bl.0;
+        let info = guild.buff_catalog.get(idx);
+        let want = match info {
+            Some(info) => buff_row_text(info, guild.buff_active(info.id)),
+            None => String::new(),
+        };
+        if text.0 != want {
+            text.0 = want;
+        }
+        let want_color = if info.map(|info| guild.buff_active(info.id)).unwrap_or(false) {
+            Color::srgb(0.5, 1.0, 0.5)
+        } else {
+            Color::WHITE
+        };
+        if color.0 != want_color {
+            color.0 = want_color;
+        }
+    }
+    for mut text in &mut buff_points {
+        let want = format!(
+            "技能 第{}/{}页（已激活 {}/{}）",
+            guild.buff_start / 8 + 1,
+            buff_page_count(guild.buff_catalog.len()),
+            guild.active_buffs.len(),
+            guild.buff_catalog.len()
+        );
+        if text.0 != want {
+            text.0 = want;
+        }
+    }
     for (mut text, mut color, line) in &mut lines {
         text.0 = match line.0 {
             0 => {
-                if guild.show_buff_page {
-                    // #2537：Buff 页头（C# BuffPage + PointsLeft；行会等级/剩余点数服务端未同步，显示激活计数）
-                    format!(
-                        "行会技能（已激活 {}/{}）",
-                        guild.active_buffs.len(),
-                        guild.buff_catalog.len()
-                    )
-                } else if guild.in_guild {
+                // C# `StatusGuildName` @(82,47)（行会名 + 会长 + 金币；公告另在 NoticePage）
+                if guild.in_guild {
                     let notice = guild.notice.first().cloned().unwrap_or_default();
                     if notice.is_empty() {
                         format!("{}（{}）金币:{}", guild.name, guild.leader, guild.gold)
@@ -948,43 +1322,25 @@ fn guild_ui_system(
                 }
             }
             i if (1..=10).contains(&i) => {
-                // #2537：Buff 页模式——行 1-8 Buff 目录（buff_start 起 8 项）、行 9 页码
-                if guild.show_buff_page {
-                    if i <= 8 {
-                        let idx = guild.buff_start + (i - 1);
-                        match guild.buff_catalog.get(idx) {
-                            Some(info) => buff_row_text(info, guild.buff_active(info.id)),
-                            None => String::new(),
-                        }
-                    } else if i == 9 {
+                // C# `MembersName[i]`/`MembersStatus[i]`（本端合并为一行）
+                let idx = scroll_offset + i - 1;
+                // #1348：按 show_offline 过滤后的可见成员映射
+                match visible.get(idx).and_then(|&mi| guild.members.get(mi)) {
+                    Some(m) => {
+                        // #1395：按 rank_index 显示职务名（C# 按职务分组）
+                        let rank = guild
+                            .rank_defs
+                            .get(m.rank_index as usize)
+                            .map(|(n, _)| n.clone())
+                            .unwrap_or_else(|| "成员".to_string());
                         format!(
-                            "技能 第{}/{}页",
-                            guild.buff_start / 8 + 1,
-                            buff_page_count(guild.buff_catalog.len())
+                            "{}{} ({})",
+                            m.name,
+                            if m.online { "" } else { "（离线）" },
+                            rank
                         )
-                    } else {
-                        String::new()
                     }
-                } else {
-                    let idx = scroll_offset + i - 1;
-                    // #1348：按 show_offline 过滤后的可见成员映射
-                    match visible.get(idx).and_then(|&mi| guild.members.get(mi)) {
-                        Some(m) => {
-                            // #1395：按 rank_index 显示职务名（C# 按职务分组）
-                            let rank = guild
-                                .rank_defs
-                                .get(m.rank_index as usize)
-                                .map(|(n, _)| n.clone())
-                                .unwrap_or_else(|| "成员".to_string());
-                            format!(
-                                "{}{} ({})",
-                                m.name,
-                                if m.online { "" } else { "（离线）" },
-                                rank
-                            )
-                        }
-                        None => String::new(),
-                    }
+                    None => String::new(),
                 }
             }
             i if (11..=18).contains(&i) => {
@@ -1002,20 +1358,8 @@ fn guild_ui_system(
             19 => format!("仓库 第{}/13页", guild.storage_page + 1),
             _ => String::new(),
         };
-        // #140 成员选中行高亮（踢出目标可见）；#2537 Buff 页已激活行绿色
-        let c = if guild.show_buff_page {
-            let active = matches!(line.0, 1..=8)
-                && guild
-                    .buff_catalog
-                    .get(guild.buff_start + (line.0 - 1))
-                    .map(|info| guild.buff_active(info.id))
-                    .unwrap_or(false);
-            if active {
-                Color::srgb(0.5, 1.0, 0.5)
-            } else {
-                Color::WHITE
-            }
-        } else if matches!(line.0, 1..=10)
+        // #140 成员选中行高亮（踢出目标可见）
+        let c = if matches!(line.0, 1..=10)
             && guild.selected_member == Some(scroll_offset + line.0 - 1)
         {
             Color::srgb(1.0, 0.9, 0.3)
@@ -1089,19 +1433,34 @@ fn guild_ui_system(
 }
 
 /// 成员行命中矩形（面板原点 ox/oy + 相对坐标；i 1..=10）
+/// C# `MembersName[i] @ (125, 30 + i*15)`，本端页内为 (125, 30 + i*20)，页面原点 (0,60)
 fn guild_member_row_rect(i: usize, ox: f32, oy: f32) -> (f32, f32, f32, f32) {
-    // 宽度=右界−左界（600−298）：旧实现误把绝对右界当宽度，命中带右扩 18px
-    (ox + 18.0, oy + 60.0 + (i - 1) as f32 * 20.0, 302.0, 18.0)
+    (
+        ox + 125.0,
+        oy + PAGE_LEFT.1 + 30.0 + (i - 1) as f32 * 20.0,
+        212.0,
+        18.0,
+    )
 }
 
-/// 仓库格命中矩形（i 11..=18）
+/// 仓库行命中矩形（i 11..=18）：StoragePage 内 (31, 20 + j*18)
 fn guild_storage_row_rect(i: usize, ox: f32, oy: f32) -> (f32, f32, f32, f32) {
-    (ox + 18.0, oy + 515.0 + (i - 11) as f32 * 18.0, 302.0, 16.0)
+    (
+        ox + 31.0,
+        oy + PAGE_LEFT.1 + 20.0 + (i - 11) as f32 * 18.0,
+        292.0,
+        16.0,
+    )
 }
 
-/// Buff 行命中矩形（i 1..=8）
+/// Buff 槽命中矩形（i 1..=8）：BuffPage 内 (4, 27 + (i-1)*38) 36 高
 fn guild_buff_row_rect(i: usize, ox: f32, oy: f32) -> (f32, f32, f32, f32) {
-    (ox + 18.0, oy + 60.0 + (i - 1) as f32 * 20.0, 200.0, 18.0)
+    (
+        ox + PAGE_BUFF.0 + 4.0,
+        oy + PAGE_BUFF.1 + 27.0 + (i - 1) as f32 * 38.0,
+        216.0,
+        36.0,
+    )
 }
 
 /// #2537 Buff 页交互（独立系统：guild_ui_system 已满 16 参 Bevy SystemParam 上限）
@@ -1679,34 +2038,42 @@ mod tests {
     /// 成员行命中：初始原点等价于原固定坐标，拖动后跟随面板
     #[test]
     fn member_row_rect_origin_and_drag() {
-        // 初始扩展根居中 (217,14)：首行 y=74，x 起 235（=217+18）
+        // #2892 批B 单元7：MembersPage @(0,60)，行 (125, 30+20i) → 面板内 (125, 90+20i)
         let (rx, ry, rw, rh) = guild_member_row_rect(1, GUILD_X, GUILD_Y);
-        assert_eq!((rx, ry, rw, rh), (235.0, 74.0, 302.0, 18.0));
+        assert_eq!((rx, ry, rw, rh), (342.0, 258.0, 212.0, 18.0));
         assert_eq!(
             guild_member_row_rect(10, GUILD_X, GUILD_Y).1,
-            74.0 + 9.0 * 20.0
+            258.0 + 9.0 * 20.0
         );
         // 拖动到 (330,100)：同一相对位置命中跟随（原始坐标 + delta(50,20)）
         let (rx2, ry2, _, _) = guild_member_row_rect(1, 330.0, 100.0);
-        assert_eq!((rx2, ry2), (348.0, 160.0));
+        assert_eq!((rx2, ry2), (455.0, 190.0));
     }
 
     /// 仓库格命中：初始等价 + 拖动跟随
     #[test]
     fn storage_row_rect_origin_and_drag() {
         let (rx, ry, _, _) = guild_storage_row_rect(11, GUILD_X, GUILD_Y);
-        assert_eq!((rx, ry), (235.0, 529.0), "初始 11 格 y=529");
+        assert_eq!(
+            (rx, ry),
+            (248.0, 248.0),
+            "StoragePage @(0,60) 内首行 (31,20)"
+        );
         let (rx2, ry2, _, _) = guild_storage_row_rect(11, 330.0, 100.0);
-        assert_eq!((rx2, ry2), (348.0, 615.0), "拖动后跟随");
+        assert_eq!((rx2, ry2), (361.0, 180.0), "拖动后跟随");
     }
 
     /// Buff 行命中：初始等价 + 拖动跟随
     #[test]
     fn buff_row_rect_origin_and_drag() {
         let (rx, ry, rw, _) = guild_buff_row_rect(1, GUILD_X, GUILD_Y);
-        assert_eq!((rx, ry, rw), (235.0, 74.0, 200.0));
+        assert_eq!(
+            (rx, ry, rw),
+            (581.0, 256.0, 216.0),
+            "BuffPage @(360,61) 内 (4,27)"
+        );
         let (rx2, ry2, _, _) = guild_buff_row_rect(1, 330.0, 100.0);
-        assert_eq!((rx2, ry2), (348.0, 160.0));
+        assert_eq!((rx2, ry2), (694.0, 188.0));
     }
 
     use super::*;
