@@ -80,14 +80,57 @@ function Get-Marks {
         Select-Object -Last $Last | ForEach-Object { ($_.Line -replace '^.*? (INFO|WARN|ERROR) ', '') -replace "\x1b\[[0-9;]*m", '' }
 }
 
+function Get-LogoutCount {
+    param([string]$User)
+    @(Select-String -Path $srvOut -Pattern "Account logged out: $User" -ErrorAction SilentlyContinue).Count
+}
+
+# 停客户端前记基线，停完等它登出落盘（#2890）
+# —— 实测客户端被杀后服务端立刻记 logout，这步只是兜底：
+#    否则提前停用例会让下一个用例抢在「登出」前登录，被服务端按「账号已在线」拒绝（历史偶发 FAIL）
+function Snapshot-Logout {
+    param([string[]]$Users)
+    $h = @{}
+    foreach ($u in $Users) { if ($u) { $h[$u] = Get-LogoutCount $u } }
+    return $h
+}
+
+function Wait-Logout {
+    param([hashtable]$Before, [int]$TimeoutSec = 15)
+    if ($Before.Count -eq 0) { return $true }
+    $deadline = (Get-Date).AddSeconds($TimeoutSec)
+    while ((Get-Date) -lt $deadline) {
+        $ok = $true
+        foreach ($u in $Before.Keys) { if ((Get-LogoutCount $u) -le $Before[$u]) { $ok = $false } }
+        if ($ok) { return $true }
+        Start-Sleep -Milliseconds 400
+    }
+    Write-Warning "等待账号登出超时（$($Before.Keys -join ',')）——下一个用例可能被「账号已在线」拒绝"
+    return $false
+}
+
 function Run-Client {
-    param([string]$Name, [string[]]$ClientArgs, [int]$Timeout)
+    param(
+        [string]$Name,
+        [string[]]$ClientArgs,
+        [int]$Timeout,
+        [string[]]$RequiredA = @(),
+        [string]$User = ""
+    )
     $err = Join-Path $tmp "$Name.err.log"
     $out = Join-Path $tmp "$Name.out.log"
     $p = Start-Process -FilePath $ClientExe -ArgumentList $ClientArgs -RedirectStandardError $err -RedirectStandardOutput $out -PassThru -WindowStyle Hidden
-    $done = $p.WaitForExit($Timeout * 1000)
-    if (-not $done) { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue }
-    Start-Sleep -Milliseconds 400
+    # #2890：判定标记一出现就停（用例本身 14~30s 就出标记，之前每个用例都白等满超时）
+    $deadline = (Get-Date).AddSeconds($Timeout)
+    while ((Get-Date) -lt $deadline) {
+        if ($RequiredA.Count -gt 0 -and (Test-Marks $err $RequiredA)) { break }
+        if (-not (Get-Process -Id $p.Id -ErrorAction SilentlyContinue)) { break }
+        Start-Sleep -Milliseconds 1000
+    }
+    $before = Snapshot-Logout @($User)
+    Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+    Wait-Logout -Before $before | Out-Null
+    Start-Sleep -Milliseconds 300
     return ,(Get-Marks $err)
 }
 
@@ -96,8 +139,9 @@ function Invoke-Case {
     $argsAll = @("--real-net","--auto-enter") + $Flags + @("--e2e-user",$TestUser,"--e2e-pass",$TestPass)
     $err = Join-Path $tmp "$Name.err.log"
     $caseTimeout = if ($CaseTimeout.ContainsKey($Name)) { $CaseTimeout[$Name] } else { $TimeoutSec }
-    $marks = Run-Client $Name $argsAll $caseTimeout
     $req = $CaseRequired[$Name]
+    $requiredA = if ($null -ne $req) { @($req.A) } else { @() }
+    $marks = Run-Client $Name $argsAll $caseTimeout $requiredA $TestUser
     if ($null -eq $req) {
         # 自定义用例：退回任意 ✅ 判定
         $pass = ($marks | Where-Object { $_ -match "✅" }).Count -gt 0
@@ -124,13 +168,27 @@ function Invoke-PairCase {
     }
     $a = Start-Process -FilePath $ClientExe -ArgumentList $aArgs -RedirectStandardError $aErr -RedirectStandardOutput $aOut -PassThru -WindowStyle Hidden
     $b = Start-Process -FilePath $ClientExe -ArgumentList $bArgs -RedirectStandardError $bErr -RedirectStandardOutput $bOut -PassThru -WindowStyle Hidden
-    $done = $a.WaitForExit($TimeoutSec * 1000)
-    if (-not $done) { Stop-Process -Id $a.Id -Force -ErrorAction SilentlyContinue }
+    $req = $CaseRequired[$Name]
+    # #2890：两侧判定标记都出现就停（不必等满超时）
+    #        某侧没有判定标记（如 friend 只看 A、whisper 只看 B）→ 该侧视为已满足
+    $aPat = if ($null -ne $req) { @($req.A) } else { @() }
+    $bPat = if ($null -ne $req) { @($req.B) } else { @() }
+    $hasAnyPattern = ($aPat.Count + $bPat.Count) -gt 0
+    $deadline = (Get-Date).AddSeconds($TimeoutSec)
+    while ((Get-Date) -lt $deadline) {
+        $aOk = if ($aPat.Count -gt 0) { Test-Marks $aErr $aPat } else { $true }
+        $bOk = if ($bPat.Count -gt 0) { Test-Marks $bErr $bPat } else { $true }
+        if ($hasAnyPattern -and $aOk -and $bOk) { break }
+        if (-not (Get-Process -Id $a.Id -ErrorAction SilentlyContinue) -and -not (Get-Process -Id $b.Id -ErrorAction SilentlyContinue)) { break }
+        Start-Sleep -Milliseconds 1000
+    }
+    $before = Snapshot-Logout @($TestUser, $SecondUser)
+    Stop-Process -Id $a.Id -Force -ErrorAction SilentlyContinue
     Stop-Process -Id $b.Id -Force -ErrorAction SilentlyContinue
-    Start-Sleep -Milliseconds 400
+    Wait-Logout -Before $before | Out-Null
+    Start-Sleep -Milliseconds 300
     $mA = Get-Marks $aErr 3
     $mB = Get-Marks $bErr 3
-    $req = $CaseRequired[$Name]
     if ($null -eq $req) {
         $pass = ($mA -match "✅").Count -gt 0 -and ($mB -match "✅").Count -gt 0
     } else {

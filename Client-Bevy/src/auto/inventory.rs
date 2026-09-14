@@ -450,7 +450,11 @@ pub(crate) fn auto_storage_equip_test(
     }
 }
 
-/// --refine-test：精炼全流程（存入 → 开始 60 秒 → 查看 → 取回）
+/// 精炼结果轮询上限（#2890）：每轮 ≈ 3s（等待）+ 2s（请查看页）+ ≤8s（等结果）≈ 13s，
+/// 上限 8 轮 ≈ 100s —— 覆盖 `[refine] time_minutes=0`（首轮即得）到默认 20 分钟里的短暂配置。
+const REFINE_POLL_MAX: u8 = 8;
+
+/// --refine-test：精炼全流程（存入 → 开始 → 轮询查看结果 → 取回）
 /// #2633 批次4 步9：背包读 `Inventory` 组件（HudState 已删）；实体缺失视同空背包。
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn auto_refine_test(
@@ -479,6 +483,7 @@ pub(crate) fn auto_refine_test(
     mut stage: Local<u8>,
     mut uid: Local<Option<u64>>,
     mut npc_oid: Local<Option<u32>>,
+    mut attempts: Local<u8>,
 ) {
     use client_bevy::scenes::AppState;
     if *state != AppState::Game {
@@ -606,13 +611,16 @@ pub(crate) fn auto_refine_test(
                 return;
             }
             if chat_has(&chat, "精炼已开始") {
-                tracing::info!("[REFINETEST] ✅ 精炼已开始（等待 65 秒）");
+                tracing::info!("[REFINETEST] ✅ 精炼已开始（开始轮询结算结果）");
                 *stage = 4;
                 *t = 0.0;
             }
         }
         4 => {
-            if *t < 65.0 {
+            // #2890：改成轮询而不是固定等 65s —— 服务端精炼时长可配
+            //（e2e 用 `[refine] time_minutes=0` 立即完成；默认 20 分钟则一直轮询到上限）。
+            // 固定等待既慢（每轮白等 1 分钟）又对配置敏感。
+            if *t < 3.0 {
                 return;
             }
             // #2843：CheckRefine 要求 [@REFINECHECK] 页——先请页，再发查看
@@ -621,7 +629,11 @@ pub(crate) fn auto_refine_test(
                     object_id: oid,
                     key: "[@REFINECHECK]".to_string(),
                 });
-                tracing::info!("[REFINETEST] CallNPC [@REFINECHECK] {}", oid);
+                tracing::info!(
+                    "[REFINETEST] CallNPC [@REFINECHECK] {}（第 {} 次查看）",
+                    oid,
+                    *attempts + 1
+                );
             }
             *stage = 7;
             *t = 0.0;
@@ -640,8 +652,18 @@ pub(crate) fn auto_refine_test(
         }
         5 => {
             if *t >= 8.0 {
-                tracing::warn!("[REFINETEST] ❌ 未收到精炼结果");
-                *stage = 9;
+                // 结果还没到（结算未完成）→ 回 4 阶段再请页重试，最多 REFINE_POLL_MAX 轮
+                if *attempts + 1 >= REFINE_POLL_MAX {
+                    tracing::warn!(
+                        "[REFINETEST] ❌ 未收到精炼结果（已轮询 {} 次）",
+                        *attempts + 1
+                    );
+                    *stage = 9;
+                } else {
+                    *attempts += 1;
+                    *stage = 4;
+                    *t = 0.0;
+                }
                 return;
             }
             if chat_has(&chat, "精炼成功")
