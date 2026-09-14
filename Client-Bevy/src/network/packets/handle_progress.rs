@@ -1217,8 +1217,12 @@ pub(crate) fn handle_progress(
         }
         // #291：C# 服务端包面收尾（HeroCreateRequest）
         x if x == ServerPacketIds::HeroCreateRequest as i16 => {
-            if hero::HeroCreateRequest::read_body(&mut cur).is_ok() {
-                tracing::info!("📦 HeroCreateRequest 解码");
+            if let Ok(p) = hero::HeroCreateRequest::read_body(&mut cur) {
+                // #2892 批C：C# `GameScene.cs:6044-6052` → 按 `CanCreateClass` 显隐职业钮 + 弹新建窗
+                server_events.write(ServerEvent::HeroCreateRequested {
+                    can_create_class: p.can_create_class.clone(),
+                });
+                tracing::info!("🧝 HeroCreateRequest: {:?}", p.can_create_class);
             }
         }
         // #291：C# 服务端包面收尾（UpdateHeroSpawnState）

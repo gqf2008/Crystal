@@ -1268,6 +1268,8 @@ fn next_gender(g: mir2_shared::enums::MirGender) -> mir2_shared::enums::MirGende
 fn hero_server_events(
     mut events: MessageReader<crate::network::server_event::ServerEvent>,
     mut hero: ResMut<HeroState>,
+    // #2892 批C：`S.HeroCreateRequest` → 打开原版「新建角色」对话框（英雄模式）
+    mut new_char: ResMut<crate::ui::new_character::NewCharState>,
 ) {
     use crate::network::server_event::ServerEvent;
     for ev in events.read() {
@@ -1308,6 +1310,10 @@ fn hero_server_events(
                 };
                 if *result == 10 {
                     hero.creating = false;
+                    // #2892 批C：英雄创建成功 → 收起新建角色对话框（C# `NewHero` 回调里 `NewHeroDialog.Dispose()`）
+                    new_char.visible = false;
+                    new_char.hero_mode = false;
+                    new_char.name.clear();
                 }
                 hero.message = hero.create_msg.clone();
             }
@@ -1322,6 +1328,40 @@ fn hero_server_events(
             ServerEvent::HeroSpawnStateChanged { state: spawn } => {
                 hero.spawn_state = *spawn;
                 tracing::info!("🧝 英雄出战状态: {:?}", spawn);
+            }
+            // #2892 批C：C# `GameScene.HeroCreateRequest`（`:6044-6052`）——
+            // 按 `CanCreateClass` 显隐职业钮后 `NewHeroDialog.Show()`（= 新建角色对话框英雄模式）
+            ServerEvent::HeroCreateRequested { can_create_class } => {
+                let mut allowed = [true; 5];
+                for (i, v) in can_create_class.iter().enumerate().take(5) {
+                    allowed[i] = *v;
+                }
+                new_char.hero_mode = true;
+                new_char.can_create_class = allowed;
+                new_char.name.clear();
+                new_char.error = None;
+                new_char.gender = mir2_shared::enums::MirGender::Male;
+                // 默认职业：保持当前选择若可选，否则取第一个可选职业
+                if !allowed
+                    .get(new_char.class as usize)
+                    .copied()
+                    .unwrap_or(true)
+                {
+                    let fallback = [
+                        mir2_shared::enums::MirClass::Warrior,
+                        mir2_shared::enums::MirClass::Wizard,
+                        mir2_shared::enums::MirClass::Taoist,
+                        mir2_shared::enums::MirClass::Assassin,
+                        mir2_shared::enums::MirClass::Archer,
+                    ]
+                    .into_iter()
+                    .find(|c| allowed.get(*c as usize).copied().unwrap_or(false));
+                    if let Some(c) = fallback {
+                        new_char.class = c;
+                    }
+                }
+                new_char.visible = true;
+                tracing::info!("🧝 打开英雄创建对话框（可创建: {:?}）", allowed);
             }
             ServerEvent::HeroAutoPotSet { stat, value } => {
                 if *stat == STAT_HP {
@@ -1473,8 +1513,8 @@ fn autopot_text(hp: u8, mp: u8) -> String {
 mod tests {
     use super::{
         behaviour_hint, behaviour_name, hero_manage_confirm_text, hero_manage_hint,
-        hero_manage_system, hero_slot_origin, HeroAvatarImages, HeroManageConfirmText,
-        HeroManageConfirmYes, HeroManageSlot, HeroState,
+        hero_manage_system, hero_server_events, hero_slot_origin, HeroAvatarImages,
+        HeroManageConfirmText, HeroManageConfirmYes, HeroManageSlot, HeroState,
     };
     use crate::game::dialogs::text_input::TextInputState;
     use crate::network::NetConnection;
@@ -1739,5 +1779,52 @@ mod tests {
         // 玩家 object_id → 不命中
         assert!(!hero.apply_magic_leveled(100, Spell::FireBall, 3, 0));
         assert_eq!(hero.magics[0].level, 2);
+    }
+
+    /// #2892 批C：`S.HeroCreateRequest` → 打开原版新建角色对话框的**英雄模式**
+    /// （C# `GameScene.cs:6044-6052` 显隐职业钮后 `NewHeroDialog.Show()`）
+    #[test]
+    fn hero_create_request_opens_new_char_dialog_in_hero_mode() {
+        use crate::network::server_event::ServerEvent;
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.init_resource::<HeroState>();
+        app.init_resource::<crate::ui::new_character::NewCharState>();
+        app.add_message::<ServerEvent>();
+        app.add_systems(Update, hero_server_events);
+
+        // 战士/刺客/弓箭手不可创建 → 职业钮隐藏，默认职业落到第一个可创建者（法师）
+        app.world_mut()
+            .write_message(ServerEvent::HeroCreateRequested {
+                can_create_class: vec![false, true, true, false, false],
+            });
+        app.update();
+        let nc = app
+            .world()
+            .resource::<crate::ui::new_character::NewCharState>();
+        assert!(
+            nc.hero_mode,
+            "应进入英雄模式（标题 Title[847]、OK 发 C.NewHero）"
+        );
+        assert!(nc.visible, "应弹出对话框");
+        assert_eq!(
+            nc.can_create_class,
+            [false, true, true, false, false],
+            "职业可选性按包内容"
+        );
+        assert_eq!(
+            nc.class,
+            mir2_shared::enums::MirClass::Wizard,
+            "默认职业应落到第一个可创建职业（Warrior 不可选 → Wizard）"
+        );
+
+        // 创建成功（result=10）→ 收起对话框并退出英雄模式
+        app.world_mut()
+            .write_message(ServerEvent::NewHeroResult { result: 10 });
+        app.update();
+        let nc = app
+            .world()
+            .resource::<crate::ui::new_character::NewCharState>();
+        assert!(!nc.visible && !nc.hero_mode, "创建成功后应收起并复位模式");
     }
 }

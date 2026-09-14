@@ -171,6 +171,12 @@ pub enum ServerEvent {
     HeroSpawnStateChanged {
         state: mir2_shared::enums::HeroSpawnState,
     },
+    /// #2892 批C：`S.HeroCreateRequest`——可创建的职业列表（C# `GameScene.HeroCreateRequest`
+    /// `:6044-6052`：按 `CanCreateClass` 显隐职业钮后 `NewHeroDialog.Show()`）
+    HeroCreateRequested {
+        /// `[Warrior, Wizard, Taoist, Assassin, Archer]`（`MirClass` 顺序）
+        can_create_class: Vec<bool>,
+    },
     /// SetAutoPotValue：英雄自动药阈值（C# S.SetAutoPotValue；stat 12=HP 13=MP）
     HeroAutoPotSet {
         stat: u8,
