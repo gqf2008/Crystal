@@ -740,7 +740,11 @@ pub(crate) fn buff_tag(t: &crate::combat::buff::BuffType) -> u8 {
         BuffType::Poison { .. } => 7,
         BuffType::Silence => 8,
         BuffType::Stun => 9,
-        BuffType::Invisibility => 10,
+        // #2892 批D 单元②：C# 三种隐身分开（tag 10 = C# `MoonLight` 图标 65，
+        // 31 = C# `Hiding` 图标 17，32 = C# `DarkBody` 图标 70）
+        BuffType::Hiding => 31,
+        BuffType::MoonLight => 10,
+        BuffType::DarkBody => 32,
         BuffType::AttackSpeedBoost { .. } => 11,
         BuffType::MoveSpeedBoost { .. } => 12,
         BuffType::AgilityBoost { .. } => 13,
@@ -801,7 +805,9 @@ pub(crate) fn buff_values(t: &crate::combat::buff::BuffType) -> Vec<i32> {
             // C# `RhinoPriest.cs:91-93`：`damage * -1`
         } => vec![-*max_dc, -*max_mc, -*max_sc],
         // 无数值的标记型 buff
-        B::Silence | B::Stun | B::Invisibility | B::Taunt | B::Frozen => Vec::new(),
+        B::Silence | B::Stun | B::Hiding | B::MoonLight | B::DarkBody | B::Taunt | B::Frozen => {
+            Vec::new()
+        }
     }
 }
 
@@ -2830,19 +2836,35 @@ impl Message<RemoveBuff> for PlayerActor {
         msg: RemoveBuff,
         _ctx: &mut Context<Self, Self::Reply>,
     ) -> Self::Reply {
-        crate::combat::buff::remove_buff_by_type(&mut self.state.buffs, &msg.buff_type);
+        // #2892 批D 单元②：C# 三种隐身（Hiding/MoonLight/DarkBody）语义等价于「破隐」，
+        // 攻击/施法破隐时按哪一个变体下发都要把三种一起清掉（否则会残留另一种隐身 buff）
+        let targets: Vec<crate::combat::buff::BuffType> =
+            if crate::combat::buff::is_invisible_type(&msg.buff_type) {
+                vec![
+                    crate::combat::buff::BuffType::Hiding,
+                    crate::combat::buff::BuffType::MoonLight,
+                    crate::combat::buff::BuffType::DarkBody,
+                ]
+            } else {
+                vec![msg.buff_type.clone()]
+            };
+        for t in &targets {
+            crate::combat::buff::remove_buff_by_type(&mut self.state.buffs, t);
+        }
         // M44：推送 RemoveBuff（[tag u8]）
-        let body = vec![buff_tag(&msg.buff_type)];
-        let _ = self
-            .gate_ref
-            .tell(SendToClient {
-                session_id: self.state.session_id,
-                data: build_packet_bytes(
-                    mir2_shared::enums::ServerPacketIds::RemoveBuff as i16,
-                    &body,
-                ),
-            })
-            .try_send();
+        for t in &targets {
+            let body = vec![buff_tag(t)];
+            let _ = self
+                .gate_ref
+                .tell(SendToClient {
+                    session_id: self.state.session_id,
+                    data: build_packet_bytes(
+                        mir2_shared::enums::ServerPacketIds::RemoveBuff as i16,
+                        &body,
+                    ),
+                })
+                .try_send();
+        }
     }
 }
 
@@ -7869,6 +7891,26 @@ fn reset_step_counter_if_idle(step_counter: &mut i32, cell_time_ms: i64, now_ms:
 
 #[cfg(test)]
 mod tests {
+    /// #2892 批D 单元②：C# 三种隐身（Hiding/MoonLight/DarkBody）必须是**三个不同 tag**，
+    /// 否则客户端只会显示其中一个的图标/文案（tag 10=MoonLight 图标 65、31=Hiding 17、32=DarkBody 70）。
+    #[test]
+    fn invisibility_trio_uses_distinct_tags() {
+        use crate::combat::buff::BuffType;
+        let hiding = super::buff_tag(&BuffType::Hiding);
+        let moon = super::buff_tag(&BuffType::MoonLight);
+        let dark = super::buff_tag(&BuffType::DarkBody);
+        assert_eq!((hiding, moon, dark), (31, 10, 32));
+        assert!(
+            hiding != moon && moon != dark && hiding != dark,
+            "三种隐身 tag 必须互不相同（实际 {hiding}/{moon}/{dark}）"
+        );
+        // 三者都算「隐身」（透明/被怪物忽略的判定统一走 is_invisible_type）
+        for t in [BuffType::Hiding, BuffType::MoonLight, BuffType::DarkBody] {
+            assert!(crate::combat::buff::is_invisible_type(&t));
+        }
+        assert!(!crate::combat::buff::is_invisible_type(&BuffType::Stun));
+    }
+
     #[test]
     /// #2791 单元④：`AddBuff` 载荷 = `[tag u8][remaining_ms u32][paused u8][value_count u8][values…]`
     #[test]
@@ -7972,7 +8014,7 @@ mod tests {
         assert!(!super::buff_removed_on_death(&BuffType::AttackBoost {
             bonus: 10
         }));
-        assert!(!super::buff_removed_on_death(&BuffType::Invisibility));
+        assert!(!super::buff_removed_on_death(&BuffType::Hiding));
         assert!(!super::buff_removed_on_death(&BuffType::DamageReduction {
             percent: 30,
             kind: ShieldKind::Other

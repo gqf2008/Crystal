@@ -756,7 +756,8 @@ impl Message<WorldAttackRequest> for WorldActor {
                 let _ = record
                     .actor_ref
                     .ask(crate::actors::player::RemoveBuff {
-                        buff_type: crate::combat::buff::BuffType::Invisibility,
+                        // C# 破隐：`RemoveBuff` 对三种隐身变体都会一并清除（见 `player.rs` 处理器）
+                        buff_type: crate::combat::buff::BuffType::Hiding,
                     })
                     .await;
                 self.reveal_player_to_others(msg.session_id, state).await;
@@ -3351,7 +3352,8 @@ impl Message<MagicRequest> for WorldActor {
             let _ = record
                 .actor_ref
                 .ask(crate::actors::player::RemoveBuff {
-                    buff_type: crate::combat::buff::BuffType::Invisibility,
+                    // C# 破隐：`RemoveBuff` 对三种隐身变体都会一并清除（见 `player.rs` 处理器）
+                    buff_type: crate::combat::buff::BuffType::Hiding,
                 })
                 .await;
             self.reveal_player_to_others(msg.session_id, &state).await;
@@ -4093,7 +4095,7 @@ impl Message<MagicRequest> for WorldActor {
             // Hiding：自身隐身（怪物失去目标，C# BuffType.Hiding）
             SPELL_HIDING => {
                 let buff = crate::combat::buff::BuffInstance::new(
-                    crate::combat::buff::BuffType::Invisibility,
+                    crate::combat::buff::BuffType::Hiding,
                     (30 + spell_level as u32 * 10) * 10, // 30-60s，100ms/tick
                     5,
                 );
@@ -4147,7 +4149,8 @@ impl Message<MagicRequest> for WorldActor {
                 }
                 for sid in &targets {
                     let buff = crate::combat::buff::BuffInstance::new(
-                        crate::combat::buff::BuffType::Invisibility,
+                        // C# `HumanObject.cs:6139` MassHiding → `BuffType.Hiding`
+                        crate::combat::buff::BuffType::Hiding,
                         duration_ticks,
                         5,
                     );
@@ -5712,7 +5715,8 @@ impl Message<MagicRequest> for WorldActor {
                 );
                 let duration_ticks = ((ac_power + (spell_level as i32 + 1) * 5).max(1) as u32) * 5;
                 let buff = crate::combat::buff::BuffInstance::new(
-                    crate::combat::buff::BuffType::Invisibility,
+                    // C# `HumanObject.cs:4572/5260` → `BuffType.MoonLight`
+                    crate::combat::buff::BuffType::MoonLight,
                     duration_ticks,
                     5,
                 );
@@ -7400,7 +7404,8 @@ impl Message<MagicRequest> for WorldActor {
                 );
                 let duration_ticks = ((ac_power + (spell_level as i32 + 1) * 5).max(1) as u32) * 5;
                 let buff = crate::combat::buff::BuffInstance::new(
-                    crate::combat::buff::BuffType::Invisibility,
+                    // MoonMist 走 C# `BuffType.MoonLight`（同图标/文案）
+                    crate::combat::buff::BuffType::MoonLight,
                     duration_ticks,
                     5,
                 );

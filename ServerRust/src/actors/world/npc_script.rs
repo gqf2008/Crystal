@@ -2505,10 +2505,11 @@ async fn exec_action(
                     )
                     .await;
                     // C# AddBuff(BuffType.MoonLight/DarkBody) → Sneaking=true（MapObject.cs:659-661）
-                    if bt == crate::combat::buff::BuffType::Invisibility
-                        && (buff_name.eq_ignore_ascii_case("MOONLIGHT")
-                            || buff_name.eq_ignore_ascii_case("DARKBODY"))
-                    {
+                    if matches!(
+                        bt,
+                        crate::combat::buff::BuffType::MoonLight
+                            | crate::combat::buff::BuffType::DarkBody
+                    ) {
                         world.set_sneaking(session_id, true).await;
                     }
                     debug!("NPC GIVEBUFF: '{}' {}s -> {} ticks", buff_name, secs, ticks);
@@ -3775,7 +3776,10 @@ fn parse_buff_type(s: &str) -> Option<crate::combat::buff::BuffType> {
         "POISON" | "POISONSHOT" => Some(BuffType::Poison { damage_per_tick: 0 }),
         "SILENCE" => Some(BuffType::Silence),
         "STUN" => Some(BuffType::Stun),
-        "INVISIBILITY" | "HIDING" | "MOONLIGHT" | "DARKBODY" => Some(BuffType::Invisibility),
+        // #2892 批D 单元②：C# 三种隐身分开映射（图标/文案不同，见客户端 `buff_display`）
+        "INVISIBILITY" | "HIDING" => Some(BuffType::Hiding),
+        "MOONLIGHT" => Some(BuffType::MoonLight),
+        "DARKBODY" => Some(BuffType::DarkBody),
         "ATTACKSPEEDBOOST" | "HASTE" => Some(BuffType::AttackSpeedBoost { percent: 0 }),
         "MOVESPEEDBOOST" | "SWIFTFEET" | "LIGHTBODY" => {
             Some(BuffType::MoveSpeedBoost { percent: 0 })
@@ -4879,13 +4883,20 @@ You don't have enough Gold!
     #[test]
     fn buff_type_parse_accepts_csharp_and_rust_names() {
         use crate::combat::buff::BuffType;
+        assert!(matches!(parse_buff_type("Hiding"), Some(BuffType::Hiding)));
+        assert!(matches!(parse_buff_type("hiding"), Some(BuffType::Hiding)));
+        // #2892 批D 单元②：三种隐身各自解析成独立变体（C# BuffType.Hiding/MoonLight/DarkBody）
         assert!(matches!(
-            parse_buff_type("Hiding"),
-            Some(BuffType::Invisibility)
+            parse_buff_type("MoonLight"),
+            Some(BuffType::MoonLight)
         ));
         assert!(matches!(
-            parse_buff_type("hiding"),
-            Some(BuffType::Invisibility)
+            parse_buff_type("DarkBody"),
+            Some(BuffType::DarkBody)
+        ));
+        assert!(matches!(
+            parse_buff_type("INVISIBILITY"),
+            Some(BuffType::Hiding)
         ));
         assert!(matches!(
             parse_buff_type("HpRegen"),

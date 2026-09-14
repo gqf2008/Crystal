@@ -1509,7 +1509,7 @@ async fn test_buffs_persistence_roundtrip() {
             300,
             10,
         ),
-        crate::combat::buff::BuffInstance::new(crate::combat::buff::BuffType::Invisibility, 120, 1),
+        crate::combat::buff::BuffInstance::new(crate::combat::buff::BuffType::MoonLight, 120, 1),
     ];
     save_buffs(&mut conn, "Hero", &buffs).await.unwrap();
 
@@ -1520,7 +1520,7 @@ async fn test_buffs_persistence_roundtrip() {
     assert!((299..=300).contains(&loaded[0].remaining_ticks));
     assert_eq!(
         loaded[1].buff_type,
-        crate::combat::buff::BuffType::Invisibility
+        crate::combat::buff::BuffType::MoonLight
     );
 
     // 已过期记录：手动插入过去到期 → 加载时丢弃

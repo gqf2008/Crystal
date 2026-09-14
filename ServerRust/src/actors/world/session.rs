@@ -859,11 +859,10 @@ impl Message<StartGameRequest> for WorldActor {
             .await;
 
         // 向已有玩家发送新玩家的 ObjectPlayer（隐身新玩家不发送，#1651/#1653）
-        let invis_tag = std::mem::discriminant(&crate::combat::buff::BuffType::Invisibility);
         if loaded_state
             .buffs
             .iter()
-            .any(|b| std::mem::discriminant(&b.buff_type) == invis_tag)
+            .any(|b| crate::combat::buff::is_invisible_type(&b.buff_type))
         {
             self.invisible_sessions.insert(msg.session_id);
         }
@@ -2043,7 +2042,6 @@ impl WorldActor {
         viewer_state: &crate::actors::player::PlayerState,
         map_index: u16,
     ) {
-        let invis_tag = std::mem::discriminant(&crate::combat::buff::BuffType::Invisibility);
         for (sid, rec) in &self.players {
             if *sid == viewer_session {
                 continue;
@@ -2057,7 +2055,7 @@ impl WorldActor {
             let is_invisible = ep_state
                 .buffs
                 .iter()
-                .any(|b| std::mem::discriminant(&b.buff_type) == invis_tag);
+                .any(|b| crate::combat::buff::is_invisible_type(&b.buff_type));
             if is_invisible {
                 continue;
             }
@@ -2081,11 +2079,10 @@ impl WorldActor {
         mover_state: &crate::actors::player::PlayerState,
         map_index: u16,
     ) {
-        let invis_tag = std::mem::discriminant(&crate::combat::buff::BuffType::Invisibility);
         if mover_state
             .buffs
             .iter()
-            .any(|b| std::mem::discriminant(&b.buff_type) == invis_tag)
+            .any(|b| crate::combat::buff::is_invisible_type(&b.buff_type))
         {
             return;
         }
