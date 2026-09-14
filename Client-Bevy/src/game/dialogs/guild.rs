@@ -224,9 +224,9 @@ pub struct GuildStorageCount(pub usize);
 /// NoticePage 正文行数/行高（C# `Notice` 文本框 322x330，本端按行渲染 16px）
 pub const NOTICE_ROWS: usize = 20;
 pub const NOTICE_ROW_DY: f32 = 16.0;
-/// 公告正文行（C# `Notice` 的可见行；由 `notice_scroll` 平移）
+/// 公告正文显示实体（多行框内的文本；翻页时按行高平移，模拟 C# `ScrollToCaret`）
 #[derive(Component)]
-pub struct GuildNoticeLine(pub usize);
+pub struct GuildNoticeText;
 
 /// C# `NoticeUpButton`/`NoticeDownButton` 的滚动语义：`NoticeScrollIndex` 为首行下标，
 /// 上到 0 停、下到 `len-1` 停（等价于对 `0..=len-1` 做 clamp）。
@@ -719,20 +719,50 @@ fn spawn_guild(
     //   上 `Prguse2[197/198/199]` @(337,1)、下 `Prguse2[207/208/209]` @(337,318)、位置条 `Prguse2[206]` @(337,16)。
     //   本端：公告正文按行只读显示（服务端 `GuildNotice` 给的就是行数组）+ 单行编辑框（Bevy 扩展）发 `EditGuildNotice`。
     commands.entity(page_notice).with_children(|p| {
-        // 公告正文（C# `Notice` 区域 322x330；本端按行渲染，行高 16 → 20 行）
-        for i in 0..NOTICE_ROWS {
-            spawn_label(
-                p,
-                &cjk,
-                "",
-                13.0,
-                1.0 + i as f32 * NOTICE_ROW_DY,
-                11.0,
-                Color::WHITE,
-                8,
-            )
-            .insert(GuildNoticeLine(i));
-        }
+        // 公告正文 = **多行可编辑框**（C# `Notice` 322x330 @(13,1)，`MirTextBox.MultiLine()`）：
+        // 容器裁剪 + 显示实体定宽折行；翻页钮按 `NoticeScrollIndex` 平移显示实体（模拟
+        // C# `UpdateNotice` 的 `ScrollToCaret()` 逐行滚动）。
+        p.spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(13.0),
+                top: Val::Px(1.0),
+                width: Val::Px(322.0),
+                height: Val::Px(330.0),
+                // 翻页平移显示实体时，超出框外的部分裁掉（等价 C# 文本框的可见区）
+                overflow: Overflow::clip(),
+                ..default()
+            },
+            BackgroundColor(Color::srgba(0.10, 0.10, 0.13, 0.95)),
+            ZIndex(2),
+            GuildNoticeField,
+            TextInputField(2),
+            crate::game::dialogs::text_input::TextInputMultiline,
+            TextInputRect(GUILD_X + 13.0, GUILD_Y + 61.0, 322.0, 330.0),
+            Visibility::Hidden,
+        ))
+        .with_children(|ic| {
+            ic.spawn((
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: Val::Px(3.0),
+                    top: Val::Px(2.0),
+                    // 定宽 → 按容器宽度折行（多行框）
+                    width: Val::Px(316.0),
+                    ..default()
+                },
+                Text::new(String::new()),
+                TextFont {
+                    font: FontSource::Handle(font.clone()),
+                    font_size: FontSize::Px(12.0),
+                    ..default()
+                },
+                TextColor(Color::WHITE),
+                ZIndex(9),
+                TextInputDisplay(2),
+                GuildNoticeText,
+            ));
+        });
         // 翻页（C# `NoticeUpButton`/`NoticeDownButton` + `NoticePositionBar`）
         if let (Some(n), Some(h), Some(pr)) = (
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 197),
@@ -748,34 +778,6 @@ fn spawn_guild(
         ) {
             spawn_icon_button(p, n, h, pr, 337.0, 318.0, 16.0, 14.0, 9).insert(GuildNoticeDown);
         }
-        // 编辑框（**Bevy 扩展**：C# 的 `Notice` 文本框本身可编辑；本端用单行输入 + 保存钮）
-        spawn_container(p, 13.0, 324.0, 322.0, 16.0, 2)
-            .insert((
-                BackgroundColor(Color::srgba(0.10, 0.10, 0.13, 0.95)),
-                GuildNoticeField,
-                TextInputField(2),
-                TextInputRect(GUILD_X + 13.0, GUILD_Y + 61.0 + 324.0, 322.0, 16.0),
-                Visibility::Hidden,
-            ))
-            .with_children(|ic| {
-                ic.spawn((
-                    Node {
-                        position_type: PositionType::Absolute,
-                        left: Val::Px(4.0),
-                        top: Val::Px(2.0),
-                        ..default()
-                    },
-                    Text::new(String::new()),
-                    TextFont {
-                        font: FontSource::Handle(font.clone()),
-                        font_size: FontSize::Px(12.0),
-                        ..default()
-                    },
-                    TextColor(Color::WHITE),
-                    ZIndex(9),
-                    TextInputDisplay(2),
-                ));
-            });
         // C# `NoticeSaveButton` = `Prguse[554/555/556]` @(20,342)（`NoticeEditButton` 560..562 同位置，二选一显示）
         if let (Some(n), Some(h), Some(pr)) = (
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 554),
@@ -1446,7 +1448,8 @@ fn guild_member_rows_system(
 /// `NoticeScrollIndex` 语义：首行下标，up 到 0 停、down 到 `len-1` 停）。
 fn guild_notice_system(
     mut guild: ResMut<GuildState>,
-    mut lines: Query<(&GuildNoticeLine, &mut Text)>,
+    // #2892：公告改为多行可编辑框后，翻页 = 平移显示实体（模拟 C# `ScrollToCaret()` 逐行滚动）
+    mut texts: Query<&mut Node, With<GuildNoticeText>>,
     up: Query<(Entity, &Interaction), With<GuildNoticeUp>>,
     down: Query<(Entity, &Interaction), With<GuildNoticeDown>>,
     mut prev_inter: Local<HashMap<Entity, Interaction>>,
@@ -1469,14 +1472,11 @@ fn guild_notice_system(
     }
     // 滚动位置随公告长度收敛（公告变短时不会停在越界行）
     guild.notice_scroll = notice_next_scroll(guild.notice_scroll, 0, guild.notice.len());
-    for (line, mut text) in &mut lines {
-        let want = guild
-            .notice
-            .get(guild.notice_scroll + line.0)
-            .cloned()
-            .unwrap_or_default();
-        if text.0 != want {
-            text.0 = want;
+    // 显示实体上移 `scroll * 行高`（框有 `Overflow::clip`，超出部分不可见）
+    for mut node in &mut texts {
+        let want = Val::Px(2.0 - guild.notice_scroll as f32 * NOTICE_ROW_DY);
+        if node.top != want {
+            node.top = want;
         }
     }
 }
