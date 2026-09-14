@@ -101,7 +101,7 @@ pwsh scripts/run_real_e2e.ps1      # 默认用仓库内 debug 产物与测试库
 脚本会：准备测试库（`scripts/e2e_setup_db.py`）→ 起服务端 → 跑用例 → 按客户端日志里的
 `✅/❌` 标记判定 → 打印汇总 → 停服务端。用例与判定标记：
 
-**当前基线（2026-09-14）：12/13 通过**，唯一未过的是下面标注「专项前置」的精炼用例。
+**当前基线（2026-09-14）：13/13 通过**（精炼为**全流程**判定，前置由脚本自动完成）。
 
 | 用例 | flag | 判定标记 |
 |---|---|---|
@@ -109,7 +109,7 @@ pwsh scripts/run_real_e2e.ps1      # 默认用仓库内 debug 产物与测试库
 | 坐骑 | `--mount-test` | `[MOUNT] ✅ 下马成功` |
 | 商城 | `--gameshop-test` | `[SHOPTEST] ✅ 完成（购买 #…）` |
 | 排行榜 | `--ranking-test` | `[RANKTEST] ✅ 排行榜` |
-| 精炼 | `--refine-test` | `[REFINETEST] ✅ 精炼已开始` |
+| 精炼 | `--refine-test` | `[REFINETEST] ✅ 精炼已开始` + `[REFINETEST] ✅ 取回成功，精炼全流程完成` |
 | 举报 | `--report-test` | `[REPORTTEST] ✅ 举报已提交确认` |
 | 升级特效 | `--level-fx-test` | `[LEVELFX] ✅ PASS 升级生效` |
 | 组队 / 私聊 / 邮件 / 交易 / 好友 / 婚姻 | 双客户端配对 | `[GROUPTEST]`/`[WHCHECK]`/`[MAILREAD]`/`[TRADETEST]`/`[FRIENDTEST]`/`[MARRY]` |
@@ -118,9 +118,15 @@ pwsh scripts/run_real_e2e.ps1      # 默认用仓库内 debug 产物与测试库
 补鱼竿的鱼钩与鱼饵、恢复精炼/交易所需物品——这些开关和消耗品会被用例改动并被服务端**存档**，
 不复位会出现「上一轮跑通、下一轮偶发失败」。
 
-**精炼用例的前置更重**：需要把角色放到铁匠（`Blacksmith_Carlos`）旁、背包带指定武器、
-服务端精炼基础成功率调成 100%，属于专项复验（历史做法：临时改库 + `config/server.toml` 的
-`[refine] base_chance`，跑完还原）。默认库状态下该用例不保证通过。
+**精炼用例的前置由 `scripts/e2e_refine_prep.py` 自动完成**（`run_real_e2e.ps1` 在开服前
+`prepare`、单客户端用例跑完后 `restore`），不再需要手工步骤：
+
+- 角色摆到 246 图铁匠 `Blacksmith_Carlos` 旁（`CallNPC` 距离校验 ≤2 格）；
+- 背包格 0 放可精炼武器（客户端脚本固定存入「背包第一件」）、`refine_log` 预置 3 件属性材料 + 1 块矿石
+  （否则结算走「无 RefinedValue → 必碎」分支）；
+- 生成**临时**服务端配置（`[refine] base_chance=100 / time_minutes=0`）并通过
+  `mir2_server <config>` 启动参数启用 —— 仓库里的 `config/server.toml` **不被改动**；
+- 跑完 `restore`：角色回钓鱼点、清精炼状态并删掉测试武器（否则后续配对用例的同图摆位会错）。
 
 ---
 
@@ -144,5 +150,6 @@ pwsh scripts/run_real_e2e.ps1      # 默认用仓库内 debug 产物与测试库
 | 客户端黑屏 / 缺图 / 中文变方框 | `Data/` 不在可执行文件同目录（或路径不对） |
 | 服务端报 `map file not found` | `Daneo1989/` 缺失或与 `server.map_data_dir` 不一致 |
 | 登录提示「密码错误」但密码没错 | 该账号**已在线**（服务端拒绝重复登录，C# 同语义）。等前一个连接断开（或重启服务端）再登 |
+| `refine-test` 报「未收到 NPCRefine / 未收到精炼结果」 | 前置没做：角色不在铁匠旁（`CallNPC` 距离 ≤2 格）或没跑 `scripts/e2e_refine_prep.py prepare`（`run_real_e2e.ps1` 会自动做） |
 | 端口被占用 | `config/server.toml` 的 `network.listen_addr`；客户端同步改 `config.ini` 的 `ServerAddr` |
 | 角色存档异常/数据回退 | 看服务端日志是否有 `Failed to save player …`（存档是单事务，任何一步失败整档回滚）；实例见 #2879（好友主键冲突，已修） |

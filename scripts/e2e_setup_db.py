@@ -22,6 +22,7 @@ DB = os.path.normpath(os.path.join(
 # 100 格（全图水域扫描实测最安全档），且 bevychar 面向左(6) 时前方 3 格 (167,667)
 # 是水格（FishingAttribute>=0，fishing-test 需要；#1217）。其余用例不依赖位置。
 SAFE_X, SAFE_Y = 170, 667  # map 1 (BichonProvince) 西北河流钓鱼点
+SAFE_MAP = 1               # 钓鱼点所在地图（精炼等用例会把角色挪到别的图，必须一起复位）
 
 # 钓具 item_index（DB item_infos.type：Hook=28 Float=29 Bait=30 Finder=31 Reel=32）
 HOOK_INDEX = 795   # FishingHook → 鱼竿 slots[0]
@@ -43,9 +44,11 @@ def main() -> int:
     con = sqlite3.connect(db_path)
     cur = con.cursor()
     # 1) 安全点 + 足够金币（gameshop 购买 #1268 需 165000；交易用例会搬金）
+    # #2887：连 map_index 一起复位——精炼用例会把角色挪到 246 图，若上一轮跑批被中断
+    # （或 restore 未执行），只重置 x/y 会让角色「在 246 图用钓鱼点坐标」，钓鱼等用例全废。
     cur.execute(
-        "UPDATE characters SET x=?, y=?, gold=1000000 WHERE name IN ('bevychar','bevy2char')",
-        (SAFE_X, SAFE_Y),
+        "UPDATE characters SET map_index=?, x=?, y=?, gold=1000000 WHERE name IN ('bevychar','bevy2char')",
+        (SAFE_MAP, SAFE_X, SAFE_Y),
     )
     # 1b) 复位协作开关：用例会切它们并被服务端存档，不复位则下一轮 group/trade/marriage
     #     会因「对方未开启」被服务端拒绝（C# 语义），表现为偶发 FAIL。
