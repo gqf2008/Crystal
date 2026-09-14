@@ -34,6 +34,11 @@ use crate::ui::theme::{
     ImageButton,
 };
 
+/// #2892 批B：C# `HeroBeltDialog`（`HeroDialogs.cs:248-300`）——面板 `Prguse[1921]` 100x38
+/// @ `(MainDialog.X + 475, ScreenHeight - 150)` = (475,618)；2 格同 `(12+35i, 3)` 32x32
+pub const PANEL: (LibraryName, usize) = (LibraryName::Prguse, 1921);
+pub const PANEL_SIZE: (f32, f32) = (100.0, 38.0);
+
 /// 格数（C# HeroBeltDialog.Grid[2]）
 pub const BELT_SLOTS: usize = 2;
 pub const CELL_SIZE: f32 = 32.0;

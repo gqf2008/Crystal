@@ -168,12 +168,16 @@
 | 批26 文本描边（C# `MirLabel` 默认 `OutLine=true`） | ① 描边副本跟随正文**位置/显隐/字号**（`sync_outline_ui_system` 补 `Node` 克隆 + 副本 1px 偏移、`Visibility`、`TextFont`；颜色刻意不镜像，副本恒黑）② 对话框文本**默认带描边**（`theme::spawn_label`/`spawn_label_center` 转调 outlined 版，约 150 处调用点零改动；新增 `*_plain` 显式无描边变体 + 两处例外：数量框 `InputTextBox`、奖励格数量黄字）③ HUD 标签补描边（HP/MP/Top/Bottom/Exp/Level/Gold/Name/Weight/Space/英雄面板/死亡提示）+ **负向断言**（聊天文本 `spawn_ui_text` 路径保持无描边）④ 文档与实机记录回填（本行） | #2818 #2819 #2822 #2823 |
 | 批27 窗口可拖动性（C# `Movable` 默认 false） | ① 给「C# 默认不可拖却被本端拖」的 7 个窗口挂 `NotDraggable`：计时器 / 掷骰 / 小地图 / 耐久面板 / 仓库 / 精炼 / 英雄主窗（`HeroManage` 显式 `Movable=true` 保持可拖）；每窗两个新单测 = 结构（该 kind 的**每个**根都带 `NotDraggable`）+ 行为（真实 spawn 出的窗口 + 真实 `dialog_drag_system`，置 Visible 后按左键断言不起拖）② §7 记录反向结构性差异（腰带/聊天/英雄腰带/好友备注/钓鱼状态/下拉框）+ 技能栏已对齐 ③ 实机截图与注入限制记录 ④ 本行 | #2830 #2833 #2834 |
 | 批28 快捷键语义（C# `GameScene.cs:532-711`） | ① 装备键（`Equipment/Equipment2`）页感知：不在角色页 → 打开并切到角色页，已在角色页 → 关窗（此前通用 toggle 会把整窗关掉）② 英雄三键补 `Hero == null` 守卫（`HeroState.current`）+ 英雄装备/技能互斥切页（C# 两页同属一个 `HeroDialog`，本端是两个独立窗）③ ESC `Closeall` 从 blanket `open.clear()` 改为 C# **集合**：直接表 31 个 kind + `NPCDialog.Hide()` 级联 8 个 kind（仅 NPC 窗可见时）+ 状态驱动 `HeroManage` 清状态；原版不关的交易窗/计时器/Buff/小地图/耐久/镶嵌/聊天公告/租赁双方窗不再被误关 ④ 本行 | #2838 #2876 #2877 #2878 |
-| 批29 Hero 按 C# 拆回原结构（#2892 批C） | 原自造 `DialogKind::Hero` 窗（`Prguse[170]` 拉伸 320x310 @(280,80)）整体删除，功能各回 C# 归属：① HUD `HeroBehaviourPanel`（4×16x17 `Prguse[1840..1847]` @ HUD+(165+16i,37)，当前行为显禁用帧；`S.UpdateHeroSpawnState` 进 `HeroState.spawn_state`）② HUD `HeroInfoPanel`（`Prguse[14]` 135x78 @(95,48) + 头像三态 `1400/1750/1379` + 名字容器 `Prguse[10]` + 血量容器 `Prguse[11]` + 三条 `Prguse[1951..1953]` 按 percent 裁绘；协议 `S.HeroInformation` 补 `max_hp/max_mp`）③ HUD `HeroMenuPanel`（`Prguse[2179]` 24x61 @(862,630) 屏幕绝对坐标 + 三钮 `2173/2170/2176` → 技能/背包/角色页）+ 召唤钮 `Prguse[2167..2169]` 20x20 @(Width-160,90) → `@SUMMONHERO`；HUD 英雄钮改 `HeroMenuPanel.Toggle()` ④ 自动药阈值回到 C# 交互：英雄背包 `Title[560..565]` 点击弹 `MirAmountBox(EnterValue, 116, 99)`（`amount_box` 支持 `min=0`）⑤ 英雄创建改走原版 `NewCharacterDialog` 英雄模式（标题 `Title[847]@(246,11)`、职业钮按 `CanCreateClass` 显隐、OK 发 `C.NewHero`；`S.HeroCreateRequest` 不再只打日志）⑥ 删除 `DialogKind::Hero` 与其 control RPC 映射、自动化依赖（列表/切换由 `HeroManageDialog` 覆盖） | #2898 #2899 #2900 #2901 #2902 + 本批 PR |
+| 批29 Hero 按 C# 拆回原结构（#2892 批C） | 原自造 `DialogKind::Hero` 窗（`Prguse[170]` 拉伸 320x310 @(280,80)）整体删除，功能各回 C# 归属：① HUD `HeroBehaviourPanel`（4×16x17 `Prguse[1840..1847]` @ HUD+(165+16i,37)，当前行为显禁用帧；`S.UpdateHeroSpawnState` 进 `HeroState.spawn_state`）② HUD `HeroInfoPanel`（`Prguse[14]` 135x78 @(95,48) + 头像三态 `1400/1750/1379` + 名字容器 `Prguse[10]` + 血量容器 `Prguse[11]` + 三条 `Prguse[1951..1953]` 按 percent 裁绘；协议 `S.HeroInformation` 补 `max_hp/max_mp`）③ HUD `HeroMenuPanel`（`Prguse[2179]` 24x61 @(862,630) 屏幕绝对坐标 + 三钮 `2173/2170/2176` → 技能/背包/角色页）+ 召唤钮 `Prguse[2167..2169]` 20x20 @(Width-160,90) → `@SUMMONHERO`；HUD 英雄钮改 `HeroMenuPanel.Toggle()` ④ 自动药阈值回到 C# 交互：英雄背包 `Title[560..565]` 点击弹 `MirAmountBox(EnterValue, 116, 99)`（`amount_box` 支持 `min=0`）⑤ 英雄创建改走原版 `NewCharacterDialog` 英雄模式（标题 `Title[847]@(246,11)`、职业钮按 `CanCreateClass` 显隐、OK 发 `C.NewHero`；`S.HeroCreateRequest` 不再只打日志）⑥ 删除 `DialogKind::Hero` 与其 control RPC 映射、自动化依赖（列表/切换由 `HeroManageDialog` 覆盖） | #2898 #2899 #2900 #2901 #2902 #2903 |
+| 批30 #2892 批A（逐窗复核 + 修错位） | ① 排行榜窗定位改回 C# `Center`（`Prguse[820]` 760x500 实测 → 原点 (350,163)，此前自造偏移）② 排行榜子控件按 C# 精灵/坐标重排（页签/行/滚动条）③ 计时器窗整窗重做（`TimerDialog` 沙漏 + 数字位 + 拖动），协议补 `SetTimer.kind`（区分正/倒计时）④ 游戏内 `MirInputBox`（`Client/MirControls/MirInputBox.cs`）落地并接 `S.GuildNameRequest`/`S.GuildRequestWar` ⑤ 行会领地窗按 C# 重建 + `GuildTerritoryPage` 协议补 `ClientGTMap` 字段（服务端 Leader/Leader2 同改） | #2893 #2894 #2895 #2896 #2897 |
+| 批31 #2892 批B（面板精灵断言全覆盖 1-4） | 目的：把「本端坐标/尺寸常量」与「`.Lib` 实测像素」钉成可执行断言，并顺手修断言暴露的真实偏差。① 8 窗（Group/Friend/Mentor/Relationship/Help/Notice/Mail/Creature）② 11 窗/元素 + **修坐骑 4 孔面板拉伸**（`Prguse[160]` 272x378 vs `[167]` 324x377）③ 9 处 + **修任务日记 8px 偏移**（C# `(ScreenWidth/2-300-20,60)`=192,60，本端曾写 200）④ 两条腰带（`Prguse[1932]` 240x38 / `Prguse[1921]` 100x38，格 `(12+35i,3)` 32x32、序号 `(8+35i,2)`）+ 耐久面板（`Prguse[2105]` 64x85 @(963,200)；**顺带修「内层只画外框、中间透出游戏世界」**：`GrayBackground`=`Prguse[2161]` Opacity 0.4 + `Background`=`Prguse[2162]`，均 56x80 @(3,3)，此前误记为 `Title[2161]` 且完全未渲染）。新增断言工具 `assert_centered`/`assert_inside`/`assert_in_canvas`/`Libs::size_off`/`Libs::pixels` + `require_assets!`（CI 无 `Data/` 时跳过）。**本批记录未修**：行会窗高度 740 ≠ C# 432（见 §7）。 | #2904 #2905 #2906 + 本 PR |
 
 ## 6. 验证基线
 
 - `cargo check --tests`（Client-Bevy）通过。
-- `cargo test`（Client-Bevy）：**542 lib** + 2 bin + 1 smoke + 24 alignment 通过（批28 单元③ 后基线；批27 收尾时 535 lib，批26 收尾时 528 lib，批25 收尾时 523 lib，批24 收尾时 514 lib）；ServerRust **680 lib** + 6 integration（同上，含 `QuestItemReward` ItemInfo 协议）；SharedRust **187 + 11**（2 ignored，含 `QuestItemReward` 往返无损）。
+- `cargo test`（Client-Bevy）：**571 lib** + 2 bin + 1 smoke + **37 alignment** 通过（批31 单元④ 后基线；批28 单元③ 时为 542 lib + 24 alignment，批27 收尾时 535 lib，批26 收尾时 528 lib，批25 收尾时 523 lib，批24 收尾时 514 lib）；ServerRust **739 lib** + 6 integration（同上，含 `QuestItemReward` ItemInfo 协议 + `ClientGTMap` 字段）；SharedRust **187 + 11**（2 ignored，含 `QuestItemReward` 往返无损）。三侧 `cargo fmt -- --check` 净零差异。
+- 批31（#2892 批B）门禁：`cargo fmt -- --check` 0 差异；`cargo test --test ui_alignment` 37 passed；`cargo test` 全量 571+2+1+37 passed。**阳性对照**：把耐久内层灰底的 alpha 由 0.4 改成 1.0（去掉 C# `Opacity = 0.4F`）→ `game::dialogs::dura_status::tests::spawned_panel_renders_inner_layers` 如期 FAILED（"下层 = C# `GrayBackground.Opacity = 0.4F`，实际 alpha 1"），改回即绿。
+- 批31 断言覆盖口径：每个窗口断言「**面板精灵索引 → `.Lib` 实测尺寸**」+「**本端常量坐标 = C# `Location`**」+ 面板不越画布 / 子控件在父矩形内；用 `Libs::pixels` 做精灵身份守卫（不同索引像素必须不同）防止「索引写错但尺寸巧合相同」。
 - Report 的 C# `Prguse[1633]` 在当前本地 Data 包缺失；已使用按 C# 控件边界推导的 360x244 深色兜底面板并保留对应子控件坐标，待资源包更新后自动加载正确背景。
 - ServerRust：680 lib + 6 integration 通过（批24 单元③ 后；批16 基线为 673 lib）；SharedRust 187 + 11（2 ignored）；`MapEditor/SharedRust` `cargo check` 通过（副本同步，批24 单元③ 改 `QuestItemReward` 时同步）。
 - 关键实机/定向验证：UI 子树泄漏截图、Character 技能页、AssignKey 模态输入、Timer 穿透、登录安全键盘资源；批7 复验 Mail/Buff；批8 复验 Center 窗口。
@@ -364,3 +368,17 @@
     `MiniMapDialog`、`CharacterDuraPanel`（`:691` 的 `Hide()` 原版被注释）、`SocketDialog`、
     `ChatNoticeDialog`、租赁双方窗（仅浏览窗 `ItemRentalDialog` 在表内）。
     `FishingStatusDialog.bEscExit` 的 `Cancel()`（`:698`）在本端对应钓鱼窗被关闭时状态行一并隐藏（同窗结构）。
+
+- 面板精灵断言（批31 / #2892 批B）：盘点口径是「本端有实体或有常量」的窗口，已覆盖 28 个窗口/元素组。
+  **本轮修掉的三处真实偏差**：① 坐骑 4 孔面板用了 `Prguse[160]`（272x378）却按 `[167]`（324x377）铺内容
+  → 面板拉伸；② 任务日记原点写 200，C# 是 `(ScreenWidth/2-300-20, 60)` = (192,60) → 8px 偏移；
+  ③ 耐久面板只画外框 `Prguse[2105]`，缺少 C# `CharacterDuraPanel` 的内层两层
+  （`GrayBackground` = `Prguse[2161]`，C# `Opacity = 0.4F`；`Background` = `Prguse[2162]`；
+  均 `Size = 56x80 @(3,3)`，`MainDialogs.cs:3951-3968`）→ 面板中间直接透出游戏世界。
+  同时更正文档级误记：内层在 `Libraries.Prguse` 而**不是** `Libraries.Title`。
+  **批B 尚未覆盖**（后续单元）：`RollDialog`（掷骰，`Prguse2[0]` 单帧）、`ItemRentalDialog` 浏览窗
+  （`Prguse3[1]` 400x174）、仓库窗的子控件层（面板已核对，内部格阵/按钮未逐个断言）。
+  **批B 记录但未修**：行会窗高度——C# `Prguse[180]` 实测 590x432 + `Location = Center` → 原点 (217,168)，
+  本端 `GUILD_H = 740`（自造加高、内容按 740 排）→ 原点 (217,14)。这是结构性偏差，需要独立单元
+  按 C# 590x432 重排行会窗内容（同类工作已在批C 的 GT/Hero 做过）。测试用 `assert_ne!` 显式钉住
+  「本端 740 ≠ C# 432」，避免被误读成已对齐（`tests/ui_alignment.rs::panel_sprites_batch_b3_match_csharp`）。

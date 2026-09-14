@@ -2976,3 +2976,106 @@ fn panel_sprites_batch_b3_match_csharp() {
 
     println!("  ✓ 批B 面板精灵核对（三）：Npc/ChatNotice/MiniMap/BigMap/Fishing/QuestDiary+Detail/Buff(11 档)");
 }
+
+/// #2892 批B（四）：两条药水/英雄腰带 + 耐久面板。
+///
+/// C# `BeltDialog`/`HeroBeltDialog` 都挂在 `(MainDialog.X + 230|475, ScreenHeight - 150)` = y 618，
+/// 格子 `(12+35i, 3)` 32x32、序号标签 `(8+35i, 2)`；`CharacterDuraPanel` 是 `Prguse[2105]` 64x85
+/// @ `(ScreenWidth-61, 200)`，内层 `Prguse[2161]`(灰) &amp; `Prguse[2162]` 56x80 @(3,3)。
+#[test]
+fn panel_sprites_batch_b4_match_csharp() {
+    use client_bevy::game::dialogs::{dura_status, hero_belt, potion_belt};
+    require_assets!("panel_sprites_batch_b4_match_csharp");
+    let mut libs = Libs::new();
+
+    // 药水腰带
+    let (pw, ph) = libs.size(potion_belt::PANEL.0, potion_belt::PANEL.1);
+    assert_eq!(
+        (pw, ph),
+        potion_belt::PANEL_SIZE,
+        "[尺寸] Prguse[1932] 240x38"
+    );
+    assert_eq!(
+        (potion_belt::BELT_X, potion_belt::BELT_Y),
+        (230.0, SH - 150.0),
+        "[坐标] C# `(MainDialog.X + 230, ScreenHeight - 150)`"
+    );
+    assert_eq!(
+        (potion_belt::CELL_DX, potion_belt::CELL_DY),
+        (12.0, 3.0),
+        "[格子] C# `Location = (x*35 + 12, 3)`"
+    );
+    assert_eq!(
+        potion_belt::CELL_SPACING,
+        35.0,
+        "[格子] C# 步进 35（不是 36）"
+    );
+    assert_in_canvas("药水腰带", 230.0, SH - 150.0, pw, ph);
+
+    // 英雄腰带
+    let (hw, hh) = libs.size(hero_belt::PANEL.0, hero_belt::PANEL.1);
+    assert_eq!(
+        (hw, hh),
+        hero_belt::PANEL_SIZE,
+        "[尺寸] Prguse[1921] 100x38"
+    );
+    assert_eq!(
+        (hero_belt::BELT_X, hero_belt::BELT_Y),
+        (475.0, SH - 150.0),
+        "[坐标] C# `(MainDialog.X + 475, ScreenHeight - 150)`"
+    );
+    assert_in_canvas("英雄腰带", 475.0, SH - 150.0, hw, hh);
+    // 两条腰带不重叠（药水 230..470，英雄 475..575）
+    assert!(
+        potion_belt::BELT_X + pw < hero_belt::BELT_X,
+        "[重叠] 药水腰带与英雄腰带不得重叠"
+    );
+
+    // 耐久面板
+    let (dw, dh) = libs.size(dura_status::PANEL.0, dura_status::PANEL.1);
+    assert_eq!(
+        (dw, dh),
+        dura_status::PANEL_SIZE,
+        "[尺寸] Prguse[2105] 64x85"
+    );
+    assert_eq!(
+        (dura_status::PANEL_X, dura_status::PANEL_Y),
+        (SW - 61.0, 200.0),
+        "[坐标] C# `CharacterDuraPanel @(ScreenWidth-61, 200)`"
+    );
+    let (iw, ih) = libs.size(dura_status::INNER_PANEL.0, dura_status::INNER_PANEL.1);
+    assert_eq!(
+        (iw, ih),
+        dura_status::INNER_SIZE,
+        "[尺寸] 内层 Prguse[2162] 56x80"
+    );
+    // C# `CharacterDuraPanel.GrayBackground`（`MainDialogs.cs:3954`）同为 `Libraries.Prguse`，
+    // 尺寸/位置与 `Background` 一致（曾误记成 `Title[2161]`）
+    let (gw, gh) = libs.size(
+        dura_status::INNER_GRAY_PANEL.0,
+        dura_status::INNER_GRAY_PANEL.1,
+    );
+    assert_eq!(
+        (gw, gh),
+        dura_status::INNER_SIZE,
+        "[尺寸] 内层灰底 Prguse[2161] 56x80"
+    );
+    assert_eq!(
+        dura_status::INNER_GRAY_PANEL.0,
+        dura_status::INNER_PANEL.0,
+        "[库] 灰底与背景同库（C# 均为 Libraries.Prguse）"
+    );
+    assert_inside(
+        "耐久内层",
+        dura_status::PANEL_X + dura_status::INNER_POS.0,
+        dura_status::PANEL_Y + dura_status::INNER_POS.1,
+        iw,
+        ih,
+        dura_status::PANEL_X,
+        dura_status::PANEL_Y,
+        dw,
+        dh,
+    );
+
+    println!("  ✓ 批B 面板精灵核对（四）：药水腰带 Prguse[1932]@(230,618) / 英雄腰带 Prguse[1921]@(475,618) / 耐久 Prguse[2105]+[2161/2162]@(963,200)");
+}

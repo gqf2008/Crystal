@@ -18,9 +18,20 @@ use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
 use crate::ui::theme::{load_lib_image, spawn_image, spawn_panel, ImageButton};
 
+/// #2892 批B：C# `CharacterDuraPanel`（`MainDialogs.cs:3947-3968`）——面板 `Prguse[2105]` 64x85
+/// @ `(ScreenWidth - 61, 200)` = (963,200)；内层两层同尺寸同位置：
+/// `GrayBackground` = `Prguse[2161]`（Opacity 0.4）与 `Background` = `Prguse[2162]`，均 56x80 @(3,3)。
+/// 注意内层在 `Prguse` 而非 `Title`（曾误写 `Title[2161]`）。
+pub const PANEL: (LibraryName, usize) = (LibraryName::Prguse, 2105);
+pub const PANEL_SIZE: (f32, f32) = (64.0, 85.0);
+pub const INNER_PANEL: (LibraryName, usize) = (LibraryName::Prguse, 2162);
+pub const INNER_GRAY_PANEL: (LibraryName, usize) = (LibraryName::Prguse, 2161);
+pub const INNER_SIZE: (f32, f32) = (56.0, 80.0);
+pub const INNER_POS: (f32, f32) = (3.0, 3.0);
+
 /// 面板位置（C#：ScreenWidth-61=963, y=200；背景图 (3,3) 内布局）
-const PANEL_X: f32 = 963.0;
-const PANEL_Y: f32 = 200.0;
+pub const PANEL_X: f32 = 963.0;
+pub const PANEL_Y: f32 = 200.0;
 
 // C# DuraStatusDialog（MainDialogs.cs:3911）容器 @ (MiniMap.X+86, MiniMap.Size.Height)，
 //   Character 切换钮相对 (20,0)（:3919）→ 绝对 (MiniMap.X+106, MiniMap.Height)，
@@ -243,6 +254,40 @@ fn spawn_dura_status(
     commands
         .entity(panel)
         .insert((DialogRoot(DialogKind::DuraStatus), NotDraggable, DuraWidget));
+
+    // 内层两层（C# `MainDialogs.cs:3951-3968`）：`GrayBackground` = Prguse[2161] 灰底（Opacity 0.4）
+    // 在下、`Background` = Prguse[2162] 描边在上；装备部位再作为 `Background` 的子层（z 更大）。
+    commands.entity(panel).with_children(|p| {
+        if let Some(gray) = load_lib_image(
+            &mut libs,
+            &mut images,
+            INNER_GRAY_PANEL.0,
+            INNER_GRAY_PANEL.1,
+        ) {
+            spawn_image(
+                p,
+                gray.clone(),
+                INNER_POS.0,
+                INNER_POS.1,
+                INNER_SIZE.0,
+                INNER_SIZE.1,
+                1,
+            )
+            // C# `Opacity = 0.4F` → `Library.Draw(..., Opacity)` 全局透明度
+            .insert(ImageNode::new(gray).with_color(Color::srgba(1.0, 1.0, 1.0, 0.4)));
+        }
+        if let Some(inner) = load_lib_image(&mut libs, &mut images, INNER_PANEL.0, INNER_PANEL.1) {
+            spawn_image(
+                p,
+                inner,
+                INNER_POS.0,
+                INNER_POS.1,
+                INNER_SIZE.0,
+                INNER_SIZE.1,
+                2,
+            );
+        }
+    });
 
     // 部位图（C# Background @ (3,3) 内相对坐标；面板子节点，随面板显隐）
     commands.entity(panel).with_children(|p| {
@@ -525,5 +570,80 @@ mod tests {
         let panels: Vec<Visibility> = pq.iter(&world).copied().collect();
         assert_eq!(panels.len(), 1, "应恰好 1 个面板 bg");
         assert_eq!(panels[0], Visibility::Hidden, "面板关闭时 bg 应隐藏");
+    }
+
+    /// #2892 批B：C# `CharacterDuraPanel`（`MainDialogs.cs:3951-3968`）内层两层必须**真实渲染**：
+    /// `GrayBackground` = `Prguse[2161]`（Opacity 0.4）+ `Background` = `Prguse[2162]`，均 56x80 @(3,3)；
+    /// 且灰底 z 序在描边之下。
+    ///
+    /// 阳性对照：修正前只画外框 `Prguse[2105]`（中间全透明、直接透出游戏世界）→ 本测试因
+    /// 找不到 56x80 @(3,3) 的两个内层实体而 FAILED。
+    #[test]
+    fn spawned_panel_renders_inner_layers() {
+        use crate::resources::libraries::{resolve_data_path, Libraries};
+        use bevy::ecs::system::RunSystemOnce;
+
+        if !crate::resources::libraries::data_assets_present() {
+            eprintln!("skip spawned_panel_renders_inner_layers: 无 Data 资产");
+            return;
+        }
+        let mut world = World::new();
+        world.insert_resource(GameLibraries(Libraries::new(resolve_data_path())));
+        world.insert_resource(Assets::<Image>::default());
+        world.insert_resource(crate::ui::sprite_ui::UiImageCache::default());
+        world
+            .run_system_once(spawn_dura_status)
+            .expect("spawn_dura_status 应成功");
+
+        fn px(v: Val) -> f32 {
+            match v {
+                Val::Px(v) => v,
+                _ => f32::NAN,
+            }
+        }
+
+        let mut q = world
+            .query_filtered::<(Entity, &Children), (With<DuraWidget>, Without<DuraToggleBtn>)>();
+        let found: Vec<Vec<Entity>> = q.iter(&world).map(|(_, c)| c.iter().collect()).collect();
+        assert_eq!(found.len(), 1, "应恰好 1 个耐久面板");
+
+        // 内层候选：尺寸 56x80 @(3,3) 的 ImageNode → (z, alpha)
+        let mut inner: Vec<(i32, f32)> = Vec::new();
+        for c in &found[0] {
+            let (Some(node), Some(img), Some(z)) = (
+                world.get::<Node>(*c),
+                world.get::<ImageNode>(*c),
+                world.get::<ZIndex>(*c),
+            ) else {
+                continue;
+            };
+            if px(node.left) != INNER_POS.0 || px(node.top) != INNER_POS.1 {
+                continue;
+            }
+            if px(node.width) != INNER_SIZE.0 || px(node.height) != INNER_SIZE.1 {
+                continue;
+            }
+            inner.push((z.0, img.color.alpha()));
+        }
+        inner.sort_by_key(|(z, _)| *z);
+        assert_eq!(
+            inner.len(),
+            2,
+            "面板内层应有 2 层（Prguse[2161] 灰底 + Prguse[2162] 描边），实际 {inner:?}"
+        );
+        assert!(
+            (inner[0].1 - 0.4).abs() < 1e-3,
+            "下层 = C# `GrayBackground.Opacity = 0.4F`，实际 alpha {}",
+            inner[0].1
+        );
+        assert!(
+            (inner[1].1 - 1.0).abs() < 1e-3,
+            "上层 = C# `Background`（无 Opacity → 1.0），实际 alpha {}",
+            inner[1].1
+        );
+        assert!(
+            inner[0].0 < inner[1].0,
+            "灰底 z 序应在描边之下（实际 {inner:?}）"
+        );
     }
 }
