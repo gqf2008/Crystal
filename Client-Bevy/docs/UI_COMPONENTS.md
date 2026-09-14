@@ -178,11 +178,12 @@
 | 批36 #2892 批B（单元9：行会 StoragePage 8×14 格阵 + 协议按槽位） | StoragePage 由「8 行单列文本列表（13 页）」改回 C# `StorageGrid = new MirItemCell[8*14]`：64 个可见格按 `(x*35+31+x, (y-StorageIndex)*35+20+(y-StorageIndex))` 落位、35x35，内嵌 `Items[image]` 图标 + 数量；`storage_page` 改作 C# `StorageIndex`（0..=6 行窗口，`y>7` 不可见）；点击按 `idx = 8*(StorageIndex + r) + x` 命中；金币行改由 `StorageGoldText`(194,312) 显示 `gold`、加减钮 `Prguse[918/917]`@(158/142,313)。**协议配套**：`ServerEvent::GuildStorage` 改为按槽位 `Vec<Option<(uid, index, count, name, image)>>`（原先 `filter_map` 把空格丢掉、物品整体上移，格阵位置对不上也画不出图），`StorageItem` 补 `image`（`ItemInfo.image`）。 | #2912 |
 | 批37 #2892 批B（单元10：行会页签按玩家行会权限门控） | 新增 `guild_tab_visible(page, opts, has_buff)` 纯函数 + `guild_my_options(guild, my_name)` 推导，把 C# `GuildRankOptions`（`Enums.cs:1898-1908`：1/2/4/8/16/32/64/128）与 `RefreshInterface` 规则接进 `guild_page_system`：`CanChangeNotice(64) → NoticeButton`、`CanChangeRank(1) → RankButton`、`CanStoreItem(8)\|CanRetrieveItem(16) → StorageButton`、缓存非空 → `BuffButton`，`MembersButton`/`StatusButton` 恒可见；当前页被权限关掉时兜底切到 `Members`。差异：C# 用服务端 `GuildStatus.MyOptions`，本端服务端自定义信息体未带该字段 → 由「本地玩家成员行 `rank_index` → `rank_defs[..].options`」推导，拿不到时不隐藏（见 §7）。 | #2913 |
 | 批38 #2892 批B（单元11：行会 NoticePage 正文 + 翻页） | NoticePage 补公告正文渲染（服务端 `GuildNotice` 行数组 → `(13, 1 + i*16)` 20 行，覆盖 C# `Notice` 文本框 322x330 区域）与 C# 滚动语义（新增纯函数 `notice_next_scroll`：`NoticeScrollIndex` 首行下标，上 0 停/下 `len-1` 停、公告变短自动收敛，接 `guild_notice_system`）；翻页钮改用 C# `Prguse2[197/198/199]`@(337,1)、`Prguse2[207/208/209]`@(337,318)；`StatusPage` 标题行收回为只显示行会名（C# `StatusGuildName`，金币/公告各有归属）。残留：编辑仍是单行输入框（C# `Notice` 为可编辑多行框）。 | #2914 |
+| 批39 #2892 批B（单元12：行会成员行内控件按 C# `UpdateMembers`） | 新增 `guild_member_rows_system` 逐帧同步 4 项：① `MembersRanks[i]` 职务下拉（100x14 @(24, 30+i*15)，`Items=Ranks`、`SelectedIndex=成员职务`、`Enabled = CanChangeRank && 成员职务下标 >= MyRankId`，改选发 `EditGuildMember{change_type=2}`）② `MembersName[i]` 只显示成员名（此前拼「名字（离线）(职务)」）③ `MembersStatus[i]`@(225,·) 在线 `LimeGreen`/离线 `White` ④ `MembersDelete[i].Visible = CanKick && 职务下标 >= MyRankId && 不是自己`（此前 18 个恒可见）。新增纯函数 `can_change_member_rank` / `can_kick_member` / `guild_my_rank_index` 并逐个钉断言。差异：`UiDropDown` 无 enabled 态（禁用时强制收起）、离线状态无「上次登录时间」（服务端自定义信息体未带 `LastLogin`）、改职无确认框（C# `OnNewRank` 有）。 | #2915 |
 
 ## 6. 验证基线
 
 - `cargo check --tests`（Client-Bevy）通过。
-- `cargo test`（Client-Bevy）：**582 lib** + 2 bin + 1 smoke + **42 alignment** 通过（批38 单元⑪ 后基线；批37 单元⑩ 时为 581 lib + 42 alignment，批36 单元⑨ 时为 579 lib + 42 alignment，批35 单元⑧ 时为 579 lib + 41 alignment，批34 单元⑦ 时为 579 lib + 40 alignment，批33 单元⑥ 时为 579 lib + 39 alignment，批32 单元⑤ 时为 576 lib + 38 alignment，批31 单元④ 时为 571 lib + 37 alignment，批28 单元③ 时为 542 lib + 24 alignment，批27 收尾时 535 lib，批26 收尾时 528 lib，批25 收尾时 523 lib，批24 收尾时 514 lib）；ServerRust **739 lib** + 6 integration（同上，含 `QuestItemReward` ItemInfo 协议 + `ClientGTMap` 字段）；SharedRust **187 + 11**（2 ignored，含 `QuestItemReward` 往返无损）。三侧 `cargo fmt -- --check` 净零差异。
+- `cargo test`（Client-Bevy）：**583 lib** + 2 bin + 1 smoke + **42 alignment** 通过（批39 单元⑫ 后基线；批38 单元⑪ 时为 582 lib + 42 alignment，批37 单元⑩ 时为 581 lib + 42 alignment，批36 单元⑨ 时为 579 lib + 42 alignment，批35 单元⑧ 时为 579 lib + 41 alignment，批34 单元⑦ 时为 579 lib + 40 alignment，批33 单元⑥ 时为 579 lib + 39 alignment，批32 单元⑤ 时为 576 lib + 38 alignment，批31 单元④ 时为 571 lib + 37 alignment，批28 单元③ 时为 542 lib + 24 alignment，批27 收尾时 535 lib，批26 收尾时 528 lib，批25 收尾时 523 lib，批24 收尾时 514 lib）；ServerRust **739 lib** + 6 integration（同上，含 `QuestItemReward` ItemInfo 协议 + `ClientGTMap` 字段）；SharedRust **187 + 11**（2 ignored，含 `QuestItemReward` 往返无损）。三侧 `cargo fmt -- --check` 净零差异。
 - 批31（#2892 批B）门禁：`cargo fmt -- --check` 0 差异；`cargo test --test ui_alignment` 37 passed；`cargo test` 全量 571+2+1+37 passed。**阳性对照**：把耐久内层灰底的 alpha 由 0.4 改成 1.0（去掉 C# `Opacity = 0.4F`）→ `game::dialogs::dura_status::tests::spawned_panel_renders_inner_layers` 如期 FAILED（"下层 = C# `GrayBackground.Opacity = 0.4F`，实际 alpha 1"），改回即绿。
 - 批31 断言覆盖口径：每个窗口断言「**面板精灵索引 → `.Lib` 实测尺寸**」+「**本端常量坐标 = C# `Location`**」+ 面板不越画布 / 子控件在父矩形内；用 `Libs::pixels` 做精灵身份守卫（不同索引像素必须不同）防止「索引写错但尺寸巧合相同」。
 - 批32（#2892 批B 单元5）门禁：`cargo fmt -- --check` 0 差异；`cargo test` 576 lib + 2 bin + 1 smoke + 38 alignment 全绿
@@ -215,6 +216,10 @@
   （`guild::tests` 24 passed，含 `notice_scroll_clamps_like_csharp`）。
   **阳性对照**：把 `notice_next_scroll` 的下钳位去掉（只 `+1` 不 clamp）→
   `notice_scroll_clamps_like_csharp` 如期 FAILED（"到底再加不动"），改回即绿。
+- 批39（#2892 批B 单元12）门禁：`cargo fmt -- --check` 0 差异；`cargo test` 583 lib + 2 bin + 1 smoke + 42 alignment 全绿
+  （`guild::tests` 25 passed，含 `member_row_permission_rules_match_csharp`）。
+  **阳性对照**：把 `can_kick_member` 的「不是自己」判断去掉 → `member_row_permission_rules_match_csharp`
+  如期 FAILED（"不能踢自己"），改回即绿。
 - Report 的 C# `Prguse[1633]` 在当前本地 Data 包缺失；已使用按 C# 控件边界推导的 360x244 深色兜底面板并保留对应子控件坐标，待资源包更新后自动加载正确背景。
 - ServerRust：680 lib + 6 integration 通过（批24 单元③ 后；批16 基线为 673 lib）；SharedRust 187 + 11（2 ignored）；`MapEditor/SharedRust` `cargo check` 通过（副本同步，批24 单元③ 改 `QuestItemReward` 时同步）。
 - 关键实机/定向验证：UI 子树泄漏截图、Character 技能页、AssignKey 模态输入、Timer 穿透、登录安全键盘资源；批7 复验 Mail/Buff；批8 复验 Center 窗口。
@@ -458,7 +463,7 @@
   Buff 行由 `GuildBuffLine(0..8)` 独立承载（不再复用成员行 `GuildLine(1..=8)`），
   `PointsLeft` @(118,3) 与 ↑↓ @(337,1)/(337,318) 进 BuffPage；成员/仓库/Buff 三个命中区随页面原点重算。
   **批35 已把 MembersPage 行几何与删除钮对齐**（见下条）；**仍未对齐的页内细节**（后续单元）：
-  ① MembersPage 未建 `MembersRanks` 职务下拉（100x14 @(24, ·)，需 `CanChangeRank` 才可用）；
+  ① MembersPage 的 `MembersRanks` 职务下拉、状态列与「能否踢人」规则已在批39 落地（见下条）；
   ② StoragePage 金币输入是 Bevy 扩展（C# 只有 `StorageGoldText` + 加减钮）—— 格阵已在批36 对齐（见下条）；
   ③ NoticePage 已在批38 补正文渲染与滚动（见下条）；残留：编辑仍是单行输入框（C# `Notice` 是可编辑多行框）；
   ④ RankPage 的权限位用 `Prguse[1346/1347]` 复选框图 + 文字标签（C# 文案由 `RanksOptionsTexts` 给），
@@ -513,3 +518,16 @@
   翻页钮用 C# 的 `Prguse2[197..199]/[207..209]` 精灵与坐标。`StatusPage` 的标题行同时收回为
   「只显示行会名」（C# `StatusGuildName`；金币在 `StorageGoldText`、公告在 `Notice`，此前本端把三者拼在一行）。
   **残留差异**：编辑入口仍是单行输入框 + 保存钮（C# 的 `Notice` 本身是可编辑多行框，本端未实现多行编辑器）。
+
+- 行会 MembersPage 行内控件（批39 / #2892 批B 单元12 已对齐）：
+  C# `UpdateMembers`（`:1596-1640`）逐行设置四件事，本端此前只做了「名字 + 永远可见的删除钮」：
+  ① `MembersRanks[i]`（`MirDropDownBox` 100x14 @(24, 30+i*15)）—— `Items = RankNames`、
+     `SelectedIndex = 该成员职务`、`Enabled = CanChangeRank && 成员职务下标 >= MyRankId`；
+     改选 → 确认框 → `C.EditGuildMember{ChangeType = 2}`（`OnNewRank`，`:1507-1519`）；
+  ② `MembersName[i].Text = 成员名`（此前本端把「名字（离线）(职务)」拼成一行，职务已由下拉表达）；
+  ③ `MembersStatus[i]` @(225, 30+i*15)：在线 `Color.LimeGreen`、离线 `Color.White`；
+  ④ `MembersDelete[i].Visible = CanKick && 成员职务下标 >= MyRankId && 不是自己`（此前 18 个删除钮恒可见）。
+  本端新增 `guild_member_rows_system` 逐帧同步这四项 + 纯函数 `can_change_member_rank` / `can_kick_member` /
+  `guild_my_rank_index`；下拉沿用本端 `UiDropDown` 控件（`Enabled = false` 时强制收起弹层，
+  因为该控件没有 enabled 态）；状态文案本端只有「在线/离线」（C# 离线还会印上次登录时间，
+  服务端 `GuildStatus` 自定义信息体未带 `LastLogin`，见 §7）。
