@@ -43,13 +43,17 @@ $tmp = Join-Path $env:TEMP "crystal_e2e"
 New-Item -ItemType Directory -Path $tmp -Force | Out-Null
 $results = [System.Collections.Generic.List[object]]::new()
 
+# 用例超时（秒）：default 见 $TimeoutSec；精炼要等结算（客户端 65s 等待 + 结算 + 取回）
+$CaseTimeout = @{ "refine-test" = 180 }
+
 # 用例成功判定标记（A=发起方/单客户端日志，B=接受方日志；全部命中才 PASS，防止登录 ✅ 误判）
 $CaseRequired = @{
     "fishing-test"  = @{ A = @('\[FISHTEST\] ✅ 收获消息'); B = @() }
     "mount-test"    = @{ A = @('\[MOUNT\] ✅ 下马成功'); B = @() }
     "gameshop-test" = @{ A = @('\[SHOPTEST\] ✅ 完成（购买 #'); B = @() }
     "ranking-test"  = @{ A = @('\[RANKTEST\] ✅ 排行榜'); B = @() }
-    "refine-test"   = @{ A = @('\[REFINETEST\] ✅ 精炼已开始'); B = @() }
+    # #2887：精炼判「全流程」（存入 → 开始 → 结果 → 取回），只到「已开始」不算过
+    "refine-test"   = @{ A = @('\[REFINETEST\] ✅ 精炼已开始','\[REFINETEST\] ✅ 取回成功，精炼全流程完成'); B = @() }
     "report-test"   = @{ A = @('\[REPORTTEST\] ✅ 举报已提交确认'); B = @() }
     "level-fx-test" = @{ A = @('\[LEVELFX\] ✅ PASS 升级生效'); B = @() }
     "group"         = @{ A = @('\[GROUPTEST\] ✅ 组队成功'); B = @('\[GROUPACCEPT\] ✅ 接受邀请') }
@@ -91,7 +95,8 @@ function Invoke-Case {
     param([string]$Name, [string[]]$Flags)
     $argsAll = @("--real-net","--auto-enter") + $Flags + @("--e2e-user",$TestUser,"--e2e-pass",$TestPass)
     $err = Join-Path $tmp "$Name.err.log"
-    $marks = Run-Client $Name $argsAll $TimeoutSec
+    $caseTimeout = if ($CaseTimeout.ContainsKey($Name)) { $CaseTimeout[$Name] } else { $TimeoutSec }
+    $marks = Run-Client $Name $argsAll $caseTimeout
     $req = $CaseRequired[$Name]
     if ($null -eq $req) {
         # 自定义用例：退回任意 ✅ 判定
@@ -145,10 +150,26 @@ if ($pyCmd) {
     Write-Warning "python 不可用，跳过 E2E 测试库准备（角色可能被怪物围杀）"
 }
 
+# 0b) 精炼 e2e 专用配置（#2887）：服务端支持 `mir2_server <config>` 启动参数
+#     （ServerRust/src/main.rs:55-57）。用临时 config 而不是改仓库里的 config/server.toml，
+#     跑崩了也不会留下改过的配置。
+#     注意：这里**只生成配置**；改库（角色挪到铁匠旁）必须等精炼用例前再做，
+#     否则会把前面的钓鱼/坐骑/商城用例的角色位置一起带偏。
+$wantRefine = $SingleFlags -contains "--refine-test"
+$refinePrep = Join-Path $PSScriptRoot "e2e_refine_prep.py"
+$refineCfg = Join-Path $tmp "server.refine-e2e.toml"
+$srvArgs = @()
+if ($wantRefine -and $pyCmd) {
+    & python $refinePrep config (Join-Path $ServerWorkDir "config\server.toml") $refineCfg
+    if ($LASTEXITCODE -eq 0) { $srvArgs = @($refineCfg) } else { Write-Warning "精炼前置失败，refine-test 可能不通过" }
+} elseif ($wantRefine) {
+    Write-Warning "python 不可用，跳过精炼前置（refine-test 大概率失败）"
+}
+
 # 1) 启动服务端
 Get-Process -Name mir2_server -ErrorAction SilentlyContinue | Stop-Process -Force
 $srvErr = Join-Path $tmp "server.err.log"; $srvOut = Join-Path $tmp "server.log"
-$srv = Start-Process -FilePath $ServerExe -WorkingDirectory $ServerWorkDir -RedirectStandardError $srvErr -RedirectStandardOutput $srvOut -PassThru -WindowStyle Hidden
+$srv = Start-Process -FilePath $ServerExe -ArgumentList $srvArgs -WorkingDirectory $ServerWorkDir -RedirectStandardError $srvErr -RedirectStandardOutput $srvOut -PassThru -WindowStyle Hidden
 Start-Sleep -Seconds 15
 if (-not (Get-Process -Id $srv.Id -ErrorAction SilentlyContinue)) {
     Write-Error "服务端启动失败：$(Get-Content $srvErr -Tail 5 -ErrorAction SilentlyContinue)"
@@ -158,7 +179,14 @@ Write-Output "服务端已启动 PID=$($srv.Id)"
 # 2) 单客户端用例
 foreach ($f in $SingleFlags) {
     $name = $f.TrimStart('-')
+    # 2a) 精炼用例前：摆位 + 材料（#2887）；跑完立刻还原，避免影响后面的配对用例同图摆位
+    if ($name -eq "refine-test" -and $pyCmd) {
+        & python $refinePrep prepare-db (Join-Path $ServerWorkDir "data\crystal.db")
+    }
     Invoke-Case $name @($f)
+    if ($name -eq "refine-test" -and $pyCmd) {
+        & python $refinePrep restore-db (Join-Path $ServerWorkDir "data\crystal.db")
+    }
 }
 
 # 3) 双客户端配对用例（组队/私聊/邮件/交易/好友）
