@@ -879,7 +879,6 @@ impl Message<StartGameRequest> for WorldActor {
             &map_title,
             self.map_infos.get(&map_info_idx),
             &self.item_infos,
-            &self.quest_infos,
             &self.recipe_infos,
         )
         .await;
@@ -947,9 +946,17 @@ impl Message<StartGameRequest> for WorldActor {
             self.maps.get(&map_slot),
         )
         .await;
+        // #2867：先记录本会话生成出来的 NPC（db_index → object_id），供任务定义回填 npc_index
+        let spawned_npcs: Vec<(i32, u32)> = new_npcs
+            .iter()
+            .map(|npc| (npc.db_index, npc.object_id))
+            .collect();
         for npc in new_npcs {
             self.npcs.insert(npc.object_id, npc);
         }
+        // #2867：任务定义（NewQuestInfo）必须在 NPC 生成之后下发，npc_index/finish_npc_index
+        // 才会是本会话的 NPC object_id（C# `QuestInfo.NpcIndex = LoadedObjectID`）
+        self.send_quest_infos(msg.session_id, &spawned_npcs).await;
         // 征服旗子 NPC（C# ConquestGuildFlagInfo.Spawn；per-session 生成）
         let new_flags = spawn_conquest_flags(
             self.gate_ref.clone(),

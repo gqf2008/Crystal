@@ -1,15 +1,92 @@
 use super::*;
 
-impl WorldActor {
-    /// #2014：quest 是否已关联到任意 NPC（collect/finish 列表）；未关联（数据未配置）时不做 NPC 强制校验
-    pub(crate) fn quest_has_npc_link(&self, quest_index: i32, finish: bool) -> bool {
-        self.npc_infos.values().any(|info| {
-            if finish {
-                info.finish_quest_indexes.contains(&quest_index)
-            } else {
-                info.collect_quest_indexes.contains(&quest_index)
+/// #2867：C# `NPCScript.ParseQuests`（`Server/MirObjects/NPC/NPCScript.cs:685-720`）——
+/// NPC 脚本 `[QUESTS]` 段的任务号语义：**正数 = 该 NPC 可接**（`QuestInfo.NpcIndex = LoadedObjectID`）、
+/// **负数 = 可交**（`FinishNpcIndex = LoadedObjectID`）；`0` 与非法行跳过（C# `index == 0 → continue`）。
+pub(crate) fn parse_quest_links(lines: &[String]) -> Vec<(i32, bool)> {
+    let mut out = Vec::new();
+    for line in lines {
+        let Ok(index) = line.trim().parse::<i32>() else {
+            continue;
+        };
+        if index == 0 {
+            continue;
+        }
+        out.push((index.abs(), index < 0));
+    }
+    out
+}
+
+/// #2867：世界启动时把 NPC 脚本的 `[QUESTS]` 页汇总成 `(quest, finish) -> [npc db_index]`。
+///
+/// C# 在脚本加载时逐 NPC 覆盖 `QuestInfo.NpcIndex`；本端保留全部候选，由 `quest_npc_in_range`
+/// 判断「附近是否存在可接/可交该任务的 NPC」，与 C# 扫描 `CurrentMap.NPCs` 的语义等价。
+/// C# 遇到 `Envir.GetQuestInfo(index) == null` 会中止该 NPC 的解析，本端改为跳过该行（更保守）。
+pub(crate) fn build_quest_npc_links(
+    npc_scripts: &std::collections::HashMap<(i32, String), Vec<String>>,
+    quest_infos: &std::collections::HashMap<i32, crate::db::QuestInfo>,
+) -> std::collections::HashMap<(i32, bool), Vec<i32>> {
+    let mut links: std::collections::HashMap<(i32, bool), Vec<i32>> =
+        std::collections::HashMap::new();
+    for ((npc_index, page), lines) in npc_scripts {
+        if !page.eq_ignore_ascii_case("[QUESTS]") {
+            continue;
+        }
+        for (quest_index, finish) in parse_quest_links(lines) {
+            if !quest_infos.contains_key(&quest_index) {
+                continue;
             }
-        })
+            let entry = links.entry((quest_index, finish)).or_default();
+            if !entry.contains(npc_index) {
+                entry.push(*npc_index);
+            }
+        }
+    }
+    links
+}
+
+/// #2867：把 `quest_npc_links` 映射到**本会话**生成出来的 NPC object_id
+/// （C# `NpcIndex = LoadedObjectID`；同一任务多个 NPC 时后生成者覆盖，对齐 C# 逐 NPC 覆盖语义）。
+pub(crate) fn quest_npc_object_ids(
+    links: &std::collections::HashMap<(i32, bool), Vec<i32>>,
+    spawned: &[(i32, u32)],
+) -> std::collections::HashMap<(i32, bool), u32> {
+    let mut out: std::collections::HashMap<(i32, bool), u32> = std::collections::HashMap::new();
+    for (key, npc_indexes) in links {
+        for (db_index, object_id) in spawned {
+            if npc_indexes.contains(db_index) {
+                out.insert(*key, *object_id);
+            }
+        }
+    }
+    out
+}
+
+/// #2867：客户端任务定义的 `(npc_index, finish_npc_index)`——`FinishNpcIndex` 缺省回退到 `NpcIndex`
+/// （C# `QuestInfo.cs:31-34` 的 getter：`_finishNpcIndex == 0 ? NpcIndex : _finishNpcIndex`）。
+pub(crate) fn quest_client_npc_ids(
+    ids: &std::collections::HashMap<(i32, bool), u32>,
+    quest_index: i32,
+) -> (u32, u32) {
+    let start = ids.get(&(quest_index, false)).copied().unwrap_or(0);
+    let finish = ids.get(&(quest_index, true)).copied().unwrap_or(start);
+    (start, finish)
+}
+
+impl WorldActor {
+    /// #2014：quest 是否已关联到任意 NPC（`[QUESTS]` 段落 / npc_infos 两列）；
+    /// 未关联（数据未配置）时不做 NPC 强制校验。
+    pub(crate) fn quest_has_npc_link(&self, quest_index: i32, finish: bool) -> bool {
+        // #2867：权威来源是 NPC 脚本 `[QUESTS]` 段（真实库 `npc_infos.collect_quest_indexes` /
+        // `finish_quest_indexes` 两列实测全为空 ⇒ 旧实现恒 false，接/交任务的 NPC 校验形同虚设）
+        self.quest_npc_links.contains_key(&(quest_index, finish))
+            || self.npc_infos.values().any(|info| {
+                if finish {
+                    info.finish_quest_indexes.contains(&quest_index)
+                } else {
+                    info.collect_quest_indexes.contains(&quest_index)
+                }
+            })
     }
 
     /// #2014：C# AcceptQuest/FinishQuest——同图 + DataRange(16) 内存在可接/可交该任务的 NPC
@@ -21,20 +98,24 @@ impl WorldActor {
         quest_index: i32,
         finish: bool,
     ) -> bool {
+        let linked = self.quest_npc_links.get(&(quest_index, finish));
         self.npcs.values().any(|npc| {
             npc.map_index == player_map
                 && crate::actors::world::ai::max_distance(px, py, npc.x, npc.y) <= 16
-                && self
-                    .npc_infos
-                    .get(&npc.db_index)
-                    .map(|info| {
-                        if finish {
-                            info.finish_quest_indexes.contains(&quest_index)
-                        } else {
-                            info.collect_quest_indexes.contains(&quest_index)
-                        }
-                    })
+                && (linked
+                    .map(|indexes| indexes.contains(&npc.db_index))
                     .unwrap_or(false)
+                    || self
+                        .npc_infos
+                        .get(&npc.db_index)
+                        .map(|info| {
+                            if finish {
+                                info.finish_quest_indexes.contains(&quest_index)
+                            } else {
+                                info.collect_quest_indexes.contains(&quest_index)
+                            }
+                        })
+                        .unwrap_or(false))
         })
     }
 
@@ -564,5 +645,78 @@ impl Message<ShareQuestRequest> for WorldActor {
             &format!("已分享任务 #{}", msg.quest_id),
         );
         debug!("ShareQuest: {} quest_id={}", state.name, msg.quest_id);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    /// #2867：C# `NPCScript.ParseQuests`（`:703-714`）——正数=可接、负数=可交；`0` 与非法行跳过
+    #[test]
+    fn parse_quest_links_matches_csharp() {
+        let lines: Vec<String> = ["121", "-121", "0", "abc", " 131 "]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        assert_eq!(
+            parse_quest_links(&lines),
+            vec![(121, false), (121, true), (131, false)]
+        );
+        assert!(parse_quest_links(&[]).is_empty());
+    }
+
+    /// #2867：`build_quest_npc_links` 只认 `[QUESTS]` 页、跳过未知任务（C# `GetQuestInfo == null`）
+    #[test]
+    fn build_quest_npc_links_filters_pages_and_unknown_quests() {
+        let mut scripts: HashMap<(i32, String), Vec<String>> = HashMap::new();
+        scripts.insert(
+            (5, "[QUESTS]".to_string()),
+            vec!["1".to_string(), "-1".to_string(), "999".to_string()],
+        );
+        // 非 [QUESTS] 页不参与
+        scripts.insert((5, "[@MAIN]".to_string()), vec!["1".to_string()]);
+        // 页名大小写不敏感
+        scripts.insert((7, "[quests]".to_string()), vec!["1".to_string()]);
+
+        let mut quest_infos: HashMap<i32, crate::db::QuestInfo> = HashMap::new();
+        quest_infos.insert(
+            1,
+            crate::db::QuestInfo {
+                index: 1,
+                ..Default::default()
+            },
+        );
+
+        let links = build_quest_npc_links(&scripts, &quest_infos);
+        // HashMap 迭代序不定 ⇒ 比较前排序
+        let mut starts = links.get(&(1, false)).cloned().unwrap_or_default();
+        starts.sort_unstable();
+        assert_eq!(starts, vec![5, 7]);
+        assert_eq!(links.get(&(1, true)), Some(&vec![5]));
+        assert!(links.get(&(999, false)).is_none(), "未知任务不建立关联");
+    }
+
+    /// #2867：任务 → 本会话 NPC object_id 映射（同任务多 NPC 后者覆盖）+ finish 回退 start
+    #[test]
+    fn quest_npc_object_ids_and_client_ids_match_csharp() {
+        let mut links: HashMap<(i32, bool), Vec<i32>> = HashMap::new();
+        links.insert((1, false), vec![5]);
+        links.insert((1, true), vec![7]);
+        links.insert((2, false), vec![5, 6]);
+        let spawned: Vec<(i32, u32)> = vec![(5, 1001), (6, 1002), (7, 1003)];
+
+        let ids = quest_npc_object_ids(&links, &spawned);
+        assert_eq!(ids.get(&(1, false)), Some(&1001));
+        assert_eq!(ids.get(&(1, true)), Some(&1003));
+        // 同一任务两个 NPC：后生成者覆盖（对齐 C# 逐 NPC 覆盖 `NpcIndex`）
+        assert_eq!(ids.get(&(2, false)), Some(&1002));
+
+        // finish 缺省回退 start（C# `QuestInfo.cs:31-34`）
+        assert_eq!(quest_client_npc_ids(&ids, 1), (1001, 1003));
+        assert_eq!(quest_client_npc_ids(&ids, 2), (1002, 1002));
+        // 未关联任务 → (0, 0)
+        assert_eq!(quest_client_npc_ids(&ids, 42), (0, 0));
     }
 }

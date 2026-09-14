@@ -1260,6 +1260,184 @@ fn e2e_awakening_success_path() {
     });
 }
 
+/// #2867：任务定义（`S.NewQuestInfo`）必须带上「可接该任务的 NPC object_id」——
+/// 数据源是 NPC 脚本 `[QUESTS]` 段（C# `NPCScript.ParseQuests:685-720` → `QuestInfo.NpcIndex = LoadedObjectID`）。
+///
+/// 此前该字段恒 0（审计索引 #2564 记录项⑦），同时让 `quest_has_npc_link` 读的
+/// `npc_infos.collect_quest_indexes`（真实库全空）把「必须到对应 NPC 处接任务」的校验变成空操作。
+#[test]
+fn e2e_quest_info_carries_npc_object_id() {
+    const CHAR: &str = "QuestNpcChar";
+
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .thread_stack_size(8 * 1024 * 1024)
+        .enable_time()
+        .build()
+        .unwrap();
+    rt.block_on(async {
+        let session_id = 44u64;
+        let (gate_ref, _tx, mut rx) = setup_gate_and_session(session_id).await;
+        let db_pool = e2e_setup_login(&gate_ref, session_id, &mut rx).await;
+
+        // 地图 0 + NPC（db_index=1）+ 该 NPC 的 [QUESTS] 页（正数 = 可接任务 1）
+        sqlx::query("INSERT INTO map_infos (idx, file_name, title) VALUES (0, '0', 'TestMap')")
+            .execute(&db_pool)
+            .await
+            .expect("insert map_infos");
+        sqlx::query(
+            "INSERT INTO npc_infos (idx, map_index, file_name, name, x, y) \
+             VALUES (1, 0, 'QuestGiver', 'QuestGiver', 10, 10)",
+        )
+        .execute(&db_pool)
+        .await
+        .expect("insert npc_infos");
+        sqlx::query(
+            "INSERT INTO npc_scripts (npc_index, page_name, lines_json) \
+             VALUES (1, '[QUESTS]', '[\"1\",\"-1\"]')",
+        )
+        .execute(&db_pool)
+        .await
+        .expect("insert npc_scripts");
+        sqlx::query(
+            "INSERT INTO quest_infos (idx, name, group_name, file_name) \
+             VALUES (1, 'TestQuest', 'TestGroup', '1.txt')",
+        )
+        .execute(&db_pool)
+        .await
+        .expect("insert quest_infos");
+
+        let social_ref = SocialActor::spawn(SocialActorArgs {
+            gate_ref: gate_ref.clone(),
+            db_pool: db_pool.clone(),
+            config: SocialActorConfig::default(),
+        });
+        let world_ref = WorldActor::spawn(WorldActorArgs {
+            tick_interval_ms: 1000,
+            gate_ref: gate_ref.clone(),
+            map_dir: std::path::PathBuf::from("."),
+            spawn_dir: None,
+            quest_dir: std::path::PathBuf::from("."),
+            npc_script_dir: std::path::PathBuf::from("."),
+            db_pool: db_pool.clone(),
+            social_ref,
+            conquest_cfg: crate::util::config::ConquestConfig::default(),
+            rested_cfg: crate::util::config::RestedConfig::default(),
+            pvp_cfg: crate::util::config::PvpConfig::default(),
+            health_regen_weight: 10,
+            mana_regen_weight: 10,
+            goods_hide_added_stats: true,
+            goods_on: true,
+            goods_max_stored: 15,
+            goods_buy_back_time_minutes: 60,
+            goods_buy_back_max_stored: 20,
+            safe_zone_healing: false,
+            archive_inactive_after_months: 12,
+            monster_recall_enabled: true,
+            monster_recall_range: 12,
+            monster_recall_cooldown_ms: 5000,
+            exp_mob_level_difference: true,
+            refine_cfg: crate::util::config::RefineConfig::default(),
+            replace_wedring_cost: 125,
+            lover_exp_bonus: 5,
+            mentor_exp_boost: 10,
+            mentor_damage_boost: 10,
+            mentor_skill_boost: true,
+            mentee_exp_bank: 1,
+            orbs_exp_list: Vec::new(),
+            orbs_dmg_list: Vec::new(),
+            orbs_def_list: Vec::new(),
+            awakening_cfg: Default::default(),
+            gem_cfg: Default::default(),
+            hero_exp_list: Vec::new(),
+            setup_cfg: Default::default(),
+            drop_rate: 1.0,
+            exp_rate: 1.0,
+            experience_list: Vec::new(),
+            item_timeout_ticks: 300,
+            max_drop_gold: 2000,
+            drop_gold: true,
+            rarity_cfg: crate::util::config::RarityConfig::default(),
+            notice_path: "Notice.txt".to_string(),
+            death_exp_penalty_percent: 0,
+            movement_pacing_ms: 0,
+            fishing_cfg: crate::util::ini::FishingConfig::default(),
+            random_item_stats: Vec::new(),
+            guild_buff_infos: Vec::new(),
+        });
+        let _ = gate_ref.ask(SetWorldRef { world_ref }).await;
+
+        // 建角
+        let mut nc_body = Vec::new();
+        let _ = mir2_shared::binary::write_dotnet_string(&mut nc_body, CHAR);
+        nc_body.push(0u8);
+        nc_body.push(0u8);
+        let _ = gate_ref
+            .ask(ClientData {
+                session_id,
+                data: build_packet_bytes(
+                    mir2_shared::enums::ClientPacketIds::NewCharacter as i16,
+                    &nc_body,
+                ),
+            })
+            .await;
+        assert!(
+            wait_opcode_body(
+                &mut rx,
+                mir2_shared::enums::ServerPacketIds::NewCharacterSuccess as i16,
+                3
+            )
+            .await
+            .is_some(),
+            "NewCharacterSuccess"
+        );
+
+        let _ = gate_ref
+            .ask(ClientData {
+                session_id,
+                data: build_packet_bytes(
+                    mir2_shared::enums::ClientPacketIds::StartGame as i16,
+                    &0i32.to_le_bytes().to_vec(),
+                ),
+            })
+            .await;
+        assert!(
+            wait_opcode_body(
+                &mut rx,
+                mir2_shared::enums::ServerPacketIds::StartGame as i16,
+                5
+            )
+            .await
+            .is_some(),
+            "StartGame"
+        );
+
+        // NPC（object_id）→ 任务定义（index + npc_index 必须等于该 object_id）
+        let npc_body = wait_opcode_body(
+            &mut rx,
+            mir2_shared::enums::ServerPacketIds::ObjectNpc as i16,
+            5,
+        )
+        .await
+        .expect("ObjectNpc 未下发");
+        let npc_oid = u32::from_le_bytes(npc_body[0..4].try_into().unwrap());
+
+        let quest_body = wait_opcode_body(
+            &mut rx,
+            mir2_shared::enums::ServerPacketIds::NewQuestInfo as i16,
+            5,
+        )
+        .await
+        .expect("NewQuestInfo 未下发");
+        let quest_index = i32::from_le_bytes(quest_body[0..4].try_into().unwrap());
+        let quest_npc_index = u32::from_le_bytes(quest_body[4..8].try_into().unwrap());
+        assert_eq!(quest_index, 1, "任务定义应为 #1");
+        assert_eq!(
+            quest_npc_index, npc_oid,
+            "npc_index 必须等于 NPC 脚本 [QUESTS] 段登记的 NPC object_id（此前恒 0）"
+        );
+    });
+}
+
 #[tokio::test]
 async fn e2e_client_version_handshake() {
     let session_id = 1u64;
