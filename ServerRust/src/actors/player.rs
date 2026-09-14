@@ -16,7 +16,7 @@ use crate::actors::quest::QuestLog;
 use crate::actors::refine::RefineLog;
 use crate::gate::actor::{GateActor, SendToClient};
 use crate::maps::loader::MapData;
-use crate::util::wire::{build_packet_bytes, write_dotnet_string};
+use crate::util::wire::build_packet_bytes;
 use mir2_shared::packets::Packet;
 
 /// 玩家已学习的魔法/技能
@@ -3399,7 +3399,7 @@ impl Message<SetStatBonuses> for PlayerActor {
         cap_player_stats(self.state.class, &mut self.state);
 
         if changed {
-            self.send_user_information_refresh();
+            self.request_user_information_refresh();
         }
     }
 }
@@ -7725,7 +7725,7 @@ impl Message<ReviveAtHalfHp> for PlayerActor {
 impl PlayerActor {
     fn send_inventory_changed(&self) {
         // 发送 UserInformation 刷新（不含背包数据，客户端需主动查询）
-        self.send_user_information_refresh();
+        self.request_user_information_refresh();
     }
 
     /// C# RecalculateQuestBag：清除任务格中不再被任何活跃任务需要的任务物品，并逐个发 S.DeleteQuestItem
@@ -7795,7 +7795,7 @@ impl PlayerActor {
 
     fn send_equipment_changed(&self) {
         // 发送 UserInformation 刷新装备状态
-        self.send_user_information_refresh();
+        self.request_user_information_refresh();
     }
 
     /// #967：下发 S.RefreshItem（C# 幸运/耐久变化后客户端即时刷新物品显示）
@@ -7818,153 +7818,20 @@ impl PlayerActor {
 
     fn send_gold_changed(&self) {
         // 发送 UserInformation 刷新金币
-        self.send_user_information_refresh();
+        self.request_user_information_refresh();
     }
 
-    /// 发送 UserInformation 刷新（不含完整背包数据）
-    fn send_user_information_refresh(&self) {
-        use mir2_shared::enums::ServerPacketIds;
-        let mut body = Vec::new();
-
-        body.extend_from_slice(&self.state.object_id.to_le_bytes()); // object_id
-        body.extend_from_slice(&1u32.to_le_bytes()); // real_id
-        write_dotnet_string(&mut body, &self.state.name); // name
-        write_dotnet_string(&mut body, self.state.guild_name.as_deref().unwrap_or("")); // guild_name
-        write_dotnet_string(
-            &mut body,
-            match self.state.guild_rank {
-                crate::actors::guild::GuildRank::Leader => "掌门",
-                crate::actors::guild::GuildRank::Officer => "副掌门",
-                crate::actors::guild::GuildRank::Member => "成员",
-            },
-        ); // guild_rank
-        body.extend_from_slice(&0i32.to_le_bytes()); // name_colour
-        body.push(self.state.class as u8); // class
-        body.push(self.state.gender as u8); // gender
-        body.extend_from_slice(&self.state.level.to_le_bytes()); // level
-        body.extend_from_slice(&self.state.x.to_le_bytes()); // location_x
-        body.extend_from_slice(&self.state.y.to_le_bytes()); // location_y
-        body.push(self.state.direction); // direction
-        body.push(self.state.hair); // hair
-        body.extend_from_slice(&self.state.hp.to_le_bytes()); // hp
-        body.extend_from_slice(&self.state.mp.to_le_bytes()); // mp
-        body.extend_from_slice(&self.state.experience.to_le_bytes()); // experience
-        body.extend_from_slice(&self.state.max_experience.to_le_bytes()); // max_experience
-        body.extend_from_slice(&0u16.to_le_bytes()); // level_effects
-        body.push(if self.state.hero_index > 0 { 1u8 } else { 0u8 }); // has_hero
-                                                                      // hero_behaviour（C# 值 0..3，与 SharedRust HeroBehaviour 一致）
-        body.push(self.state.hero_behaviour); // hero_behaviour (C# 0..3)
-
-        // 背包/装备数据（简化版：不发送完整物品，客户端通过 ItemChanged 等增量包更新）
-        body.push(0u8); // has_inventory=false
-        body.push(0u8); // has_equipment=false
-        body.push(0u8); // has_quest_inventory=false
-        body.extend_from_slice(&(self.state.inventory.gold as u32).to_le_bytes()); // gold
-        body.extend_from_slice(&0u32.to_le_bytes()); // credit=0
-                                                     // 仓库扩容/仓库密码（C# UserInformation：HasExpandedStorage/HasStoragePassword/
-                                                     // RequireStoragePassword/StoragePasswordLastSet/ExpandedStorageExpiryTime）
-        body.push(if self.state.has_expanded_storage {
-            1u8
-        } else {
-            0u8
-        }); // has_expanded_storage
-        body.push(if self.state.has_storage_password {
-            1u8
-        } else {
-            0u8
-        }); // has_storage_password
-        body.push(if self.state.require_storage_password {
-            1u8
-        } else {
-            0u8
-        }); // require_storage_password
-        body.extend_from_slice(&self.state.storage_password_last_set.to_le_bytes()); // storage_password_last_set
-        body.extend_from_slice(&self.state.expanded_storage_expiry_date.to_le_bytes()); // expanded_storage_expiry_time
-        body.extend_from_slice(&0i32.to_le_bytes()); // magic_count=0
-        body.extend_from_slice(&0i32.to_le_bytes()); // creature_count=0
-        body.push(0u8); // summoned_creature_type
-        body.push(0u8); // creature_summoned=false
-        body.push(if self.state.allow_observe { 1u8 } else { 0u8 }); // allow_observe
-        body.push(0u8); // observer=false
-
-        // #208：角色面板属性段（18 x i32；最终值 = 基础 + 装备加成）
-        body.extend_from_slice(
-            &(self.state.max_hp
-                + self.state.bonus_max_hp
-                + crate::combat::buff::get_stat_bonus(
-                    &self.state.buffs,
-                    &crate::combat::buff::BuffType::MaxHpBoost { bonus: 0 },
-                ))
-            .to_le_bytes(),
-        );
-        body.extend_from_slice(
-            &(self.state.max_mp
-                + self.state.bonus_max_mp
-                + crate::combat::buff::get_stat_bonus(
-                    &self.state.buffs,
-                    &crate::combat::buff::BuffType::MaxMpBoost { bonus: 0 },
-                ))
-            .to_le_bytes(),
-        );
-        for v in [
-            self.state.min_ac + self.state.bonus_min_ac,
-            self.state.max_ac + self.state.bonus_max_ac,
-        ] {
-            body.extend_from_slice(&v.to_le_bytes());
-        }
-        for v in [
-            self.state.min_mac + self.state.bonus_min_mac,
-            self.state.max_mac + self.state.bonus_max_mac,
-        ] {
-            body.extend_from_slice(&v.to_le_bytes());
-        }
-        for v in [
-            self.state.min_attack + self.state.bonus_min_attack,
-            self.state.max_attack + self.state.bonus_max_attack,
-        ] {
-            body.extend_from_slice(&v.to_le_bytes());
-        }
-        for v in [
-            self.state.min_mc + self.state.bonus_min_mc,
-            self.state.max_mc + self.state.bonus_max_mc,
-        ] {
-            body.extend_from_slice(&v.to_le_bytes());
-        }
-        for v in [
-            self.state.min_sc + self.state.bonus_min_sc,
-            self.state.max_sc + self.state.bonus_max_sc,
-        ] {
-            body.extend_from_slice(&v.to_le_bytes());
-        }
-        body.extend_from_slice(&self.state.critical_rate.to_le_bytes());
-        body.extend_from_slice(&self.state.critical_damage.to_le_bytes());
-        body.extend_from_slice(&self.state.attack_speed.to_le_bytes()); // attack_speed（装备加成 Stat::AttackSpeed）
-        body.extend_from_slice(&self.state.accuracy.to_le_bytes());
-        body.extend_from_slice(&self.state.agility.to_le_bytes());
-        body.extend_from_slice(&self.state.luck.to_le_bytes());
-
-        // #210：State 页段（轻量刷新无 item_infos，负重暂填 0；全量包由 build_user_information_packet 下发）
-        for v in [
-            0i32, // bag_weight
-            0i32, // wear_weight
-            0i32, // hand_weight
-            self.state.magic_resist,
-            self.state.poison_resist,
-            self.state.health_recovery,
-            self.state.spell_recovery,
-            self.state.poison_recovery,
-            self.state.holy,
-            self.state.freezing,
-            self.state.poison_attack,
-        ] {
-            body.extend_from_slice(&v.to_le_bytes());
-        }
-
+    /// #2872：状态变化后请求 world 下发一次**完整** `S.UserInformation`
+    ///
+    /// C# `PlayerObject.GetUserInfo`（`PlayerObject.cs:1649-1700`）每次都带完整
+    /// `Inventory`/`Equipment`/`QuestInventory` 段；本端此前在此自造「轻量 UserInformation」
+    /// （不带这三段），会让按 C# 语义解析的客户端把背包/装备视图清空（#2870 真机复现）。
+    /// 玩家 actor 没有 `item_infos`，故交给 world 侧构造完整包。
+    fn request_user_information_refresh(&self) {
         let _ = self
-            .gate_ref
-            .tell(SendToClient {
+            .world_ref
+            .tell(crate::actors::world::RefreshUserInformation {
                 session_id: self.state.session_id,
-                data: build_packet_bytes(ServerPacketIds::UserInformation as i16, &body),
             })
             .try_send();
     }
