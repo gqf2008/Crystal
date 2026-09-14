@@ -64,6 +64,9 @@ pub enum InputPurpose {
     GuildWarReturn,
     /// 公会名 → `C.GuildNameReturn{Name}`
     GuildNameReturn,
+    /// #2892 批D：好友窗「添加好友」→ `C.AddFriend{Name, Blocked}`
+    /// （C# `FriendDialog.cs:143-160`：`new MirInputBox(FriendEnterAddName/FriendEnterBlockName)`，OK 时发包）
+    AddFriend { blocked: bool },
 }
 
 /// 输入框状态（C# 每次 `new MirInputBox(message)` 一个新窗口；本端复用同一实体）
@@ -193,6 +196,25 @@ fn spawn_input_box(
     });
 }
 
+/// #2892 批D：**客户端发起式**输入框（C# `new MirInputBox(message)` + `inputBox.Show()`，
+/// 用于好友窗「添加好友」`FriendDialog.cs:143-160`；服务端发起式见下一个系统）。
+pub fn open_input_box(
+    state: &mut InputBoxState,
+    input: &mut TextInputState,
+    purpose: InputPurpose,
+    title: &str,
+) {
+    state.open = true;
+    state.purpose = purpose;
+    state.title = title.to_string();
+    if input.texts.len() <= INPUT_FIELD_ID {
+        input.texts.resize(INPUT_FIELD_ID + 1, String::new());
+    }
+    input.texts[INPUT_FIELD_ID].clear();
+    input.active = Some(INPUT_FIELD_ID);
+    tracing::info!("⌨️ [INPUTBOX] 打开输入框（客户端发起）：{title}");
+}
+
 /// 服务端发起式取名 → 打开输入框（C# `GameScene.GuildNameRequest` / `GuildRequestWar`）
 fn input_box_open_system(
     mut state: ResMut<InputBoxState>,
@@ -299,6 +321,14 @@ fn input_box_ui_system(
                     name: body.clone(),
                 });
                 tracing::info!("⌨️ [INPUTBOX] C.GuildNameReturn name={body}");
+            }
+            InputPurpose::AddFriend { blocked } => {
+                // C# `inputBox.OKButton.Click`：`C.AddFriend{Name, Blocked}`（`FriendDialog.cs:155`）
+                net.send_packet(&mir2_shared::packets::client::friend::AddFriend {
+                    name: body.clone(),
+                    blocked,
+                });
+                tracing::info!("👥 [INPUTBOX] C.AddFriend name={body} blocked={blocked}");
             }
             InputPurpose::None => {}
         }
@@ -487,5 +517,40 @@ mod tests {
             app.world().resource::<DialogManager>().blocks_world_click(),
             "MirInputBox 是模态框，应屏蔽世界点击"
         );
+    }
+
+    /// #2892 批D：客户端发起式输入框（C# `new MirInputBox(message).Show()`）——
+    /// 打开时置标题/用途、清空并聚焦输入框；用途携带 `Blocked`（好友窗的加好友/加黑名单共用）。
+    ///
+    /// 阳性对照：去掉 `input.active = Some(INPUT_FIELD_ID);` → 本测试 FAILED。
+    #[test]
+    fn open_input_box_sets_state_and_focuses() {
+        let mut st = InputBoxState::default();
+        let mut input = TextInputState::default();
+        open_input_box(
+            &mut st,
+            &mut input,
+            InputPurpose::AddFriend { blocked: true },
+            "请输入您想要屏蔽的人的名字。",
+        );
+        assert!(st.open, "应打开");
+        assert_eq!(st.purpose, InputPurpose::AddFriend { blocked: true });
+        assert_eq!(st.title, "请输入您想要屏蔽的人的名字。");
+        assert_eq!(input.active, Some(INPUT_FIELD_ID), "应聚焦输入框");
+        assert!(
+            input.texts.len() > INPUT_FIELD_ID,
+            "输入串缓冲应扩展到该 id"
+        );
+        assert!(input.texts[INPUT_FIELD_ID].is_empty(), "打开时应清空");
+        // 加好友页签（非黑名单）时 `Blocked = false`
+        let mut st2 = InputBoxState::default();
+        let mut input2 = TextInputState::default();
+        open_input_box(
+            &mut st2,
+            &mut input2,
+            InputPurpose::AddFriend { blocked: false },
+            "请输入您想要添加的人的名字。",
+        );
+        assert_eq!(st2.purpose, InputPurpose::AddFriend { blocked: false });
     }
 }

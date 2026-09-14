@@ -52,6 +52,9 @@ pub struct FriendState {
     pub pending: Option<FriendPending>,
     /// 当前页签（false=好友 true=黑名单，C# _blockedTab）
     pub blocked_tab: bool,
+    /// #2892 批D：「添加好友」请求（`Some(blocked)` = 当前页签是否黑名单），
+    /// 由 `friend_add_open_system` 消费 → 打开 C# `MirInputBox`（`FriendDialog.cs:143-160`）
+    pub add_request: Option<bool>,
 }
 
 #[derive(Component)]
@@ -129,6 +132,13 @@ impl Plugin for FriendPlugin {
         app.add_systems(
             Update,
             friend_memo_open_system
+                .after(friend_ui_system)
+                .run_if(in_state(AppState::Game)),
+        );
+        // #2892 批D：「添加好友」走 C# `MirInputBox`（客户端发起式）
+        app.add_systems(
+            Update,
+            friend_add_open_system
                 .after(friend_ui_system)
                 .run_if(in_state(AppState::Game)),
         );
@@ -401,9 +411,9 @@ fn friend_ui_system(
             continue;
         }
         if act.is_add {
-            friend.pending = Some(FriendPending::Add);
-            input.texts[30].clear();
-            input.active = Some(30);
+            // #2892 批D：C# `AddButton.Click → new MirInputBox(FriendEnterAddName/FriendEnterBlockName)`
+            // （`FriendDialog.cs:143-160`）→ 记一个请求，由 `friend_add_open_system` 走通用 `MirInputBox`
+            friend.add_request = Some(friend.blocked_tab);
         } else if act.is_remove {
             if let Some(idx) = friend.selected {
                 if let Some(f) = list.get(idx) {
@@ -510,6 +520,30 @@ fn friend_memo_open_system(
     input.texts[crate::game::dialogs::memo::MEMO_INPUT_ID] = f.memo.clone();
     input.active = Some(crate::game::dialogs::memo::MEMO_INPUT_ID);
     tracing::info!("👥 打开好友备注窗: {}", f.name);
+}
+
+/// #2892 批D：「添加好友」→ C# `MirInputBox`（`FriendDialog.cs:143-160`）：
+/// 提示文案 `FriendEnterAddName`/`FriendEnterBlockName`（中文逐字取 `Chinese.json`），
+/// OK 时由 `input_box.rs` 发 `C.AddFriend{Name, Blocked}`。
+fn friend_add_open_system(
+    mut friend: ResMut<FriendState>,
+    mut box_state: ResMut<crate::game::dialogs::input_box::InputBoxState>,
+    mut input: ResMut<crate::game::dialogs::text_input::TextInputState>,
+) {
+    let Some(blocked) = friend.add_request.take() else {
+        return;
+    };
+    let title = if blocked {
+        "请输入您想要屏蔽的人的名字。"
+    } else {
+        "请输入您想要添加的人的名字。"
+    };
+    crate::game::dialogs::input_box::open_input_box(
+        &mut box_state,
+        &mut input,
+        crate::game::dialogs::input_box::InputPurpose::AddFriend { blocked },
+        title,
+    );
 }
 
 /// 消费服务端好友事件（网络层只广播 ServerEvent）
