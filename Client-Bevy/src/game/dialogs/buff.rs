@@ -278,6 +278,22 @@ pub(crate) fn buff_display(tag: u8) -> BuffDisplay {
             stats: D_NONE,
             percent: false,
         },
+        // #2892 批D 单元②：C# 三种隐身分开（`BuffDialog.cs:435-460` 的图标表）
+        // 31 = `BuffType.Hiding`（图标 17）、32 = `BuffType.DarkBody`（图标 70）；tag 10 = `MoonLight`
+        31 => BuffDisplay {
+            name: "隐身",
+            description: "对多数怪物隐形。\n",
+            icon: 17,
+            stats: D_NONE,
+            percent: false,
+        },
+        32 => BuffDisplay {
+            name: "暗身术",
+            description: "对多数怪物隐形且可移动。\n",
+            icon: 70,
+            stats: D_NONE,
+            percent: false,
+        },
         12 => BuffDisplay {
             name: "迅足",
             description: "",
@@ -1023,6 +1039,22 @@ mod tests {
     fn buff_display_samples_match_csharp_tables() {
         let d = buff_display(10);
         assert_eq!((d.name, d.icon), ("月影隐身", 65));
+        // #2892 批D 单元②：C# 三种隐身图标/文案分开（Hiding 17 / MoonLight 65 / DarkBody 70）
+        let hiding = buff_display(31);
+        assert_eq!((hiding.name, hiding.icon), ("隐身", 17));
+        assert_eq!(hiding.description, "对多数怪物隐形。\n");
+        let dark = buff_display(32);
+        assert_eq!((dark.name, dark.icon), ("暗身术", 70));
+        assert_eq!(dark.description, "对多数怪物隐形且可移动。\n");
+        assert_ne!(
+            (
+                buff_display(10).icon,
+                buff_display(31).icon,
+                buff_display(32).icon
+            ),
+            (65, 65, 65),
+            "三种隐身必须三个不同图标（修正前本端全部显示 MoonLight 的 65）"
+        );
         let d = buff_display(2);
         assert_eq!((d.name, d.icon, d.stats), ("攻击加成", 249, D_MAXDC));
         let d = buff_display(26);

@@ -2687,7 +2687,6 @@ impl WorldActor {
                 }
             }
             // 隐身过期检查：从 invisible_sessions 中移除已过期玩家并广播现身
-            let invis_tag = std::mem::discriminant(&crate::combat::buff::BuffType::Invisibility);
             let mut to_reveal: Vec<(u64, crate::actors::player::PlayerState)> = Vec::new();
             for session_id in &self.invisible_sessions {
                 if let Some(record) = self.players.get(session_id) {
@@ -2695,7 +2694,7 @@ impl WorldActor {
                         let still_invisible = state
                             .buffs
                             .iter()
-                            .any(|b| std::mem::discriminant(&b.buff_type) == invis_tag);
+                            .any(|b| crate::combat::buff::is_invisible_type(&b.buff_type));
                         if !still_invisible {
                             to_reveal.push((*session_id, state));
                         }
@@ -8406,8 +8405,6 @@ impl Message<Tick> for WorldActor {
                 mir2_shared::enums::PoisonType,
             )> = {
                 let mut results = Vec::new();
-                let invis_tag =
-                    std::mem::discriminant(&crate::combat::buff::BuffType::Invisibility);
                 for (session_id, record) in &self.players {
                     if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
                         if !state.is_dead {
@@ -8415,7 +8412,7 @@ impl Message<Tick> for WorldActor {
                             let is_invisible = state
                                 .buffs
                                 .iter()
-                                .any(|b| std::mem::discriminant(&b.buff_type) == invis_tag);
+                                .any(|b| crate::combat::buff::is_invisible_type(&b.buff_type));
                             if is_invisible {
                                 continue;
                             }

@@ -36,8 +36,13 @@ pub enum BuffType {
     Silence,
     /// 眩晕（无法移动/攻击）
     Stun,
-    /// 隐身（Hiding/MassHiding/MoonLight/DarkBody）
-    Invisibility,
+    // ===== 隐身三态（C# `BuffType` 分开的三个条目，图标/文案/可见性规则各不相同）=====
+    /// 隐身（C# `BuffType.Hiding`，图标 17，对多数怪物隐形）
+    Hiding,
+    /// 月影隐身（C# `BuffType.MoonLight`，图标 65，远距离对玩家与怪物隐形）
+    MoonLight,
+    /// 暗身术（C# `BuffType.DarkBody`，图标 70，对多数怪物隐形且可移动）
+    DarkBody,
     // ===== 刺客/弓箭手扩展（对齐 C# BuffType）=====
     /// 攻击速度提升（Haste，降低攻击冷却）
     AttackSpeedBoost { percent: i32 },
@@ -329,11 +334,18 @@ pub fn is_incacapacitated(buffs: &[BuffInstance]) -> bool {
         .any(|b| matches!(b.buff_type, BuffType::Stun | BuffType::Frozen))
 }
 
+/// C# 的三种隐身 BuffType（Hiding / MoonLight / DarkBody）——本端保留各自的图标/文案，
+/// 但**可见性规则暂未分档**（C# 三者各不相同，见 `docs/UI_COMPONENTS.md` §7）。
+pub fn is_invisible_type(t: &BuffType) -> bool {
+    matches!(
+        t,
+        BuffType::Hiding | BuffType::MoonLight | BuffType::DarkBody
+    )
+}
+
 /// 检查是否隐身
 pub fn is_invisible(buffs: &[BuffInstance]) -> bool {
-    buffs
-        .iter()
-        .any(|b| matches!(b.buff_type, BuffType::Invisibility))
+    buffs.iter().any(|b| is_invisible_type(&b.buff_type))
 }
 
 /// 检查是否被沉默（无法施法）

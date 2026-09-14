@@ -5742,7 +5742,7 @@ impl WorldActor {
                                 Some(std::mem::discriminant(&crate::combat::buff::BuffType::Stun))
                             }
                             "INVISIBILITY" => Some(std::mem::discriminant(
-                                &crate::combat::buff::BuffType::Invisibility,
+                                &crate::combat::buff::BuffType::Hiding,
                             )),
                             _ => None,
                         };
@@ -6220,12 +6220,11 @@ impl WorldActor {
                             }),
                             "SILENCE" => Some(crate::combat::buff::BuffType::Silence),
                             "STUN" => Some(crate::combat::buff::BuffType::Stun),
-                            "INVISIBILITY" => Some(crate::combat::buff::BuffType::Invisibility),
+                            "INVISIBILITY" => Some(crate::combat::buff::BuffType::Hiding),
                             _ => None,
                         };
                         if let Some(bt) = buff_type {
-                            let is_invis =
-                                matches!(bt, crate::combat::buff::BuffType::Invisibility);
+                            let is_invis = crate::combat::buff::is_invisible_type(&bt);
                             let buff =
                                 crate::combat::buff::BuffInstance::new(bt, duration, interval);
                             if let Some(record) = self.players.get(&session_id) {
@@ -7145,7 +7144,7 @@ impl WorldActor {
                             }
                             "SILENCE" => Some(crate::combat::buff::BuffType::Silence),
                             "STUN" => Some(crate::combat::buff::BuffType::Stun),
-                            "INVISIBILITY" => Some(crate::combat::buff::BuffType::Invisibility),
+                            "INVISIBILITY" => Some(crate::combat::buff::BuffType::Hiding),
                             _ => None,
                         };
                         if let Some(bt) = buff_type {
@@ -9574,7 +9573,7 @@ impl WorldActor {
         let buff_hidden = state
             .buffs
             .iter()
-            .any(|b| matches!(b.buff_type, crate::combat::buff::BuffType::Invisibility));
+            .any(|b| crate::combat::buff::is_invisible_type(&b.buff_type));
         let currently_invisible = self.invisible_sessions.contains(&session_id);
         if has_clear_ring && !currently_invisible {
             self.invisible_sessions.insert(session_id);

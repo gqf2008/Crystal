@@ -179,11 +179,12 @@
 | 批37 #2892 批B（单元10：行会页签按玩家行会权限门控） | 新增 `guild_tab_visible(page, opts, has_buff)` 纯函数 + `guild_my_options(guild, my_name)` 推导，把 C# `GuildRankOptions`（`Enums.cs:1898-1908`：1/2/4/8/16/32/64/128）与 `RefreshInterface` 规则接进 `guild_page_system`：`CanChangeNotice(64) → NoticeButton`、`CanChangeRank(1) → RankButton`、`CanStoreItem(8)\|CanRetrieveItem(16) → StorageButton`、缓存非空 → `BuffButton`，`MembersButton`/`StatusButton` 恒可见；当前页被权限关掉时兜底切到 `Members`。差异：C# 用服务端 `GuildStatus.MyOptions`，本端服务端自定义信息体未带该字段 → 由「本地玩家成员行 `rank_index` → `rank_defs[..].options`」推导，拿不到时不隐藏（见 §7）。 | #2913 |
 | 批38 #2892 批B（单元11：行会 NoticePage 正文 + 翻页） | NoticePage 补公告正文渲染（服务端 `GuildNotice` 行数组 → `(13, 1 + i*16)` 20 行，覆盖 C# `Notice` 文本框 322x330 区域）与 C# 滚动语义（新增纯函数 `notice_next_scroll`：`NoticeScrollIndex` 首行下标，上 0 停/下 `len-1` 停、公告变短自动收敛，接 `guild_notice_system`）；翻页钮改用 C# `Prguse2[197/198/199]`@(337,1)、`Prguse2[207/208/209]`@(337,318)；`StatusPage` 标题行收回为只显示行会名（C# `StatusGuildName`，金币/公告各有归属）。残留：编辑仍是单行输入框（C# `Notice` 为可编辑多行框）。 | #2914 |
 | 批39 #2892 批B（单元12：行会成员行内控件按 C# `UpdateMembers`） | 新增 `guild_member_rows_system` 逐帧同步 4 项：① `MembersRanks[i]` 职务下拉（100x14 @(24, 30+i*15)，`Items=Ranks`、`SelectedIndex=成员职务`、`Enabled = CanChangeRank && 成员职务下标 >= MyRankId`，改选发 `EditGuildMember{change_type=2}`）② `MembersName[i]` 只显示成员名（此前拼「名字（离线）(职务)」）③ `MembersStatus[i]`@(225,·) 在线 `LimeGreen`/离线 `White` ④ `MembersDelete[i].Visible = CanKick && 职务下标 >= MyRankId && 不是自己`（此前 18 个恒可见）。新增纯函数 `can_change_member_rank` / `can_kick_member` / `guild_my_rank_index` 并逐个钉断言。差异：`UiDropDown` 无 enabled 态（禁用时强制收起）、离线状态无「上次登录时间」（服务端自定义信息体未带 `LastLogin`）、改职无确认框（C# `OnNewRank` 有）。 | #2915 |
+| 批40 #2892 批D 单元②（三种隐身显示粒度） | 服务端 `combat/buff.rs` 把单一 `Invisibility` 拆成 C# 的 `Hiding`/`MoonLight`/`DarkBody` 三个变体，新增 `is_invisible_type`；`player.rs` tag 由「全部 10」改为 31/10/32（↔ C# `BuffDialog.cs:435-460` 图标 17/65/70），`buff_values`/死亡清理/破隐移除同步（`RemoveBuff` 对三种隐身一并清除并逐个下发 `S.RemoveBuff`）；`npc_script.rs` 脚本关键字 `HIDING`/`INVISIBILITY`/`MOONLIGHT`/`DARKBODY` 分别映射；`combat.rs` `SPELL_HIDING`+MassHiding→`Hiding`、`SPELL_MOON_LIGHT`+MoonMist→`MoonLight`；`tick.rs`/`session.rs`/`world/mod.rs` 的隐身判定统一走 `is_invisible_type`；客户端 `buff_display` 补 tag 31「隐身」(17)/32「暗身术」(70)（文案逐字取 `Chinese.json`）。未拆：`Rage`/`Impact` 仍共用 `AttackBoost`；三者的**可见性规则**仍共用一套（C# 各不相同）。 | #2916 |
 
 ## 6. 验证基线
 
 - `cargo check --tests`（Client-Bevy）通过。
-- `cargo test`（Client-Bevy）：**583 lib** + 2 bin + 1 smoke + **42 alignment** 通过（批39 单元⑫ 后基线；批38 单元⑪ 时为 582 lib + 42 alignment，批37 单元⑩ 时为 581 lib + 42 alignment，批36 单元⑨ 时为 579 lib + 42 alignment，批35 单元⑧ 时为 579 lib + 41 alignment，批34 单元⑦ 时为 579 lib + 40 alignment，批33 单元⑥ 时为 579 lib + 39 alignment，批32 单元⑤ 时为 576 lib + 38 alignment，批31 单元④ 时为 571 lib + 37 alignment，批28 单元③ 时为 542 lib + 24 alignment，批27 收尾时 535 lib，批26 收尾时 528 lib，批25 收尾时 523 lib，批24 收尾时 514 lib）；ServerRust **739 lib** + 6 integration（同上，含 `QuestItemReward` ItemInfo 协议 + `ClientGTMap` 字段）；SharedRust **187 + 11**（2 ignored，含 `QuestItemReward` 往返无损）。三侧 `cargo fmt -- --check` 净零差异。
+- `cargo test`（Client-Bevy）：**583 lib** + 2 bin + 1 smoke + **42 alignment** 通过（批40 批D 单元② 后基线；批39 单元⑫ 时为 583 lib + 42 alignment（ServerRust 739 lib），批38 单元⑪ 时为 582 lib + 42 alignment，批37 单元⑩ 时为 581 lib + 42 alignment，批36 单元⑨ 时为 579 lib + 42 alignment，批35 单元⑧ 时为 579 lib + 41 alignment，批34 单元⑦ 时为 579 lib + 40 alignment，批33 单元⑥ 时为 579 lib + 39 alignment，批32 单元⑤ 时为 576 lib + 38 alignment，批31 单元④ 时为 571 lib + 37 alignment，批28 单元③ 时为 542 lib + 24 alignment，批27 收尾时 535 lib，批26 收尾时 528 lib，批25 收尾时 523 lib，批24 收尾时 514 lib）；ServerRust **740 lib** + 6 integration（同上，含 `QuestItemReward` ItemInfo 协议 + `ClientGTMap` 字段）；SharedRust **187 + 11**（2 ignored，含 `QuestItemReward` 往返无损）。三侧 `cargo fmt -- --check` 净零差异。
 - 批31（#2892 批B）门禁：`cargo fmt -- --check` 0 差异；`cargo test --test ui_alignment` 37 passed；`cargo test` 全量 571+2+1+37 passed。**阳性对照**：把耐久内层灰底的 alpha 由 0.4 改成 1.0（去掉 C# `Opacity = 0.4F`）→ `game::dialogs::dura_status::tests::spawned_panel_renders_inner_layers` 如期 FAILED（"下层 = C# `GrayBackground.Opacity = 0.4F`，实际 alpha 1"），改回即绿。
 - 批31 断言覆盖口径：每个窗口断言「**面板精灵索引 → `.Lib` 实测尺寸**」+「**本端常量坐标 = C# `Location`**」+ 面板不越画布 / 子控件在父矩形内；用 `Libs::pixels` 做精灵身份守卫（不同索引像素必须不同）防止「索引写错但尺寸巧合相同」。
 - 批32（#2892 批B 单元5）门禁：`cargo fmt -- --check` 0 差异；`cargo test` 576 lib + 2 bin + 1 smoke + 38 alignment 全绿
@@ -220,6 +221,13 @@
   （`guild::tests` 25 passed，含 `member_row_permission_rules_match_csharp`）。
   **阳性对照**：把 `can_kick_member` 的「不是自己」判断去掉 → `member_row_permission_rules_match_csharp`
   如期 FAILED（"不能踢自己"），改回即绿。
+- 批40（#2892 批D 单元②）门禁：三侧 `cargo fmt -- --check` 0 差异；ServerRust `cargo test --lib` **740 passed**
+  （新增 `invisibility_trio_uses_distinct_tags`）+ 6 integration；Client-Bevy 583 lib + 2 bin + 1 smoke + 42 alignment；
+  SharedRust 187 + 11（2 ignored）。
+  **阳性对照**（两侧各一）：① ServerRust 把 `DarkBody` 的 tag 改回 10 →
+  `invisibility_trio_uses_distinct_tags` 如期 FAILED（`(31, 10, 10) != (31, 10, 32)`）；
+  ② Client-Bevy 的 `buff_display` 若把 31/32 也指向 MoonLight 的图标，则
+  `buff_display_samples_match_csharp_tables` 里「三种隐身必须三个不同图标」的 `assert_ne!` 会 FAILED。
 - Report 的 C# `Prguse[1633]` 在当前本地 Data 包缺失；已使用按 C# 控件边界推导的 360x244 深色兜底面板并保留对应子控件坐标，待资源包更新后自动加载正确背景。
 - ServerRust：680 lib + 6 integration 通过（批24 单元③ 后；批16 基线为 673 lib）；SharedRust 187 + 11（2 ignored）；`MapEditor/SharedRust` `cargo check` 通过（副本同步，批24 单元③ 改 `QuestItemReward` 时同步）。
 - 关键实机/定向验证：UI 子树泄漏截图、Character 技能页、AssignKey 模态输入、Timer 穿透、登录安全键盘资源；批7 复验 Mail/Buff；批8 复验 Center 窗口。
@@ -360,7 +368,21 @@
 - 悬停提示（`MirControl.Hint`）覆盖长尾：C# 侧 `Hint = ` 共 **203 处**（`rg -c "Hint\s*=" Client/MirScenes`，其中 MainDialogs 149）。**已对齐**：HUD 主按钮 8 个（含键位）、小地图条 3 个（邮件/大地图/小地图）、菜单窗 13 个（含键位）、物品/商品/角色格（`item_tooltip_lines`）、头顶名字（玩家/怪物/NPC）、技能栏格（`SkillMpCooldownKey`）、大地图（搜索NPC/队友名）、玩家右键菜单 5 项、Mail（发送/读取/删除）、Group（允许拒绝队伍请求/添加/移除/成员名）、Friend（添加/移除/备注/邮件/悄悄话）、Ranking 6 页签、Relationship 5 项、Mentor 3 项、GuildTerritory 4 项（退出/翻页/购买）、Hero 行为 4 项 + 英雄/药水腰带 2 项、耐久面板钮、设置窗 2 条音量滑条、**技能页 7 行魔法格**（103 条技能描述，`dialogs/skill_desc.rs`，按 C# `Spell` 分派）。
   机制：sprite-UI `UiButton` 走 `TooltipHint`（source=1）；bevy UI `Button`/文本按钮走 `UiHint`（source=8，命中用「沿 `ChildOf` 链累加各级 `Node.left/top` 的绝对矩形」，`Auto` 尺寸回退 `ComputedNode`）；提示面板自身是 `GlobalZIndex(90)` 的 bevy_ui 根节点（批19 由 sprite 层迁移——旧实现会被所属对话框整块盖住）；带键位的文案按 C# `KeyBindSettings.GetKey` 拼接（`keyboard_layout::{binding_key_text, hint_with_key}`）。
   **批22 后已全部接上**（原「控件未实现」三项 + Buff 图标，见上）：`ChatControlBar`（批20）、`LoverButton`（批21）、GuildTerritory 邮件会长钮（批21）、Mail 回复（批21）、Relationship `AllowButton` 动态 Hint（批21）、`HeroManageAvatar`（批22 单元①）、Gameshop 付款复选框（批22 单元②）、`BuffDialog` 增益图标 Hint（批22 单元④）。**批23 单元① 已对齐 Exp/Drop**：C# `HumanObject.AddBuff` 对本人无条件 `Enqueue(S.AddBuff)`（`Visible` 只控制广播给他人），故 C# 客户端 Buff 窗会显示 `BuffImage(Exp)=260`/`(Drop)=162`；本端由 `SetExpMultiplier`/`SetDropMultiplier` 携带显示载荷（生效发 AddBuff tag 29/30 + `Luck` 百分比、到期发 RemoveBuff）补齐，安全区顺延不发包（与 C# 客户端本地倒计时一致）。**剩余长尾**：C# 的 `PoisonBuffDialog`（毒窗口，`Prguse2[40..]`）是**原版未完成功能**——源码自带 `//UNFINISHED`（`BuffDialog.cs:535`）且全仓零调用点（`S.Poisoned` 只用位掩码驱动致盲/清魔法），本端**不实现**；毒状态在本端走 `LocalPoisonChanged` 提示。
-  **Buff 显示近似（批22 单元④）**：Rust 端 `BuffType` 比 C# 粗（`AttackBoost` 同时覆盖 C# `Rage` 与 Buff 药水 `Impact`；`Invisibility` 覆盖 `Hiding`/`MoonLight`/`DarkBody`），`dialogs/buff.rs::buff_display` 按**代表来源**取 C# 图标/文案；毒类（`Poison/Slow/Frozen/Stun`）取 `PoisonType` 的图标与名称；展开态面板宽度按 art 宽度布局（C# `Size.Width` 展开时被改写成 `count*23`，比 art 窄 ~21px）；渐隐动画（C# `Opacity 0→1`，0.2/55ms）简化为直接显隐；Buff 窗为状态驱动 `AlwaysVisible`；**批23 单元② 已按 C# `Movable = false` 不可拖动**（`NotDraggable` 标记 + `dialog_drag_system` 的 `Without<NotDraggable>`，既不拖动也不进 kind 包围盒）。
+  **Buff 显示粒度（批22 单元④ → 批40 部分收口）**：`dialogs/buff.rs::buff_display` 按 tag 取 C# 图标/文案。
+  **批40 已把三种隐身拆开**：服务端 `BuffType` 由单一 `Invisibility` 拆为 `Hiding`/`MoonLight`/`DarkBody`
+  （tag 31/10/32 ↔ C# `BuffDialog.cs:435-460` 的图标 17/65/70，文案取 `Chinese.json` 的 `BuffType_*` +
+  `InvisibleToManyMonsters*`/`InvisibleToPlayersAndMonstersAtDistance`）；脚本 `GIVEBUFF` 关键字
+  （`HIDING`/`INVISIBILITY`/`MOONLIGHT`/`DARKBODY`）与法术（`SPELL_HIDING`/MassHiding→`Hiding`、
+  `SPELL_MOON_LIGHT`/MoonMist→`MoonLight`）各自映射；破隐（攻击/施法）与「是否隐身」判定统一走
+  `combat::buff::is_invisible_type`，`RemoveBuff` 对三种一并清除。
+  **仍未拆**：`AttackBoost` 同时覆盖 C# `Rage`（战士怒气，图标 49，MaxDC/MinDC）与 Buff 药水 `Impact`
+  （图标 249）；毒类（`Poison/Slow/Frozen/Stun`）取 `PoisonType` 的图标与名称；展开态面板宽度按 art 宽度布局
+  （C# `Size.Width` 展开时被改写成 `count*23`，比 art 窄 ~21px）；渐隐动画（C# `Opacity 0→1`，0.2/55ms）
+  简化为直接显隐；Buff 窗为状态驱动 `AlwaysVisible`；**批23 单元② 已按 C# `Movable = false` 不可拖动**
+  （`NotDraggable` 标记 + `dialog_drag_system` 的 `Without<NotDraggable>`）。
+  **另记**：C# 三种隐身的**可见性规则**各不相同（Hiding 对多数怪物、MoonLight 远距离对玩家与怪物、
+  DarkBody 对多数怪物且可移动），本端目前三者共用同一套「隐身即隐藏/不被怪物选中」判定；
+  `SPELL_DARK_BODY` 只召唤分身、未按 C# `:5363` 额外挂 `DarkBody` buff。
 - QuestDetail（批24）：**信用图标缺失**——C# 奖励区画 `Prguse[2447]`（信用/点数图标），但本端 `Data/Prguse.Lib` 只有 2447 张（下标 0..2446）→ 该图越界取不到，本端按缺失跳过（数值与偏移链仍按 C# 计算）；待资源包更新后自动出现。
 - QuestDetail（批24）：`_pauseButton`（`Title[270/271/272]` @(120,436)）在 C# 里**建了控件但 `Visible = false` 且无 Click**（`QuestDialogs.cs:577-584`，死控件）→ 本端保留同坐标实体并恒隐藏，不接线；同理 C# 注释掉的 `helpButton`（`Prguse2[257..259]`）不存在，本端不实现。
 - QuestDetail（批24）：消息区标题行 C# 用 `Font(Settings.FontName, 10F, FontStyle.Bold)`（GDI 合成粗体），Bevy `TextFont.weight` 只对**可变字重**字体生效（宋体无可变轴）→ 本端以 **+1px 字号**近似（正文 12px / 标题 13px，`QuestMessage` 的 +5 行占位与 15 缩进仍逐字照抄）。行内富文本**批25 已补齐**（见下条）。
