@@ -1,7 +1,11 @@
 // ============================================================================
 // 排名对话框（M9 第 3 批）
-// 布局参考：macroquad ranking_dialog.rs
-//   - 背景 Title[728]（324x441），(200,150)，10 行 28px
+// 布局参考：C# `Client/MirScenes/Dialogs/RankingDialog.cs`
+//   - 背景 Title[728]（原生 324x441）@ C# 居中公式 (350,163)
+//   - 子控件待精灵化（页签 Title[751..768] / 关闭 Prguse2[360..362] /
+//     翻页 Prguse2[197..199]@(299,100)、[207..209]@(299,386) /
+//     滚动条 Prguse2[205/206]@(299,113) / 仅在线 Prguse[2086/2087]@(190,H-20) /
+//     MyRank @(229,36) 82x22 / 行 (0/55/150/220,0)）——见 #2892 checklist
 // 网络：Ranking 请求 → 服务器回排名 → 显示
 // ============================================================================
 
@@ -15,6 +19,17 @@ use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
 use crate::ui::sprite_ui::{shared_cjk_font, UiCjkFont};
 use crate::ui::theme::{load_lib_image, spawn_icon_button, spawn_label, spawn_panel, ImageButton};
+
+/// #2892：面板几何对齐 C# `RankingDialog.cs:37-46`——
+/// `Index = 728; Library = Libraries.Title;`（原生 324x441），
+/// `Location = new Point((Settings.ScreenWidth - Size.Width) / 2,
+/// (Settings.ScreenHeight - Size.Height) / 2)`。
+/// 1024x768 屏上即 (350,163)（C# 为整数除法，等价 `dialogs::center_origin`）。
+///
+/// 此前硬编码 (200,150)（macroquad 迁移样板遗留）→ 整窗偏移 (150,13)，玩家可见。
+pub const PANEL_W: f32 = 324.0;
+pub const PANEL_H: f32 = 441.0;
+pub const PANEL_ORIGIN: (f32, f32) = (350.0, 163.0);
 
 /// 排名条目（服务端 Rankings 包）
 #[derive(Debug, Clone, Default)]
@@ -158,13 +173,21 @@ fn spawn_ranking(
     // 实体首次排版生效）——本窗原先整屏豆腐，改用共享宋体主字体。
     let font = shared_cjk_font(&mut fonts, &mut cjk_font);
 
-    // bevy_ui 面板 Title[728]（324x441 @ 200,150）——bevy_ui 迁移样板
+    // bevy_ui 面板 Title[728]（324x441）@ C# 居中 (350,163)
     let Some(bg) =
         crate::ui::theme::load_lib_image(&mut libs, &mut images, LibraryName::Title, 728)
     else {
         return;
     };
-    let panel = crate::ui::theme::spawn_panel(&mut commands, bg, 200.0, 150.0, 324.0, 441.0, 40);
+    let panel = crate::ui::theme::spawn_panel(
+        &mut commands,
+        bg,
+        PANEL_ORIGIN.0,
+        PANEL_ORIGIN.1,
+        PANEL_W,
+        PANEL_H,
+        40,
+    );
     commands
         .entity(panel)
         .insert((DialogRoot(DialogKind::Ranking), RankingWidget));
@@ -505,6 +528,23 @@ fn ranking_server_events(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #2892：面板原点必须等于 C# `RankingDialog.cs:45` 的居中公式
+    /// `((1024-W)/2, (768-H)/2)`（整数除法 → `dialogs::center_origin`）。
+    #[test]
+    fn panel_origin_matches_csharp_centering() {
+        use crate::game::dialogs::center_origin;
+        assert_eq!(
+            center_origin(PANEL_W, PANEL_H),
+            PANEL_ORIGIN,
+            "原点应为 C# 居中公式结果（此前硬编码 (200,150) 偏 (150,13)）"
+        );
+        assert_eq!(
+            PANEL_ORIGIN,
+            (350.0, 163.0),
+            "C# (1024-324)/2=350、(768-441)/2=163（整数除法）"
+        );
+    }
 
     fn entry(rank: i32, class: u8) -> RankEntry {
         RankEntry {

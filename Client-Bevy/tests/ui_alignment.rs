@@ -1779,3 +1779,52 @@ fn item_rental_guest_windows_aligned() {
 
     println!("  ✓ 租赁四窗 Prguse[238] 204x109 @163/287、自有/对方分流、锁定帧 250..253 齐全");
 }
+
+/// #2892：排行榜窗面板几何对齐 C# `RankingDialog.cs:37-46`——
+/// `Index = 728; Library = Libraries.Title;`（原生 324x441），
+/// `Location = ((ScreenWidth - Size.Width) / 2, (ScreenHeight - Size.Height) / 2)` → (350,163)。
+/// 此前硬编码 (200,150)（macroquad 迁移样板遗留）→ 整窗偏移 (150,13)。
+/// 本测试用真实精灵尺寸钉住「尺寸 == 原生」「原点 == C# 居中」；改回硬编码即红。
+#[test]
+fn ranking_dialog_aligned() {
+    use client_bevy::game::dialogs::ranking as rk;
+    require_assets!("ranking_dialog_aligned");
+    let mut libs = Libs::new();
+
+    let (w, h) = libs.size(LibraryName::Title, 728);
+    assert_eq!(
+        (w, h),
+        (rk::PANEL_W, rk::PANEL_H),
+        "[尺寸] 面板应取 Title[728] 原生尺寸 (324x441)，不得拉伸"
+    );
+
+    let (ox, oy) = rk::PANEL_ORIGIN;
+    // C# 是整数除法（`MirControl.Location` 为 int），Bevy 侧 `center_origin` 用 floor：
+    // (768-441)/2 = 163.5 → 163；故此处不能用 `assert_centered`（它按 f32 精确半宽比较）。
+    let (ex, ey) = (((SW - w) / 2.0).floor(), ((SH - h) / 2.0).floor());
+    assert_eq!(
+        (ox, oy),
+        (ex, ey),
+        "[居中] 排行榜原点应为 C# 整数除法居中结果（精灵 Title[728] {w}x{h}）"
+    );
+    assert_eq!(
+        (ox, oy),
+        (350.0, 163.0),
+        "[坐标] C# 居中公式 ((1024-324)/2, (768-441)/2)"
+    );
+    assert_in_canvas("排行榜", ox, oy, w, h);
+
+    // 窗口引用的精灵（关闭键 Prguse2[360..362]、仅在线勾选框 Prguse[2086/2087]）必须存在
+    for (lib, idx) in [
+        (LibraryName::Prguse2, 360usize),
+        (LibraryName::Prguse2, 361),
+        (LibraryName::Prguse2, 362),
+        (LibraryName::Prguse, 2086),
+        (LibraryName::Prguse, 2087),
+    ] {
+        let (sw, sh) = libs.size(lib, idx);
+        assert!(sw > 0.0 && sh > 0.0, "[精灵] {lib:?}[{idx}] 应存在且非空");
+    }
+
+    println!("  ✓ 排行榜 Title[728] 324x441 @(350,163)（C# 居中公式）");
+}
