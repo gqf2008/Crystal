@@ -1562,7 +1562,11 @@ pub(crate) fn auto_territory_test(
     state: Res<State<client_bevy::scenes::AppState>>,
     time: Res<Time>,
     territory: Res<client_bevy::game::dialogs::guild_territory::GuildTerritoryState>,
+    input_box: Res<client_bevy::game::dialogs::input_box::InputBoxState>,
+    mut input: ResMut<client_bevy::game::dialogs::text_input::TextInputState>,
     mut mgr: ResMut<client_bevy::game::dialogs::DialogManager>,
+    mut events: MessageWriter<client_bevy::network::server_event::ServerEvent>,
+    mut submits: MessageWriter<client_bevy::game::dialogs::text_input::TextInputSubmit>,
     mut t: Local<f32>,
     mut stage: Local<u8>,
     mut bought_id: Local<Option<i32>>,
@@ -1646,24 +1650,53 @@ pub(crate) fn auto_territory_test(
             if *t < 6.0 {
                 return;
             }
-            // 向 TestGuildWar 宣战（--territory-war 客户端先创建）
-            net.send_packet(&mir2_shared::packets::client::guild::GuildWarReturn {
-                guild_name: "TestGuildWar".to_string(),
-            });
-            tracing::info!("[TERRTEST] 向 TestGuildWar 宣战");
+            // #2892 批C：走 C# 链路——NPC `RequestWarKey` → `S.GuildRequestWar` → `MirInputBox`
+            // （这里直接注入服务端提示事件，等价于 NPC 触发的那个包）
+            events.write(
+                client_bevy::network::server_event::ServerEvent::TerritoryWar {
+                    guild_name: String::new(),
+                },
+            );
+            tracing::info!("[TERRTEST] 注入 S.GuildRequestWar（模拟 NPC RequestWarKey）");
             *stage = 5;
             *t = 0.0;
         }
         5 => {
-            if *t >= 10.0 {
-                tracing::warn!("[TERRTEST] ❌ 未收到宣战确认");
+            if *t < 1.0 {
+                return;
+            }
+            use client_bevy::game::dialogs::input_box::InputPurpose;
+            if !input_box.open || input_box.purpose != InputPurpose::GuildWarReturn {
+                tracing::warn!("[TERRTEST] ❌ 宣战输入框未弹出（S.GuildRequestWar → MirInputBox）");
                 *stage = 9;
                 return;
             }
-            if territory.war_message.contains("TestGuildWar") {
-                tracing::info!("[TERRTEST] ✅ 宣战成功: {}", territory.war_message);
-                *stage = 9;
+            // 填名字 → 回车（C# `InputTextBox` + Enter → OK → `C.GuildWarReturn`）
+            use client_bevy::game::dialogs::input_box::INPUT_FIELD_ID;
+            if input.texts.len() <= INPUT_FIELD_ID {
+                input.texts.resize(INPUT_FIELD_ID + 1, String::new());
             }
+            input.texts[INPUT_FIELD_ID] = "TestGuildWar".to_string();
+            submits.write(client_bevy::game::dialogs::text_input::TextInputSubmit(
+                INPUT_FIELD_ID,
+            ));
+            tracing::info!("[TERRTEST] 宣战输入框已弹出，提交 TestGuildWar");
+            *stage = 6;
+            *t = 0.0;
+        }
+        6 => {
+            if *t < 1.0 {
+                return;
+            }
+            if input_box.open {
+                tracing::warn!("[TERRTEST] ❌ 提交后输入框未关闭");
+                *stage = 9;
+                return;
+            }
+            tracing::info!(
+                "[TERRTEST] ✅ 宣战链路：S.GuildRequestWar → MirInputBox 弹出 → 提交 → C.GuildWarReturn"
+            );
+            *stage = 9;
         }
         _ => {}
     }

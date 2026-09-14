@@ -476,20 +476,40 @@ impl Packet for Rankings {
     }
 }
 
-/// GuildTerritoryPage - 公会领地页面 (274)
-#[derive(Debug, Clone)]
+/// GuildTerritoryPage - 公会领地页面 (276)
+///
+/// #2892 批C：线格式与字段**对齐 C# `S.GuildTerritoryPage`**（`Shared/ServerPackets.cs:4273-4295`
+/// + `ClientGTMap`（`Shared/Data/SharedData.cs:139-176`））：
+/// `length(i32) + count(i32) + count × { index(i32), Name, Owner, Leader, Leader2, price(i32),
+/// days(i32), begin(i32) }`（字符串均为 .NET 7-bit 前缀）。
+/// Rust 在每项**前置** `id(i32)`：本端购买走领地 ID（C# 用 Owner 公会名），属协议自洽扩展。
+#[derive(Debug, Clone, Default)]
 pub struct GuildTerritoryPage {
+    /// C# `length`：条目总数（客户端 `(Page+1)*7 < length` 判定能否翻页）
+    pub length: i32,
     pub territories: Vec<TerritoryInfo>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct TerritoryInfo {
-    pub index: i32,          // 索引
-    pub name: String,        // 名称
-    pub owner_guild: String, // 拥有公会
-    pub start_time: i64,     // 开始时间
-    pub end_time: i64,       // 结束时间
-    pub war_fee: u32,        // 战争费用
+    /// Rust 扩展：领地 ID（`C.PurchaseGuildTerritory{territory_id}` 用）
+    pub id: i32,
+    /// C# `ClientGTMap.index`
+    pub index: i32,
+    /// C# `ClientGTMap.Name`
+    pub name: String,
+    /// C# `ClientGTMap.Owner`（无主为「无」）
+    pub owner: String,
+    /// C# `ClientGTMap.Leader`（拥有公会最高职务第一名）
+    pub leader: String,
+    /// C# `ClientGTMap.Leader2`（第二名，无则空）
+    pub leader2: String,
+    /// C# `ClientGTMap.price`（0 = 不在售）
+    pub price: i32,
+    /// C# `ClientGTMap.days`
+    pub days: i32,
+    /// C# `ClientGTMap.begin`：租期剩余秒（>0 → 客户端显示「出售待定」，`:831`）
+    pub begin: i32,
 }
 
 impl Packet for GuildTerritoryPage {
@@ -500,16 +520,21 @@ impl Packet for GuildTerritoryPage {
         use byteorder::WriteBytesExt;
 
         // C# writes: length(i32) + Count + List[i].Save()
-        writer.write_i32::<LittleEndian>(self.territories.len() as i32)?; // length
-        writer.write_i32::<LittleEndian>(self.territories.len() as i32)?; // count
+        writer.write_i32::<LittleEndian>(self.length)?;
+        writer.write_i32::<LittleEndian>(self.territories.len() as i32)?;
 
         for territory in &self.territories {
+            // Rust 扩展：领地 ID 前置
+            writer.write_i32::<LittleEndian>(territory.id)?;
+            // C# `ClientGTMap.Save`
             writer.write_i32::<LittleEndian>(territory.index)?;
             write_dotnet_string(writer, &territory.name)?;
-            write_dotnet_string(writer, &territory.owner_guild)?;
-            writer.write_i64::<LittleEndian>(territory.start_time)?;
-            writer.write_i64::<LittleEndian>(territory.end_time)?;
-            writer.write_u32::<LittleEndian>(territory.war_fee)?;
+            write_dotnet_string(writer, &territory.owner)?;
+            write_dotnet_string(writer, &territory.leader)?;
+            write_dotnet_string(writer, &territory.leader2)?;
+            writer.write_i32::<LittleEndian>(territory.price)?;
+            writer.write_i32::<LittleEndian>(territory.days)?;
+            writer.write_i32::<LittleEndian>(territory.begin)?;
         }
 
         Ok(())
@@ -517,33 +542,38 @@ impl Packet for GuildTerritoryPage {
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
         use crate::binary::read_dotnet_string;
-        let _rank_type = reader.read_u8()?;
-        let _my_rank = reader.read_i32::<LittleEndian>()?;
+        let length = reader.read_i32::<LittleEndian>()?;
         let count = reader.read_i32::<LittleEndian>()?;
         let mut territories = Vec::with_capacity(count as usize);
 
         for _ in 0..count {
+            let id = reader.read_i32::<LittleEndian>()?;
             let index = reader.read_i32::<LittleEndian>()?;
-
             let name = read_dotnet_string(reader)?;
-
-            let owner_guild = read_dotnet_string(reader)?;
-
-            let start_time = reader.read_i64::<LittleEndian>()?;
-            let end_time = reader.read_i64::<LittleEndian>()?;
-            let war_fee = reader.read_u32::<LittleEndian>()?;
+            let owner = read_dotnet_string(reader)?;
+            let leader = read_dotnet_string(reader)?;
+            let leader2 = read_dotnet_string(reader)?;
+            let price = reader.read_i32::<LittleEndian>()?;
+            let days = reader.read_i32::<LittleEndian>()?;
+            let begin = reader.read_i32::<LittleEndian>()?;
 
             territories.push(TerritoryInfo {
+                id,
                 index,
                 name,
-                owner_guild,
-                start_time,
-                end_time,
-                war_fee,
+                owner,
+                leader,
+                leader2,
+                price,
+                days,
+                begin,
             });
         }
 
-        Ok(Self { territories })
+        Ok(Self {
+            length,
+            territories,
+        })
     }
 }
 

@@ -151,11 +151,11 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
             let mut mock_guild_gold: u32 = 0;
             let mut mock_guild_storage: Vec<Option<mir2_shared::data::item::UserItem>> = vec![None; 40];
             let mut mock_guild_members: Vec<String> = vec!["刀客".to_string()];
-            // #672：行会领地（(id, map_index, owner, state)）
-            let mut mock_territories: Vec<(i32, i32, String, u8)> = vec![
-                (1, 0, String::new(), 0),
-                (2, 1, String::new(), 0),
-                (3, 2, "敌对行会".to_string(), 0),
+            // #672/#2892：行会领地（(id, owner, leader, price, begin)）
+            let mut mock_territories: Vec<MockTerritory> = vec![
+                (1, String::new(), String::new(), 0, 0),
+                (2, String::new(), String::new(), 0, 0),
+                (3, "敌对行会".to_string(), "会长甲".to_string(), 1_000_000, 0),
             ];
             // #702：--guild-accept 行会邀请推送（进游戏 2s 后）
             let mut mock_guild_invite_sent = false;
@@ -1047,10 +1047,8 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                 x if x == ClientPacketIds::GuildTerritoryPage as i16 => {
                                     use byteorder::{LittleEndian, ReadBytesExt};
                                     let _page = cur.read_u32::<LittleEndian>().unwrap_or(0);
-                                    send(
-                                        &to_client,
-                                        &MockTerritoryPage { rows: mock_territories.clone() },
-                                    );
+                                    // #2892 批C：按 C# `ClientGTMap` 线格式回发
+                                    send(&to_client, &mock_gt_page(&mock_territories));
                                     tracing::info!("🏯 [MOCK] 领地列表回发");
                                 }
                                 x if x == ClientPacketIds::PurchaseGuildTerritory as i16 => {
@@ -1061,18 +1059,20 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                         .unwrap_or_else(|| "TestGuild4".to_string());
                                     for row in mock_territories.iter_mut() {
                                         if row.0 as u32 == tid {
-                                            row.2 = owner.clone();
+                                            row.1 = owner.clone();
+                                            row.2 = format!("会长{}", &owner);
+                                            row.3 = 0;
+                                            row.4 = 0;
                                         }
                                     }
                                     tracing::info!("🏯 [MOCK] 购买领地 #{} 归属 {}", tid, owner);
                                 }
                                 x if x == ClientPacketIds::GuildWarReturn as i16 => {
                                     if let Ok(p) = client::guild::GuildWarReturn::read_body(&mut cur) {
-                                        send(
-                                            &to_client,
-                                            &MockGuildRequestWar { guild_name: p.guild_name },
-                                        );
-                                        tracing::info!("🏯 [MOCK] 宣战确认");
+                                        // #2892 批C：C# `PlayerObject.GuildWarReturn` 不回送
+                                        // `S.GuildRequestWar`（那只由 NPC RequestWarKey 发起），
+                                        // 故 mock 同样不回包，只记日志
+                                        tracing::info!("🏯 [MOCK] 收到宣战请求：{}", p.guild_name);
                                     }
                                 }
                                 // #702：好友（--friend-test）

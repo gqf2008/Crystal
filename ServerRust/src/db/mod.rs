@@ -3148,6 +3148,28 @@ pub async fn delete_guild(pool: &DbPool, guild_name: &str) -> anyhow::Result<()>
     Ok(())
 }
 
+/// #2892 批C：取各公会**最高职务档**（`rank_index = 0`）的成员名（按加入顺序），
+/// 供行会领地列表的 `Leader`/`Leader2` 用 —— C# `GuildObject.cs:305-311`
+/// 取 `Ranks[0].Members[0]` / `[1]`（第一位为会长、第二位为副会长）。
+pub async fn load_guild_top_rank_members(
+    pool: &DbPool,
+) -> anyhow::Result<HashMap<String, Vec<String>>> {
+    let rows = sqlx::query(
+        "SELECT guild_name, member_name FROM guild_members WHERE rank_index = 0 \
+         ORDER BY guild_name, rowid",
+    )
+    .fetch_all(pool)
+    .await?;
+
+    let mut out: HashMap<String, Vec<String>> = HashMap::new();
+    for row in rows {
+        let guild: String = row.get("guild_name");
+        let member: String = row.get("member_name");
+        out.entry(guild).or_default().push(member);
+    }
+    Ok(out)
+}
+
 pub async fn load_guilds(pool: &DbPool) -> anyhow::Result<HashMap<String, Guild>> {
     let mut guilds = HashMap::new();
 
