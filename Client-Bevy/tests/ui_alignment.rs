@@ -2555,3 +2555,81 @@ fn hero_menu_panel_aligned() {
         "  ✓ HeroMenuPanel Prguse[2179] 24x61 @(862,630) + 三钮 16x16；召唤钮 Prguse[2167..2169] 20x20 @(Width-160, 90)"
     );
 }
+
+/// #2892 批C：英雄背包（`HeroInventoryDialog`）自动药区对齐 C#（`HeroDialogs.cs:101-180`）——
+/// 面板 `Prguse[1422]` 324x266；HP/MP 钮 `Title[560..565]` 60x25 @(58/206, H-60)；
+/// 百分比标签 @(58/206, H-33) 60x25；物品格 @(122/166, H-55)；锁条 `Prguse[1428/1429]` 108x62 @(57/162,196)。
+#[test]
+fn hero_inventory_autopot_aligned() {
+    use client_bevy::game::dialogs::hero_inventory as hi;
+    require_assets!("hero_inventory_autopot_aligned");
+    let mut libs = Libs::new();
+
+    let (pw, ph) = libs.size(LibraryName::Prguse, 1422);
+    assert_eq!((pw, ph), (324.0, 266.0), "[尺寸] 英雄背包面板 324x266");
+    let (ox, oy) = (hi::DIALOG_X, hi::DIALOG_Y);
+    assert_eq!(
+        (ox, oy),
+        (0.0, 0.0),
+        "C# `HeroInventoryDialog` 未设 Location"
+    );
+    assert_in_canvas("英雄背包", ox, oy, pw, ph);
+
+    // HP/MP 自动药钮（C# `Location = (58|206, Size.Height - 60)`）
+    for (idx, dx, name) in [(560usize, 58.0, "HP 钮"), (563, 206.0, "MP 钮")] {
+        let (w, h) = libs.size(LibraryName::Title, idx);
+        assert_eq!(
+            (w, h),
+            (60.0, 25.0),
+            "[尺寸] {name} 应取 Title[{idx}] 60x25"
+        );
+        for f in [idx + 1, idx + 2] {
+            assert_eq!(
+                libs.size(LibraryName::Title, f),
+                (w, h),
+                "[尺寸] Title[{f}]（hover/pressed）应与 normal 同尺寸"
+            );
+        }
+        let (x, y) = (ox + dx, oy + ph - 60.0);
+        assert_inside(name, x, y, w, h, ox, oy, pw, ph);
+        // 百分比标签在钮下方 27px（C# `HPButton.Location.Y + 27`）
+        assert_inside(
+            &format!("{name}百分比"),
+            x,
+            y + 27.0,
+            60.0,
+            25.0,
+            ox,
+            oy,
+            pw,
+            ph,
+        );
+    }
+    // 两个钮的水平区不重叠（58+60=118 ≤ 206）
+    assert!(58.0 + 60.0 <= 206.0, "[重叠] HP/MP 钮不得水平重叠");
+
+    // 锁条（`Prguse[1428]/[1429]` 108x62 @(57|162,196)）
+    for (idx, dx, name) in [(1428usize, 57.0, "HP 锁条"), (1429, 162.0, "MP 锁条")] {
+        let (w, h) = libs.size(LibraryName::Prguse, idx);
+        assert_eq!(
+            (w, h),
+            (108.0, 62.0),
+            "[尺寸] {name} 应取 Prguse[{idx}] 108x62"
+        );
+        assert_inside(name, ox + dx, oy + 196.0, w, h, ox, oy, pw, ph);
+    }
+    // 数量框图标（C# `MirAmountBox(EnterValue, 116, 99)` → `Items[116]`）
+    let (iw, ih, _, ioy) = libs.size_off(LibraryName::Items, 116);
+    assert!(
+        iw > 0.0 && ih > 0.0,
+        "[精灵] 自动药数量框图标 Items[116] 应存在"
+    );
+    assert_eq!(
+        ioy, 2.0,
+        "C# `UseOffSet` 下绘制位置 = Location + 精灵 offset"
+    );
+
+    println!(
+        "  ✓ 英雄背包自动药：Title[560..565] 60x25 @(58/206,206) + 标签(+27) + 锁条 Prguse[1428/1429] 108x62 @(57/162,196)"
+    );
+}
