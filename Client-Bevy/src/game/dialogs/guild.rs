@@ -184,6 +184,28 @@ pub struct GuildStorageIcon(pub usize);
 #[derive(Component)]
 pub struct GuildStorageCount(pub usize);
 
+/// NoticePage 正文行数/行高（C# `Notice` 文本框 322x330，本端按行渲染 16px）
+pub const NOTICE_ROWS: usize = 20;
+pub const NOTICE_ROW_DY: f32 = 16.0;
+/// 公告正文行（C# `Notice` 的可见行；由 `notice_scroll` 平移）
+#[derive(Component)]
+pub struct GuildNoticeLine(pub usize);
+
+/// C# `NoticeUpButton`/`NoticeDownButton` 的滚动语义：`NoticeScrollIndex` 为首行下标，
+/// 上到 0 停、下到 `len-1` 停（等价于对 `0..=len-1` 做 clamp）。
+pub fn notice_next_scroll(current: usize, delta: i32, len: usize) -> usize {
+    if len == 0 {
+        return 0;
+    }
+    let last = (len - 1) as i64;
+    (current as i64 + delta as i64).clamp(0, last) as usize
+}
+/// 公告翻页钮（C# `NoticeUpButton`/`NoticeDownButton` @(337,1)/(337,318)）
+#[derive(Component)]
+pub struct GuildNoticeUp;
+#[derive(Component)]
+pub struct GuildNoticeDown;
+
 // C# `GuildRankOptions`（`Shared/Enums.cs:1898-1908`）的位值
 pub const GUILD_OPT_CHANGE_RANK: u8 = 1;
 pub const GUILD_OPT_RECRUIT: u8 = 2;
@@ -293,6 +315,8 @@ pub struct GuildState {
     pub show_buff_page: bool,
     /// #2892 批B 单元7：当前页（C# `LeftDialog`/`RightDialog` 选中的 `*Page`）
     pub page: GuildPage,
+    /// #2892 批B 单元11：公告滚动首行（C# `GuildDialog.NoticeScrollIndex`）
+    pub notice_scroll: usize,
     /// #2537：Buff 页滚动起点（C# StartIndex，8 行/页）
     pub buff_start: usize,
 }
@@ -456,6 +480,7 @@ impl Plugin for GuildPlugin {
             Update,
             (
                 guild_page_system,
+                guild_notice_system,
                 guild_ui_system,
                 guild_buff_system,
                 guild_storage_system,
@@ -650,14 +675,48 @@ fn spawn_guild(
         }
     }
 
-    // ---- NoticePage：公告（C# `Notice` 文本框 @(13,1) 322x330，本端为单行输入 + 保存钮）----
+    // ---- NoticePage：公告（C# `GuildDialog.cs:215-316`）
+    //   `Notice` 文本框 322x330 @(13,1)（多行、按 `NoticeScrollIndex` 翻行）、
+    //   `NoticeEditButton Prguse[560/561/562]` / `NoticeSaveButton Prguse[554/555/556]` @(20,342)（二选一显示）、
+    //   上 `Prguse2[197/198/199]` @(337,1)、下 `Prguse2[207/208/209]` @(337,318)、位置条 `Prguse2[206]` @(337,16)。
+    //   本端：公告正文按行只读显示（服务端 `GuildNotice` 给的就是行数组）+ 单行编辑框（Bevy 扩展）发 `EditGuildNotice`。
     commands.entity(page_notice).with_children(|p| {
-        spawn_container(p, 13.0, 1.0, 322.0, 40.0, 2)
+        // 公告正文（C# `Notice` 区域 322x330；本端按行渲染，行高 16 → 20 行）
+        for i in 0..NOTICE_ROWS {
+            spawn_label(
+                p,
+                &cjk,
+                "",
+                13.0,
+                1.0 + i as f32 * NOTICE_ROW_DY,
+                11.0,
+                Color::WHITE,
+                8,
+            )
+            .insert(GuildNoticeLine(i));
+        }
+        // 翻页（C# `NoticeUpButton`/`NoticeDownButton` + `NoticePositionBar`）
+        if let (Some(n), Some(h), Some(pr)) = (
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 197),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 198),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 199),
+        ) {
+            spawn_icon_button(p, n, h, pr, 337.0, 1.0, 16.0, 14.0, 9).insert(GuildNoticeUp);
+        }
+        if let (Some(n), Some(h), Some(pr)) = (
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 207),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 208),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 209),
+        ) {
+            spawn_icon_button(p, n, h, pr, 337.0, 318.0, 16.0, 14.0, 9).insert(GuildNoticeDown);
+        }
+        // 编辑框（**Bevy 扩展**：C# 的 `Notice` 文本框本身可编辑；本端用单行输入 + 保存钮）
+        spawn_container(p, 13.0, 324.0, 322.0, 16.0, 2)
             .insert((
                 BackgroundColor(Color::srgba(0.10, 0.10, 0.13, 0.95)),
                 GuildNoticeField,
                 TextInputField(2),
-                TextInputRect(GUILD_X + 13.0, GUILD_Y + 61.0, 322.0, 40.0),
+                TextInputRect(GUILD_X + 13.0, GUILD_Y + 61.0 + 324.0, 322.0, 16.0),
                 Visibility::Hidden,
             ))
             .with_children(|ic| {
@@ -1183,6 +1242,45 @@ fn spawn_guild(
 }
 
 /// #2892 批B 单元7：页签切换（C# `GuildDialog.LeftDialog(0..3)` / `RightDialog(0..1)`）。
+/// #2892 批B 单元11：NoticePage 正文与翻页（C# `Notice` + `NoticeUpButton`/`NoticeDownButton`，
+/// `NoticeScrollIndex` 语义：首行下标，up 到 0 停、down 到 `len-1` 停）。
+fn guild_notice_system(
+    mut guild: ResMut<GuildState>,
+    mut lines: Query<(&GuildNoticeLine, &mut Text)>,
+    up: Query<(Entity, &Interaction), With<GuildNoticeUp>>,
+    down: Query<(Entity, &Interaction), With<GuildNoticeDown>>,
+    mut prev_inter: Local<HashMap<Entity, Interaction>>,
+) {
+    fn edge(e: Entity, inter: &Interaction, prev: &mut HashMap<Entity, Interaction>) -> bool {
+        let was = prev.insert(e, *inter);
+        *inter == Interaction::Pressed && was != Some(Interaction::Pressed)
+    }
+    for (e, inter) in &up {
+        if edge(e, inter, &mut prev_inter) {
+            // C# `NoticeUpButton.Click`：`if (NoticeScrollIndex == 0) return;`
+            guild.notice_scroll = notice_next_scroll(guild.notice_scroll, -1, guild.notice.len());
+        }
+    }
+    for (e, inter) in &down {
+        if edge(e, inter, &mut prev_inter) {
+            // C# `NoticeDownButton.Click`：`if (NoticeScrollIndex == Notice.MultiText.Length - 1) return;`
+            guild.notice_scroll = notice_next_scroll(guild.notice_scroll, 1, guild.notice.len());
+        }
+    }
+    // 滚动位置随公告长度收敛（公告变短时不会停在越界行）
+    guild.notice_scroll = notice_next_scroll(guild.notice_scroll, 0, guild.notice.len());
+    for (line, mut text) in &mut lines {
+        let want = guild
+            .notice
+            .get(guild.notice_scroll + line.0)
+            .cloned()
+            .unwrap_or_default();
+        if text.0 != want {
+            text.0 = want;
+        }
+    }
+}
+
 /// 非当前页整页 `Visibility::Hidden`（页面是根面板的子实体，关闭窗口时随根一起不渲染）。
 fn guild_page_system(
     mut guild: ResMut<GuildState>,
@@ -1479,16 +1577,9 @@ fn guild_ui_system(
         text.0 = match line.0 {
             0 => {
                 // C# `StatusGuildName` @(82,47)（行会名 + 会长 + 金币；公告另在 NoticePage）
+                // C# 该行只放行会名（金币在 `StorageGoldText`、公告在 `Notice` 文本框）
                 if guild.in_guild {
-                    let notice = guild.notice.first().cloned().unwrap_or_default();
-                    if notice.is_empty() {
-                        format!("{}（{}）金币:{}", guild.name, guild.leader, guild.gold)
-                    } else {
-                        format!(
-                            "{}（{}）金币:{} 公告:{}",
-                            guild.name, guild.leader, guild.gold, notice
-                        )
-                    }
+                    guild.name.clone()
                 } else {
                     "未加入行会".to_string()
                 }
@@ -2514,5 +2605,27 @@ mod tests {
         // rank_index 越界 → None（不 panic）
         st.members[0].rank_index = 9;
         assert_eq!(guild_my_options(&st, Some("bob")), None);
+    }
+    /// #2892 批B 单元11：公告滚动（C# `NoticeScrollIndex`：首行下标，0..=len-1 钳位）。
+    ///
+    /// 阳性对照：把下钳位去掉（只 `+1` 不 clamp）→ 本测试的「到底再加不动」断言 FAILED。
+    #[test]
+    fn notice_scroll_clamps_like_csharp() {
+        assert_eq!(notice_next_scroll(0, -1, 5), 0, "到顶再加不动");
+        assert_eq!(notice_next_scroll(0, 1, 5), 1);
+        assert_eq!(notice_next_scroll(3, 1, 5), 4);
+        assert_eq!(notice_next_scroll(4, 1, 5), 4, "到底再加不动");
+        assert_eq!(notice_next_scroll(4, -1, 5), 3);
+        // 空公告：恒 0（C# `Notice.MultiText.Length - 1` 会是 -1，本端取 0 避免下溢）
+        assert_eq!(notice_next_scroll(3, -1, 0), 0);
+        assert_eq!(notice_next_scroll(3, 1, 0), 0);
+        // 与可见行数常数一致：正文区 330px / 16px 行高 = 20 行
+        assert_eq!(NOTICE_ROWS, 20);
+        assert_eq!(NOTICE_ROW_DY, 16.0);
+        assert_eq!(NOTICE_ROWS as f32 * NOTICE_ROW_DY, 320.0);
+        assert!(
+            NOTICE_ROWS as f32 * NOTICE_ROW_DY <= 330.0,
+            "[越界] 公告 20 行不越出 C# `Notice` 文本框高 330"
+        );
     }
 }
