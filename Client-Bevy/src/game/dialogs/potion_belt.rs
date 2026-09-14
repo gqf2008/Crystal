@@ -26,13 +26,21 @@ use crate::ui::theme::{
     ImageButton,
 };
 
+/// #2892 批B：C# `BeltDialog`（`InventoryDialog.cs:604-700`）——面板 `Prguse[1932]` 240x38
+/// @ `(MainDialog.X + 230, ScreenHeight - 150)` = (230,618)；6 格 `(12+35i, 3)` 32x32、序号标签 `(8+35i, 2)`
+pub const PANEL: (LibraryName, usize) = (LibraryName::Prguse, 1932);
+pub const PANEL_SIZE: (f32, f32) = (240.0, 38.0);
+
 /// 药水腰带格数（C# BeltDialog 6 格）
 const BELT_SLOTS: usize = 6;
 const CELL_SIZE: f32 = 32.0;
-const CELL_SPACING: f32 = 35.0;
+/// 格子左/上偏移与步进（C# `Grid[x].Location = (x*35 + 12, 3)`、`Size = 32x32`）
+pub const CELL_DX: f32 = 12.0;
+pub const CELL_DY: f32 = 3.0;
+pub const CELL_SPACING: f32 = 35.0;
 /// 横向（C# Location (230,618)）
-const BELT_X: f32 = 230.0;
-const BELT_Y: f32 = 618.0;
+pub const BELT_X: f32 = 230.0;
+pub const BELT_Y: f32 = 618.0;
 /// 纵向（C# Flip Location (0,200)）
 const BELT_VERT_X: f32 = 0.0;
 const BELT_VERT_Y: f32 = 200.0;
@@ -178,7 +186,7 @@ pub(crate) fn belt_restock_events(
 
 /// 横向：格 @(12+i*35,3)、数字 @(8+i*35,2)、旋转 @(222,3)、关闭 @(222,19)
 fn h_slot(i: usize) -> (f32, f32) {
-    (BELT_X + 12.0 + i as f32 * CELL_SPACING, BELT_Y + 3.0)
+    (BELT_X + CELL_DX + i as f32 * CELL_SPACING, BELT_Y + CELL_DY)
 }
 fn h_num(i: usize) -> (f32, f32) {
     (BELT_X + 8.0 + i as f32 * CELL_SPACING, BELT_Y + 2.0)
