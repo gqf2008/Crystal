@@ -142,6 +142,23 @@ pub const STATUS_BASE: (LibraryName, usize, f32, f32) = (LibraryName::Prguse, 18
 pub const BUFF_BASE: (LibraryName, usize) = (LibraryName::Prguse, 1853);
 /// C# `RanksOptionsTexts[i]` 文案（`:859-871` 的顺序：改/招/踢/存/取/盟/告/益）
 pub const GUILD_PERM_LABELS: [&str; 8] = ["改", "招", "踢", "存", "取", "盟", "告", "益"];
+/// MembersPage 行数（C# `MemberPageRows = 18`）与行几何（`MembersName[i] @ (125, 30 + i*15)`）
+pub const MEMBER_ROWS: usize = 18;
+pub const MEMBER_ROW_Y0: f32 = 30.0;
+pub const MEMBER_ROW_DY: f32 = 15.0;
+pub const MEMBER_COL_NAME: f32 = 125.0;
+pub const MEMBER_COL_STATUS: f32 = 225.0;
+/// 删除钮列（C# `MembersDelete[i] @ (210, 30 + i*15)`，`Prguse[917]` 16x14）
+pub const MEMBER_COL_DELETE: f32 = 210.0;
+pub const MEMBER_DELETE_SPRITE: (LibraryName, usize) = (LibraryName::Prguse, 917);
+/// `GuildLine` 行号分段（成员 1..=18 / 仓库 20..=27 / 仓库页头 28）
+pub const MEMBER_LINE_BASE: usize = 1;
+pub const STORAGE_LINE_BASE: usize = MEMBER_LINE_BASE + MEMBER_ROWS;
+pub const STORAGE_HEADER_LINE: usize = STORAGE_LINE_BASE + 8;
+
+/// 成员行删除钮（C# `MembersDelete[i]`，i = 页内行号 0..18）
+#[derive(Component)]
+pub struct GuildMemberDelete(pub usize);
 
 /// 显示离线复选框图（C# `MembersShowOfflineButton` = `Prguse[1346]`）
 #[derive(Component)]
@@ -435,13 +452,18 @@ fn spawn_guild(
             Visibility::Hidden,
             // #89 成员列表滚动（C# `MembersPage` 内 (125,30) 起；行高见 §7 偏差记录）
             UiScrollList {
-                rect_rel: (125.0, 90.0, 200.0, 200.0),
-                row_h: 20.0,
-                visible: 10,
+                rect_rel: (
+                    MEMBER_COL_NAME,
+                    PAGE_LEFT.1 + MEMBER_ROW_Y0,
+                    200.0,
+                    MEMBER_ROW_DY * MEMBER_ROWS as f32,
+                ),
+                row_h: MEMBER_ROW_DY,
+                visible: MEMBER_ROWS,
                 total: 0,
                 offset: 0,
                 step: 3,
-                track_rel: (337.0, 61.0, 16.0, 200.0),
+                track_rel: (337.0, 61.0, 16.0, 300.0),
                 thumb: None,
                 z: 8,
             },
@@ -608,18 +630,41 @@ fn spawn_guild(
     // ---- MembersPage：成员列表 + 滚动条 + 显示离线（C# `GuildDialog.cs:318-487`）----
     commands.entity(page_members).with_children(|p| {
         spawn_scroll_bar_ui(p, (337.0, 1.0, 16.0, 331.0), 8);
-        for i in 1..=10usize {
+        // C# `MemberPageRows = 18`，`MembersName[i] @ (125, 30 + i*15)`（7F 字体 → 11px）
+        for i in 0..MEMBER_ROWS {
             spawn_label(
                 p,
                 &cjk,
                 "",
-                125.0,
-                30.0 + (i - 1) as f32 * 20.0,
-                12.0,
+                MEMBER_COL_NAME,
+                MEMBER_ROW_Y0 + i as f32 * MEMBER_ROW_DY,
+                11.0,
                 Color::WHITE,
                 8,
             )
-            .insert(GuildLine(i));
+            .insert(GuildLine(MEMBER_LINE_BASE + i));
+        }
+        // C# `MembersDelete[i] = Prguse[917] @(210, 30 + i*15)`
+        if let Some(h) = load_lib_image(
+            &mut libs,
+            &mut images,
+            MEMBER_DELETE_SPRITE.0,
+            MEMBER_DELETE_SPRITE.1,
+        ) {
+            for i in 0..MEMBER_ROWS {
+                spawn_icon_button(
+                    p,
+                    h.clone(),
+                    h.clone(),
+                    h.clone(),
+                    MEMBER_COL_DELETE,
+                    MEMBER_ROW_Y0 + i as f32 * MEMBER_ROW_DY,
+                    16.0,
+                    14.0,
+                    9,
+                )
+                .insert(GuildMemberDelete(i));
+            }
         }
         // C# `MembersShowOfflineButton` `Prguse[1346]` + `MembersShowOfflineStatus` `Prguse[1347]`
         // @(230,310)，标签 `MembersShowOffline` @(245,309)
@@ -747,8 +792,9 @@ fn spawn_guild(
 
     // ---- StoragePage：金币 + 物品格 + 翻页（C# `GuildDialog.cs:617-750`）----
     commands.entity(page_storage).with_children(|p| {
-        // C# `StorageGoldText` @(194,312) 125x12（本端由 `GuildLine(19)` 填充）
-        spawn_label(p, &cjk, "", 194.0, 312.0, 11.0, Color::WHITE, 8).insert(GuildLine(19));
+        // C# `StorageGoldText` @(194,312) 125x12（本端由 `GuildLine(STORAGE_HEADER_LINE)` 填充）
+        spawn_label(p, &cjk, "", 194.0, 312.0, 11.0, Color::WHITE, 8)
+            .insert(GuildLine(STORAGE_HEADER_LINE));
         // C# `StorageGoldAdd` `Prguse[918]` @(158,313) / `StorageGoldRemove` `Prguse[917]` @(142,313)
         if let Some(h) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 918) {
             spawn_icon_button(p, h.clone(), h.clone(), h, 158.0, 313.0, 16.0, 14.0, 9)
@@ -799,7 +845,7 @@ fn spawn_guild(
                 Color::WHITE,
                 8,
             )
-            .insert(GuildLine(11 + i));
+            .insert(GuildLine(STORAGE_LINE_BASE + i));
         }
         // 存入/取出（**Bevy 扩展**；C# 靠点击格子搬运）
         if let (Some(n), Some(h), Some(pr)) = (
@@ -1109,6 +1155,8 @@ fn guild_ui_system(
             Without<GuildBuffLine>,
         ),
     >,
+    // #2892 批B 单元8：C# `MembersDelete[i].Click → DeleteMember(i)`
+    del_btns: Query<(Entity, &Interaction, &GuildMemberDelete)>,
     mut prev_inter: Local<HashMap<Entity, Interaction>>,
     mut requested: Local<bool>,
     panel_origin: Query<&Node, With<GuildWidget>>,
@@ -1321,9 +1369,9 @@ fn guild_ui_system(
                     "未加入行会".to_string()
                 }
             }
-            i if (1..=10).contains(&i) => {
+            i if (MEMBER_LINE_BASE..MEMBER_LINE_BASE + MEMBER_ROWS).contains(&i) => {
                 // C# `MembersName[i]`/`MembersStatus[i]`（本端合并为一行）
-                let idx = scroll_offset + i - 1;
+                let idx = scroll_offset + i - MEMBER_LINE_BASE;
                 // #1348：按 show_offline 过滤后的可见成员映射
                 match visible.get(idx).and_then(|&mi| guild.members.get(mi)) {
                     Some(m) => {
@@ -1343,8 +1391,8 @@ fn guild_ui_system(
                     None => String::new(),
                 }
             }
-            i if (11..=18).contains(&i) => {
-                let slot = guild.storage_page * 8 + (i - 11);
+            i if (STORAGE_LINE_BASE..STORAGE_LINE_BASE + 8).contains(&i) => {
+                let slot = guild.storage_page * 8 + (i - STORAGE_LINE_BASE);
                 match guild.storage_items.get(slot).and_then(|s| s.as_ref()) {
                     Some(it) => format!(
                         "{:02}: {} x{}",
@@ -1355,12 +1403,12 @@ fn guild_ui_system(
                     None => format!("{:02}: 空", slot + 1),
                 }
             }
-            19 => format!("仓库 第{}/13页", guild.storage_page + 1),
+            i if i == STORAGE_HEADER_LINE => format!("仓库 第{}/13页", guild.storage_page + 1),
             _ => String::new(),
         };
         // #140 成员选中行高亮（踢出目标可见）
-        let c = if matches!(line.0, 1..=10)
-            && guild.selected_member == Some(scroll_offset + line.0 - 1)
+        let c = if (MEMBER_LINE_BASE..MEMBER_LINE_BASE + MEMBER_ROWS).contains(&line.0)
+            && guild.selected_member == Some(scroll_offset + line.0 - MEMBER_LINE_BASE)
         {
             Color::srgb(1.0, 0.9, 0.3)
         } else {
@@ -1395,14 +1443,35 @@ fn guild_ui_system(
                     .unwrap_or((GUILD_X, GUILD_Y));
                 if !guild.show_buff_page {
                     let visible = guild.visible_member_indices();
-                    for i in 1..=10usize {
+                    // C# `MembersDelete[i].Click → DeleteMember(i)`：直接对**该行**的成员发踢出
+                    for (e, inter, del) in &del_btns {
+                        if edge(e, inter, &mut prev_inter) {
+                            let idx = scroll_offset + del.0;
+                            if let Some(&mi) = visible.get(idx) {
+                                if let Some(m) = guild.members.get(mi) {
+                                    net.send_packet(
+                                        &mir2_shared::packets::client::guild::EditGuildMember {
+                                            change_type: 1,
+                                            rank_index: 0,
+                                            name: m.name.clone(),
+                                            rank_name: String::new(),
+                                        },
+                                    );
+                                    tracing::info!("🏰 踢出行会成员（行内删除钮）: {}", m.name);
+                                    guild.selected_member = None;
+                                }
+                            }
+                            return;
+                        }
+                    }
+                    for i in MEMBER_LINE_BASE..MEMBER_LINE_BASE + MEMBER_ROWS {
                         let (rx, ry, rw, rh) = guild_member_row_rect(i, ox, oy);
                         if cursor.x >= rx
                             && cursor.x <= rx + rw
                             && cursor.y >= ry
                             && cursor.y <= ry + rh
                         {
-                            let idx = scroll_offset + i - 1;
+                            let idx = scroll_offset + i - MEMBER_LINE_BASE;
                             if let Some(&mi) = visible.get(idx) {
                                 guild.selected_member = Some(idx);
                                 tracing::info!("🏰 选中行会成员: {}", guild.members[mi].name);
@@ -1412,14 +1481,14 @@ fn guild_ui_system(
                     }
                 }
                 // 仓库格子点击选中（取出目标，原版 C# StorageGrid 点击语义）
-                for i in 11..=18usize {
+                for i in STORAGE_LINE_BASE..STORAGE_LINE_BASE + 8 {
                     let (rx, ry, rw, rh) = guild_storage_row_rect(i, ox, oy);
                     if cursor.x >= rx
                         && cursor.x <= rx + rw
                         && cursor.y >= ry
                         && cursor.y <= ry + rh
                     {
-                        let slot = guild.storage_page * 8 + (i - 11);
+                        let slot = guild.storage_page * 8 + (i - STORAGE_LINE_BASE);
                         if slot < guild.storage_items.len() {
                             guild.selected_storage = Some(slot);
                             tracing::info!("🏰 选中仓库格子 {}", slot);
@@ -1432,22 +1501,22 @@ fn guild_ui_system(
     }
 }
 
-/// 成员行命中矩形（面板原点 ox/oy + 相对坐标；i 1..=10）
-/// C# `MembersName[i] @ (125, 30 + i*15)`，本端页内为 (125, 30 + i*20)，页面原点 (0,60)
+/// 成员行命中矩形（面板原点 ox/oy + 相对坐标；i = `MEMBER_LINE_BASE + 行号`）
+/// C# `MembersName[i] @ (125, 30 + i*15)`，页面原点 (0,60)
 fn guild_member_row_rect(i: usize, ox: f32, oy: f32) -> (f32, f32, f32, f32) {
     (
-        ox + 125.0,
-        oy + PAGE_LEFT.1 + 30.0 + (i - 1) as f32 * 20.0,
+        ox + MEMBER_COL_NAME,
+        oy + PAGE_LEFT.1 + MEMBER_ROW_Y0 + (i - MEMBER_LINE_BASE) as f32 * MEMBER_ROW_DY,
         212.0,
-        18.0,
+        15.0,
     )
 }
 
-/// 仓库行命中矩形（i 11..=18）：StoragePage 内 (31, 20 + j*18)
+/// 仓库行命中矩形：StoragePage 内 (31, 20 + j*18)
 fn guild_storage_row_rect(i: usize, ox: f32, oy: f32) -> (f32, f32, f32, f32) {
     (
         ox + 31.0,
-        oy + PAGE_LEFT.1 + 20.0 + (i - 11) as f32 * 18.0,
+        oy + PAGE_LEFT.1 + 20.0 + (i - STORAGE_LINE_BASE) as f32 * 18.0,
         292.0,
         16.0,
     )
@@ -2040,26 +2109,31 @@ mod tests {
     fn member_row_rect_origin_and_drag() {
         // #2892 批B 单元7：MembersPage @(0,60)，行 (125, 30+20i) → 面板内 (125, 90+20i)
         let (rx, ry, rw, rh) = guild_member_row_rect(1, GUILD_X, GUILD_Y);
-        assert_eq!((rx, ry, rw, rh), (342.0, 258.0, 212.0, 18.0));
+        assert_eq!((rx, ry, rw, rh), (342.0, 258.0, 212.0, 15.0));
         assert_eq!(
             guild_member_row_rect(10, GUILD_X, GUILD_Y).1,
-            258.0 + 9.0 * 20.0
+            258.0 + 9.0 * 15.0
         );
         // 拖动到 (330,100)：同一相对位置命中跟随（原始坐标 + delta(50,20)）
         let (rx2, ry2, _, _) = guild_member_row_rect(1, 330.0, 100.0);
         assert_eq!((rx2, ry2), (455.0, 190.0));
+        // C# `MemberPageRows = 18`：末行页内 y = 30 + 17*15 = 285 → 屏幕 y = 168+60+285 = 513
+        assert_eq!(
+            guild_member_row_rect(MEMBER_LINE_BASE + MEMBER_ROWS - 1, GUILD_X, GUILD_Y).1,
+            513.0
+        );
     }
 
     /// 仓库格命中：初始等价 + 拖动跟随
     #[test]
     fn storage_row_rect_origin_and_drag() {
-        let (rx, ry, _, _) = guild_storage_row_rect(11, GUILD_X, GUILD_Y);
+        let (rx, ry, _, _) = guild_storage_row_rect(STORAGE_LINE_BASE, GUILD_X, GUILD_Y);
         assert_eq!(
             (rx, ry),
             (248.0, 248.0),
             "StoragePage @(0,60) 内首行 (31,20)"
         );
-        let (rx2, ry2, _, _) = guild_storage_row_rect(11, 330.0, 100.0);
+        let (rx2, ry2, _, _) = guild_storage_row_rect(STORAGE_LINE_BASE, 330.0, 100.0);
         assert_eq!((rx2, ry2), (361.0, 180.0), "拖动后跟随");
     }
 
