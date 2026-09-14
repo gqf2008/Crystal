@@ -69,6 +69,11 @@ impl WindowDragState {
         self.offsets.get(&w).copied().unwrap_or((0.0, 0.0))
     }
 
+    /// 直接设置偏移（供窗口系统/测试使用）
+    pub fn set_offset(&mut self, w: DragWindow, dx: f32, dy: f32) {
+        self.offsets.insert(w, (dx, dy));
+    }
+
     /// 正在拖动的窗口
     pub fn dragging(&self) -> Option<DragWindow> {
         self.dragging.map(|(w, _)| w)
