@@ -2665,6 +2665,12 @@ async fn save_friends(
     character_name: &str,
     list: &FriendList,
 ) -> anyhow::Result<()> {
+    // #2879：历史库/内存里可能存在同名多条（旧版按运行时 object_id 去重的遗留）。
+    // 不归一化就写库会撞 PRIMARY KEY(character_name, friend_object_id)，令整次
+    // 角色存档事务回滚（位置/金币/背包一起丢）。归一是最后的兜底防线。
+    let mut list = list.clone();
+    list.normalize();
+
     sqlx::query("DELETE FROM friends WHERE character_name = ?")
         .bind(character_name)
         .execute(&mut *conn)
@@ -2724,6 +2730,9 @@ pub async fn load_friends(pool: &DbPool, character_name: &str) -> anyhow::Result
             name: row.get("blocked_name"),
         });
     }
+
+    // 旧库同名多条 → 读入即归一（下次存档写回时顺带清理）
+    list.normalize();
 
     Ok(list)
 }
@@ -6176,6 +6185,86 @@ mod tests {
             .await
             .expect("fresh schema must satisfy load_map_infos");
         assert_eq!(maps.len(), 1, "载入到 1 张地图");
+    }
+
+    /// #2879：同名多条好友（旧版按运行时 object_id 去重的遗留）写库前必须归一化——
+    /// 否则撞 `PRIMARY KEY(character_name, friend_object_id)`，令**整次角色存档事务回滚**。
+    ///
+    /// 红检：去掉 `save_friends` 里的 `normalize()` → 本用例 panic（UNIQUE constraint failed）。
+    #[tokio::test]
+    async fn save_friends_dedupes_legacy_duplicates_instead_of_failing_save() {
+        use crate::actors::friend::{FriendEntry, FriendList};
+
+        let pool = init_db_pool("sqlite::memory:?cache=shared")
+            .await
+            .expect("init_db_pool");
+        // characters.account_username 有 FK → accounts(username)：先建账号再建角色
+        sqlx::query("INSERT INTO accounts (username, password_hash) VALUES ('acc', 'x')")
+            .execute(&pool)
+            .await
+            .expect("insert owner account");
+        sqlx::query(
+            "INSERT INTO characters (name, account_username) VALUES ('dedupe-owner', 'acc')",
+        )
+        .execute(&pool)
+        .await
+        .expect("insert owner character");
+        // 现场复刻测试库 friends 表：同一好友名 6 条不同运行时 id
+        let mut list = FriendList::new();
+        for oid in [1000u32, 1402, 18604, 20560, 30340, 32296] {
+            list.friends.push(FriendEntry {
+                object_id: oid,
+                name: "bevychar".into(),
+                memo: String::new(),
+            });
+        }
+
+        let mut conn = pool.acquire().await.expect("acquire");
+        save_friends(&mut conn, "dedupe-owner", &list)
+            .await
+            .expect("同名多条不应再让好友写库（进而整次存档）失败");
+        drop(conn);
+
+        let rows: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM friends WHERE character_name = 'dedupe-owner'",
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("count friends");
+        assert_eq!(rows, 1, "写库前应归一化成一条（保留最新运行时 id）");
+
+        let loaded = load_friends(&pool, "dedupe-owner").await.expect("load");
+        assert_eq!(loaded.friends.len(), 1);
+        assert_eq!(loaded.friends[0].object_id, 32296);
+
+        // 另一半现场：上线校正（social.rs SocialPlayerJoined）把多条同名刷成**同一**运行时 id，
+        // 此时按 id 写库会直接撞主键（整次存档回滚）——归一是唯一防线。
+        sqlx::query(
+            "INSERT INTO characters (name, account_username) VALUES ('dedupe-owner2', 'acc')",
+        )
+        .execute(&pool)
+        .await
+        .expect("insert second owner");
+        let mut collapsed = FriendList::new();
+        for name in ["bevychar", "BEVYCHAR"] {
+            collapsed.friends.push(FriendEntry {
+                object_id: 777,
+                name: name.into(),
+                memo: String::new(),
+            });
+        }
+        let mut conn = pool.acquire().await.expect("acquire");
+        save_friends(&mut conn, "dedupe-owner2", &collapsed)
+            .await
+            .expect("同一运行时 id 的多条不该让存档失败");
+        drop(conn);
+        let rows: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM friends WHERE character_name = 'dedupe-owner2'",
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("count friends 2");
+        assert_eq!(rows, 1);
     }
 
     #[test]

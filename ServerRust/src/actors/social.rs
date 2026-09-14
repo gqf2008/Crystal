@@ -2791,6 +2791,9 @@ impl Message<SocialPlayerJoined> for SocialActor {
                     }
                 }
                 if changed {
+                    // #2879：同名多条（旧库遗留）在这里会被刷成同一运行时 id，
+                    // 必须归一化，否则保存时撞好友主键、整角色存档回滚。
+                    os.friend_list.normalize();
                     let _ = r.ask(SetPlayerState { state: os }).await;
                     self.send_friends_list(*sid).await;
                 }

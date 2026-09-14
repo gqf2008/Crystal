@@ -31,15 +31,31 @@ impl FriendList {
         Self::default()
     }
 
-    /// 添加好友
+    /// 添加好友。
+    ///
+    /// 身份 = 角色名（忽略大小写）；C# 基准 `Server/MirDatabase/CharacterInfo.cs:712-743`
+    /// `FriendInfo.Index` 是**持久角色 Index**（重启/重登不变），运行时 ObjectID 从不作身份键。
+    /// 本端 `object_id` 是会话内运行时 id（每次登录都变），若按它去重就会同名累积——
+    /// 参见 #2879：测试库 `friends` 表同名 6 条不同 id；上线校正把多条同名改成同一 id 后，
+    /// 写库撞 `PRIMARY KEY(character_name, friend_object_id)`，令**整个角色存档事务回滚**。
     pub fn add_friend(&mut self, object_id: u32, name: String) {
-        if !self.friends.iter().any(|f| f.object_id == object_id) {
-            self.friends.push(FriendEntry {
+        match self
+            .friends
+            .iter()
+            .position(|f| f.name.eq_ignore_ascii_case(&name))
+        {
+            Some(idx) => {
+                // 已有该好友（含离线添加的占位条目）→ 只刷新运行时 id，不新增条目
+                self.friends[idx].object_id = object_id;
+                self.friends[idx].name = name;
+            }
+            None => self.friends.push(FriendEntry {
                 object_id,
                 name,
                 memo: String::new(),
-            });
+            }),
         }
+        self.normalize();
     }
 
     /// 移除好友（按 object_id）
@@ -62,11 +78,80 @@ impl FriendList {
         }
     }
 
-    /// 添加黑名单
+    /// 添加黑名单（同 [`Self::add_friend`]：身份 = 名字，运行时 id 只作缓存）
     pub fn add_blocked(&mut self, object_id: u32, name: String) {
-        if !self.blocked.iter().any(|b| b.object_id == object_id) {
-            self.blocked.push(BlockedEntry { object_id, name });
+        match self
+            .blocked
+            .iter()
+            .position(|b| b.name.eq_ignore_ascii_case(&name))
+        {
+            Some(idx) => {
+                self.blocked[idx].object_id = object_id;
+                self.blocked[idx].name = name;
+            }
+            None => self.blocked.push(BlockedEntry { object_id, name }),
         }
+        self.normalize();
+    }
+
+    /// 归一化：按名字（忽略大小写）去重，再兜底按运行时 id 去重。返回移除条目数。
+    ///
+    /// 用途：① 旧库/旧内存里已有同名多条（#2879 遗留）时自愈；② 上线校正把同名条目
+    /// 统一刷成同一运行时 id 后收敛为一条；③ 写库前兜底，保证存档不会因好友主键冲突回滚。
+    pub fn normalize(&mut self) -> usize {
+        let before = self.friends.len() + self.blocked.len();
+
+        let mut friends: Vec<FriendEntry> = Vec::with_capacity(self.friends.len());
+        for f in self.friends.drain(..) {
+            match friends
+                .iter_mut()
+                .find(|p| p.name.eq_ignore_ascii_case(&f.name))
+            {
+                Some(prev) => {
+                    // 保留最后一条的运行时 id（最新会话），备注沿用非空者
+                    if prev.memo.is_empty() {
+                        prev.memo = f.memo;
+                    }
+                    prev.object_id = f.object_id;
+                    if prev.name != f.name {
+                        prev.name = f.name;
+                    }
+                }
+                None => friends.push(f),
+            }
+        }
+        let mut deduped: Vec<FriendEntry> = Vec::with_capacity(friends.len());
+        for f in friends {
+            if !deduped.iter().any(|p| p.object_id == f.object_id) {
+                deduped.push(f);
+            }
+        }
+        self.friends = deduped;
+
+        let mut blocked: Vec<BlockedEntry> = Vec::with_capacity(self.blocked.len());
+        for b in self.blocked.drain(..) {
+            match blocked
+                .iter_mut()
+                .find(|p| p.name.eq_ignore_ascii_case(&b.name))
+            {
+                Some(prev) => {
+                    prev.object_id = b.object_id;
+                    if prev.name != b.name {
+                        prev.name = b.name;
+                    }
+                }
+                None => blocked.push(b),
+            }
+        }
+        let mut deduped_blocked: Vec<BlockedEntry> = Vec::with_capacity(blocked.len());
+        for b in blocked {
+            if !deduped_blocked.iter().any(|p| p.object_id == b.object_id) {
+                deduped_blocked.push(b);
+            }
+        }
+        self.blocked = deduped_blocked;
+
+        before - (self.friends.len() + self.blocked.len())
     }
 
     /// 移除黑名单
@@ -152,6 +237,74 @@ mod tests {
         list.add_friend(1001, "Alice".into());
         list.add_friend(1001, "Alice".into()); // duplicate
         assert_eq!(list.friends.len(), 1);
+    }
+
+    /// #2879：同名好友换运行时 id（重登/对方重新上线）应原地刷新，而不是新增条目。
+    /// 反向添加链路（social.rs `AddFriendRequest` 在线双向添加）每次上线都会走这里。
+    #[test]
+    fn test_add_friend_same_name_new_runtime_id_updates_in_place() {
+        let mut list = FriendList::new();
+        list.add_friend(1000, "bevychar".into());
+        list.add_friend(32296, "BEVYCHAR".into()); // 大小写不同 + 新运行时 id
+        assert_eq!(
+            list.friends.len(),
+            1,
+            "同名（忽略大小写）应按名字去重，不能按运行时 id 累积"
+        );
+        assert_eq!(list.friends[0].object_id, 32296, "应刷新为最新运行时 id");
+    }
+
+    /// #2879 数据现场复现：测试库里同名 6 条不同运行时 id（旧版遗留）→ 归一化后 1 条。
+    #[test]
+    fn test_normalize_collapses_legacy_duplicate_friend_rows() {
+        let mut list = FriendList::new();
+        for (oid, memo) in [
+            (1000u32, ""),
+            (1402, "老备注"),
+            (18604, ""),
+            (20560, ""),
+            (30340, ""),
+            (32296, ""),
+        ] {
+            list.friends.push(FriendEntry {
+                object_id: oid,
+                name: "bevychar".into(),
+                memo: memo.to_string(),
+            });
+        }
+        assert_eq!(list.normalize(), 5);
+        assert_eq!(list.friends.len(), 1);
+        assert_eq!(list.friends[0].object_id, 32296);
+        assert_eq!(list.friends[0].memo, "老备注", "非空备注应保留");
+        assert_eq!(list.normalize(), 0, "二次归一应为幂等");
+    }
+
+    /// 兜底：不同名但运行时 id 撞车（旧库可能存过运行时 id）同样会撞写库主键，须去重。
+    #[test]
+    fn test_normalize_dedupes_object_id_across_names() {
+        let mut list = FriendList::new();
+        list.friends.push(FriendEntry {
+            object_id: 7,
+            name: "A".into(),
+            memo: String::new(),
+        });
+        list.friends.push(FriendEntry {
+            object_id: 7,
+            name: "B".into(),
+            memo: String::new(),
+        });
+        assert_eq!(list.normalize(), 1);
+        assert_eq!(list.friends.len(), 1);
+    }
+
+    /// 黑名单同一处理（add_blocked 同源缺陷）。
+    #[test]
+    fn test_add_blocked_same_name_new_runtime_id_updates_in_place() {
+        let mut list = FriendList::new();
+        list.add_blocked(1000, "Enemy".into());
+        list.add_blocked(2000, "enemy".into());
+        assert_eq!(list.blocked.len(), 1);
+        assert_eq!(list.blocked[0].object_id, 2000);
     }
 
     #[test]
