@@ -44,6 +44,8 @@ UI 交互以原版 C# 客户端（`Client/MirScenes/Dialogs/*.cs`）为准，游
 
 ## 运行
 
+> 交付/部署（产物从哪来、必须自备哪些数据、验收与排障）见 [`docs/DELIVERY.md`](../docs/DELIVERY.md)。
+
 ```bash
 # 需要数据目录（仓库根 Data/ 或 Client-Bevy/Data，自动解析）与 ServerRust
 # mock 模式（离线演示）：
