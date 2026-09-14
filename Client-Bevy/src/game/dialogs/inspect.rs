@@ -27,6 +27,10 @@ use crate::ui::theme::{
     UiItemCellData,
 };
 
+/// #2892 批B：面板精灵与 C# 原生尺寸（C# `InspectDialog.Index = 430; Location = (536,0)`）
+pub const PANEL: (LibraryName, usize) = (LibraryName::Prguse, 430);
+pub const PANEL_SIZE: (f32, f32) = (264.0, 408.0);
+
 /// 背景 Prguse[430] 左贴右缘（C# :2153-2155 Location(536,0)）
 pub const BG_X: f32 = 536.0;
 pub const BG_Y: f32 = 0.0;
@@ -163,8 +167,8 @@ fn spawn_inspect(
                 position_type: PositionType::Absolute,
                 left: Val::Px(BG_X),
                 top: Val::Px(BG_Y),
-                width: Val::Px(264.0),
-                height: Val::Px(408.0),
+                width: Val::Px(PANEL_SIZE.0),
+                height: Val::Px(PANEL_SIZE.1),
                 ..default()
             },
             ImageNode::new(bg),

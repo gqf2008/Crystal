@@ -20,6 +20,11 @@ use crate::ui::theme::{
     spawn_scroll_bar_ui, UiItemCellData, UiScrollList,
 };
 
+/// #2892 批B：面板精灵与 C# 原生尺寸/坐标（C# `NPCGoodsDialog.Index = 1000; Location = (0,224)`）
+pub const PANEL: (LibraryName, usize) = (LibraryName::Prguse, 1000);
+pub const PANEL_SIZE: (f32, f32) = (244.0, 334.0);
+pub const PANEL_POS: (f32, f32) = (0.0, 224.0);
+
 /// 商品条目
 #[derive(Debug, Clone)]
 pub struct GoodsEntry {
@@ -156,7 +161,15 @@ fn spawn_npc_goods(
     let Some(bg) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 1000) else {
         return;
     };
-    let panel = spawn_panel(&mut commands, bg, 0.0, 224.0, 244.0, 334.0, 30);
+    let panel = spawn_panel(
+        &mut commands,
+        bg,
+        PANEL_POS.0,
+        PANEL_POS.1,
+        PANEL_SIZE.0,
+        PANEL_SIZE.1,
+        30,
+    );
     commands.entity(panel).insert((
         DialogRoot(crate::game::dialogs::DialogKind::NpcGoods),
         NpcGoodsWidget,

@@ -16,6 +16,11 @@ use crate::scenes::AppState;
 use crate::ui::sprite_ui::{shared_cjk_font, UiCjkFont, UiFont};
 use crate::ui::theme::{load_lib_image, spawn_icon_button, spawn_image, spawn_label, spawn_panel};
 
+/// #2892 批B：管理窗面板精灵与 C# 原生尺寸/坐标（C# `HeroManageDialog.Index = 1688; Location = (350,350)`）
+pub const MANAGE_PANEL: (LibraryName, usize) = (LibraryName::Prguse, 1688);
+pub const MANAGE_PANEL_SIZE: (f32, f32) = (352.0, 161.0);
+pub const MANAGE_PANEL_POS: (f32, f32) = (350.0, 350.0);
+
 /// 英雄状态
 #[derive(Resource)]
 pub struct HeroState {
@@ -244,7 +249,15 @@ fn spawn_hero_manage(
     let empty_frame = avatar_images.empty_frame.clone();
     commands.insert_resource(avatar_images);
     if let Some(bg) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 1688) {
-        let manage = spawn_panel(&mut commands, bg, 350.0, 350.0, 352.0, 161.0, 31);
+        let manage = spawn_panel(
+            &mut commands,
+            bg,
+            MANAGE_PANEL_POS.0,
+            MANAGE_PANEL_POS.1,
+            MANAGE_PANEL_SIZE.0,
+            MANAGE_PANEL_SIZE.1,
+            31,
+        );
         commands.entity(manage).insert((
             HeroManageWidget,
             DialogRoot(DialogKind::HeroManage),
