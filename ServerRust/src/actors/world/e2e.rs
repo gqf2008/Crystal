@@ -485,6 +485,493 @@ fn e2e_refine_deposit_requires_refine_npc_page() {
     });
 }
 
+/// #2863：精炼**成功路径**端到端（存入武器 + 材料 → 开始 → 结算成功 → 取回），并与「无材料 ⇒ 粉碎」对照。
+///
+/// 真机复验（#2843）只覆盖了「存入 + 开始」与「无材料 ⇒ 必碎」；成功分支（属性生效 + 取回）此前无自动化覆盖。
+/// 本用例走真实 gate/world 协议：地图 0 + 铁匠 NPC 从 DB 载入，`[@REFINE]`/`[@REFINECHECK]` 页 key 齐全，
+/// 配置 `base_chance = 100`（成功确定）、`time_minutes = 0`（结算立即可做）。
+#[test]
+fn e2e_refine_full_success_path() {
+    const WEAPON_UID: u64 = 9201;
+    const WEAPON2_UID: u64 = 9202;
+    const CHAR: &str = "RefineOkChar";
+
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .thread_stack_size(8 * 1024 * 1024)
+        .enable_time()
+        .build()
+        .unwrap();
+    rt.block_on(async {
+        let session_id = 42u64;
+        let (gate_ref, _tx, mut rx) = setup_gate_and_session(session_id).await;
+        let db_pool = e2e_setup_login(&gate_ref, session_id, &mut rx).await;
+
+        // 地图 0 + 铁匠 NPC（CallNPC 需要真实 NPC 对象；[@REFINE]/[@REFINECHECK] 是引擎级 key，无需脚本行）
+        sqlx::query("INSERT INTO map_infos (idx, file_name, title) VALUES (0, '0', 'TestMap')")
+            .execute(&db_pool)
+            .await
+            .expect("insert map_infos");
+        sqlx::query(
+            "INSERT INTO npc_infos (idx, map_index, file_name, name, x, y) \
+             VALUES (1, 0, 'Blacksmith_Carlos', 'Blacksmith_Carlos', 10, 10)",
+        )
+        .execute(&db_pool)
+        .await
+        .expect("insert npc_infos");
+
+        // 物品表：武器(type=1 ⇒ 满足 OnlyRefineWeapon) / DC-MC-SC 材料 / 矿石（name == RefineConfig.ore_name）
+        let item_infos: [(i32, &str, i32, &str); 5] = [
+            (100, "TestBlade", 1, "{}"),
+            (200, "TestDcMat", 0, "{\"7\":5,\"8\":15}"),
+            (201, "TestMcMat", 0, "{\"9\":5,\"10\":12}"),
+            (202, "TestScMat", 0, "{\"11\":5,\"12\":9}"),
+            (300, "BlackIronOre", 14, "{}"),
+        ];
+        for (idx, name, item_type, stats_json) in item_infos {
+            sqlx::query("INSERT INTO item_infos (idx, name, type, stats_json) VALUES (?, ?, ?, ?)")
+                .bind(idx)
+                .bind(name)
+                .bind(item_type)
+                .bind(stats_json)
+                .execute(&db_pool)
+                .await
+                .expect("insert item_infos");
+        }
+
+        let social_ref = SocialActor::spawn(SocialActorArgs {
+            gate_ref: gate_ref.clone(),
+            db_pool: db_pool.clone(),
+            config: SocialActorConfig::default(),
+        });
+        let world_ref = WorldActor::spawn(WorldActorArgs {
+            tick_interval_ms: 1000,
+            gate_ref: gate_ref.clone(),
+            map_dir: std::path::PathBuf::from("."),
+            spawn_dir: None,
+            quest_dir: std::path::PathBuf::from("."),
+            npc_script_dir: std::path::PathBuf::from("."),
+            db_pool: db_pool.clone(),
+            social_ref,
+            conquest_cfg: crate::util::config::ConquestConfig::default(),
+            rested_cfg: crate::util::config::RestedConfig::default(),
+            pvp_cfg: crate::util::config::PvpConfig::default(),
+            health_regen_weight: 10,
+            mana_regen_weight: 10,
+            goods_hide_added_stats: true,
+            goods_on: true,
+            goods_max_stored: 15,
+            goods_buy_back_time_minutes: 60,
+            goods_buy_back_max_stored: 20,
+            safe_zone_healing: false,
+            archive_inactive_after_months: 12,
+            monster_recall_enabled: true,
+            monster_recall_range: 12,
+            monster_recall_cooldown_ms: 5000,
+            exp_mob_level_difference: true,
+            // #2863：确定性观察——成功必中（base 100）+ 结算立即可做（0 分钟）
+            refine_cfg: crate::util::config::RefineConfig {
+                base_chance: 100,
+                time_minutes: 0,
+                ..Default::default()
+            },
+            replace_wedring_cost: 125,
+            lover_exp_bonus: 5,
+            mentor_exp_boost: 10,
+            mentor_damage_boost: 10,
+            mentor_skill_boost: true,
+            mentee_exp_bank: 1,
+            orbs_exp_list: Vec::new(),
+            orbs_dmg_list: Vec::new(),
+            orbs_def_list: Vec::new(),
+            awakening_cfg: Default::default(),
+            gem_cfg: Default::default(),
+            hero_exp_list: Vec::new(),
+            setup_cfg: Default::default(),
+            drop_rate: 1.0,
+            exp_rate: 1.0,
+            experience_list: Vec::new(),
+            item_timeout_ticks: 300,
+            max_drop_gold: 2000,
+            drop_gold: true,
+            rarity_cfg: crate::util::config::RarityConfig::default(),
+            notice_path: "Notice.txt".to_string(),
+            death_exp_penalty_percent: 0,
+            movement_pacing_ms: 0,
+            fishing_cfg: crate::util::ini::FishingConfig::default(),
+            random_item_stats: Vec::new(),
+            guild_buff_infos: Vec::new(),
+        });
+        let _ = gate_ref.ask(SetWorldRef { world_ref }).await;
+
+        // 建角
+        let mut nc_body = Vec::new();
+        let _ = mir2_shared::binary::write_dotnet_string(&mut nc_body, CHAR);
+        nc_body.push(0u8);
+        nc_body.push(0u8);
+        let _ = gate_ref
+            .ask(ClientData {
+                session_id,
+                data: build_packet_bytes(
+                    mir2_shared::enums::ClientPacketIds::NewCharacter as i16,
+                    &nc_body,
+                ),
+            })
+            .await;
+        assert!(
+            wait_opcode_body(
+                &mut rx,
+                mir2_shared::enums::ServerPacketIds::NewCharacterSuccess as i16,
+                3
+            )
+            .await
+            .is_some(),
+            "NewCharacterSuccess"
+        );
+
+        // 背包：0 = 精炼武器、1..3 = DC/MC/SC 材料、4 = 矿石、5 = 第二段武器、7/8 = 第二段材料（**无矿石**）
+        let backpack: [(i32, i32, u64, u16); 6] = [
+            (0, 100, WEAPON_UID, 1000),
+            (1, 200, 9301, 1000),
+            (2, 201, 9302, 1000),
+            (3, 202, 9303, 1000),
+            (4, 300, 9304, 5000), // 矿纯度 = current_dura/1000 = 5
+            (5, 100, WEAPON2_UID, 1000),
+        ];
+        let backpack_extra: [(i32, i32, u64, u16); 2] = [
+            (7, 200, 9305, 1000), // 第二段：有属性材料
+            (8, 201, 9306, 1000), // 第二段：有属性材料
+        ];
+        for (grid, item_index, uid, dura) in backpack {
+            let mut item = mir2_shared::data::item::UserItem::default();
+            item.item_index = item_index;
+            item.unique_id = uid;
+            item.count = 1;
+            item.current_dura = dura;
+            item.max_dura = dura;
+            let item_json = serde_json::to_string(&item).expect("serialize item");
+            sqlx::query(
+                "INSERT INTO inventory_backpack (character_name, grid, item_json) VALUES (?, ?, ?)",
+            )
+            .bind(CHAR)
+            .bind(grid)
+            .bind(item_json)
+            .execute(&db_pool)
+            .await
+            .expect("insert backpack item");
+        }
+        for (grid, item_index, uid, dura) in backpack_extra {
+            let mut item = mir2_shared::data::item::UserItem::default();
+            item.item_index = item_index;
+            item.unique_id = uid;
+            item.count = 1;
+            item.current_dura = dura;
+            item.max_dura = dura;
+            let item_json = serde_json::to_string(&item).expect("serialize item");
+            sqlx::query(
+                "INSERT INTO inventory_backpack (character_name, grid, item_json) VALUES (?, ?, ?)",
+            )
+            .bind(CHAR)
+            .bind(grid)
+            .bind(item_json)
+            .execute(&db_pool)
+            .await
+            .expect("insert backpack item");
+        }
+        sqlx::query("UPDATE characters SET gold = 100000 WHERE name = ?")
+            .bind(CHAR)
+            .execute(&db_pool)
+            .await
+            .expect("grant gold");
+        // 站到铁匠旁（CallNPC 有 2 格距离校验；NPC 在 (10,10)）
+        sqlx::query("UPDATE characters SET map_index = 0, x = 11, y = 10 WHERE name = ?")
+            .bind(CHAR)
+            .execute(&db_pool)
+            .await
+            .expect("place character next to blacksmith");
+
+        // StartGame → 抓 ObjectNpc 拿 NPC object_id（CallNPC 需要真实 NPC 对象）
+        let _ = gate_ref
+            .ask(ClientData {
+                session_id,
+                data: build_packet_bytes(
+                    mir2_shared::enums::ClientPacketIds::StartGame as i16,
+                    &0i32.to_le_bytes().to_vec(),
+                ),
+            })
+            .await;
+        assert!(
+            wait_opcode_body(
+                &mut rx,
+                mir2_shared::enums::ServerPacketIds::StartGame as i16,
+                5
+            )
+            .await
+            .is_some(),
+            "StartGame"
+        );
+        let npc_body = wait_opcode_body(
+            &mut rx,
+            mir2_shared::enums::ServerPacketIds::ObjectNpc as i16,
+            5,
+        )
+        .await
+        .expect("ObjectNpc（铁匠）未下发——地图/NPC 载入失败");
+        let npc_oid = u32::from_le_bytes(npc_body[0..4].try_into().unwrap());
+
+        // 引擎级 NPC 页 key（C# DepositRefineItem/RefineItem/CheckRefine 的前置）
+        let call_npc = |key: &str| {
+            let mut body = Vec::new();
+            body.extend_from_slice(&npc_oid.to_le_bytes());
+            let _ = mir2_shared::binary::write_dotnet_string(&mut body, key);
+            build_packet_bytes(mir2_shared::enums::ClientPacketIds::CallNPC as i16, &body)
+        };
+        let deposit = |from: i32, to: i32| {
+            let mut body = Vec::new();
+            body.extend_from_slice(&from.to_le_bytes());
+            body.extend_from_slice(&to.to_le_bytes());
+            build_packet_bytes(
+                mir2_shared::enums::ClientPacketIds::DepositRefineItem as i16,
+                &body,
+            )
+        };
+        let retrieve = |from: i32, to: i32| {
+            let mut body = Vec::new();
+            body.extend_from_slice(&from.to_le_bytes());
+            body.extend_from_slice(&to.to_le_bytes());
+            build_packet_bytes(
+                mir2_shared::enums::ClientPacketIds::RetrieveRefineItem as i16,
+                &body,
+            )
+        };
+        let refine_start = |uid: u64| {
+            build_packet_bytes(
+                mir2_shared::enums::ClientPacketIds::RefineItem as i16,
+                &uid.to_le_bytes(),
+            )
+        };
+        let refine_check = |uid: u64| {
+            build_packet_bytes(
+                mir2_shared::enums::ClientPacketIds::CheckRefine as i16,
+                &uid.to_le_bytes(),
+            )
+        };
+        // ===== 第一段：材料齐全 ⇒ 成功 =====
+        let _ = gate_ref
+            .ask(ClientData {
+                session_id,
+                data: call_npc("[@REFINE]"),
+            })
+            .await;
+        assert!(
+            wait_opcode_body(
+                &mut rx,
+                mir2_shared::enums::ServerPacketIds::NPCRefine as i16,
+                3
+            )
+            .await
+            .is_some(),
+            "NPCRefine（[@REFINE] 页）未返回"
+        );
+
+        // 存入武器（背包格 0 → 精炼格 0）
+        let _ = gate_ref
+            .ask(ClientData {
+                session_id,
+                data: deposit(0, 0),
+            })
+            .await;
+        let ack = wait_opcode_body(
+            &mut rx,
+            mir2_shared::enums::ServerPacketIds::DepositRefineItem as i16,
+            3,
+        )
+        .await
+        .expect("武器存入确认包缺失");
+        assert_eq!(ack[8], 1, "有 [@REFINE] 页时武器存入必须成功");
+
+        // 存入 3 个属性材料 + 1 块矿石（精炼格 1..=4）
+        for (from, to) in [(1, 1), (2, 2), (3, 3), (4, 4)] {
+            let _ = gate_ref
+                .ask(ClientData {
+                    session_id,
+                    data: deposit(from, to),
+                })
+                .await;
+            let ack = wait_opcode_body(
+                &mut rx,
+                mir2_shared::enums::ServerPacketIds::DepositRefineItem as i16,
+                3,
+            )
+            .await
+            .unwrap_or_else(|| panic!("精炼材料 {from}→{to} 存入确认包缺失"));
+            assert_eq!(
+                ack[8], 1,
+                "精炼材料 {from}→{to} 存入应成功（背包格有材料且 [@REFINE] 页已开）"
+            );
+        }
+
+        // 开始精炼 → S.RefineItem{uid}
+        let _ = gate_ref
+            .ask(ClientData {
+                session_id,
+                data: refine_start(WEAPON_UID),
+            })
+            .await;
+        let start_body = wait_opcode_body(
+            &mut rx,
+            mir2_shared::enums::ServerPacketIds::RefineItem as i16,
+            3,
+        )
+        .await
+        .expect("精炼开始确认包（S.RefineItem）缺失");
+        assert_eq!(
+            u64::from_le_bytes(start_body[0..8].try_into().unwrap()),
+            WEAPON_UID
+        );
+
+        // 查看页 + CheckRefine → 成功分支的发包是 ItemUpgraded（失败分支发 S.RefineItem + 粉碎消息）
+        let _ = gate_ref
+            .ask(ClientData {
+                session_id,
+                data: call_npc("[@REFINECHECK]"),
+            })
+            .await;
+        assert!(
+            wait_opcode_body(
+                &mut rx,
+                mir2_shared::enums::ServerPacketIds::NPCCheckRefine as i16,
+                3
+            )
+            .await
+            .is_some(),
+            "NPCCheckRefine（[@REFINECHECK] 页）未返回"
+        );
+        let _ = gate_ref
+            .ask(ClientData {
+                session_id,
+                data: refine_check(WEAPON_UID),
+            })
+            .await;
+        let upgraded = wait_opcode_body(
+            &mut rx,
+            mir2_shared::enums::ServerPacketIds::ItemUpgraded as i16,
+            5,
+        )
+        .await;
+        assert!(
+            upgraded.is_some(),
+            "材料齐全 + base_chance=100 时必须走成功分支（S.ItemUpgraded）"
+        );
+
+        // 取回精炼产物（精炼格 0 → 背包格 6；格 5 预留给第二把武器）
+        let _ = gate_ref
+            .ask(ClientData {
+                session_id,
+                data: retrieve(0, 6),
+            })
+            .await;
+        let ack = wait_opcode_body(
+            &mut rx,
+            mir2_shared::enums::ServerPacketIds::RetrieveRefineItem as i16,
+            3,
+        )
+        .await
+        .expect("取回确认包缺失");
+        assert_eq!(ack[8], 1, "成功结算后取回必须成功");
+
+        // ===== 第二段：有属性材料但**无矿石** ⇒ 必碎 =====
+        // （C# `PlayerObject.cs:12771-12785`：`oreAmount == 0` 不设 RefinedValue ⇒ 结算必碎；
+        //   这一段同时是「矿判定」的红检靶子：去掉矿判定后这里会变成成功分支）
+        let _ = gate_ref
+            .ask(ClientData {
+                session_id,
+                data: call_npc("[@REFINE]"),
+            })
+            .await;
+        let _ = wait_opcode_body(
+            &mut rx,
+            mir2_shared::enums::ServerPacketIds::NPCRefine as i16,
+            3,
+        )
+        .await;
+        let _ = gate_ref
+            .ask(ClientData {
+                session_id,
+                data: deposit(5, 0),
+            })
+            .await;
+        let ack = wait_opcode_body(
+            &mut rx,
+            mir2_shared::enums::ServerPacketIds::DepositRefineItem as i16,
+            3,
+        )
+        .await
+        .expect("第二把武器存入确认包缺失");
+        assert_eq!(ack[8], 1, "第二把武器存入应成功");
+        for (from, to) in [(7, 1), (8, 2)] {
+            let _ = gate_ref
+                .ask(ClientData {
+                    session_id,
+                    data: deposit(from, to),
+                })
+                .await;
+            let ack = wait_opcode_body(
+                &mut rx,
+                mir2_shared::enums::ServerPacketIds::DepositRefineItem as i16,
+                3,
+            )
+            .await
+            .unwrap_or_else(|| panic!("第二段材料 {from}→{to} 存入确认包缺失"));
+            assert_eq!(ack[8], 1, "第二段材料 {from}→{to} 存入应成功");
+        }
+        let _ = gate_ref
+            .ask(ClientData {
+                session_id,
+                data: refine_start(WEAPON2_UID),
+            })
+            .await;
+        assert!(
+            wait_opcode_body(
+                &mut rx,
+                mir2_shared::enums::ServerPacketIds::RefineItem as i16,
+                3
+            )
+            .await
+            .is_some(),
+            "第二段精炼开始确认包缺失"
+        );
+        let _ = gate_ref
+            .ask(ClientData {
+                session_id,
+                data: call_npc("[@REFINECHECK]"),
+            })
+            .await;
+        let _ = wait_opcode_body(
+            &mut rx,
+            mir2_shared::enums::ServerPacketIds::NPCCheckRefine as i16,
+            3,
+        )
+        .await;
+        let _ = gate_ref
+            .ask(ClientData {
+                session_id,
+                data: refine_check(WEAPON2_UID),
+            })
+            .await;
+        // 粉碎分支：`S.RefineItem`（RefineReset，C# :12961-12967）而非 `S.ItemUpgraded`
+        assert!(
+            wait_opcode_body(
+                &mut rx,
+                mir2_shared::enums::ServerPacketIds::RefineItem as i16,
+                5
+            )
+            .await
+            .is_some(),
+            "有属性材料但无矿石时必须走粉碎分支（C# oreAmount==0 ⇒ 不设 RefinedValue；复位包为 S.RefineItem）"
+        );
+    });
+}
+
 #[tokio::test]
 async fn e2e_client_version_handshake() {
     let session_id = 1u64;

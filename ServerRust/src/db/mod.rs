@@ -316,7 +316,22 @@ pub async fn init_db_pool(db_url: &str) -> anyhow::Result<DbPool> {
             no_mount INTEGER NOT NULL DEFAULT 0,
             need_bridle INTEGER NOT NULL DEFAULT 0,
             no_fight INTEGER NOT NULL DEFAULT 0,
-            music INTEGER NOT NULL DEFAULT 0
+            music INTEGER NOT NULL DEFAULT 0,
+            -- #2863：以下 12 列由 C# 导入器写入真实库，但 Rust 侧 CREATE TABLE 一直缺失
+            -- ⇒ 用 `init_db_pool` 新建的库在 `load_map_infos` 读取时会 panic（ColumnNotFound）。
+            -- 类型/默认值按真实库 `PRAGMA table_info(map_infos)` 对齐。
+            no_town_teleport INTEGER NOT NULL DEFAULT 0,
+            no_reincarnation INTEGER NOT NULL DEFAULT 0,
+            weather_particles INTEGER NOT NULL DEFAULT 0,
+            gt INTEGER NOT NULL DEFAULT 0,
+            gt_index INTEGER NOT NULL DEFAULT 0,
+            no_group INTEGER NOT NULL DEFAULT 0,
+            no_pets INTEGER NOT NULL DEFAULT 0,
+            no_intelligent_creatures INTEGER NOT NULL DEFAULT 0,
+            no_hero INTEGER NOT NULL DEFAULT 0,
+            no_experience INTEGER NOT NULL DEFAULT 0,
+            required_group INTEGER NOT NULL DEFAULT 0,
+            required_group_size INTEGER NOT NULL DEFAULT 0
         );
         CREATE TABLE IF NOT EXISTS safe_zones (
             map_index INTEGER NOT NULL,
@@ -6140,6 +6155,27 @@ mod tests {
         .await
         .unwrap();
         pool
+    }
+
+    /// #2863：`init_db_pool` 建出的 schema 必须覆盖 `load_map_infos` 读取的列——
+    /// 此前 `CREATE TABLE map_infos` 少了 12 列（`no_town_teleport` / `no_reincarnation` / `gt` …），
+    /// 用 Rust 新建库（CI/内存库/全新部署）第一次载入地图就会 `ColumnNotFound` panic。
+    ///
+    /// 红检：删掉 CREATE TABLE 里的 `no_town_teleport` → 本用例 FAILED。
+    #[tokio::test]
+    async fn schema_map_infos_covers_loader_columns() {
+        // `?cache=shared` 让连接池各连接看到同一份内存库（与 e2e harness 的临时库一致）
+        let pool = init_db_pool("sqlite::memory:?cache=shared")
+            .await
+            .expect("init_db_pool");
+        sqlx::query("INSERT INTO map_infos (idx, file_name, title) VALUES (0, '0', 'TestMap')")
+            .execute(&pool)
+            .await
+            .expect("insert map_infos");
+        let maps = load_map_infos(&pool)
+            .await
+            .expect("fresh schema must satisfy load_map_infos");
+        assert_eq!(maps.len(), 1, "载入到 1 张地图");
     }
 
     #[test]
