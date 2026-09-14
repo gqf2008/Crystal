@@ -7,6 +7,9 @@
 1. 把测试角色 bevychar/bevy2char 移到远离刷怪点的河边钓鱼点（fishing-test 需要
    前方 3 格为水格 FishingAttribute>=0，C# FishingCast 语义；#1217 数据驱动钓鱼）
 2. bevychar 背包为空时恢复 2 件物品（精炼/交易用例需要）
+3. 复位「允许组队/交易/观察/结婚」开关（用例会切换它们并被服务端存档，不复位则
+   下一轮 group/trade/marriage 用例会因对方未开启而失败——C# 同样按角色持久化）
+4. 鱼竿补齐鱼钩（slots[0]，C# FishingCast NeedHook）与鱼饵（slots[2]，消耗品，余量不足时补满）
 """
 import json
 import os
@@ -19,6 +22,11 @@ DB = os.path.normpath(os.path.join(
 # 100 格（全图水域扫描实测最安全档），且 bevychar 面向左(6) 时前方 3 格 (167,667)
 # 是水格（FishingAttribute>=0，fishing-test 需要；#1217）。其余用例不依赖位置。
 SAFE_X, SAFE_Y = 170, 667  # map 1 (BichonProvince) 西北河流钓鱼点
+
+# 钓具 item_index（DB item_infos.type：Hook=28 Float=29 Bait=30 Finder=31 Reel=32）
+HOOK_INDEX = 795   # FishingHook → 鱼竿 slots[0]
+BAIT_INDEX = 798   # FishBait    → 鱼竿 slots[2]
+BAIT_MIN = 20      # 低于此值补满（#1313 每次抛竿消耗 1 个，跑多了会耗空）
 
 
 def make_item(template, uid: int, item_index: int) -> str:
@@ -39,6 +47,15 @@ def main() -> int:
         "UPDATE characters SET x=?, y=?, gold=1000000 WHERE name IN ('bevychar','bevy2char')",
         (SAFE_X, SAFE_Y),
     )
+    # 1b) 复位协作开关：用例会切它们并被服务端存档，不复位则下一轮 group/trade/marriage
+    #     会因「对方未开启」被服务端拒绝（C# 语义），表现为偶发 FAIL。
+    for col in ("allow_group", "allow_trade", "allow_observe", "allow_marriage"):
+        try:
+            cur.execute(
+                f"UPDATE characters SET {col}=1 WHERE name IN ('bevychar','bevy2char')"
+            )
+        except sqlite3.Error:
+            pass  # 旧库无该列（服务端启动后迁移补列）
     # 2) 配对摆位（#1166 + #1230 修正）：交易邀请要求目标在正前方一格且面对面（C# 语义）。
     #    注意 (169,667) 是不可走水格（障碍）：bevy2char 若摆到那里，服务端登录会因
     #    “原位置不可走”回退到城镇安全区出生点 (288,616)，被野生怪物围杀导致交易用例失败。
@@ -91,13 +108,26 @@ def main() -> int:
         slots = rod.get('slots') or [None] * 5
         while len(slots) < 5:
             slots.append(None)
-        if not slots[2]:
+        changed = False
+        # 鱼钩必需（服务端 FishingCast：槽 0 空 → “你需要鱼钩”）
+        if not slots[0]:
+            hook = dict(rod)
+            hook['unique_id'] = rod.get('unique_id', 79301) + 4
+            hook['item_index'] = HOOK_INDEX
+            hook['count'] = 1
+            hook['slots'] = []
+            slots[0] = hook
+            changed = True
+        # 鱼饵：缺失或余量不足都补满（否则抛竿失败 / 静默不触发 FishingUpdate）
+        if not slots[2] or (slots[2].get('count') or 0) < BAIT_MIN:
             bait = dict(rod)
             bait['unique_id'] = rod.get('unique_id', 79301) + 2
-            bait['item_index'] = 798
+            bait['item_index'] = BAIT_INDEX
             bait['count'] = 50
             bait['slots'] = []
             slots[2] = bait
+            changed = True
+        if changed:
             rod['slots'] = slots
             cur.execute(
                 "UPDATE inventory_equipment SET item_json=? WHERE character_name='bevychar' AND slot=0",
