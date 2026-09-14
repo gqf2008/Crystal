@@ -17,6 +17,18 @@ use mir2_shared::enums::Spell;
 
 /// 攻击视野范围（C# AttackRange=6，但 ProcessTarget 用 ViewRange 寻敌）
 const VIEW_RANGE: i32 = 20;
+/// C# `DarkOmaKing.AttackRange = 6`——`InAttackRange()` 的判定半径（Orb/MassThunder 只在攻击距离内触发）
+const ATTACK_RANGE: i32 = 6;
+/// C# Nuke 法术场参数（`DarkOmaKing.cs:114-131`）：`start = 3000`、`ExpireTime = 900 + start`、`TickSpeed = 1000`
+const NUKE_START_MS: u64 = 3000;
+const NUKE_DURATION_MS: u64 = 900;
+const NUKE_TICK_MS: u64 = 1000;
+
+/// C# `DarkOmaKing.InAttackRange()`（`:28-31`）——同图且切比雪夫距离 ≤ `AttackRange(6)`。
+/// Orb/MassThunder 定时器写在 `Attack()` 内部，故也受此门控。
+pub(crate) fn in_attack_range(dist: i32) -> bool {
+    dist <= ATTACK_RANGE
+}
 /// 近战判定距离（C# InRange(CurrentLocation, Target, 3)）
 const MELEE_RANGE: i32 = 3;
 /// Orb（PowerBead）召唤周期：20s = 200 ticks（C# _OrbTime）
@@ -81,6 +93,23 @@ impl MonsterBehavior for DarkOmaKingBehavior {
 
         let dist = max_distance(monster.x, monster.y, target.x, target.y);
 
+        // #2857：C# 的 Orb/MassThunder 定时器写在 `Attack()` **内部**，而 `Attack()` 只会在
+        // `InAttackRange()`（距离 ≤ 6）且 `CanAttack` 成立时被调用——超出攻击距离时先走近，不落雷/不召唤。
+        if !in_attack_range(dist) {
+            if ctx.tick_count >= monster.next_move_tick {
+                let (nx, ny, dir) = step_toward(monster.x, monster.y, target.x, target.y);
+                ctx.out_moves.push((monster.object_id, nx, ny, dir));
+                monster.next_move_tick = ctx.tick_count + monster.ai_profile.move_interval;
+                monster.ai_state = crate::actors::world::MonsterAiState::Chase;
+            }
+            return;
+        }
+
+        // C# `CanAttack` 门控（`AttackTime`/`ActionTime` 都须已过）
+        if ctx.tick_count < monster.next_attack_tick {
+            return;
+        }
+
         // ---- 定时器驱动：PowerBead 召唤（C# DarkOmaKing.cs:44-68）----
         if ctx.tick_count >= self.next_bead_tick {
             self.next_bead_tick = ctx.tick_count + ORB_INTERVAL_TICKS;
@@ -113,14 +142,20 @@ impl MonsterBehavior for DarkOmaKingBehavior {
             // C# 10s + Random(0,5000)
             let jitter = fastrand::u64(0..MASS_THUNDER_JITTER_TICKS);
             self.next_thunder_tick = ctx.tick_count + MASS_THUNDER_BASE_TICKS + jitter;
+            // C# MassThunder 分支在 `return` 前已设 `ActionTime = Envir.Time + AttackSpeed + 300`
+            // （虽然跳过了末尾的 `AttackTime` 更新，但 `CanAttack` 要求两个计时器都过 ⇒ 有效冷却 = +AttackSpeed+300）
+            monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown + 3;
 
             // MAC 伤害 AOE（C# GetAttackPower(MinMC, MaxMC)）
             let damage = crate::combat::attack::get_attack_power(
                 monster.min_mc,
                 monster.max_mc,
                 monster.luck,
-            )
-            .max(1);
+            );
+            // C# `if (damage == 0) return;`（冷却已推进，本次不落雷）
+            if damage == 0 {
+                return;
+            }
             ctx.out_attacks
                 .push(crate::actors::world::ai::AttackAction::Aoe {
                     attacker_oid: monster.object_id,
@@ -134,12 +169,11 @@ impl MonsterBehavior for DarkOmaKingBehavior {
         }
 
         // ---- 攻击 / 追击（C# Attack + ProcessTarget）----
-        if dist <= MELEE_RANGE {
-            if ctx.tick_count < monster.next_attack_tick {
-                return;
-            }
-            monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
-
+        // C# `ranged = CurrentLocation == Target.CurrentLocation || !InRange(CurrentLocation, Target, 3)`
+        // ⇒ **同格也算远程**（distance == 0 走远程分支）
+        if dist > 0 && dist <= MELEE_RANGE {
+            // C# 每个分支先设 `ActionTime = Envir.Time + AttackSpeed + 300`（近战/远程）后再判伤害
+            monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown + 3;
             // C# DarkOmaKing.cs:87-133：ranged=false 时
             if fastrand::i32(0..4) > 0 {
                 // 3/4：普攻 DC（Type=0）
@@ -147,24 +181,30 @@ impl MonsterBehavior for DarkOmaKingBehavior {
                     monster.min_dmg,
                     monster.max_dmg,
                     monster.luck,
-                )
-                .max(1);
-                ctx.out_attacks
-                    .push(crate::actors::world::ai::AttackAction::Melee {
-                        attacker_oid: monster.object_id,
-                        target_session: target.session_id,
-                        damage,
-                        spell_id: 0,
-                        attack_type: 0,
-                    });
+                );
+                // C# `if (damage == 0) return;`——本次不出伤（冷却已推进）
+                if damage > 0 {
+                    ctx.out_attacks
+                        .push(crate::actors::world::ai::AttackAction::Melee {
+                            attacker_oid: monster.object_id,
+                            target_session: target.session_id,
+                            damage,
+                            spell_id: 0,
+                            attack_type: 0,
+                        });
+                }
             } else {
                 // 1/4：FullmoonAttack 三连击 + DarkOmaKingNuke 法术场（Type=1）
                 let damage = crate::combat::attack::get_attack_power(
                     monster.min_dmg,
                     monster.max_dmg,
                     monster.luck,
-                )
-                .max(1);
+                );
+                // C# `ActionTime = Envir.Time + AttackSpeed + 3400`（Nuke 分支冷却更长）
+                monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown + 34;
+                if damage <= 0 {
+                    return;
+                }
                 // C# FullmoonAttack(damage, delay, ACAgility, pushDistance=1, distance=2)：16 格（8 方向 × 2 圈）
                 let dir = direction_towards(monster.x, monster.y, target.x, target.y);
                 monster.direction = dir;
@@ -207,49 +247,71 @@ impl MonsterBehavior for DarkOmaKingBehavior {
                         x: nuke_x,
                         y: nuke_y,
                         value: monster.max_dmg, // C# Value = Stats[Stat.MaxDC]
-                        duration_ms: 900,
-                        tick_ms: 1000,
+                        duration_ms: NUKE_DURATION_MS,
+                        tick_ms: NUKE_TICK_MS,
                         caster_oid: monster.object_id,
                         caster_session: 0,
                         cells: Vec::new(),
                         show: true,
-                        start_delay_ms: 0,
+                        // C# `start = 3000`（`DelayedAction(DelayedType.Spawn, Envir.Time + 3000, ob)`）
+                        start_delay_ms: NUKE_START_MS,
                     });
-                // Nuke 模式冷却更长（C# ActionTime + 3400）
-                monster.next_attack_tick = ctx.tick_count + 34;
             }
-        } else if dist <= 6 {
+        } else {
             // 远程（C# DarkOmaKing.cs:134-148）：1/3 概率弹道 MAC 攻击
-            if ctx.tick_count < monster.next_attack_tick {
-                return;
-            }
-            monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
+            monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown + 3;
             if fastrand::i32(0..3) == 0 {
                 let damage = crate::combat::attack::get_attack_power(
                     monster.min_mc,
                     monster.max_mc,
                     monster.luck,
-                )
-                .max(1);
-                ctx.out_attacks
-                    .push(crate::actors::world::ai::AttackAction::Range {
-                        attacker_oid: monster.object_id,
-                        target_session: target.session_id,
-                        target_object_id: target.object_id,
-                        damage,
-                        spell_id: 0,
-                    });
+                );
+                // C# `if (damage == 0) return;`
+                if damage > 0 {
+                    ctx.out_attacks
+                        .push(crate::actors::world::ai::AttackAction::Range {
+                            attacker_oid: monster.object_id,
+                            target_session: target.session_id,
+                            target_object_id: target.object_id,
+                            damage,
+                            spell_id: 0,
+                        });
+                }
             }
-        } else if ctx.tick_count >= monster.next_move_tick {
-            // 追击（C# 标准 MoveTo）
-            let (nx, ny, dir) = step_toward(monster.x, monster.y, target.x, target.y);
-            ctx.out_moves.push((monster.object_id, nx, ny, dir));
-            monster.next_move_tick = ctx.tick_count + monster.ai_profile.move_interval;
-            monster.ai_state = crate::actors::world::MonsterAiState::Chase;
         }
     }
 
     fn on_die(&mut self, _monster: &mut MonsterState, _ctx: &mut AiCtx) {
         // C# Die：Kill SlaveList（PowerBead）。由调用方通过 is_slave=true 标记统一清理。
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// #2857：C# `DarkOmaKing.AttackRange = 6`（`:13-19`）——Orb/MassThunder 定时器在 `Attack()` 内，
+    /// 只有距离 ≤ 6（`InAttackRange`）才会触发；超出距离只走近。
+    #[test]
+    fn attack_range_gate_matches_csharp() {
+        assert!(in_attack_range(0));
+        assert!(in_attack_range(6));
+        assert!(!in_attack_range(7));
+        assert!(!in_attack_range(20));
+    }
+
+    /// #2857：C# Nuke 法术场（`:114-131`）`start = 3000`、`ExpireTime = now + 900 + start`、`TickSpeed = 1000`
+    /// ——折算成「总寿命 + 首跳偏移」后应为 `(3900, 2000)`。
+    #[test]
+    fn nuke_timing_matches_csharp() {
+        assert_eq!(NUKE_START_MS, 3000);
+        assert_eq!(NUKE_DURATION_MS, 900);
+        assert_eq!(NUKE_TICK_MS, 1000);
+        let (expires_ms, last_tick_shift_ms) = crate::actors::world::spell::delayed_spell_timing(
+            NUKE_START_MS,
+            NUKE_DURATION_MS,
+            NUKE_TICK_MS,
+        );
+        assert_eq!((expires_ms, last_tick_shift_ms), (3900, 2000));
     }
 }
