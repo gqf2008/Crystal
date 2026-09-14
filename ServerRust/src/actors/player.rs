@@ -732,7 +732,11 @@ pub(crate) fn buff_tag(t: &crate::combat::buff::BuffType) -> u8 {
     match t {
         BuffType::HpRegen { .. } => 0,
         BuffType::MpRegen { .. } => 1,
-        BuffType::AttackBoost { .. } => 2,
+        // #2892 批D 单元②：C# `Impact`（药水，图标 249）与 `Rage`（怒气，图标 49）分开
+        BuffType::Impact { .. } => 2,
+        BuffType::Rage { .. } => 14,
+        // 英雄 `UltimateEnhancer` 走 `AttackBoost`：C# 图标 35「终极强化」
+        BuffType::AttackBoost { .. } => 33,
         BuffType::DefenseBoost { .. } => 3,
         BuffType::AcDefenseBoost { .. } => 4,
         BuffType::MacDefenseBoost { .. } => 5,
@@ -748,7 +752,8 @@ pub(crate) fn buff_tag(t: &crate::combat::buff::BuffType) -> u8 {
         BuffType::AttackSpeedBoost { .. } => 11,
         BuffType::MoveSpeedBoost { .. } => 12,
         BuffType::AgilityBoost { .. } => 13,
-        BuffType::CriticalRateBoost { .. } => 14,
+        // Rust 扩展（C# 无暴击率 Buff）：tag 34
+        BuffType::CriticalRateBoost { .. } => 34,
         BuffType::MpRegenBoost { .. } => 15,
         BuffType::MaxMpBoost { .. } => 16,
         BuffType::Reflect { .. } => 17,
@@ -776,6 +781,8 @@ pub(crate) fn buff_values(t: &crate::combat::buff::BuffType) -> Vec<i32> {
         B::HpRegen { amount_per_tick } => vec![*amount_per_tick],
         B::MpRegen { amount_per_tick } => vec![*amount_per_tick],
         B::AttackBoost { bonus } => vec![*bonus],
+        B::Impact { bonus } => vec![*bonus],
+        B::Rage { bonus } => vec![*bonus],
         B::DefenseBoost { bonus } => vec![*bonus],
         B::AcDefenseBoost { bonus } => vec![*bonus],
         B::MacDefenseBoost { bonus } => vec![*bonus],
@@ -7892,6 +7899,21 @@ fn reset_step_counter_if_idle(step_counter: &mut i32, cell_time_ms: i64, now_ms:
 #[cfg(test)]
 mod tests {
     /// #2892 批D 单元②：C# 三种隐身（Hiding/MoonLight/DarkBody）必须是**三个不同 tag**，
+    /// #2892 批D 单元②：C# 把「药水攻击加成（`Impact`，图标 249）」与「战士怒气（`Rage`，图标 49）」
+    /// 分成两个 BuffType；英雄 `UltimateEnhancer` 走的 `AttackBoost` 另给「终极强化」(图标 35)。
+    #[test]
+    fn attack_boost_trio_uses_distinct_tags() {
+        use crate::combat::buff::BuffType;
+        let impact = super::buff_tag(&BuffType::Impact { bonus: 0 });
+        let rage = super::buff_tag(&BuffType::Rage { bonus: 0 });
+        let ultimate = super::buff_tag(&BuffType::AttackBoost { bonus: 0 });
+        assert_eq!((impact, rage, ultimate), (2, 14, 33));
+        assert!(
+            impact != rage && rage != ultimate && impact != ultimate,
+            "药水/怒气/终极强化 tag 必须互不相同（实际 {impact}/{rage}/{ultimate}）"
+        );
+    }
+
     /// 否则客户端只会显示其中一个的图标/文案（tag 10=MoonLight 图标 65、31=Hiding 17、32=DarkBody 70）。
     #[test]
     fn invisibility_trio_uses_distinct_tags() {
