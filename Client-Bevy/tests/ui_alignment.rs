@@ -3079,3 +3079,207 @@ fn panel_sprites_batch_b4_match_csharp() {
 
     println!("  ✓ 批B 面板精灵核对（四）：药水腰带 Prguse[1932]@(230,618) / 英雄腰带 Prguse[1921]@(475,618) / 耐久 Prguse[2105]+[2161/2162]@(963,200)");
 }
+
+/// #2892 批B（五）：掷骰窗 + 租借浏览窗。
+///
+/// 掷骰：C# `RollDialog.Setup`（`RollDialog.cs:78-114`）——骰子 `Size 65x65`
+/// @ `((ScreenWidth/2)-38, (ScreenHeight/2)-40)`、尤茨 `Size 180x130` @ `(-90, -65)`；
+/// 帧表：空闲 `Prguse[282]`/`Items[2581]`、动画 `Prguse[290..293]`/`Items[2581..2586]`、
+/// 结果 `Prguse[281+result]`/`Items[2587+result]`。两个控件 `UseOffSet = true`，
+/// 故绘制点还要加帧自带 offset，且**绘制尺寸用帧原生尺寸而非控件 Size**。
+///
+/// 租借浏览：C# `ItemRentalDialog`（`ItemRentalDialog.cs:16-105`）——`Prguse3[1]` 400x174 居中，
+/// 标题 `Prguse3[0]` @(22,8)、页签 `Prguse3[2]` @(8,32) 72x23 / `Prguse3[3]` @(81,32) 84x23、
+/// 租借键 `Prguse3[4..6]` @(295,144) 85x29、关闭 `Prguse2[360..362]` @(375,3)、
+/// 3 行 `(0, 78+i*21)`。
+#[test]
+fn panel_sprites_batch_b5_match_csharp() {
+    use client_bevy::game::dialogs::{item_rental_browse as browse, roll};
+    require_assets!("panel_sprites_batch_b5_match_csharp");
+    let mut libs = Libs::new();
+
+    // ---- 掷骰窗 ----
+    assert_eq!(
+        roll::DIE_CONTROL_SIZE,
+        (65.0, 65.0),
+        "[尺寸] C# 骰子 Size 65x65"
+    );
+    assert_eq!(
+        roll::YUT_CONTROL_SIZE,
+        (180.0, 130.0),
+        "[尺寸] C# 尤茨 Size 180x130"
+    );
+    assert_eq!(
+        roll::DIE_ORIGIN,
+        ((SW / 2.0) - 38.0, (SH / 2.0) - 40.0),
+        "[坐标] C# 骰子 `((SW/2)-38, (SH/2)-40)`"
+    );
+    assert_eq!(
+        roll::YUT_ORIGIN,
+        ((SW / 2.0) - 90.0, (SH / 2.0) - 65.0),
+        "[坐标] C# 尤茨 `((SW/2)-90, (SH/2)-65)`"
+    );
+    // 骰子帧（空闲 / 4 帧动画 / 6 个结果帧）
+    for idx in [roll::DIE_IDLE_INDEX, roll::DIE_ANIM_INDEX] {
+        let (w, h) = libs.size(LibraryName::Prguse, idx);
+        assert!(w > 0.0 && h > 0.0, "[资产] Prguse[{idx}] 应存在");
+    }
+    for i in 0..roll::DIE_ANIM_FRAMES {
+        let (w, h) = libs.size(LibraryName::Prguse, roll::DIE_ANIM_INDEX + i);
+        assert_eq!(
+            (w, h),
+            (64.0, 61.0),
+            "[尺寸] Prguse[{}]",
+            roll::DIE_ANIM_INDEX + i
+        );
+    }
+    for r in 1..=6usize {
+        let idx = roll::DIE_RESULT_BASE + r;
+        let (w, h) = libs.size(LibraryName::Prguse, idx);
+        assert_eq!((w, h), (64.0, 61.0), "[尺寸] Prguse[{idx}] 骰子结果帧");
+        // 结果帧 ≠ 控件 Size（65x65）：C# 只把 Size 当命中框，绘制用帧原生尺寸
+        assert!(
+            (w, h) != roll::DIE_CONTROL_SIZE,
+            "[尺寸] Prguse[{idx}] 帧原生 64x61 ≠ 控件 Size 65x65（不得拉伸到控件尺寸）"
+        );
+    }
+    // 尤茨帧：**每帧高度都不同**（木棒下落的逐帧动画：127/127/180/210/199/171），
+    // 这正是「绘制尺寸必须用帧原生尺寸」的证据——拉伸到控件 Size 180x130 会把动画压扁。
+    let mut yut_heights = Vec::new();
+    for i in 0..roll::YUT_ANIM_FRAMES {
+        let (w, h) = libs.size(LibraryName::Items, roll::YUT_IDLE_INDEX + i);
+        assert_eq!(
+            w,
+            180.0,
+            "[宽度] Items[{}] 应为 180",
+            roll::YUT_IDLE_INDEX + i
+        );
+        assert!(h > 0.0, "[资产] Items[{}] 应存在", roll::YUT_IDLE_INDEX + i);
+        yut_heights.push(h);
+    }
+    assert!(
+        yut_heights.iter().any(|h| (*h - 130.0).abs() > 1.0),
+        "[尺寸] 尤茨动画帧高度不齐（{yut_heights:?}）→ 不得拉伸到控件 Size 180x130"
+    );
+    for r in 1..=6usize {
+        let idx = roll::YUT_RESULT_BASE + r;
+        let (w, h) = libs.size(LibraryName::Items, idx);
+        assert_eq!(w, 180.0, "[宽度] Items[{idx}] 尤茨结果帧应为 180");
+        assert!(h > 0.0, "[资产] Items[{idx}] 尤茨结果帧应存在");
+    }
+    // `UseOffSet = true` → 绘制点 = 控件原点 + 帧 offset（C# `MirImageControl.DisplayLocation`）
+    assert_eq!(
+        libs.size_off(LibraryName::Items, roll::YUT_RESULT_BASE + 1)
+            .2,
+        1.0,
+        "[偏移] Items[2588] 自带 offset.x = 1 → 实绘 x = 422+1"
+    );
+    assert_eq!(
+        libs.size_off(LibraryName::Prguse, roll::DIE_RESULT_BASE + 1)
+            .2,
+        0.0,
+        "[偏移] Prguse[282] offset.x = 0 → 实绘 x = 474"
+    );
+    assert_in_canvas(
+        "掷骰（骰子）",
+        roll::DIE_ORIGIN.0,
+        roll::DIE_ORIGIN.1,
+        64.0,
+        61.0,
+    );
+    assert_in_canvas(
+        "掷骰（尤茨）",
+        roll::YUT_ORIGIN.0 + 1.0,
+        roll::YUT_ORIGIN.1,
+        180.0,
+        210.0,
+    );
+    assert!(
+        (roll::roll_duration(0) - 2.4).abs() < 1e-6 && (roll::roll_duration(1) - 0.6).abs() < 1e-6,
+        "[时序] 骰子 2.4s（4 帧 × 6 轮）/ 尤茨 0.6s（6 帧）"
+    );
+
+    // ---- 租借浏览窗 ----
+    let (pw, ph) = libs.size(browse::PANEL.0, browse::PANEL.1);
+    assert_eq!(
+        (pw, ph),
+        (browse::PANEL_W, browse::PANEL_H),
+        "[尺寸] Prguse3[1] 400x174"
+    );
+    assert_eq!(
+        client_bevy::game::dialogs::center_origin(pw, ph),
+        ((SW - pw) / 2.0, (SH - ph) / 2.0),
+        "[坐标] C# `Location = Center`"
+    );
+    assert_in_canvas("租借浏览", (SW - pw) / 2.0, (SH - ph) / 2.0, pw, ph);
+    let (tw, th) = libs.size(browse::TITLE.0, browse::TITLE.1);
+    assert_eq!((tw, th), (52.0, 18.0), "[尺寸] Prguse3[0] 标题");
+    assert_inside(
+        "租借标题",
+        browse::TITLE_POS.0,
+        browse::TITLE_POS.1,
+        tw,
+        th,
+        0.0,
+        0.0,
+        pw,
+        ph,
+    );
+    let (rw, rh) = libs.size(browse::RENTED_TAB_SPRITE.0, browse::RENTED_TAB_SPRITE.1);
+    assert_eq!(
+        (rw, rh),
+        (browse::RENTED_TAB.2, browse::RENTED_TAB.3),
+        "[尺寸] Prguse3[2] 页签"
+    );
+    let (bw2, bh2) = libs.size(browse::BORROWED_TAB_SPRITE.0, browse::BORROWED_TAB_SPRITE.1);
+    assert_eq!(
+        (bw2, bh2),
+        (browse::BORROWED_TAB.2, browse::BORROWED_TAB.3),
+        "[尺寸] Prguse3[3] 页签"
+    );
+    for (lib, idx) in browse::RENT_BTN_SPRITES {
+        let (w, h) = libs.size(lib, idx);
+        assert_eq!(
+            (w, h),
+            (84.0, 28.0),
+            "[尺寸] Prguse3[{idx}] 租借键（帧 84x28，控件 85x29）"
+        );
+    }
+    for (lib, idx) in browse::CLOSE_SPRITES {
+        let (w, h) = libs.size(lib, idx);
+        assert_eq!((w, h), (24.0, 21.0), "[尺寸] Prguse2[{idx}] 关闭键");
+    }
+    // 关闭键与 3 行都在面板内
+    let (cw, ch) = libs.size(browse::CLOSE_SPRITES[0].0, browse::CLOSE_SPRITES[0].1);
+    assert_inside(
+        "租借关闭键",
+        browse::CLOSE_POS.0,
+        browse::CLOSE_POS.1,
+        cw,
+        ch,
+        0.0,
+        0.0,
+        pw,
+        ph,
+    );
+    assert_inside(
+        "租借按钮",
+        browse::RENT_BTN_POS.0,
+        browse::RENT_BTN_POS.1,
+        browse::RENT_BTN_SIZE.0,
+        browse::RENT_BTN_SIZE.1,
+        0.0,
+        0.0,
+        pw,
+        ph,
+    );
+    let last_row_y = browse::ROW_Y0 + (browse::RENTAL_ROWS as f32 - 1.0) * browse::ROW_DY;
+    assert_inside("租借末行", 0.0, last_row_y, 383.0, 21.0, 0.0, 0.0, pw, ph);
+    assert!(
+        browse::RENT_BTN_POS.1 > last_row_y,
+        "[重叠] 租借键在 3 行之下（144 > {}）",
+        last_row_y
+    );
+
+    println!("  ✓ 批B 面板精灵核对（五）：掷骰 Prguse[282/290..293/282..287]+Items[2581..2586/2588..2593] / 租借浏览 Prguse3[0..6]+Prguse2[360..362]");
+}
