@@ -2166,3 +2166,127 @@ fn input_box_aligned() {
         "  ✓ MirInputBox Prguse[660] 288x156 @(368,306)：标题(25,25) 235x40、输入(23,86) 240x19、OK/Cancel 76x25 @(60/160,123)"
     );
 }
+
+/// #2892 批C：行会领地窗对齐 C# `GuildTerritoryDialog .cs`——
+/// 面板 `Prguse[680]`（原生 568x241），C# **未设 Location** → (0,0)；
+/// 标题 `Title[54]`@(217,11)、关闭 `Prguse[361..363]`@(544,8)、翻页 `Prguse2[240..245]`@(214/317,213)、
+/// 邮件/购买 `Prguse[437..439]`@(262/292,208)、表头 5 列 @(15/60/230/380/480,38)、
+/// 7 行 `GTRow` 550x17 @(5,60+20i) 五列 15/45/150/365/460。
+#[test]
+fn guild_territory_dialog_aligned() {
+    use client_bevy::game::dialogs::guild_territory as gt;
+    require_assets!("guild_territory_dialog_aligned");
+    let mut libs = Libs::new();
+
+    let (w, h) = libs.size(LibraryName::Prguse, gt::PANEL_INDEX);
+    assert_eq!(
+        (w, h),
+        (gt::PANEL_W, gt::PANEL_H),
+        "[尺寸] 面板应取 Prguse[680] 原生 568x241，不得拉伸"
+    );
+    let (ox, oy) = gt::PANEL_ORIGIN;
+    assert_eq!((ox, oy), (0.0, 0.0), "[坐标] C# 未设 Location → 默认 (0,0)");
+    assert_in_canvas("行会领地", ox, oy, w, h);
+
+    // 标题 `Title[54]`
+    assert_eq!(
+        libs.size(LibraryName::Title, 54),
+        gt::TITLE_SIZE,
+        "[尺寸] 标题应取 Title[54] 133x15"
+    );
+    assert_eq!(gt::TITLE_POS, (217.0, 11.0));
+    assert_inside(
+        "标题",
+        ox + gt::TITLE_POS.0,
+        oy + gt::TITLE_POS.1,
+        gt::TITLE_SIZE.0,
+        gt::TITLE_SIZE.1,
+        ox,
+        oy,
+        w,
+        h,
+    );
+
+    // 关闭（`Prguse[361..363]` 16x15）、翻页（`Prguse2[240..245]` 16x16）
+    assert_eq!(
+        libs.size(LibraryName::Prguse, 361),
+        gt::CLOSE_SIZE,
+        "[尺寸] 关闭键应取 Prguse[361] 16x15"
+    );
+    assert!(libs.size(LibraryName::Prguse, 363).0 > 0.0);
+    assert_eq!(gt::CLOSE_POS, (544.0, 8.0));
+    assert_inside(
+        "关闭键",
+        ox + gt::CLOSE_POS.0,
+        oy + gt::CLOSE_POS.1,
+        gt::CLOSE_SIZE.0,
+        gt::CLOSE_SIZE.1,
+        ox,
+        oy,
+        w,
+        h,
+    );
+    for (idx, pos, name) in [
+        (240usize, gt::PREV_POS, "上一页"),
+        (243, gt::NEXT_POS, "下一页"),
+    ] {
+        assert_eq!(
+            libs.size(LibraryName::Prguse2, idx),
+            gt::PAGE_SIZE,
+            "[尺寸] {name}应取 Prguse2[{idx}] 16x16"
+        );
+        assert_inside(
+            name,
+            ox + pos.0,
+            oy + pos.1,
+            gt::PAGE_SIZE.0,
+            gt::PAGE_SIZE.1,
+            ox,
+            oy,
+            w,
+            h,
+        );
+    }
+
+    // 邮件 / 购买（同 `Prguse[437..439]` 28x25，C# BuyButton 默认隐藏）
+    assert_eq!(
+        libs.size(LibraryName::Prguse, 437),
+        gt::ACTION_SIZE,
+        "[尺寸] 邮件/购买键应取 Prguse[437] 28x25"
+    );
+    for (pos, name) in [(gt::MAIL_POS, "邮件"), (gt::BUY_POS, "购买")] {
+        assert_inside(
+            name,
+            ox + pos.0,
+            oy + pos.1,
+            gt::ACTION_SIZE.0,
+            gt::ACTION_SIZE.1,
+            ox,
+            oy,
+            w,
+            h,
+        );
+    }
+    assert!(
+        gt::MAIL_POS.0 + gt::ACTION_SIZE.0 <= gt::BUY_POS.0,
+        "[重叠] 邮件键不得压住购买键"
+    );
+
+    // 表头 5 列 + 7 行（含末行底边）
+    assert_eq!(gt::HEADER_X, [15.0, 60.0, 230.0, 380.0, 480.0]);
+    assert_eq!(gt::HEADER_Y, 38.0);
+    assert_eq!(gt::HEADERS.len(), 5);
+    assert_eq!(gt::ROW_COUNT, 7, "C# `for (i = 0; i < 7; i++)`");
+    assert_eq!(gt::ROW_LABEL_X, [15.0, 45.0, 150.0, 365.0, 460.0]);
+    let last_bottom = gt::ROW_Y0 + (gt::ROW_COUNT as f32 - 1.0) * gt::ROW_STEP + gt::ROW_H;
+    assert_eq!(last_bottom, 197.0, "[行] 末行底边 = 60 + 6*20 + 17");
+    assert!(
+        last_bottom <= gt::PANEL_H,
+        "[包含] 7 行必须在 568x241 面板内（此前自造的 340 高面板是多余的）"
+    );
+    assert!(gt::ROW_X + gt::ROW_W <= gt::PANEL_W);
+
+    println!(
+        "  ✓ 行会领地 Prguse[680] 568x241 @(0,0)：标题(217,11)、关闭(544,8)、翻页(214/317,213)、邮件/购买(262/292,208)、表头 y38、7 行 550x17 @(5,60+20i)"
+    );
+}

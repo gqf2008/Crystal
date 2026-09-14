@@ -291,52 +291,31 @@ impl Packet for MockGuildMemberJoined {
     }
 }
 
-/// #672：行会领地页（客户端格式 [count i32][per: id i32][map_index i32][owner dotnet][state u8]）
-pub(crate) struct MockTerritoryPage {
-    pub(crate) rows: Vec<(i32, i32, String, u8)>,
-}
+/// #672/#2892：mock 行会领地行 `(id, owner, leader, price, begin)`
+pub(crate) type MockTerritory = (i32, String, String, i32, i32);
 
-impl Packet for MockTerritoryPage {
-    const OPCODE: i16 = mir2_shared::enums::ServerPacketIds::GuildTerritoryPage as i16;
-
-    fn read_body<R: std::io::Read>(_: &mut R) -> mir2_shared::data::stats::SharedResult<Self> {
-        unreachable!("mock 只发送不解析")
-    }
-
-    fn write_body<W: std::io::Write>(
-        &self,
-        writer: &mut W,
-    ) -> mir2_shared::data::stats::SharedResult<()> {
-        use byteorder::{LittleEndian, WriteBytesExt};
-        writer.write_i32::<LittleEndian>(self.rows.len() as i32)?;
-        for (id, map_index, owner, state) in &self.rows {
-            writer.write_i32::<LittleEndian>(*id)?;
-            writer.write_i32::<LittleEndian>(*map_index)?;
-            mir2_shared::binary::write_dotnet_string(writer, owner)?;
-            writer.write_u8(*state)?;
-        }
-        Ok(())
-    }
-}
-
-/// #672：宣战确认（客户端格式 [guild_name dotnet]）
-pub(crate) struct MockGuildRequestWar {
-    pub(crate) guild_name: String,
-}
-
-impl Packet for MockGuildRequestWar {
-    const OPCODE: i16 = mir2_shared::enums::ServerPacketIds::GuildRequestWar as i16;
-
-    fn read_body<R: std::io::Read>(_: &mut R) -> mir2_shared::data::stats::SharedResult<Self> {
-        unreachable!("mock 只发送不解析")
-    }
-
-    fn write_body<W: std::io::Write>(
-        &self,
-        writer: &mut W,
-    ) -> mir2_shared::data::stats::SharedResult<()> {
-        mir2_shared::binary::write_dotnet_string(writer, &self.guild_name)?;
-        Ok(())
+/// #2892 批C：按 C# `ClientGTMap` 构造 `S.GuildTerritoryPage`（复用共享包体，
+/// 不再手写字节，避免 mock 与服务端线格式漂移）
+pub(crate) fn mock_gt_page(
+    rows: &[MockTerritory],
+) -> mir2_shared::packets::server::special_systems::GuildTerritoryPage {
+    use mir2_shared::packets::server::special_systems::{GuildTerritoryPage, TerritoryInfo};
+    GuildTerritoryPage {
+        length: rows.len() as i32,
+        territories: rows
+            .iter()
+            .map(|(id, owner, leader, price, begin)| TerritoryInfo {
+                id: *id,
+                index: *id,
+                name: format!("GT{id}"),
+                owner: owner.clone(),
+                leader: leader.clone(),
+                leader2: String::new(),
+                price: *price,
+                days: 0,
+                begin: *begin,
+            })
+            .collect(),
     }
 }
 

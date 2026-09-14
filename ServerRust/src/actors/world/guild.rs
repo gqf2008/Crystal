@@ -408,25 +408,10 @@ impl WorldActor {
         self.refresh_guild_war_colours(sender_guild, &guild_name)
             .await;
 
-        // Send GuildRequestWar packet back to the declarer
-        use mir2_shared::packets::server::miscellaneous::GuildRequestWar;
-        let war_packet = GuildRequestWar {
-            guild_name: guild_name.clone(),
-        };
-        let mut war_body = Vec::new();
-        if let Ok(()) = mir2_shared::packets::Packet::write_body(&war_packet, &mut war_body) {
-            let _ = self
-                .gate_ref
-                .tell(SendToClient {
-                    session_id,
-                    data: build_packet_bytes(
-                        mir2_shared::enums::ServerPacketIds::GuildRequestWar as i16,
-                        &war_body,
-                    ),
-                })
-                .await;
-        }
-
+        // #2892 批C：**删除**「回送 GuildRequestWar」——C# `PlayerObject.GuildWarReturn`（`:10283-10325`）
+        // 宣战成功后只给自己发聊天（`YouStartedWarWith`）、给对方行会发聊天，
+        // 不再回送提示框（`S.GuildRequestWar` 仅由 NPC `RequestWarKey` 发出，见 `npc.rs:492`）。
+        // 原先回送会让客户端在宣战后再次弹出取名框（Bevy 自造流程的遗留）。
         send_system_message(
             &self.gate_ref,
             session_id,
@@ -753,22 +738,34 @@ impl Message<GuildTerritoryPageRequest> for WorldActor {
         msg: GuildTerritoryPageRequest,
         _ctx: &mut Context<Self, Self::Reply>,
     ) {
-        self.send_guild_territory_page_packet(msg.session_id, msg.page);
+        self.send_guild_territory_page_packet(msg.session_id, msg.page)
+            .await;
     }
 }
 
 impl WorldActor {
-    /// #2380：下发行会领地列表页（C# GetGuildTerritories；客户端 GuildTerritoryPage 与 NPC [@GUILDTERRITORY] 共用）
-    pub(crate) fn send_guild_territory_page_packet(&self, session_id: u64, _page: u32) {
-        let count = self.conquest_instances.len() as i32;
+    /// #2380：下发行会领地列表页（C# GetGuildTerritories；客户端 GuildTerritoryPage 与 NPC [@GUILDTERRITORY] 共用）。
+    ///
+    /// #2892 批C：改为按 C# `ClientGTMap` 字段下发（Leader/Leader2/price/days/begin），
+    /// 公会最高职务成员名从 DB 现取（C# `GuildObject.Ranks[0].Members`）。
+    pub(crate) async fn send_guild_territory_page_packet(&self, session_id: u64, _page: u32) {
+        let leaders = crate::db::load_guild_top_rank_members(&self.db_pool)
+            .await
+            .unwrap_or_default();
+        let map_titles: std::collections::HashMap<i32, String> = self
+            .map_infos
+            .iter()
+            .map(|(idx, info)| (*idx, info.title.clone()))
+            .collect();
+        let page = build_guild_territory_page(
+            &self.conquest_instances,
+            &leaders,
+            &map_titles,
+            self.tick_count,
+        );
         let mut body = Vec::new();
-        body.extend_from_slice(&count.to_le_bytes());
-        for instance in &self.conquest_instances {
-            body.extend_from_slice(&instance.id.to_le_bytes());
-            body.extend_from_slice(&instance.map_index.to_le_bytes());
-            let owner = instance.owner_guild.as_deref().unwrap_or("");
-            crate::util::wire::write_dotnet_string(&mut body, owner);
-            body.push(instance.state.clone() as u8);
+        if mir2_shared::packets::Packet::write_body(&page, &mut body).is_err() {
+            return;
         }
         let _ = self
             .gate_ref
@@ -781,6 +778,88 @@ impl WorldActor {
             })
             .try_send();
     }
+}
+
+/// #2892 批C：构造 C# 语义的 `S.GuildTerritoryPage`（`ClientGTMap`，`SharedData.cs:139-176`）。
+///
+/// 字段来源：
+/// - `index` = 领地地图索引；`name` = 地图标题（C# `MapInfo.Title`）
+/// - `owner` = 拥有公会名；**无主下发空串**（客户端渲染「无」并按 C# 规则判为「可用」；
+///   C# 服务端写死 `"None"`、客户端却拿本地化「无」比较，是原版自身的不一致 —— Rust 取空串自洽）
+/// - `leader`/`leader2` = 拥有公会最高职务档前两名成员（`GuildObject.cs:305-311`）
+/// - `price` = 挂售价（未挂售 0）；`begin` = 租期剩余秒（C# `(GTBegin - Now).Seconds`，`:831`）
+/// - `days` = 剩余整天数（C# 存租期天数；Rust 由剩余 tick 折算）
+pub(crate) fn build_guild_territory_page(
+    instances: &[crate::actors::world::conquest::ConquestInstance],
+    leaders: &std::collections::HashMap<String, Vec<String>>,
+    map_titles: &std::collections::HashMap<i32, String>,
+    now_tick: u64,
+) -> mir2_shared::packets::server::special_systems::GuildTerritoryPage {
+    use mir2_shared::packets::server::special_systems::{GuildTerritoryPage, TerritoryInfo};
+
+    let mut territories = Vec::with_capacity(instances.len());
+    for inst in instances {
+        let owner = inst.owner_guild.clone().unwrap_or_default();
+        let (leader, leader2) = if owner.is_empty() {
+            (String::new(), String::new())
+        } else {
+            let members = leaders.get(&owner).cloned().unwrap_or_default();
+            (
+                members.first().cloned().unwrap_or_default(),
+                members.get(1).cloned().unwrap_or_default(),
+            )
+        };
+        let (price, days, begin) = gt_row_finance(
+            inst.for_sale,
+            inst.sale_price,
+            inst.rent_expire_tick,
+            now_tick,
+        );
+        territories.push(TerritoryInfo {
+            id: inst.id,
+            index: inst.map_index,
+            name: map_titles.get(&inst.map_index).cloned().unwrap_or_default(),
+            owner,
+            leader,
+            leader2,
+            price,
+            days,
+            begin,
+        });
+    }
+    GuildTerritoryPage {
+        length: territories.len() as i32,
+        territories,
+    }
+}
+
+/// 单行的 C# 折算式（抽出便于单测）：`price` = 挂售价（未挂售 0）；
+/// `begin` = 租期剩余秒（C# `(GTBegin - Now).Seconds`，`0` = 未拥有/已到期）；
+/// `days` = 剩余整天数（C# 存租期天数，Rust 由剩余 tick 折算）。
+pub(crate) fn gt_row_finance(
+    for_sale: bool,
+    sale_price: u64,
+    rent_expire_tick: u64,
+    now_tick: u64,
+) -> (i32, i32, i32) {
+    // 世界循环 100ms/tick
+    const TICKS_PER_SEC: u64 = 10;
+    let price = if for_sale {
+        sale_price.min(i32::MAX as u64) as i32
+    } else {
+        0
+    };
+    let begin = if rent_expire_tick > now_tick {
+        ((rent_expire_tick - now_tick) / TICKS_PER_SEC).min(i32::MAX as u64) as i32
+    } else {
+        0
+    };
+    let days = if begin > 0 {
+        (begin + 86_399) / 86_400
+    } else {
+        0
+    };
+    (price, days, begin)
 }
 
 /// #2820：领地购买/续租的**写入段**（C# `PlayerObject.PurchaseGuildTerritory` 的赋值 + `MyGuild.NeedSave`）。
@@ -981,6 +1060,63 @@ fn guild_storage_gold_change_body(amount: u32, change_type: u8, name: &str) -> V
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #2892 批C：GT 行折算 —— `price` 只在挂售时下发；`begin` = 租期剩余秒；
+    /// `days` = 剩余整天数（向上取整）
+    #[test]
+    fn gt_row_finance_matches_csharp_fields() {
+        // 未挂售 → price 0；无租期 → begin/days 0
+        assert_eq!(gt_row_finance(false, 5_000_000, 0, 100), (0, 0, 0));
+        // 挂售 → price = sale_price
+        assert_eq!(gt_row_finance(true, 5_000_000, 0, 0).0, 5_000_000);
+        // 租期剩 7200 秒（72000 ticks）→ begin 7200、days 1（向上取整）
+        let (_, days, begin) = gt_row_finance(false, 0, 72_000, 0);
+        assert_eq!(begin, 7200);
+        assert_eq!(days, 1);
+        // 已到期 → begin 0
+        assert_eq!(gt_row_finance(false, 0, 100, 200), (0, 0, 0));
+        // 超过 i32 上限 → 钳制，不 panic
+        assert_eq!(gt_row_finance(true, u64::MAX, 0, 0).0, i32::MAX);
+    }
+
+    /// #2892 批C：`Leader`/`Leader2` 取拥有公会最高职务档前两名（C# `GuildObject.cs:305-311`）；
+    /// 无主行三字段都空（客户端据此判「可用」）
+    #[test]
+    fn gt_page_rows_use_top_rank_members() {
+        use crate::actors::world::conquest::{ConquestGame, ConquestInstance};
+        let mut owned = ConquestInstance::new(3, 5, 0, ConquestGame::Classic);
+        owned.owner_guild = Some("行会A".to_string());
+        owned.for_sale = true;
+        owned.sale_price = 1_000_000;
+        let leaders = std::collections::HashMap::from([
+            (
+                "行会A".to_string(),
+                vec!["会长甲".to_string(), "副会长乙".to_string()],
+            ),
+            ("行会B".to_string(), vec!["会长丙".to_string()]),
+        ]);
+        let titles = std::collections::HashMap::from([(5, "GT 地图".to_string())]);
+        let page = build_guild_territory_page(&[owned], &leaders, &titles, 0);
+        assert_eq!(page.length, 1);
+        let row = &page.territories[0];
+        assert_eq!(row.id, 3);
+        assert_eq!(row.index, 5);
+        assert_eq!(row.name, "GT 地图");
+        assert_eq!(row.owner, "行会A");
+        assert_eq!(row.leader, "会长甲");
+        assert_eq!(row.leader2, "副会长乙");
+        assert_eq!(row.price, 1_000_000);
+
+        // 无主 → owner/leader/leader2 空串、price 0
+        let mut free = ConquestInstance::new(4, 6, 0, ConquestGame::Classic);
+        free.owner_guild = None;
+        let page = build_guild_territory_page(&[free], &leaders, &titles, 0);
+        let row = &page.territories[0];
+        assert!(row.owner.is_empty());
+        assert!(row.leader.is_empty());
+        assert!(row.leader2.is_empty());
+        assert_eq!(row.price, 0);
+    }
 
     /// #2820：领地购买/续租写入段——写主 + 置脏 + 租期（挂售成交多 1 天、清挂售与售价）
     /// （C# `PlayerObject.PurchaseGuildTerritory` + `MyGuild.NeedSave`）

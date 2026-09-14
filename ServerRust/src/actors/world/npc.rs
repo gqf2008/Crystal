@@ -467,7 +467,8 @@ impl Message<NPCCallRequest> for WorldActor {
             }
             // C# GuildTerritoryKey：player.GetGuildTerritories(0)（S.GuildTerritoryPage 第 0 页）
             Some(EngineNpcAction::GuildTerritory) => {
-                self.send_guild_territory_page_packet(msg.session_id, 0);
+                self.send_guild_territory_page_packet(msg.session_id, 0)
+                    .await;
                 return;
             }
             // C# GuildCreateKey（NPCScript.cs:1050-1062）：已在行会拒绝；否则 S.GuildNameRequest（等级在创建时校验）

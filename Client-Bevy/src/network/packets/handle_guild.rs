@@ -437,56 +437,44 @@ pub(crate) fn handle_guild(
         }
         // ---- M36: 行会领地/宣战 ----
         x if x == ServerPacketIds::GuildTerritoryPage as i16 => {
-            // [count i32][per: id i32][map_index i32][owner 7-bit dotnet][state u8]
+            // #2892 批C：改用 C# `ClientGTMap` 线格式（`length + count + 每项 9 字段`；
+            // Rust 在每项前置领地 id）——与共享包结构同源，避免手写解析漂移
             let body = &payload[PacketHeader::HEADER_SIZE..];
             let mut cur = std::io::Cursor::new(body);
-            use byteorder::{LittleEndian, ReadBytesExt};
-            let count = cur.read_i32::<LittleEndian>().unwrap_or(0).max(0) as usize;
-            let mut rows = Vec::with_capacity(count);
-            let mut ok = true;
-            for _ in 0..count {
-                let id = match cur.read_i32::<LittleEndian>() {
-                    Ok(v) => v,
-                    Err(_) => {
-                        ok = false;
-                        break;
-                    }
-                };
-                let map_index = match cur.read_i32::<LittleEndian>() {
-                    Ok(v) => v,
-                    Err(_) => {
-                        ok = false;
-                        break;
-                    }
-                };
-                let owner = match mir2_shared::binary::read_dotnet_string(&mut cur) {
-                    Ok(v) => v,
-                    Err(_) => {
-                        ok = false;
-                        break;
-                    }
-                };
-                let state = match cur.read_u8() {
-                    Ok(v) => v,
-                    Err(_) => {
-                        ok = false;
-                        break;
-                    }
-                };
-                rows.push(TerritoryRow {
-                    id,
-                    map_index,
-                    owner,
-                    state,
-                });
-            }
-            if ok {
-                let row_count = rows.len();
-                let unowned = rows.iter().filter(|r| r.owner.is_empty()).count();
-                server_events.write(ServerEvent::TerritoryList { rows });
-                tracing::info!("🏯 领地列表: {} 个（无主 {}）", row_count, unowned);
-            } else {
-                tracing::warn!("⚠️ GuildTerritoryPage 解析失败: (len={})", payload.len());
+            match mir2_shared::packets::server::special_systems::GuildTerritoryPage::read_body(
+                &mut cur,
+            ) {
+                Ok(page) => {
+                    let rows: Vec<TerritoryRow> = page
+                        .territories
+                        .iter()
+                        .map(|t| TerritoryRow {
+                            id: t.id,
+                            map_index: t.index,
+                            name: t.name.clone(),
+                            owner: t.owner.clone(),
+                            leader: t.leader.clone(),
+                            leader2: t.leader2.clone(),
+                            price: t.price,
+                            days: t.days,
+                            begin: t.begin,
+                        })
+                        .collect();
+                    let row_count = rows.len();
+                    let unowned = rows.iter().filter(|r| r.owner.is_empty()).count();
+                    server_events.write(ServerEvent::TerritoryList { rows });
+                    tracing::info!(
+                        "🏯 领地列表: {} 个（无主 {}，length={}）",
+                        row_count,
+                        unowned,
+                        page.length
+                    );
+                }
+                Err(e) => tracing::warn!(
+                    "⚠️ GuildTerritoryPage 解析失败: {} (len={})",
+                    e,
+                    payload.len()
+                ),
             }
         }
         x if x == ServerPacketIds::GuildRequestWar as i16 => {
