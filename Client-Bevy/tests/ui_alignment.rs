@@ -3868,3 +3868,110 @@ fn panel_sprites_batch_b20_match_notice_editor() {
         g::PAGE_LEFT.3,
     );
 }
+
+/// #2892：钓鱼窗按 C# 拆成两个窗（`FishingDialog.cs:10-157` 主窗 + `:159-320` 状态窗）。
+///
+/// 主窗 `FishingDialog` = `Prguse[1340]` 200x287 @ `Center`（`Movable`）：标题 `@(10,4)`180x20、
+/// 关闭 `Prguse2[360..362]` @(175,3) 24x21、钓具格 5 个 34x30（Hook/Float/Bait/Finder/Reel @(17,203)/(17,241)/(57,241)/(97,241)/(137,241)）。
+/// 状态窗 `FishingStatusDialog` = `Prguse[1341]` 244x128 @(390,300)（`Movable`）：`ProgressBar`@(14,62)216x12、
+/// `ChanceBar`@(14,64)、`ChanceLabel`@(14,79)、关闭 `Prguse2[360..362]`@(216,4)、
+/// 抛竿 `Title[149]`(禁用)/`Title[170..179]`+按下`142`@(47,95)60x25、
+/// 自动钓鱼 `Title[180..182]`@(110,95)48x25、勾选框 `Prguse[1343/1344]`@(172,95)、ESC 勾选 `Prguse[1346/1347]`@(135,41)。
+#[test]
+fn panel_sprites_batch_b23_match_fishing_split() {
+    use client_bevy::game::dialogs::fishing as f;
+    require_assets!("panel_sprites_batch_b23_match_fishing_split");
+    let mut libs = Libs::new();
+
+    // 主窗
+    let (w1, h1) = libs.size(f::PANEL.0, f::PANEL.1);
+    assert_eq!((w1, h1), f::PANEL_SIZE, "[尺寸] Prguse[1340] 主窗");
+    // C# `Center` 用 int 除法：(768-287)/2 = 240（不是 240.5）
+    assert_eq!(
+        client_bevy::game::dialogs::center_origin(w1, h1),
+        (((SW - w1) / 2.0).floor(), ((SH - h1) / 2.0).floor()),
+        "[坐标] C# `Location = Center`"
+    );
+    // 状态窗
+    let (w2, h2) = libs.size(f::STATUS_PANEL.0, f::STATUS_PANEL.1);
+    assert_eq!(
+        (w2, h2),
+        f::STATUS_SIZE,
+        "[尺寸] Prguse[1341] 状态窗 244x128"
+    );
+    assert_eq!(
+        (f::STATUS_X, f::STATUS_Y),
+        ((SW - w2) / 2.0, 300.0),
+        "[坐标] C# `Location = ((SW-Size.Width)/2, 300)`"
+    );
+    assert_in_canvas("钓鱼状态窗", f::STATUS_X, f::STATUS_Y, w2, h2);
+    // 状态窗子控件精灵
+    assert_eq!(
+        libs.size(LibraryName::Prguse, 1343),
+        (28.0, 25.0),
+        "[尺寸] 自动钓鱼未勾选"
+    );
+    assert_eq!(
+        libs.size(LibraryName::Prguse, 1344),
+        (28.0, 25.0),
+        "[尺寸] 自动钓鱼勾选"
+    );
+    assert_eq!(
+        libs.size(LibraryName::Prguse, 1346),
+        (12.0, 12.0),
+        "[尺寸] ESC 未勾选"
+    );
+    assert_eq!(
+        libs.size(LibraryName::Prguse, 1347),
+        (16.0, 12.0),
+        "[尺寸] ESC 勾选"
+    );
+    assert_eq!(
+        libs.size(LibraryName::Title, 149),
+        (60.0, 25.0),
+        "[尺寸] 抛竿禁用帧"
+    );
+    assert_eq!(
+        libs.size(LibraryName::Title, 142),
+        (60.0, 25.0),
+        "[尺寸] 抛竿按下帧"
+    );
+    for idx in 170..=179usize {
+        assert_eq!(
+            libs.size(LibraryName::Title, idx),
+            (60.0, 25.0),
+            "[尺寸] 抛竿动画帧 {idx}"
+        );
+    }
+    for idx in 180..=182usize {
+        assert_eq!(
+            libs.size(LibraryName::Title, idx),
+            (48.0, 25.0),
+            "[尺寸] 自动钓鱼帧 {idx}"
+        );
+    }
+    for idx in 360..=362usize {
+        assert_eq!(
+            libs.size(LibraryName::Prguse2, idx),
+            (24.0, 21.0),
+            "[尺寸] 关闭键 {idx}"
+        );
+    }
+    // 两窗子控件都在各自面板内
+    assert_inside("状态窗关闭键", 216.0, 4.0, 24.0, 21.0, 0.0, 0.0, w2, h2);
+    assert_inside("抛竿键", 47.0, 95.0, 60.0, 25.0, 0.0, 0.0, w2, h2);
+    assert_inside("自动钓鱼键", 110.0, 95.0, 48.0, 25.0, 0.0, 0.0, w2, h2);
+    assert_inside("勾选框", 172.0, 95.0, 28.0, 25.0, 0.0, 0.0, w2, h2);
+    assert_inside("进度条", 14.0, 62.0, 216.0, 12.0, 0.0, 0.0, w2, h2);
+    assert_inside("主窗关闭键", 175.0, 3.0, 24.0, 21.0, 0.0, 0.0, w1, h1);
+    // 钓具格（C# 5 个 34x30）在主板内且互不重叠
+    for (x, y) in [
+        (17.0, 203.0),
+        (17.0, 241.0),
+        (57.0, 241.0),
+        (97.0, 241.0),
+        (137.0, 241.0),
+    ] {
+        assert_inside("钓具格", x, y, 34.0, 30.0, 0.0, 0.0, w1, h1);
+    }
+}

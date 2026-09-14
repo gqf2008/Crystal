@@ -141,6 +141,10 @@ pub enum DialogKind {
     /// `Movable = true`，`FriendDialog.cs:480-568`）。独立 kind：C# 是**独立可拖小窗**，
     /// 本端此前把备注做成好友窗内嵌输入框，按 C# 拆窗后拖动归一 kind 聚合。
     Memo,
+    /// #2892/#2926：C# `FishingStatusDialog`（钓鱼状态窗，`Prguse[1341]` 244x128 @(390,300)，
+    /// `Movable = true`）。与 `Fishing`（带钓具格的主窗 `Prguse[1340]`）**成对显隐但各自独立拖动**
+    /// —— 共用 kind 会让拖动一个时把另一个也拖走（C# 两窗各自 `Movable`）。
+    FishingStatus,
 }
 
 /// 对话框管理（打开栈，栈顶在最前）
