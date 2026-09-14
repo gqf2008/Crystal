@@ -63,6 +63,8 @@ pub mod storage;
 pub mod text_input;
 pub mod timer;
 pub mod trade;
+// #2892 批D 单元①：C# `MirControl.Movable` 窗口拖动（腰带/聊天/备注/钓鱼/下拉框）
+pub mod window_drag;
 
 use bevy::prelude::*;
 
@@ -1185,6 +1187,12 @@ impl Plugin for DialogsPlugin {
                 .run_if(in_state(AppState::Game)),
         );
         app.add_plugins(text_input::TextInputPlugin);
+        // #2892 批D 单元①：可拖窗口偏移状态 + 拖动系统（C# `MirControl.Movable`）
+        app.init_resource::<window_drag::WindowDragState>();
+        app.add_systems(
+            Update,
+            window_drag::window_drag_system.run_if(in_state(crate::scenes::AppState::Game)),
+        );
         // #2892 批C：游戏内 `MirInputBox`（服务端发起式取名）
         app.add_plugins(input_box::InputBoxPlugin);
         app.add_plugins((

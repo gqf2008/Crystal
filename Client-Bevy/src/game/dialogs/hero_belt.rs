@@ -282,6 +282,8 @@ fn hero_belt_ui_system(
     chat: Res<crate::game::chat::ChatState>,
     mut visible: ResMut<HeroBeltVisible>,
     mut vertical: ResMut<HeroBeltVertical>,
+    // #2892 批D 单元①：C# `HeroBeltDialog.Movable = true` → 拖动偏移
+    mut drag: ResMut<crate::game::dialogs::window_drag::WindowDragState>,
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
     // With<HeroBeltWidget> 限定，避免误碰全屏其它实体（#1362 同坑）——
@@ -336,6 +338,16 @@ fn hero_belt_ui_system(
             38.0,
         )
     };
+    // C# `HeroBeltDialog` 拖动（登记基准矩形后叠加偏移；子控件是面板的相对坐标）
+    drag.register(
+        crate::game::dialogs::window_drag::DragWindow::HeroBelt,
+        px,
+        py,
+        pw,
+        ph,
+    );
+    let (dx, dy) = drag.offset(crate::game::dialogs::window_drag::DragWindow::HeroBelt);
+    let (px, py) = (px + dx, py + dy);
 
     for (e, mut node, _, mut img, inter, mut btn, bg, overlay, slot, num, rot, cls) in &mut items {
         if bg.is_some() {
@@ -376,11 +388,13 @@ fn hero_belt_ui_system(
             node.height = Val::Px(if vert { 92.0 } else { 38.0 });
         } else if let Some(n) = num {
             let (x, y) = if vert { v_num(n.0) } else { h_num(n.0) };
+            let (x, y) = (x + dx, y + dy);
             node.left = Val::Px(x - px);
             node.top = Val::Px(y - py);
         } else if let Some(s) = slot {
             // 格（横向 @(12+i*35,3)；纵向 @(3,i*35+12)，C# :313/:336）
             let (x, y) = if vert { v_slot(s.0) } else { h_slot(s.0) };
+            let (x, y) = (x + dx, y + dy);
             node.left = Val::Px(x - px);
             node.top = Val::Px(y - py);
         } else if rot.is_some() {
@@ -390,6 +404,7 @@ fn hero_belt_ui_system(
             } else {
                 (BELT_X + 82.0, BELT_Y + 3.0)
             };
+            let (x, y) = (x + dx, y + dy);
             node.left = Val::Px(x - px);
             node.top = Val::Px(y - py);
             if let Some(btn) = btn.as_mut() {
@@ -412,6 +427,7 @@ fn hero_belt_ui_system(
             } else {
                 (BELT_X + 82.0, BELT_Y + 19.0)
             };
+            let (x, y) = (x + dx, y + dy);
             node.left = Val::Px(x - px);
             node.top = Val::Px(y - py);
             if let Some(btn) = btn.as_mut() {
