@@ -180,11 +180,12 @@
 | 批38 #2892 批B（单元11：行会 NoticePage 正文 + 翻页） | NoticePage 补公告正文渲染（服务端 `GuildNotice` 行数组 → `(13, 1 + i*16)` 20 行，覆盖 C# `Notice` 文本框 322x330 区域）与 C# 滚动语义（新增纯函数 `notice_next_scroll`：`NoticeScrollIndex` 首行下标，上 0 停/下 `len-1` 停、公告变短自动收敛，接 `guild_notice_system`）；翻页钮改用 C# `Prguse2[197/198/199]`@(337,1)、`Prguse2[207/208/209]`@(337,318)；`StatusPage` 标题行收回为只显示行会名（C# `StatusGuildName`，金币/公告各有归属）。残留：编辑仍是单行输入框（C# `Notice` 为可编辑多行框）。 | #2914 |
 | 批39 #2892 批B（单元12：行会成员行内控件按 C# `UpdateMembers`） | 新增 `guild_member_rows_system` 逐帧同步 4 项：① `MembersRanks[i]` 职务下拉（100x14 @(24, 30+i*15)，`Items=Ranks`、`SelectedIndex=成员职务`、`Enabled = CanChangeRank && 成员职务下标 >= MyRankId`，改选发 `EditGuildMember{change_type=2}`）② `MembersName[i]` 只显示成员名（此前拼「名字（离线）(职务)」）③ `MembersStatus[i]`@(225,·) 在线 `LimeGreen`/离线 `White` ④ `MembersDelete[i].Visible = CanKick && 职务下标 >= MyRankId && 不是自己`（此前 18 个恒可见）。新增纯函数 `can_change_member_rank` / `can_kick_member` / `guild_my_rank_index` 并逐个钉断言。差异：`UiDropDown` 无 enabled 态（禁用时强制收起）、离线状态无「上次登录时间」（服务端自定义信息体未带 `LastLogin`）、改职无确认框（C# `OnNewRank` 有）。 | #2915 |
 | 批40 #2892 批D 单元②（三种隐身显示粒度） | 服务端 `combat/buff.rs` 把单一 `Invisibility` 拆成 C# 的 `Hiding`/`MoonLight`/`DarkBody` 三个变体，新增 `is_invisible_type`；`player.rs` tag 由「全部 10」改为 31/10/32（↔ C# `BuffDialog.cs:435-460` 图标 17/65/70），`buff_values`/死亡清理/破隐移除同步（`RemoveBuff` 对三种隐身一并清除并逐个下发 `S.RemoveBuff`）；`npc_script.rs` 脚本关键字 `HIDING`/`INVISIBILITY`/`MOONLIGHT`/`DARKBODY` 分别映射；`combat.rs` `SPELL_HIDING`+MassHiding→`Hiding`、`SPELL_MOON_LIGHT`+MoonMist→`MoonLight`；`tick.rs`/`session.rs`/`world/mod.rs` 的隐身判定统一走 `is_invisible_type`；客户端 `buff_display` 补 tag 31「隐身」(17)/32「暗身术」(70)（文案逐字取 `Chinese.json`）。未拆：`Rage`/`Impact` 仍共用 `AttackBoost`；三者的**可见性规则**仍共用一套（C# 各不相同）。 | #2916 |
+| 批41 #2892 批D 单元②续（`Impact`/`Rage` 拆档） | 服务端 `combat/buff.rs` 新增 `Impact{bonus}`（C# 药水攻击加成，图标 249）与 `Rage{bonus}`（C# 战士怒气，图标 49，`HumanObject.cs:4970` 加 MinDC/MaxDC），`get_stat_bonus`/`is_debuff` 同步；`player.rs` tag 拆为 2/14/33（第三档 33 = 英雄 `UltimateEnhancer` 走的 `AttackBoost`，C# 图标 35「终极强化」），`CriticalRateBoost` 移到 tag 34（Rust 扩展）；药水两条路径（`item.rs:870` 背包 / `:2007` 英雄）改发 `Impact`；脚本关键字 `ATTACKBOOST`/`ATTACK`/`IMPACT`→`Impact`、`RAGE`→`Rage`、`FURY`→`AttackBoost`；客户端 `buff_display` 补 14「怒气」(49)/33「终极强化」(35)/34「暴击率提升」。 | #2917 |
 
 ## 6. 验证基线
 
 - `cargo check --tests`（Client-Bevy）通过。
-- `cargo test`（Client-Bevy）：**583 lib** + 2 bin + 1 smoke + **42 alignment** 通过（批40 批D 单元② 后基线；批39 单元⑫ 时为 583 lib + 42 alignment（ServerRust 739 lib），批38 单元⑪ 时为 582 lib + 42 alignment，批37 单元⑩ 时为 581 lib + 42 alignment，批36 单元⑨ 时为 579 lib + 42 alignment，批35 单元⑧ 时为 579 lib + 41 alignment，批34 单元⑦ 时为 579 lib + 40 alignment，批33 单元⑥ 时为 579 lib + 39 alignment，批32 单元⑤ 时为 576 lib + 38 alignment，批31 单元④ 时为 571 lib + 37 alignment，批28 单元③ 时为 542 lib + 24 alignment，批27 收尾时 535 lib，批26 收尾时 528 lib，批25 收尾时 523 lib，批24 收尾时 514 lib）；ServerRust **740 lib** + 6 integration（同上，含 `QuestItemReward` ItemInfo 协议 + `ClientGTMap` 字段）；SharedRust **187 + 11**（2 ignored，含 `QuestItemReward` 往返无损）。三侧 `cargo fmt -- --check` 净零差异。
+- `cargo test`（Client-Bevy）：**583 lib** + 2 bin + 1 smoke + **42 alignment** 通过（批41 批D 单元②续 后基线；批40 时为 583 lib + 42 alignment（ServerRust 740 lib），批39 单元⑫ 时为 583 lib + 42 alignment（ServerRust 739 lib），批38 单元⑪ 时为 582 lib + 42 alignment，批37 单元⑩ 时为 581 lib + 42 alignment，批36 单元⑨ 时为 579 lib + 42 alignment，批35 单元⑧ 时为 579 lib + 41 alignment，批34 单元⑦ 时为 579 lib + 40 alignment，批33 单元⑥ 时为 579 lib + 39 alignment，批32 单元⑤ 时为 576 lib + 38 alignment，批31 单元④ 时为 571 lib + 37 alignment，批28 单元③ 时为 542 lib + 24 alignment，批27 收尾时 535 lib，批26 收尾时 528 lib，批25 收尾时 523 lib，批24 收尾时 514 lib）；ServerRust **741 lib** + 6 integration（同上，含 `QuestItemReward` ItemInfo 协议 + `ClientGTMap` 字段）；SharedRust **187 + 11**（2 ignored，含 `QuestItemReward` 往返无损）。三侧 `cargo fmt -- --check` 净零差异。
 - 批31（#2892 批B）门禁：`cargo fmt -- --check` 0 差异；`cargo test --test ui_alignment` 37 passed；`cargo test` 全量 571+2+1+37 passed。**阳性对照**：把耐久内层灰底的 alpha 由 0.4 改成 1.0（去掉 C# `Opacity = 0.4F`）→ `game::dialogs::dura_status::tests::spawned_panel_renders_inner_layers` 如期 FAILED（"下层 = C# `GrayBackground.Opacity = 0.4F`，实际 alpha 1"），改回即绿。
 - 批31 断言覆盖口径：每个窗口断言「**面板精灵索引 → `.Lib` 实测尺寸**」+「**本端常量坐标 = C# `Location`**」+ 面板不越画布 / 子控件在父矩形内；用 `Libs::pixels` 做精灵身份守卫（不同索引像素必须不同）防止「索引写错但尺寸巧合相同」。
 - 批32（#2892 批B 单元5）门禁：`cargo fmt -- --check` 0 差异；`cargo test` 576 lib + 2 bin + 1 smoke + 38 alignment 全绿
@@ -331,6 +332,12 @@
   - 未覆盖：`NPCDialog.Hide()` 级联在**真实 NPC 流程**中的表现（需服务端脚本触发 NPC 商店/修理等），
     当前由 `Npc` 窗可见性条件 + 级联表单测覆盖。
 
+- 批41（#2892 批D 单元②续：`Impact`/`Rage` 拆档）门禁：三侧 `cargo fmt -- --check` 0 差异；
+  ServerRust `cargo test --lib` **741 passed**（新增 `attack_boost_trio_uses_distinct_tags`）+ 6 integration；
+  Client-Bevy 583 lib + 2 bin + 1 smoke + 42 alignment；SharedRust 187 + 11（2 ignored）。
+  **阳性对照**：把 `Rage` 的 tag 改回 2（= 修正前与 `Impact` 共用）→ `attack_boost_trio_uses_distinct_tags`
+  如期 FAILED（`(2, 2, 33) != (2, 14, 33)`），改回即绿。
+
 ## 7. 已知有意偏差
 
 - Creature：C# `CreatureRenameButton` 构造即 `Visible = false` 且再无置真处（原版死控件，改名入口点不到）；Bevy 保留可用的「改名」按钮（功能补齐见 #1281），仅坐标/精灵与 C# 对齐。
@@ -375,14 +382,26 @@
   （`HIDING`/`INVISIBILITY`/`MOONLIGHT`/`DARKBODY`）与法术（`SPELL_HIDING`/MassHiding→`Hiding`、
   `SPELL_MOON_LIGHT`/MoonMist→`MoonLight`）各自映射；破隐（攻击/施法）与「是否隐身」判定统一走
   `combat::buff::is_invisible_type`，`RemoveBuff` 对三种一并清除。
-  **仍未拆**：`AttackBoost` 同时覆盖 C# `Rage`（战士怒气，图标 49，MaxDC/MinDC）与 Buff 药水 `Impact`
-  （图标 249）；毒类（`Poison/Slow/Frozen/Stun`）取 `PoisonType` 的图标与名称；展开态面板宽度按 art 宽度布局
+  **批41 已把 `Impact`/`Rage` 拆开**（见下条）；**仍未拆**：毒类（`Poison/Slow/Frozen/Stun`）取 `PoisonType`
+  的图标与名称；展开态面板宽度按 art 宽度布局
   （C# `Size.Width` 展开时被改写成 `count*23`，比 art 窄 ~21px）；渐隐动画（C# `Opacity 0→1`，0.2/55ms）
   简化为直接显隐；Buff 窗为状态驱动 `AlwaysVisible`；**批23 单元② 已按 C# `Movable = false` 不可拖动**
   （`NotDraggable` 标记 + `dialog_drag_system` 的 `Without<NotDraggable>`）。
   **另记**：C# 三种隐身的**可见性规则**各不相同（Hiding 对多数怪物、MoonLight 远距离对玩家与怪物、
   DarkBody 对多数怪物且可移动），本端目前三者共用同一套「隐身即隐藏/不被怪物选中」判定；
   `SPELL_DARK_BODY` 只召唤分身、未按 C# `:5363` 额外挂 `DarkBody` buff。
+
+- Buff 攻击加成拆档（批41 / #2892 批D 单元②续，已对齐）：
+  C# 把「Buff 药水的攻击加成」与「战士怒气」分成两个 BuffType —— `Impact`（图标 249，
+  `PlayerObject.cs:5854` / `HeroObject.cs:379`）与 `Rage`（图标 49，`HumanObject.cs:4970` 给
+  `MinDC/MaxDC += value`）；英雄的 `UltimateEnhancer` 是第三个（图标 35「终极强化」）。
+  本端此前三者共用 `AttackBoost`（tag 2 → 都显示「攻击加成」249）。
+  现在：服务端新增 `Impact`/`Rage` 变体（`get_stat_bonus` 同名加成、`is_debuff` 负值判定一并覆盖），
+  tag 拆为 **2（Impact）/14（Rage）/33（AttackBoost=终极强化）**；药水两条路径（背包 `:870` 与英雄 `:2007`）
+  改发 `Impact`；脚本关键字 `ATTACKBOOST`/`ATTACK`/`IMPACT` → `Impact`、`RAGE` → `Rage`、
+  `FURY` → `AttackBoost`（C# 的 `Fury` 是攻击速度，本端保留为通用攻击加成别名）；
+  客户端 `buff_display` 补 14「怒气」(49，MaxDC)、33「终极强化」(35)，并把 **Rust 扩展**的
+  `CriticalRateBoost` 移到 tag 34「暴击率提升」(C# 无暴击率 Buff，图标为本端选取)。
 - QuestDetail（批24）：**信用图标缺失**——C# 奖励区画 `Prguse[2447]`（信用/点数图标），但本端 `Data/Prguse.Lib` 只有 2447 张（下标 0..2446）→ 该图越界取不到，本端按缺失跳过（数值与偏移链仍按 C# 计算）；待资源包更新后自动出现。
 - QuestDetail（批24）：`_pauseButton`（`Title[270/271/272]` @(120,436)）在 C# 里**建了控件但 `Visible = false` 且无 Click**（`QuestDialogs.cs:577-584`，死控件）→ 本端保留同坐标实体并恒隐藏，不接线；同理 C# 注释掉的 `helpButton`（`Prguse2[257..259]`）不存在，本端不实现。
 - QuestDetail（批24）：消息区标题行 C# 用 `Font(Settings.FontName, 10F, FontStyle.Bold)`（GDI 合成粗体），Bevy `TextFont.weight` 只对**可变字重**字体生效（宋体无可变轴）→ 本端以 **+1px 字号**近似（正文 12px / 标题 13px，`QuestMessage` 的 +5 行占位与 15 缩进仍逐字照抄）。行内富文本**批25 已补齐**（见下条）。

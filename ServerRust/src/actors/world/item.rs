@@ -867,7 +867,8 @@ impl Message<UseItemRequest> for WorldActor {
                                 }
                             };
                             if get(Stat::MaxDC) > 0 || get(Stat::MinDC) > 0 {
-                                apply(BuffType::AttackBoost {
+                                // C# `PlayerObject.cs:5854`：Buff 药水的攻击加成 = `BuffType.Impact`
+                                apply(BuffType::Impact {
                                     bonus: get(Stat::MaxDC).max(get(Stat::MinDC)),
                                 })
                                 .await;
@@ -2004,7 +2005,8 @@ impl Message<UseItemRequest> for WorldActor {
                             };
                             let added_maxdc = get_added(Stat::MaxDC).max(get_added(Stat::MinDC));
                             if added_maxdc > 0 {
-                                apply(BuffType::AttackBoost { bonus: added_maxdc }).await;
+                                // C# `HeroObject.cs:379`：英雄 Buff 药水同样走 `BuffType.Impact`
+                                apply(BuffType::Impact { bonus: added_maxdc }).await;
                                 applied = true;
                             }
                             let added_maxmc = get_added(Stat::MaxMC).max(get_added(Stat::MinMC));

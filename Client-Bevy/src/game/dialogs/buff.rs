@@ -178,11 +178,36 @@ pub(crate) fn buff_display(tag: u8) -> BuffDisplay {
             stats: D_MP,
             percent: false,
         },
+        // C# `BuffType.Impact`（药水攻击加成，图标 249）
         2 => BuffDisplay {
             name: "攻击加成",
             description: "",
             icon: 249,
             stats: D_MAXDC,
+            percent: false,
+        },
+        // #2892 批D 单元②：`BuffType.Rage`（怒气，图标 49，C# `HumanObject.cs:4970` 加 MinDC/MaxDC）
+        14 => BuffDisplay {
+            name: "怒气",
+            description: "",
+            icon: 49,
+            stats: D_MAXDC,
+            percent: false,
+        },
+        // 英雄 `UltimateEnhancer` 走 `AttackBoost`：C# 图标 35「终极强化」
+        33 => BuffDisplay {
+            name: "终极强化",
+            description: "",
+            icon: 35,
+            stats: D_MAXDC,
+            percent: false,
+        },
+        // **Rust 扩展**：暴击率提升（C# 无此 Buff，脚本 `CRITICALRATEBOOST` 用；图标沿用 49 系）
+        34 => BuffDisplay {
+            name: "暴击率提升",
+            description: "",
+            icon: 47,
+            stats: D_CRIT,
             percent: false,
         },
         3 => BuffDisplay {
@@ -1057,6 +1082,20 @@ mod tests {
         );
         let d = buff_display(2);
         assert_eq!((d.name, d.icon, d.stats), ("攻击加成", 249, D_MAXDC));
+        // #2892 批D 单元②：C# `Impact`(2,249) 与 `Rage`(14,49) 分开；
+        // 英雄 `UltimateEnhancer`(33,35) 与 Rust 扩展暴击(34) 各自独立
+        let rage = buff_display(14);
+        assert_eq!((rage.name, rage.icon), ("怒气", 49));
+        assert_eq!(rage.stats, D_MAXDC, "C# Rage 加 MinDC/MaxDC");
+        let ultimate = buff_display(33);
+        assert_eq!((ultimate.name, ultimate.icon), ("终极强化", 35));
+        let crit = buff_display(34);
+        assert_eq!((crit.name, crit.stats), ("暴击率提升", D_CRIT));
+        assert_ne!(
+            (buff_display(2).icon, buff_display(14).icon),
+            (249, 249),
+            "药水攻击加成与怒气必须两个不同图标（修正前两者共用 AttackBoost→249）"
+        );
         let d = buff_display(26);
         assert_eq!(d.stats, D_RHINO);
         assert_eq!(

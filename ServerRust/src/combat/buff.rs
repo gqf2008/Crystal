@@ -18,8 +18,13 @@ pub enum BuffType {
     HpRegen { amount_per_tick: i32 },
     /// MP 持续回复
     MpRegen { amount_per_tick: i32 },
-    /// 攻击力提升（Fury/Rage 类）
+    /// 攻击力提升（英雄 `UltimateEnhancer` 按职业映射的通用攻击/魔法/道术加成；C# 图标 35「终极强化」）
     AttackBoost { bonus: i32 },
+    // ===== #2892 批D 单元②：C# 把「药水攻击加成」与「战士怒气」分成两个 BuffType =====
+    /// Buff 药水的攻击加成（C# `BuffType.Impact`，图标 249，`PlayerObject.cs:5854` / `HeroObject.cs:379`）
+    Impact { bonus: i32 },
+    /// 战士怒气（C# `BuffType.Rage`，图标 49，`HumanObject.cs:4970`：`MinDC/MaxDC += value`）
+    Rage { bonus: i32 },
     /// 防御力提升（SoulShield/BlessedArmour）
     DefenseBoost { bonus: i32 },
     /// 物理防御提升（BlessedArmour，C# Stat.AC）
@@ -50,7 +55,7 @@ pub enum BuffType {
     MoveSpeedBoost { percent: i32 },
     /// 敏捷提升（LightBody）
     AgilityBoost { bonus: i32 },
-    /// 暴击率提升（Rage）
+    /// 暴击率提升（**Rust 扩展**：C# 没有暴击率 Buff，脚本关键字 `CRITICALRATEBOOST` 用）
     CriticalRateBoost { bonus: i32 },
     /// 魔力恢复提升（Concentration）
     MpRegenBoost { bonus: i32 },
@@ -274,6 +279,8 @@ pub fn get_stat_bonus(buffs: &[BuffInstance], stat_type: &BuffType) -> i32 {
         .filter(|b| std::mem::discriminant(&b.buff_type) == std::mem::discriminant(stat_type))
         .map(|b| match (&b.buff_type, stat_type) {
             (BuffType::AttackBoost { bonus }, BuffType::AttackBoost { .. }) => *bonus,
+            (BuffType::Impact { bonus }, BuffType::Impact { .. }) => *bonus,
+            (BuffType::Rage { bonus }, BuffType::Rage { .. }) => *bonus,
             (BuffType::DefenseBoost { bonus }, BuffType::DefenseBoost { .. }) => *bonus,
             (BuffType::AgilityBoost { bonus }, BuffType::AgilityBoost { .. }) => *bonus,
             (BuffType::CriticalRateBoost { bonus }, BuffType::CriticalRateBoost { .. }) => *bonus,
@@ -321,6 +328,8 @@ pub fn is_debuff(buff_type: &BuffType) -> bool {
         | BuffType::Poison { .. } => true,
         // 负值增益（C# 用负 Stats 表达减益，如 PK 惩罚）也算 Debuff
         BuffType::AttackBoost { bonus }
+        | BuffType::Impact { bonus }
+        | BuffType::Rage { bonus }
         | BuffType::McBoost { bonus }
         | BuffType::ScBoost { bonus } => *bonus < 0,
         _ => false,

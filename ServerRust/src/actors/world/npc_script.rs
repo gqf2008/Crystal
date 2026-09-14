@@ -3763,7 +3763,12 @@ fn parse_buff_type(s: &str) -> Option<crate::combat::buff::BuffType> {
     match s.trim().to_uppercase().as_str() {
         "HPREGEN" => Some(BuffType::HpRegen { amount_per_tick: 0 }),
         "MPREGEN" => Some(BuffType::MpRegen { amount_per_tick: 0 }),
-        "ATTACKBOOST" | "FURY" | "ATTACK" => Some(BuffType::AttackBoost { bonus: 0 }),
+        // #2892 批D 单元②：C# `Impact`（药水攻击加成）与 `Rage`（怒气）分开；
+        // `Fury`（狂怒，攻击速度）在 C# 是另一个 BuffType，这里保留为通用攻击加成别名
+        "ATTACKBOOST" | "ATTACK" => Some(BuffType::Impact { bonus: 0 }),
+        "IMPACT" => Some(BuffType::Impact { bonus: 0 }),
+        "RAGE" => Some(BuffType::Rage { bonus: 0 }),
+        "FURY" => Some(BuffType::AttackBoost { bonus: 0 }),
         "DEFENSEBOOST" | "DEFENSE" => Some(BuffType::DefenseBoost { bonus: 0 }),
         "ACDEFENSEBOOST" | "BLESSEDARMOUR" | "BLESSEDARMOR" => {
             Some(BuffType::AcDefenseBoost { bonus: 0 })
@@ -3785,7 +3790,7 @@ fn parse_buff_type(s: &str) -> Option<crate::combat::buff::BuffType> {
             Some(BuffType::MoveSpeedBoost { percent: 0 })
         }
         "AGILITYBOOST" => Some(BuffType::AgilityBoost { bonus: 0 }),
-        "CRITICALRATEBOOST" | "RAGE" => Some(BuffType::CriticalRateBoost { bonus: 0 }),
+        "CRITICALRATEBOOST" => Some(BuffType::CriticalRateBoost { bonus: 0 }),
         "MPREGENBOOST" | "CONCENTRATION" => Some(BuffType::MpRegenBoost { bonus: 0 }),
         "MAXMPBOOST" | "MAGICBOOSTER" => Some(BuffType::MaxMpBoost { bonus: 0 }),
         "REFLECT" | "ENERGYSHIELD" | "COUNTERATTACK" => Some(BuffType::Reflect { percent: 0 }),
