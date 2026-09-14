@@ -19,13 +19,19 @@ const APPEAR_RANGE: i32 = 3;
 const VIEW_RANGE: i32 = 14;
 const MELEE_RANGE: i32 = 1;
 const CHECK_TICKS: u64 = 20;
+/// #2861：C# `Armadillo.cs:19`——覆写 `SpawnDigOutEffect` 为 `Envir.Time > DigOutTime + 500`
+/// （比僵尸的 1000ms 快 0.5 秒）
+const HOLE_DELAY_TICKS: u64 = 5;
 
 pub struct ArmadilloBehavior {
     visible: bool,
     next_check_tick: u64,
     spawned: bool,
-    /// 钻出时刻（tick；1s 后生成洞口，继承 C# DigOutZombie）
+    /// 钻出时刻（tick；0.5s 后生成洞口，C# Armadillo 覆写）
     dig_out_tick: u64,
+    /// #2861：钻出瞬间的坐标（C# `DigOutLocation`）
+    dig_out_x: i32,
+    dig_out_y: i32,
     /// 洞口是否已生成（继承 C# DoneDigOut）
     hole_done: bool,
     /// 逃跑模式（C# _runAway）
@@ -38,6 +44,41 @@ impl Default for ArmadilloBehavior {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// #2861：C# `Armadillo.cs:17-21`——覆写后的洞口延迟是 **500ms（5 tick）**，
+    /// 比 `DigOutZombie` 的 1000ms 快 0.5 秒
+    #[test]
+    fn armadillo_hole_delay_matches_csharp() {
+        assert_eq!(HOLE_DELAY_TICKS, 5);
+        assert_eq!(
+            crate::actors::world::ai::bosses::dig_out_zombie::HOLE_DELAY_TICKS,
+            10
+        );
+        // 触发条件用共享判定：钻出于 tick 0 → tick 5 起可生成
+        assert!(
+            !crate::actors::world::ai::bosses::dig_out_zombie::hole_ready(
+                true,
+                4,
+                0,
+                HOLE_DELAY_TICKS,
+                false
+            )
+        );
+        assert!(
+            crate::actors::world::ai::bosses::dig_out_zombie::hole_ready(
+                true,
+                5,
+                0,
+                HOLE_DELAY_TICKS,
+                false
+            )
+        );
+    }
+}
+
 impl ArmadilloBehavior {
     pub fn new() -> Self {
         Self {
@@ -45,6 +86,8 @@ impl ArmadilloBehavior {
             next_check_tick: 0,
             spawned: false,
             dig_out_tick: 0,
+            dig_out_x: 0,
+            dig_out_y: 0,
             hole_done: false,
             run_away: false,
         }
@@ -87,6 +130,9 @@ impl MonsterBehavior for ArmadilloBehavior {
                 if has_near {
                     self.visible = true;
                     self.dig_out_tick = ctx.tick_count;
+                    // #2861：记录钻出瞬间的坐标（洞口按此坐标生成）
+                    self.dig_out_x = monster.x;
+                    self.dig_out_y = monster.y;
                     self.hole_done = false;
                 }
             }
@@ -95,21 +141,28 @@ impl MonsterBehavior for ArmadilloBehavior {
             return;
         }
 
-        // C# DigOutZombie.SpawnDigOutEffect（继承）：钻出 1s 后生成洞口 SpellObject（5 分钟）
-        if !self.hole_done && ctx.tick_count >= self.dig_out_tick + 10 {
+        // C# `Armadillo.SpawnDigOutEffect`（`:17-36`）：钻出 0.5s 后生成 `DigOutArmadillo` 洞口
+        // （5 分钟、`TickSpeed = 2000`、`Caster = null`、坐标 = 钻出瞬间的 `DigOutLocation`、不广播视觉）
+        if crate::actors::world::ai::bosses::dig_out_zombie::hole_ready(
+            self.visible,
+            ctx.tick_count,
+            self.dig_out_tick,
+            HOLE_DELAY_TICKS,
+            self.hole_done,
+        ) {
             self.hole_done = true;
             ctx.out_spell_fields
                 .push(crate::actors::world::ai::SpellFieldSpawn {
                     spell: mir2_shared::enums::Spell::DigOutArmadillo,
-                    x: monster.x,
-                    y: monster.y,
+                    x: self.dig_out_x,
+                    y: self.dig_out_y,
                     value: 1,
-                    duration_ms: 300_000,
-                    tick_ms: 2000,
-                    caster_oid: monster.object_id,
+                    duration_ms: crate::actors::world::ai::bosses::dig_out_zombie::HOLE_DURATION_MS,
+                    tick_ms: crate::actors::world::ai::bosses::dig_out_zombie::HOLE_TICK_MS,
+                    caster_oid: 0,
                     caster_session: 0,
                     cells: Vec::new(),
-                    show: true,
+                    show: false,
                     start_delay_ms: 0,
                 });
         }
