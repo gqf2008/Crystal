@@ -19,13 +19,18 @@ use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
 use crate::ui::sprite_ui::{shared_cjk_font, UiCjkFont, UiFont};
 use crate::ui::theme::{
-    load_lib_image, spawn_animated_icon_button, spawn_container, spawn_icon_button, spawn_label,
-    spawn_panel,
+    load_lib_image, spawn_animated_icon_button, spawn_container, spawn_icon_button, spawn_image,
+    spawn_label, spawn_panel,
 };
 
 /// #2892 批B：面板精灵与 C# 原生尺寸（C# `FishingDialog.Index = 1340; Location = Center`）
 pub const PANEL: (LibraryName, usize) = (LibraryName::Prguse, 1340);
 pub const PANEL_SIZE: (f32, f32) = (200.0, 287.0);
+/// C# `FishingStatusDialog`（`FishingDialog.cs:159-179`）：`Prguse[1341]` 244x128 @(390,300)、`Movable`
+pub const STATUS_PANEL: (LibraryName, usize) = (LibraryName::Prguse, 1341);
+pub const STATUS_SIZE: (f32, f32) = (244.0, 128.0);
+pub const STATUS_X: f32 = 390.0;
+pub const STATUS_Y: f32 = 300.0;
 
 /// 钓鱼状态（FishingUpdate 写入）
 #[derive(Resource, Default)]
@@ -51,6 +56,32 @@ pub struct FishingAutocast;
 
 #[derive(Component)]
 pub struct FishingLine(usize);
+
+/// 主窗标题 `TitleLabel`（C# @(10,4) 180x20）
+#[derive(Component)]
+pub struct FishingTitle;
+/// 状态窗根（C# `FishingStatusDialog`，与主窗分开）
+#[derive(Component)]
+pub struct FishingStatusRoot;
+#[derive(Component)]
+pub struct FishingStatusClose;
+/// `ChanceLabel`（C# @(14,79)）
+#[derive(Component)]
+pub struct FishingChanceLabel;
+/// 进度条（C# `ProgressBar` 为 `BeforeDraw` 自绘，本端用容器 + 填充近似）
+#[derive(Component)]
+pub struct FishingProgressBar;
+#[derive(Component)]
+pub struct FishingProgressFill;
+/// 抛竿键禁用帧（C# `Title[149]`）
+#[derive(Component)]
+pub struct FishingCastDisabled;
+/// 自动钓鱼勾选框（`Prguse[1343]/[1344]`）
+#[derive(Component)]
+pub struct FishingAutocastBox;
+/// ESC 退出勾选框（`Prguse[1346]/[1347]`）
+#[derive(Component)]
+pub struct FishingEscTick;
 
 /// 钓具槽（0=Hook 1=Float 2=Bait 3=Finder 4=Reel，C# FishingSlot）
 #[derive(Component)]
@@ -121,6 +152,113 @@ fn spawn_fishing(
         .entity(panel)
         .insert((DialogRoot(DialogKind::Fishing), FishingWidget));
 
+    // ---- FishingStatusDialog（C# `FishingDialog.cs:159-320`）：`Prguse[1341]` 244x128
+    //      @ ((1024-244)/2, 300) = (390,300)，`Movable = true`；与主窗**分开**（C# 两个独立窗）。
+    if let Some(bg2) = load_lib_image(&mut libs, &mut images, STATUS_PANEL.0, STATUS_PANEL.1) {
+        let status = spawn_panel(
+            &mut commands,
+            bg2,
+            STATUS_X,
+            STATUS_Y,
+            STATUS_SIZE.0,
+            STATUS_SIZE.1,
+            31,
+        );
+        commands.entity(status).insert((
+            // 独立 kind：C# `FishingDialog` 与 `FishingStatusDialog` 都 `Movable` 且各自拖动
+            DialogRoot(DialogKind::FishingStatus),
+            FishingWidget,
+            FishingStatusRoot,
+        ));
+        commands.entity(status).with_children(|p| {
+            // 进度条/机会条（C# `ProgressBar`@(14,62)216x12、`ChanceBar`@(14,64) 为 BeforeDraw 自绘；
+            // 本端用容器 + 填充子实体近似）
+            spawn_container(p, 14.0, 62.0, 216.0, 12.0, 8)
+                .insert((
+                    BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.35)),
+                    FishingProgressBar,
+                ))
+                .with_children(|c| {
+                    c.spawn((
+                        Node {
+                            position_type: PositionType::Absolute,
+                            left: Val::Px(0.0),
+                            top: Val::Px(0.0),
+                            width: Val::Px(0.0),
+                            height: Val::Px(12.0),
+                            ..default()
+                        },
+                        BackgroundColor(Color::srgb(0.2, 0.9, 0.3)),
+                        FishingProgressFill,
+                    ));
+                });
+            // `ChanceLabel` @(14,79)（C# `:199-206`）
+            spawn_label(p, &cjk, "", 14.0, 79.0, 12.0, Color::WHITE, 9).insert(FishingChanceLabel);
+            // `ESCTick` `Prguse[1346]`（未勾）/`[1347]`（勾）@(135,41)（C# `:281-303`）
+            if let Some(off) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 1346) {
+                spawn_image(p, off, 135.0, 41.0, 12.0, 12.0, 8);
+            }
+            if let Some(on) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 1347) {
+                spawn_image(p, on, 135.0, 41.0, 16.0, 12.0, 9)
+                    .insert((FishingEscTick, Visibility::Hidden));
+            }
+            // 关闭 `Prguse2[360/361/362]` @(216,4) 24x21
+            if let (Some(n), Some(h), Some(pr)) = (
+                load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 360),
+                load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 361),
+                load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 362),
+            ) {
+                spawn_icon_button(p, n, h, pr, 216.0, 4.0, 24.0, 21.0, 10)
+                    .insert(FishingStatusClose);
+            }
+            // 抛竿 `FishButton`：禁用帧 `Title[149]`；可抛时 10 帧动画 + 按下帧 `142` @(47,95)
+            if let Some(disabled) = load_lib_image(&mut libs, &mut images, LibraryName::Title, 149)
+            {
+                spawn_icon_button(
+                    p,
+                    disabled.clone(),
+                    disabled.clone(),
+                    disabled,
+                    47.0,
+                    95.0,
+                    60.0,
+                    25.0,
+                    10,
+                )
+                .insert(FishingCastDisabled);
+            }
+            let frames: Vec<Handle<Image>> = (0..10usize)
+                .filter_map(|i| load_lib_image(&mut libs, &mut images, LibraryName::Title, 170 + i))
+                .collect();
+            if frames.len() < 10 {
+                tracing::warn!("抛竿按钮动画帧缺失：{}/10（Title[170..179]）", frames.len());
+            }
+            if !frames.is_empty() {
+                let pressed = load_lib_image(&mut libs, &mut images, LibraryName::Title, 142);
+                spawn_animated_icon_button(
+                    p, frames, None, pressed, 47.0, 95.0, 60.0, 25.0, 10, 0.13, true,
+                )
+                .insert(FishingCast);
+            }
+            // 自动钓鱼开关 `Title[180/181/182]` @(110,95) 48x25
+            if let (Some(n), Some(h), Some(pr)) = (
+                load_lib_image(&mut libs, &mut images, LibraryName::Title, 180),
+                load_lib_image(&mut libs, &mut images, LibraryName::Title, 181),
+                load_lib_image(&mut libs, &mut images, LibraryName::Title, 182),
+            ) {
+                spawn_icon_button(p, n, h, pr, 110.0, 95.0, 48.0, 25.0, 10).insert(FishingAutocast);
+            }
+            // 自动钓鱼勾选框 `Prguse[1343]`（未）/`[1344]`（勾）@(172,95) 28x25
+            if let Some(off) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 1343) {
+                spawn_image(p, off, 172.0, 95.0, 28.0, 25.0, 8);
+            }
+            if let Some(on) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 1344) {
+                spawn_image(p, on, 172.0, 95.0, 28.0, 25.0, 9)
+                    .insert((FishingAutocastBox, Visibility::Hidden));
+            }
+        });
+    }
+
     commands.entity(panel).with_children(|p| {
         // 关闭 Prguse2[360/361/362]：旧 sprite 在 rel(220,3) 悬空面板外（200 宽），
         // 移到面板右上角 (176,3)
@@ -130,44 +268,6 @@ fn spawn_fishing(
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 362),
         ) {
             spawn_icon_button(p, n, h, pr, 176.0, 3.0, 20.0, 20.0, 10).insert(FishingClose);
-        }
-        // 状态行 4 @(18,40+22i)
-        for i in 0..4usize {
-            spawn_label(
-                p,
-                &cjk,
-                "",
-                18.0,
-                40.0 + i as f32 * 22.0,
-                12.0,
-                Color::WHITE,
-                9,
-            )
-            .insert(FishingLine(i));
-        }
-        // 抛竿按钮（#90 续：MirAnimatedButton，C# FishingDialog FishButton
-        // Title[170..179] 10 帧 130ms 循环 + 按下帧 142）@(20,140)
-        let frames: Vec<Handle<Image>> = (0..10usize)
-            .filter_map(|i| load_lib_image(&mut libs, &mut images, LibraryName::Title, 170 + i))
-            .collect();
-        // （批次19-23 评审 F5）帧缺失静默降级：资源缺帧时打日志便于排查
-        if frames.len() < 10 {
-            tracing::warn!("抛竿按钮动画帧缺失：{}/10（Title[170..179]）", frames.len());
-        }
-        if !frames.is_empty() {
-            let pressed = load_lib_image(&mut libs, &mut images, LibraryName::Title, 142);
-            spawn_animated_icon_button(
-                p, frames, None, pressed, 20.0, 140.0, 76.0, 25.0, 10, 0.13, true,
-            )
-            .insert(FishingCast);
-        }
-        // 自动钓鱼开关 Title[210/211/212] @(110,140)
-        if let (Some(n), Some(h), Some(pr)) = (
-            load_lib_image(&mut libs, &mut images, LibraryName::Title, 210),
-            load_lib_image(&mut libs, &mut images, LibraryName::Title, 211),
-            load_lib_image(&mut libs, &mut images, LibraryName::Title, 212),
-        ) {
-            spawn_icon_button(p, n, h, pr, 110.0, 140.0, 76.0, 25.0, 10).insert(FishingAutocast);
         }
         // 钓具槽（C# FishingDialog Grid：Hook/Float/Bait/Finder/Reel，34x30）
         for (i, (rx, ry)) in GEAR_POS.iter().enumerate() {
@@ -188,10 +288,22 @@ fn fishing_ui_system(
     mut state: ResMut<FishingState>,
     net: Res<NetConnection>,
     close: Query<(Entity, &Interaction), With<FishingClose>>,
+    status_close: Query<(Entity, &Interaction), With<FishingStatusClose>>,
     cast_btn: Query<(Entity, &Interaction), With<FishingCast>>,
     autocast_btn: Query<(Entity, &Interaction), With<FishingAutocast>>,
     mut widgets: Query<&mut Visibility, With<FishingWidget>>,
-    mut lines: Query<(&mut Text, &FishingLine)>,
+    // #2926：`ChanceLabel`（C# @(14,79)）+ 进度条填充（C# `ProgressBar` 为 BeforeDraw 自绘）
+    mut chance: Query<&mut Text, With<FishingChanceLabel>>,
+    mut fills: Query<&mut Node, With<FishingProgressFill>>,
+    // `Without<FishingWidget>` 与上面的 widgets 查询显式互斥（两者都改 Visibility，B0001）
+    mut autocast_box: Query<
+        &mut Visibility,
+        (
+            With<FishingAutocastBox>,
+            Without<FishingEscTick>,
+            Without<FishingWidget>,
+        ),
+    >,
     mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
 ) {
     fn edge(
@@ -203,6 +315,8 @@ fn fishing_ui_system(
         *inter == Interaction::Pressed && was != Some(Interaction::Pressed)
     }
     let open = mgr.is_open(DialogKind::Fishing);
+    // 状态窗跟随主窗显隐（C# 由钓鱼流程同时 Show/Hide 两窗）
+    crate::game::dialogs::sync_dialog_state(&mut mgr, DialogKind::FishingStatus, open);
     for mut vis in widgets.iter_mut() {
         *vis = if open {
             Visibility::Visible
@@ -213,9 +327,10 @@ fn fishing_ui_system(
     if !open {
         return;
     }
-    for (e, inter) in &close {
+    for (e, inter) in close.iter().chain(status_close.iter()) {
         if edge(e, inter, &mut prev_inter) {
             mgr.close(DialogKind::Fishing);
+            mgr.close(DialogKind::FishingStatus);
         }
     }
     let status = match state.progress {
@@ -226,14 +341,34 @@ fn fishing_ui_system(
         5 => "自动钓鱼已切换".to_string(),
         _ => format!("进度 {}", state.progress),
     };
-    for (mut text, line) in &mut lines {
-        text.0 = match line.0 {
-            0 => format!("钓鱼状态: {}", status),
-            1 => format!("自动钓鱼: {}", if state.autocast { "开" } else { "关" }),
-            2 => state.message.clone(),
-            3 => "需要装备鱼竿（武器栏）".to_string(),
-            _ => String::new(),
+    for mut text in &mut chance {
+        let want = if state.message.is_empty() {
+            format!("钓鱼状态: {status}")
+        } else {
+            format!("钓鱼状态: {status}  {}", state.message)
         };
+        if text.0 != want {
+            text.0 = want;
+        }
+    }
+    // 进度条填充宽度（C# `ProgressBar` 自绘；本端按 `progress` 0..3 映射到 0..216px）
+    let frac = state.progress.clamp(0, 3) as f32 / 3.0;
+    for mut node in &mut fills {
+        let want = Val::Px(216.0 * frac);
+        if node.width != want {
+            node.width = want;
+        }
+    }
+    // 自动钓鱼勾选框（C# `AutoCastBox.Index = _autoCast ? 1344 : 1343`）
+    for mut vis in &mut autocast_box {
+        let want = if state.autocast {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
+        if *vis != want {
+            *vis = want;
+        }
     }
     // 抛竿（C# FishingDialog → C.FishingCast）
     for (e, inter) in &cast_btn {
