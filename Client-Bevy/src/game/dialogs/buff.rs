@@ -34,7 +34,7 @@ use crate::ui::sprite_ui::{shared_cjk_font, UiCjkFont, UiFont};
 use crate::ui::theme::{load_lib_image, spawn_icon_button, spawn_image, spawn_label, spawn_panel};
 
 /// 面板精灵 `Prguse2[20..=30]` 的实测尺寸（`w, h`）——C# 面板 art 决定布局基准
-const PANEL_SIZES: [(f32, f32); 11] = [
+pub const PANEL_SIZES: [(f32, f32); 11] = [
     (44.0, 34.0),
     (68.0, 34.0),
     (92.0, 34.0),
@@ -50,8 +50,8 @@ const PANEL_SIZES: [(f32, f32); 11] = [
 
 /// 面板**右边**锚点（C# `Location = (ScreenWidth - 170, 0)` 且展开时 `newX = Location.X -
 /// Size.Width + oldWidth` → 右缘恒在 `854 + 44 = 898`，向左长；正好贴着小地图左缘）
-const PANEL_RIGHT: f32 = 898.0;
-const PANEL_Y: f32 = 0.0;
+pub const PANEL_RIGHT: f32 = 898.0;
+pub const PANEL_Y: f32 = 0.0;
 /// 收起态宽度（C# `Size(44, 34)`）
 const PANEL_COLLAPSED_W: f32 = 44.0;
 

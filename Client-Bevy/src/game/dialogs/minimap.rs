@@ -23,6 +23,10 @@ use crate::ui::theme::{
     load_lib_image, spawn_container, spawn_icon_button, spawn_image, spawn_label, spawn_panel,
 };
 
+/// #2892 批B：面板精灵与 C# 原生尺寸（C# `MiniMapDialog.Index = 2090; Location = (ScreenWidth-126, 0)`）
+pub const PANEL: (LibraryName, usize) = (LibraryName::Prguse, 2090);
+pub const PANEL_SIZE: (f32, f32) = (128.0, 154.0);
+
 const MINIMAP_X: f32 = 1024.0 - 126.0;
 const MINIMAP_Y: f32 = 0.0;
 

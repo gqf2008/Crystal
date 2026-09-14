@@ -13,6 +13,11 @@ use crate::scenes::AppState;
 use crate::ui::sprite_ui::UiFont;
 use crate::ui::theme::{load_lib_image, spawn_panel};
 
+/// #2892 批B：面板精灵与 C# 原生尺寸（C# `ChatNoticeDialog.Index = 1361; Library = Libraries.Prguse`，
+/// `Location = (ScreenWidth/2 - W/2, ScreenHeight/6 - H/2)`）
+pub const PANEL: (LibraryName, usize) = (LibraryName::Prguse, 1361);
+pub const PANEL_SIZE: (f32, f32) = (660.0, 25.0);
+
 fn chat_notice_origin(width: f32, height: f32) -> (f32, f32) {
     // C# ChatNoticeDialog：X = ScreenWidth/2 - W/2；
     // Y = ScreenHeight/6 - H/2（逐项整数除法）。

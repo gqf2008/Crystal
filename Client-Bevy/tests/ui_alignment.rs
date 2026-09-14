@@ -2854,3 +2854,125 @@ fn panel_sprites_batch_b2_match_csharp() {
 
     println!("  ✓ 批B 面板精灵核对（二）：Storage/NpcGoods/Mount/Inspect/NpcAwake/GameShop/KeyboardLayout/HeroManage/Trade/GuestTrade/Socket");
 }
+
+/// #2892 批B（三）：Npc / Buff / ChatNotice / 小地图 / 大地图 / 钓鱼 / 任务日记 / 任务详情。
+///
+/// Buff 面板按 `Prguse2[20..30]` 的**逐档真实尺寸**核对（11 档 art 尺寸不同，是布局基准）；
+/// 任务日记按 C# `(ScreenWidth/2 - 300 - 20, 60)` = (192,60) 核对（本端此前写成 200，偏 8px）。
+#[test]
+fn panel_sprites_batch_b3_match_csharp() {
+    use client_bevy::game::dialogs::{
+        big_map, buff, chat_notice, fishing, guild, minimap, npc, quest_log,
+    };
+    require_assets!("panel_sprites_batch_b3_match_csharp");
+    let mut libs = Libs::new();
+
+    // Npc：C# `NPCDialog` 用 Prguse[995]，本端用同图的 Prguse[384]（两者实测同尺寸）
+    let (w, h) = libs.size(npc::PANEL.0, npc::PANEL.1);
+    assert_eq!((w, h), (440.0, 224.0), "[尺寸] NPC 面板 440x224");
+    assert_eq!(
+        libs.size(LibraryName::Prguse, 995),
+        (w, h),
+        "C# `NPCDialog.Index = 995` 与本端所用 Prguse[384] 应为同尺寸"
+    );
+    assert_eq!((npc::PANEL_W, npc::PANEL_H), (w, h));
+
+    // ChatNotice：C# `Prguse[1361]` 660x25 @ (ScreenWidth/2 - W/2, ScreenHeight/6 - H/2)
+    let (cw, ch) = libs.size(chat_notice::PANEL.0, chat_notice::PANEL.1);
+    assert_eq!(
+        (cw, ch),
+        chat_notice::PANEL_SIZE,
+        "[尺寸] ChatNotice 660x25"
+    );
+    assert_eq!(
+        (
+            (SW / 2.0 - (cw / 2.0).floor()).floor(),
+            ((SH / 6.0).floor() - (ch / 2.0).floor()).floor()
+        ),
+        (182.0, 116.0),
+        "[坐标] C# ChatNotice 原点公式"
+    );
+
+    // 小地图：C# `Prguse[2090]` @(898,0)
+    let (mw, mh) = libs.size(minimap::PANEL.0, minimap::PANEL.1);
+    assert_eq!((mw, mh), minimap::PANEL_SIZE, "[尺寸] 小地图 128x154");
+    assert_eq!(
+        SW - 126.0,
+        898.0,
+        "[坐标] C# `Location = (ScreenWidth-126, 0)`"
+    );
+
+    // 大地图：C# `Title[820]` 760x500 居中
+    let (bmw, bmh) = libs.size(big_map::PANEL.0, big_map::PANEL.1);
+    assert_eq!(
+        (bmw, bmh),
+        (big_map::PANEL_W, big_map::PANEL_H),
+        "[尺寸] 大地图 760x500"
+    );
+    assert_eq!(
+        (((SW - bmw) / 2.0).floor(), ((SH - bmh) / 2.0).floor()),
+        (132.0, 134.0),
+        "[居中] C# `BigMapDialog.Location = Center`"
+    );
+
+    // 钓鱼：C# `Prguse[1340]` 200x287 居中
+    let (fw, fh) = libs.size(fishing::PANEL.0, fishing::PANEL.1);
+    assert_eq!((fw, fh), fishing::PANEL_SIZE, "[尺寸] 钓鱼面板 200x287");
+    assert_eq!(
+        (((SW - fw) / 2.0).floor(), ((SH - fh) / 2.0).floor()),
+        (412.0, 240.0),
+        "[居中] C# `FishingDialog.Location = Center`"
+    );
+
+    // 任务日记：C# `Prguse[961]` 316x466 @ (ScreenWidth/2 - 300 - 20, 60) = (192,60)
+    let (dw, dh) = libs.size(quest_log::DIARY_PANEL.0, quest_log::DIARY_PANEL.1);
+    assert_eq!((dw, dh), quest_log::DIARY_SIZE, "[尺寸] 任务日记 316x466");
+    assert_eq!(
+        quest_log::DIARY_POS,
+        (SW / 2.0 - 300.0 - 20.0, 60.0),
+        "[坐标] C# QuestDiaryDialog 原点（此前写成 200 → 偏 8px）"
+    );
+    // 任务详情：C# `Prguse[960]` @ (ScreenWidth/2 + 20, 60) = (532,60)
+    let (qw, qh) = libs.size(quest_log::DETAIL_PANEL.0, quest_log::DETAIL_PANEL.1);
+    assert_eq!((qw, qh), quest_log::DIARY_SIZE, "[尺寸] 任务详情同 316x466");
+    assert_eq!(quest_log::DETAIL_POS, (SW / 2.0 + 20.0, 60.0));
+
+    // Buff：`Prguse2[20..30]` 11 档 art 尺寸逐一核对（布局基准），右缘恒 898（C# 右锚 `newX`）
+    for (i, expected) in buff::PANEL_SIZES.iter().enumerate() {
+        let real = libs.size(LibraryName::Prguse2, 20 + i);
+        assert_eq!(
+            real,
+            *expected,
+            "[尺寸] Buff 面板 Prguse2[{}] 实测尺寸应与 PANEL_SIZES[{i}] 一致",
+            20 + i
+        );
+    }
+    assert_eq!(
+        buff::PANEL_RIGHT - buff::PANEL_SIZES[0].0,
+        854.0,
+        "[坐标] C# `Location.X = ScreenWidth - 170` = 854（收起态 44 宽 → 右缘 898）"
+    );
+    assert_eq!(buff::PANEL_Y, 0.0);
+
+    // Guild：C# `Prguse[180]` 实测 590x432 + `Location = Center` → (217,168)。
+    // **已知偏差（本批只记录，未修）**：本端 `GUILD_H = 740`（自造加高，内容布局按 740 排），
+    // 故原点为 (217,14) 而非 (217,168) —— 需要独立单元按 C# 590x432 重排行会窗内容。
+    let (gw, gh) = libs.size(guild::PANEL.0, guild::PANEL.1);
+    assert_eq!(
+        (gw, gh),
+        (590.0, 432.0),
+        "[尺寸] 行会窗面板 Prguse[180] 590x432"
+    );
+    assert_eq!(
+        guild::GUILD_W,
+        gw,
+        "[尺寸] 本端宽度与 C# 一致（高度 740 vs 432 为已知偏差）"
+    );
+    assert_ne!(
+        guild::GUILD_H,
+        gh,
+        "记录：本端高度仍为 740（≠C# 432）→ 行会窗待按 C# 尺寸重排（#2892 批B 后续单元）"
+    );
+
+    println!("  ✓ 批B 面板精灵核对（三）：Npc/ChatNotice/MiniMap/BigMap/Fishing/QuestDiary+Detail/Buff(11 档)");
+}

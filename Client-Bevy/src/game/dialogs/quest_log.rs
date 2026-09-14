@@ -29,6 +29,15 @@ use crate::ui::theme::{
 use mir2_shared::data::client_data::ClientQuestInfo;
 use mir2_shared::data::shared_data::QuestItemReward;
 
+/// #2892 批B：日记窗面板与 C# 原点（C# `QuestDiaryDialog.Index = 961;
+/// Location = (ScreenWidth/2 - 300 - 20, 60)` = **(192, 60)**）
+pub const DIARY_PANEL: (LibraryName, usize) = (LibraryName::Prguse, 961);
+pub const DIARY_SIZE: (f32, f32) = (316.0, 466.0);
+pub const DIARY_POS: (f32, f32) = (192.0, 60.0);
+/// C# `QuestDetailDialog.Index = 960` @ `(ScreenWidth/2 + 20, 60)` = (532,60)
+pub const DETAIL_PANEL: (LibraryName, usize) = (LibraryName::Prguse, 960);
+pub const DETAIL_POS: (f32, f32) = (532.0, 60.0);
+
 /// C# Globals.MaxConcurrentQuests（服务端 quest_log.can_accept 同值）
 pub const MAX_CONCURRENT_QUESTS: usize = 20;
 
@@ -726,11 +735,19 @@ fn spawn_quest_log(
     let font = ui_font.0.clone();
     let cjk = shared_cjk_font(&mut fonts, &mut cjk_font);
 
-    // 面板 Prguse[961]（C# QuestDiaryDialog，316x466 @ (200,60)）
+    // 面板 Prguse[961]（C# QuestDiaryDialog，316x466 @ (192,60)）
     let Some(bg) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 961) else {
         return;
     };
-    let panel = spawn_panel(&mut commands, bg, 200.0, 60.0, 316.0, 466.0, 30);
+    let panel = spawn_panel(
+        &mut commands,
+        bg,
+        DIARY_POS.0,
+        DIARY_POS.1,
+        DIARY_SIZE.0,
+        DIARY_SIZE.1,
+        30,
+    );
     commands
         .entity(panel)
         .insert((DialogRoot(DialogKind::QuestLog), QuestLogWidget));
@@ -2334,8 +2351,8 @@ fn quest_log_ui_system(
             if let Some(cursor) = window.cursor_position() {
                 let (ox, oy) =
                     ui.1.single()
-                        .map(|n| crate::ui::theme::node_origin(n, (200.0, 60.0)))
-                        .unwrap_or((200.0, 60.0));
+                        .map(|n| crate::ui::theme::node_origin(n, DIARY_POS))
+                        .unwrap_or(DIARY_POS);
                 for i in 0..8usize {
                     let (rx, ry, rw, rh) = quest_log_row_rect(i, ox, oy);
                     if cursor.x >= rx
@@ -3937,10 +3954,13 @@ mod tests {
     /// 任务行命中：初始原点等价于原固定坐标，拖动后跟随面板
     #[test]
     fn row_rect_origin_and_drag() {
-        // 初始 (200,60)：首行 y=100（=60+40），x 起 218（=200+18）
-        let (rx, ry, rw, rh) = quest_log_row_rect(0, 200.0, 60.0);
-        assert_eq!((rx, ry, rw, rh), (218.0, 100.0, 282.0, 18.0));
-        assert_eq!(quest_log_row_rect(7, 200.0, 60.0).1, 100.0 + 7.0 * 20.0);
+        // 初始 (192,60)（C# `QuestDiaryDialog`）：首行 y=100（=60+40），x 起 210（=192+18）
+        let (rx, ry, rw, rh) = quest_log_row_rect(0, DIARY_POS.0, DIARY_POS.1);
+        assert_eq!((rx, ry, rw, rh), (210.0, 100.0, 282.0, 18.0));
+        assert_eq!(
+            quest_log_row_rect(7, DIARY_POS.0, DIARY_POS.1).1,
+            100.0 + 7.0 * 20.0
+        );
         // 拖动到 (250,100)：跟随
         let (rx2, ry2, _, _) = quest_log_row_rect(0, 250.0, 100.0);
         assert_eq!((rx2, ry2), (268.0, 140.0));
