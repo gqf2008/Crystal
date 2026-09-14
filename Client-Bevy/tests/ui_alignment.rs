@@ -2290,3 +2290,73 @@ fn guild_territory_dialog_aligned() {
         "  ✓ 行会领地 Prguse[680] 568x241 @(0,0)：标题(217,11)、关闭(544,8)、翻页(214/317,213)、邮件/购买(262/292,208)、表头 y38、7 行 550x17 @(5,60+20i)"
     );
 }
+
+/// #2892 批C：英雄行为条对齐 C# `HeroBehaviourPanel`（`HeroDialogs.cs:751-793`）——
+/// `Size = 64x17`、`Location = MainDialog + (165,37)`；4 个 16x17 图标
+/// `Prguse[1840..1843]`（当前行为用禁用帧 `1844..1847`）。
+#[test]
+fn hero_behaviour_panel_aligned() {
+    use client_bevy::game::hud;
+    require_assets!("hero_behaviour_panel_aligned");
+    let mut libs = Libs::new();
+
+    // HUD 背景 = `Prguse[1]`（分辨率档 1），`main_x = (1024-bg_w)/2`、`main_y = 768-bg_h`
+    let (bg_w, bg_h) = libs.size(LibraryName::Prguse, 1);
+    let (main_x, main_y) = ((SW - bg_w) / 2.0, SH - bg_h);
+
+    assert_eq!(hud::HERO_BEHAVIOUR_ORIGIN, (165.0, 37.0));
+    assert_eq!(hud::HERO_BEHAVIOUR_ICON, (16.0, 17.0));
+    assert_eq!(hud::HERO_BEHAVIOUR_ICON_BASE, 1840);
+    assert_eq!(hud::HERO_BEHAVIOUR_DISABLED_BASE, 1844);
+
+    // 面板 64x17 = 4 × 16
+    let panel_w = hud::HERO_BEHAVIOUR_ICON.0 * 4.0;
+    assert_eq!(panel_w, 64.0, "[尺寸] C# `Size = new Size(64, 17)`");
+    let sx = main_x + hud::HERO_BEHAVIOUR_ORIGIN.0;
+    let sy = main_y + hud::HERO_BEHAVIOUR_ORIGIN.1;
+    assert_in_canvas("英雄行为条", sx, sy, panel_w, hud::HERO_BEHAVIOUR_ICON.1);
+
+    for i in 0..4usize {
+        let (w, h) = libs.size(LibraryName::Prguse, hud::HERO_BEHAVIOUR_ICON_BASE + i);
+        assert_eq!(
+            (w, h),
+            hud::HERO_BEHAVIOUR_ICON,
+            "[尺寸] 图标 Prguse[{}] 应为 16x17",
+            hud::HERO_BEHAVIOUR_ICON_BASE + i
+        );
+        // 禁用帧（C# `DisabledIndex`）同尺寸
+        let (dw, dh) = libs.size(LibraryName::Prguse, hud::HERO_BEHAVIOUR_DISABLED_BASE + i);
+        assert_eq!(
+            (dw, dh),
+            (w, h),
+            "[尺寸] 禁用帧 Prguse[{}] 应与可用帧同尺寸",
+            hud::HERO_BEHAVIOUR_DISABLED_BASE + i
+        );
+        assert_inside(
+            &format!("行为{i}"),
+            sx + i as f32 * hud::HERO_BEHAVIOUR_ICON.0,
+            sy,
+            w,
+            h,
+            main_x,
+            main_y,
+            hud::HERO_BEHAVIOUR_ORIGIN.0 * 2.0 + panel_w,
+            hud::HERO_BEHAVIOUR_ICON.1 * 4.0,
+        );
+    }
+
+    // 关键身份：可用帧与禁用帧不是同一张图（尺寸相同，只比尺寸抓不到用错帧）
+    for i in 0..4usize {
+        let a = libs.pixels(LibraryName::Prguse, hud::HERO_BEHAVIOUR_ICON_BASE + i);
+        let b = libs.pixels(LibraryName::Prguse, hud::HERO_BEHAVIOUR_DISABLED_BASE + i);
+        assert!(!a.is_empty() && !b.is_empty());
+        assert_ne!(
+            a, b,
+            "[身份] 行为 {i} 的可用帧与禁用帧应是不同图像（C# `Index` vs `DisabledIndex`）"
+        );
+    }
+
+    println!(
+        "  ✓ 英雄行为条 64x17 @HUD+(165,37)：4 个 16x17 图标 Prguse[1840..1843]/禁用[1844..1847]"
+    );
+}

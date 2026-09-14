@@ -1221,8 +1221,10 @@ pub(crate) fn handle_progress(
         }
         // #291：C# 服务端包面收尾（UpdateHeroSpawnState）
         x if x == ServerPacketIds::UpdateHeroSpawnState as i16 => {
-            if hero::UpdateHeroSpawnState::read_body(&mut cur).is_ok() {
-                tracing::info!("📦 UpdateHeroSpawnState 解码");
+            if let Ok(p) = hero::UpdateHeroSpawnState::read_body(&mut cur) {
+                // #2892 批C：HeroBehaviourPanel 的显隐判据（C# `p.State > Unsummoned`）
+                server_events.write(ServerEvent::HeroSpawnStateChanged { state: p.state });
+                tracing::info!("🧝 UpdateHeroSpawnState: {:?}", p.state);
             }
         }
         // #291：C# 服务端包面收尾（Magic）

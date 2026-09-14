@@ -45,6 +45,9 @@ pub struct HeroState {
     pub create_gender: mir2_shared::enums::MirGender,
     /// 英雄行为（C# HeroBehaviour：0=攻击 1=反击 2=跟随 3=自定义）
     pub behaviour: mir2_shared::enums::HeroBehaviour,
+    /// #2892 批C：C# `HeroSpawnState`（`S.UpdateHeroSpawnState`）——
+    /// `HeroBehaviourPanel.Visible = state > Unsummoned`（`GameScene.cs:6190`）
+    pub spawn_state: mir2_shared::enums::HeroSpawnState,
     /// 英雄自动药阈值（0=关闭；C# HeroInventoryDialog AutoHPPercent）
     pub auto_pot_hp: u8,
     pub auto_pot_mp: u8,
@@ -79,6 +82,8 @@ impl Default for HeroState {
             create_class: mir2_shared::enums::MirClass::Warrior,
             create_gender: mir2_shared::enums::MirGender::Male,
             behaviour: mir2_shared::enums::HeroBehaviour::Attack,
+            // C# `HeroSpawnState` 默认无出战英雄（`None`/`Unsummoned` 都不显示行为条）
+            spawn_state: mir2_shared::enums::HeroSpawnState::Unsummoned,
             auto_pot_hp: 0,
             auto_pot_mp: 0,
             inventory: Vec::new(),
@@ -389,31 +394,10 @@ fn spawn_hero(
         ) {
             spawn_icon_button(p, n, h, pr, 130.0, 150.0, 90.0, 25.0, 10).insert(HeroSwitch1);
         }
-        // 创建英雄说明 + 行为标签 + 行为按钮（C# HeroBehaviourPanel：Prguse 1840..1843，16x17）
+        // 创建英雄说明
         spawn_label(p, &cjk, "创建英雄", 34.0, 186.0, 12.0, Color::WHITE, 10);
-        spawn_label(p, &cjk, "行为:", 130.0, 186.0, 12.0, Color::WHITE, 10);
-        for i in 0..4usize {
-            if let Some(h) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 1840 + i) {
-                crate::ui::theme::spawn_image(
-                    p,
-                    h.clone(),
-                    160.0 + i as f32 * 18.0,
-                    182.0,
-                    16.0,
-                    17.0,
-                    10,
-                )
-                .insert((
-                    HeroBehaviourBtn(i),
-                    Button,
-                    // #2775：C# `HeroDialogs.cs:774` BehaviourButtons[i].Hint =
-                    // `HeroBehaviourFormat`（「英雄行为：{0}」+ `HeroBehaviour` 枚举本地化名）
-                    crate::ui::tooltip::UiHint {
-                        text: behaviour_hint(i),
-                    },
-                ));
-            }
-        }
+        // #2892 批C：行为按钮（`Prguse[1840..1847]`）已按 C# 移到 HUD `HeroBehaviourPanel`
+        // （`Prguse` 64x17 @ HUD+(165,37)，见 `game/hud.rs::hero_behaviour_system`）
         // 复活按钮（默认隐藏，hero_hp<=0 时由 hero_revive_system 显示）
         spawn_container(p, 20.0, 170.0, 160.0, 20.0, 10)
             .insert((
@@ -1160,7 +1144,6 @@ fn hero_button_system(
         Option<&HeroCreateOk>,
         Option<&HeroAutoHpCycle>,
         Option<&HeroAutoMpCycle>,
-        Option<&HeroBehaviourBtn>,
     )>,
     mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
 ) {
@@ -1231,7 +1214,7 @@ fn hero_button_system(
             input.active = None;
         }
     }
-    for (e, inter, class_btn, gender_btn, ok, hp_btn, mp_btn, behaviour) in &mut cycle_btns {
+    for (e, inter, class_btn, gender_btn, ok, hp_btn, mp_btn) in &mut cycle_btns {
         if !edge(e, inter, &mut prev_inter) {
             continue;
         }
@@ -1260,16 +1243,6 @@ fn hero_button_system(
                 stat: STAT_MP,
                 value: state.auto_pot_mp as u32,
             });
-        } else if let Some(b) = behaviour {
-            let behaviour = match b.0 {
-                1 => mir2_shared::enums::HeroBehaviour::CounterAttack,
-                2 => mir2_shared::enums::HeroBehaviour::Follow,
-                3 => mir2_shared::enums::HeroBehaviour::Custom,
-                _ => mir2_shared::enums::HeroBehaviour::Attack,
-            };
-            net.send_packet(&mir2_shared::packets::client::hero::SetHeroBehaviour { behaviour });
-            state.message = format!("行为: {}", behaviour_name(behaviour));
-            tracing::info!("🦸 设置英雄行为: {:?}", behaviour);
         }
     }
 }
@@ -1370,6 +1343,12 @@ fn hero_server_events(
                     hero.behaviour = b;
                     hero.message = format!("行为: {}", behaviour_name(b));
                 }
+            }
+            // #2892 批C：C# `S.UpdateHeroSpawnState` —— HUD 行为条显隐判据
+            // （`HeroBehaviourPanel.Visible = p.State > Unsummoned`，`GameScene.cs:6190`）
+            ServerEvent::HeroSpawnStateChanged { state: spawn } => {
+                hero.spawn_state = *spawn;
+                tracing::info!("🧝 英雄出战状态: {:?}", spawn);
             }
             ServerEvent::HeroAutoPotSet { stat, value } => {
                 if *stat == STAT_HP {
@@ -1493,7 +1472,7 @@ fn behaviour_name(b: mir2_shared::enums::HeroBehaviour) -> &'static str {
 
 /// #2775：英雄行为按钮 Hint（C# `HeroDialogs.cs:774` `HeroBehaviourFormat` =「英雄行为：{0}」，
 /// `{0}` 取 `HeroBehaviour` 枚举的本地化名；按钮下标 i 即枚举值，C# `Enum.Parse` 同序）。
-fn behaviour_hint(i: usize) -> String {
+pub(crate) fn behaviour_hint(i: usize) -> String {
     let name = match i {
         0 => "攻击",
         1 => "反击",

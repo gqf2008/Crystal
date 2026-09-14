@@ -23,6 +23,7 @@ use crate::game::player_state::{
 };
 use crate::game::sets::GameSet;
 use crate::map_renderer::GameLibraries;
+use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
 use crate::ui::sprite_ui::UiButton;
@@ -62,6 +63,25 @@ pub struct HeroBtn;
 /// #1357：HUD 英雄状态小面板（C# HeroInfoPanel：名字/等级/HP/MP/经验）
 #[derive(Component)]
 pub struct HeroPanel;
+
+/// #2892 批C：C# `HeroBehaviourPanel`（`HeroDialogs.cs:751-793`）——
+/// `Size = 64x17`、`DrawImage = false`、`Location = MainDialog + (165,37)`；
+/// 4 个 16x17 图标 `Prguse[1840..1843]`，**当前行为**显示 `Prguse[1844..1847]` 禁用帧。
+pub const HERO_BEHAVIOUR_ORIGIN: (f32, f32) = (165.0, 37.0);
+pub const HERO_BEHAVIOUR_ICON: (f32, f32) = (16.0, 17.0);
+pub const HERO_BEHAVIOUR_ICON_BASE: usize = 1840;
+pub const HERO_BEHAVIOUR_DISABLED_BASE: usize = 1844;
+
+/// 行为按钮（C# `HeroBehaviourPanel.BehaviourButtons[i]`）
+#[derive(Component)]
+pub struct HeroBehaviourBtn {
+    /// 行为序号 0..3（C# `HeroBehaviour` 枚举值）
+    pub index: usize,
+    /// 可用帧 `Prguse[1840+i]`
+    pub normal: Handle<Image>,
+    /// 禁用帧 `Prguse[1844+i]`（C# `DisabledIndex`）
+    pub disabled: Handle<Image>,
+}
 #[derive(Component)]
 pub struct HeroPanelText(usize);
 
@@ -161,6 +181,58 @@ fn hero_btn_system(
         } else {
             Visibility::Hidden
         };
+    }
+}
+
+/// #2892 批C：英雄行为条（C# `HeroBehaviourPanel`）——
+/// 显隐按出战状态（`Visible = p.State > Unsummoned`，`GameScene.cs:6190`）、
+/// 当前行为显禁用帧（`UpdateBehaviour`：`Enabled = (byte)behaviour != i`）、
+/// 点击发 `C.SetHeroBehaviour`（`SetBehaviour`，`:784-787`）。
+fn hero_behaviour_system(
+    hero: Res<crate::game::dialogs::hero::HeroState>,
+    net: Res<NetConnection>,
+    mut btns: Query<(
+        &HeroBehaviourBtn,
+        &UiButton,
+        &mut crate::ui::sprite_ui::ButtonFrames,
+        &mut Sprite,
+        &mut Visibility,
+    )>,
+) {
+    use mir2_shared::enums::HeroBehaviour;
+    let summoned = hero.spawn_state as u8 > mir2_shared::enums::HeroSpawnState::Unsummoned as u8;
+    let show = hero.current.is_some() && summoned;
+    let current = hero.behaviour as u8 as usize;
+    for (btn, ui, mut frames, mut sprite, mut vis) in &mut btns {
+        let want_vis = if show {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
+        if *vis != want_vis {
+            *vis = want_vis;
+        }
+        // 帧：当前行为 → 禁用帧（C# `DisabledIndex`）
+        let want = if btn.index == current {
+            btn.disabled.clone()
+        } else {
+            btn.normal.clone()
+        };
+        if frames.normal != want {
+            frames.normal = want.clone();
+            frames.hover = want.clone();
+            frames.pressed = want.clone();
+            sprite.image = want;
+        }
+        // 点击：当前行为按钮在 C# 是 `Enabled = false`，不响应
+        if ui.clicked && btn.index != current {
+            if let Ok(behaviour) = HeroBehaviour::try_from(btn.index as u8) {
+                net.send_packet(&mir2_shared::packets::client::hero::SetHeroBehaviour {
+                    behaviour,
+                });
+                tracing::info!("🧝 设置英雄行为: {:?}", behaviour);
+            }
+        }
     }
 }
 
@@ -429,6 +501,8 @@ impl Plugin for HudPlugin {
                 attack_mode_text_system,
                 hero_btn_system,
                 hero_panel_system,
+                // #2892 批C：英雄行为条（C# HeroBehaviourPanel）
+                hero_behaviour_system,
                 hud_space_weight_system,
                 hud_tooltip_system,
             )
@@ -766,6 +840,56 @@ fn spawn_hud(
             Anchor::TOP_LEFT,
             false,
         );
+    }
+
+    // #2892 批C：英雄行为条（C# `HeroBehaviourPanel`，`HeroDialogs.cs:751-793`）——
+    // 4 个 16x17 图标 @ x=0/16/32/48、y=HUD+37；可用帧 `Prguse[1840..1843]`、
+    // 当前行为显禁用帧 `Prguse[1844..1847]`（C# `DisabledIndex` + `Enabled=false`）
+    for i in 0..4usize {
+        let Some(normal) = ui_image(
+            &mut libs,
+            &mut images,
+            &mut cache,
+            LibraryName::Prguse,
+            HERO_BEHAVIOUR_ICON_BASE + i,
+        ) else {
+            continue;
+        };
+        let Some(disabled) = ui_image(
+            &mut libs,
+            &mut images,
+            &mut cache,
+            LibraryName::Prguse,
+            HERO_BEHAVIOUR_DISABLED_BASE + i,
+        ) else {
+            continue;
+        };
+        if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
+            &mut commands,
+            &mut libs,
+            &mut images,
+            &mut cache,
+            LibraryName::Prguse,
+            HERO_BEHAVIOUR_ICON_BASE + i,
+            HERO_BEHAVIOUR_ICON_BASE + i,
+            HERO_BEHAVIOUR_ICON_BASE + i,
+            main_x + HERO_BEHAVIOUR_ORIGIN.0 + i as f32 * HERO_BEHAVIOUR_ICON.0,
+            main_y + HERO_BEHAVIOUR_ORIGIN.1,
+            3.0,
+            HERO_BEHAVIOUR_ICON.0,
+            HERO_BEHAVIOUR_ICON.1,
+        ) {
+            commands.entity(e).insert((
+                HeroBehaviourBtn {
+                    index: i,
+                    normal,
+                    disabled,
+                },
+                Visibility::Hidden,
+                // C# `HeroDialogs.cs:774`：Hint = `HeroBehaviourFormat`（英雄行为：{0}）
+                crate::ui::tooltip::TooltipHint(crate::game::dialogs::hero::behaviour_hint(i)),
+            ));
+        }
     }
 
     // 死亡弹窗（对齐 C# GameScene.ShowReviveMessage → MirMessageBox(YesNo)）：
@@ -1391,6 +1515,135 @@ fn death_overlay_system(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #2892 批C：C# `HeroBehaviourPanel`（`HeroDialogs.cs:751-793`）几何——
+    /// 64x17、HUD+(165,37)、4 个 16x17 图标、可用/禁用帧基址 1840/1844
+    #[test]
+    fn hero_behaviour_geometry_matches_csharp() {
+        assert_eq!(HERO_BEHAVIOUR_ORIGIN, (165.0, 37.0));
+        assert_eq!(HERO_BEHAVIOUR_ICON, (16.0, 17.0));
+        assert_eq!(HERO_BEHAVIOUR_ICON_BASE, 1840);
+        assert_eq!(HERO_BEHAVIOUR_DISABLED_BASE, 1844);
+        // 面板 `Size = 64x17` = 4 × 16 宽
+        assert_eq!(HERO_BEHAVIOUR_ICON.0 * 4.0, 64.0);
+    }
+
+    /// #2892 批C：行为条显隐 / 禁用帧 / 点击发包（C# `UpdateBehaviour` + `SetBehaviour`）
+    #[test]
+    fn hero_behaviour_visibility_frames_and_click() {
+        use crate::ui::sprite_ui::ButtonFrames;
+        use mir2_shared::enums::{HeroBehaviour, HeroSpawnState};
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.insert_resource(NetConnection::default());
+        let mut hero = crate::game::dialogs::hero::HeroState::default();
+        hero.current = Some(mir2_shared::data::client_data::ClientHeroInformation {
+            index: 1,
+            name: "英雄".to_string(),
+            level: 10,
+            class: mir2_shared::enums::MirClass::Warrior,
+            gender: mir2_shared::enums::MirGender::Male,
+        });
+        hero.spawn_state = HeroSpawnState::Summoned;
+        hero.behaviour = HeroBehaviour::Follow; // 当前 = 2
+        app.insert_resource(hero);
+        app.add_systems(Update, hero_behaviour_system);
+
+        let (tx, rx) = crossbeam_channel::unbounded::<Vec<u8>>();
+        app.world_mut().resource_mut::<NetConnection>().to_server = Some(tx);
+        // 独立的图片句柄：用于断言「当前行为显禁用帧」
+        app.insert_resource(Assets::<Image>::default());
+
+        // 4 个按钮（handles 用 default 占位；断言用索引区分）
+        let mut buttons = Vec::new();
+        for i in 0..4usize {
+            let normal = app
+                .world_mut()
+                .resource_mut::<Assets<Image>>()
+                .add(Image::default());
+            let disabled = app
+                .world_mut()
+                .resource_mut::<Assets<Image>>()
+                .add(Image::default());
+            let e = app
+                .world_mut()
+                .spawn((
+                    HeroBehaviourBtn {
+                        index: i,
+                        normal: normal.clone(),
+                        disabled: disabled.clone(),
+                    },
+                    UiButton {
+                        rect: (0.0, 0.0, 16.0, 17.0),
+                        clicked: false,
+                    },
+                    ButtonFrames {
+                        normal,
+                        hover: Handle::default(),
+                        pressed: Handle::default(),
+                    },
+                    Sprite::default(),
+                    Visibility::Hidden,
+                ))
+                .id();
+            buttons.push(e);
+        }
+        app.update();
+
+        // 出战 + 有英雄 → 4 个都可见；当前行为（2）显禁用帧（index → disabled 句柄）
+        for (i, e) in buttons.iter().enumerate() {
+            let vis = *app.world().entity(*e).get::<Visibility>().unwrap();
+            assert_eq!(vis, Visibility::Visible, "出战状态应显示行为条（按钮 {i}）");
+            let btn = app.world().entity(*e).get::<HeroBehaviourBtn>().unwrap();
+            let frames = app.world().entity(*e).get::<ButtonFrames>().unwrap();
+            if i == 2 {
+                assert_eq!(
+                    frames.normal, btn.disabled,
+                    "当前行为（Follow=2）应显禁用帧 Prguse[1844+2]"
+                );
+            } else {
+                assert_eq!(
+                    frames.normal, btn.normal,
+                    "非当前行为应显可用帧 Prguse[1840+i]"
+                );
+            }
+        }
+        app.world_mut().entity_mut(buttons[2]).insert(UiButton {
+            rect: (0.0, 0.0, 16.0, 17.0),
+            clicked: true,
+        });
+        app.update();
+        assert!(
+            rx.try_recv().is_err(),
+            "当前行为的按钮在 C# 是 Enabled=false，点击不得发包"
+        );
+
+        // 点其它行为 → 发 C.SetHeroBehaviour
+        app.world_mut().entity_mut(buttons[1]).insert(UiButton {
+            rect: (0.0, 0.0, 16.0, 17.0),
+            clicked: true,
+        });
+        app.update();
+        let raw = rx.try_recv().expect("点非当前行为应发 C.SetHeroBehaviour");
+        let pkt: mir2_shared::packets::client::hero::SetHeroBehaviour =
+            mir2_shared::packets::base::deserialize_packet(&mut std::io::Cursor::new(raw))
+                .expect("应为 SetHeroBehaviour 包");
+        assert_eq!(pkt.behaviour, HeroBehaviour::CounterAttack);
+
+        // 收回英雄（Unsummoned）→ 全部隐藏
+        app.world_mut()
+            .resource_mut::<crate::game::dialogs::hero::HeroState>()
+            .spawn_state = HeroSpawnState::Unsummoned;
+        app.update();
+        for e in &buttons {
+            assert_eq!(
+                *app.world().entity(*e).get::<Visibility>().unwrap(),
+                Visibility::Hidden,
+                "Unsummoned 时行为条必须隐藏（C# `State > Unsummoned`）"
+            );
+        }
+    }
 
     /// C# GoldLabel = Gold.ToString("###,###,##0")（千分位）
     #[test]
