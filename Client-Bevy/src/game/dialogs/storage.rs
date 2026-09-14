@@ -27,13 +27,66 @@ use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
 use crate::ui::sprite_ui::{shared_cjk_font, UiCjkFont, UiFont};
 use crate::ui::theme::{
-    load_lib_image, spawn_container, spawn_icon_button, spawn_item_cell_ui_root, spawn_label,
-    spawn_panel, UiItemCell, UiItemCellData, UiItemCellIcon,
+    load_lib_image, spawn_container, spawn_icon_button, spawn_image, spawn_item_cell_ui_root,
+    spawn_label, spawn_panel, ImageButton, UiItemCell, UiItemCellData, UiItemCellIcon,
 };
 
 /// #2892 批B：面板精灵与 C# 原生尺寸（C# `StorageDialog.Index = 586; Library = Libraries.Prguse`）
 pub const PANEL: (LibraryName, usize) = (LibraryName::Prguse, 586);
 pub const PANEL_SIZE: (f32, f32) = (388.0, 346.0);
+
+// ---- C# `StorageDialog` 子控件（`NPCDialogs.cs:2815-2935`）----
+/// 标题 `TitleLabel` = `Title[0]` @(18,8)
+pub const TITLE_SPRITE: (LibraryName, usize) = (LibraryName::Title, 0);
+pub const TITLE_POS: (f32, f32) = (18.0, 8.0);
+/// 页码钮 `Storage1Button`/`Storage2Button`：`[正常帧, 另一页激活时的帧]`
+/// （C# `RefreshStorage1` 置 743/746，`RefreshStorage2` 置 744/745）
+pub const PAGE1_TAB: [(LibraryName, usize); 2] =
+    [(LibraryName::Title, 743), (LibraryName::Title, 744)];
+pub const PAGE2_TAB: [(LibraryName, usize); 2] =
+    [(LibraryName::Title, 746), (LibraryName::Title, 745)];
+pub const PAGE1_TAB_POS: (f32, f32) = (8.0, 36.0);
+pub const PAGE2_TAB_POS: (f32, f32) = (80.0, 36.0);
+/// 租用扩容钮 `RentButton` = `Title[483/484/485]` @(283,33)（仅第 2 页可见）
+pub const RENT_SPRITES: [(LibraryName, usize); 3] = [
+    (LibraryName::Title, 483),
+    (LibraryName::Title, 484),
+    (LibraryName::Title, 485),
+];
+pub const RENT_BTN_POS: (f32, f32) = (283.0, 33.0);
+/// 密码钮 `ProtectButton` = `Title[113/114/115]` @(328,33)
+pub const PROTECT_SPRITES: [(LibraryName, usize); 3] = [
+    (LibraryName::Title, 113),
+    (LibraryName::Title, 114),
+    (LibraryName::Title, 115),
+];
+pub const PROTECT_BTN_POS: (f32, f32) = (328.0, 33.0);
+/// 关闭钮 `CloseButton` = `Prguse2[360/361/362]` @(363,3)
+pub const CLOSE_SPRITES: [(LibraryName, usize); 3] = [
+    (LibraryName::Prguse2, 360),
+    (LibraryName::Prguse2, 361),
+    (LibraryName::Prguse2, 362),
+];
+pub const CLOSE_POS: (f32, f32) = (363.0, 3.0);
+/// 未扩容遮罩 `LockedPage` = `Prguse[2443]` @(8,59)（仅第 2 页且未扩容时可见）
+pub const LOCKED_PAGE_SPRITE: (LibraryName, usize) = (LibraryName::Prguse, 2443);
+pub const LOCKED_PAGE_POS: (f32, f32) = (8.0, 59.0);
+/// 两行提示（C# `RentalLabel` / `StoragePasswordLabel`，`AutoSize` 故只给左上角）
+pub const RENTAL_LABEL_POS: (f32, f32) = (40.0, 322.0);
+pub const PASSWORD_LABEL_POS: (f32, f32) = (40.0, 304.0);
+
+/// 第 1 页格数（C# `Globals.StorageGridSize` 基础 80 = 10×8）
+pub const PAGE_CELLS: usize = COLS * ROWS;
+/// 扩容后总格数（C# `Grid = new MirItemCell[10 * 16]`）
+pub const MAX_CELLS: usize = PAGE_CELLS * 2;
+
+/// 仓库页码（C# `Storage1Button`/`Storage2Button` 切页）
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum StoragePage {
+    #[default]
+    One,
+    Two,
+}
 
 /// 仓库数据（网络 UserStorage 写入）
 #[derive(Resource, Default)]
@@ -51,17 +104,55 @@ pub struct StorageState {
     pub unlock_panel: bool,
     /// 仓库解锁结果提示（#200）
     pub unlock_msg: String,
+    /// 当前页（C# `RefreshStorage1`/`RefreshStorage2`）
+    pub page: StoragePage,
+    /// 是否处于扩容状态（C# `UserInformation.HasExpandedStorage`；第 2 页放行条件）
+    pub has_expanded_storage: bool,
+    /// 扩容到期时间（C# `ExpandedStorageExpiryTime`，仅用于提示文本）
+    pub expiry_time: i64,
+    /// 租用扩容确认框是否打开（C# `RentButton.Click` → `MirMessageBox`）
+    pub rent_confirm: bool,
 }
 
 impl StorageState {
-    /// 按服务端 ResizeStorage 调整格数（C# Array.Resize：截断/补空，上限 COLS*ROWS=80，#281）
+    /// 按服务端 ResizeStorage 调整格数（C# `Array.Resize`：截断/补空；上限 = 扩容后 160 格）
     pub fn resize(&mut self, size: usize) {
-        let size = size.min(COLS * ROWS);
+        let size = size.min(MAX_CELLS);
         if size < self.items.len() {
             self.items.truncate(size);
         } else {
             self.items.resize(size, None);
         }
+    }
+
+    /// 当前页的格区间 `[start, end)`（C# `RefreshStorage1`/`RefreshStorage2` 的 `Visible` 规则）
+    /// - 第 1 页：`0..min(len, 80)`（恒显示）
+    /// - 第 2 页：`80..len`，但**未扩容时全隐藏**（C# `grid.ItemSlot < StorageGridSize || !HasExpandedStorage`）
+    pub fn page_range(&self) -> (usize, usize) {
+        match self.page {
+            StoragePage::One => (0, self.items.len().min(PAGE_CELLS)),
+            StoragePage::Two => {
+                if self.has_expanded_storage {
+                    (
+                        PAGE_CELLS.min(self.items.len()),
+                        self.items.len().min(MAX_CELLS),
+                    )
+                } else {
+                    (PAGE_CELLS, PAGE_CELLS)
+                }
+            }
+        }
+    }
+
+    /// 第 2 页是否可用（未扩容 → 显示 `LockedPage` 遮罩 + 租用钮）
+    pub fn page2_available(&self) -> bool {
+        self.has_expanded_storage && self.items.len() > PAGE_CELLS
+    }
+
+    /// 与 C# `GameScene.SelectedCell` 一致的「选中格」是否落在当前页
+    pub fn selected_on_page(&self) -> bool {
+        let (start, end) = self.page_range();
+        self.selected.is_some_and(|s| s >= start && s < end)
     }
 }
 
@@ -88,9 +179,39 @@ pub struct StorageWidget;
 #[derive(Component)]
 pub struct StorageClose;
 
-/// 仓库密码按钮（C# StorageDialog ProtectButton）
+/// 仓库密码按钮（C# `StorageDialog.ProtectButton`）
 #[derive(Component)]
 pub struct StoragePwdBtn;
+
+/// 第 1 / 第 2 页页码钮（C# `Storage1Button` / `Storage2Button`）
+#[derive(Component)]
+pub struct StoragePage1Tab;
+#[derive(Component)]
+pub struct StoragePage2Tab;
+
+/// 租用扩容钮（C# `StorageDialog.RentButton`）
+#[derive(Component)]
+pub struct StorageRentBtn;
+
+/// 未扩容遮罩（C# `StorageDialog.LockedPage`）
+#[derive(Component)]
+pub struct StorageLockedPage;
+
+/// 两行提示（C# `RentalLabel` / `StoragePasswordLabel`）
+#[derive(Component)]
+pub struct StorageRentalLabel;
+#[derive(Component)]
+pub struct StoragePasswordLabel;
+
+/// 租用扩容确认框（C# `RentButton.Click` 里的 `MirMessageBox`）
+#[derive(Component)]
+pub struct StorageRentConfirm;
+#[derive(Component)]
+pub struct StorageRentConfirmText;
+#[derive(Component)]
+pub struct StorageRentConfirmOk;
+#[derive(Component)]
+pub struct StorageRentConfirmCancel;
 
 /// 仓库密码面板
 #[derive(Component)]
@@ -134,6 +255,7 @@ impl Plugin for StoragePlugin {
             (
                 storage_grid_sync_system,
                 storage_ui_system,
+                storage_page_system,
                 storage_locked_icon_system,
                 storage_action_system,
                 storage_tooltip_system,
@@ -187,25 +309,140 @@ fn spawn_storage_dialog(
         .insert((DialogRoot(DialogKind::Storage), StorageWidget, NotDraggable));
 
     commands.entity(panel).with_children(|p| {
-        // 关闭按钮（Prguse2 360/361/362）@(363,3)
-        if let (Some(n), Some(h), Some(pr)) = (
-            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 360),
-            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 361),
-            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 362),
-        ) {
-            spawn_icon_button(p, n, h, pr, 363.0, 3.0, 20.0, 20.0, 10).insert(StorageClose);
+        // 标题 `Title[0]` @(18,8)（C# `TitleLabel`，此前是自造文字「仓库」）
+        if let Some(h) = load_lib_image(&mut libs, &mut images, TITLE_SPRITE.0, TITLE_SPRITE.1) {
+            spawn_image(p, h, TITLE_POS.0, TITLE_POS.1, 71.0, 15.0, 9);
         }
-        // 标题文字
-        spawn_label(p, &cjk, "仓库", 18.0, 8.0, 12.0, Color::WHITE, 9);
-        // 仓库密码按钮 + 标签 @(18,330)
-        if let (Some(n), Some(h), Some(pr)) = (
-            load_lib_image(&mut libs, &mut images, LibraryName::Title, 206),
-            load_lib_image(&mut libs, &mut images, LibraryName::Title, 207),
-            load_lib_image(&mut libs, &mut images, LibraryName::Title, 208),
-        ) {
-            spawn_icon_button(p, n, h, pr, 18.0, 330.0, 76.0, 23.0, 10).insert(StoragePwdBtn);
+        // 页码钮 Storage1Button/Storage2Button（Title[743/744] @(8,36)、Title[746/745] @(80,36)）
+        // 帧由 `storage_ui_system` 按当前页切换（C# `RefreshStorage1/2` 改 `Index`/`HoverIndex`）
+        if let Some(n) = load_lib_image(&mut libs, &mut images, PAGE1_TAB[0].0, PAGE1_TAB[0].1) {
+            spawn_icon_button(
+                p,
+                n.clone(),
+                n.clone(),
+                n,
+                PAGE1_TAB_POS.0,
+                PAGE1_TAB_POS.1,
+                72.0,
+                23.0,
+                10,
+            )
+            .insert(StoragePage1Tab);
         }
-        spawn_label(p, &cjk, "仓库密码", 34.0, 334.0, 12.0, Color::WHITE, 11);
+        if let Some(n) = load_lib_image(&mut libs, &mut images, PAGE2_TAB[0].0, PAGE2_TAB[0].1) {
+            spawn_icon_button(
+                p,
+                n.clone(),
+                n.clone(),
+                n,
+                PAGE2_TAB_POS.0,
+                PAGE2_TAB_POS.1,
+                72.0,
+                23.0,
+                10,
+            )
+            .insert(StoragePage2Tab);
+        }
+        // 未扩容遮罩 `Prguse[2443]` @(8,59)（默认隐藏，第 2 页未扩容时显示）
+        if let Some(h) = load_lib_image(
+            &mut libs,
+            &mut images,
+            LOCKED_PAGE_SPRITE.0,
+            LOCKED_PAGE_SPRITE.1,
+        ) {
+            spawn_image(p, h, LOCKED_PAGE_POS.0, LOCKED_PAGE_POS.1, 372.0, 265.0, 9)
+                .insert((StorageLockedPage, Visibility::Hidden));
+        }
+        // 租用扩容钮 `Title[483/484/485]` @(283,33)（仅第 2 页可见）
+        if let (Some(n), Some(h), Some(pr)) = (
+            load_lib_image(&mut libs, &mut images, RENT_SPRITES[0].0, RENT_SPRITES[0].1),
+            load_lib_image(&mut libs, &mut images, RENT_SPRITES[1].0, RENT_SPRITES[1].1),
+            load_lib_image(&mut libs, &mut images, RENT_SPRITES[2].0, RENT_SPRITES[2].1),
+        ) {
+            spawn_icon_button(p, n, h, pr, RENT_BTN_POS.0, RENT_BTN_POS.1, 48.0, 25.0, 10)
+                .insert((StorageRentBtn, Visibility::Hidden));
+        }
+        // 密码钮 `Title[113/114/115]` @(328,33)（C# `ProtectButton`；此前本端自造「仓库密码」钮 @(18,330)）
+        if let (Some(n), Some(h), Some(pr)) = (
+            load_lib_image(
+                &mut libs,
+                &mut images,
+                PROTECT_SPRITES[0].0,
+                PROTECT_SPRITES[0].1,
+            ),
+            load_lib_image(
+                &mut libs,
+                &mut images,
+                PROTECT_SPRITES[1].0,
+                PROTECT_SPRITES[1].1,
+            ),
+            load_lib_image(
+                &mut libs,
+                &mut images,
+                PROTECT_SPRITES[2].0,
+                PROTECT_SPRITES[2].1,
+            ),
+        ) {
+            spawn_icon_button(
+                p,
+                n,
+                h,
+                pr,
+                PROTECT_BTN_POS.0,
+                PROTECT_BTN_POS.1,
+                48.0,
+                25.0,
+                10,
+            )
+            .insert(StoragePwdBtn);
+        }
+        // 关闭钮 `Prguse2[360/361/362]` @(363,3) 24x21（此前按 20x20 自造尺寸）
+        if let (Some(n), Some(h), Some(pr)) = (
+            load_lib_image(
+                &mut libs,
+                &mut images,
+                CLOSE_SPRITES[0].0,
+                CLOSE_SPRITES[0].1,
+            ),
+            load_lib_image(
+                &mut libs,
+                &mut images,
+                CLOSE_SPRITES[1].0,
+                CLOSE_SPRITES[1].1,
+            ),
+            load_lib_image(
+                &mut libs,
+                &mut images,
+                CLOSE_SPRITES[2].0,
+                CLOSE_SPRITES[2].1,
+            ),
+        ) {
+            spawn_icon_button(p, n, h, pr, CLOSE_POS.0, CLOSE_POS.1, 24.0, 21.0, 10)
+                .insert(StorageClose);
+        }
+        // 两行提示（C# `RentalLabel` @(40,322) / `StoragePasswordLabel` @(40,304)）
+        spawn_label(
+            p,
+            &cjk,
+            "",
+            RENTAL_LABEL_POS.0,
+            RENTAL_LABEL_POS.1,
+            12.0,
+            Color::WHITE,
+            11,
+        )
+        .insert((StorageRentalLabel, Visibility::Hidden));
+        spawn_label(
+            p,
+            &cjk,
+            "",
+            PASSWORD_LABEL_POS.0,
+            PASSWORD_LABEL_POS.1,
+            12.0,
+            Color::WHITE,
+            11,
+        )
+        .insert((StoragePasswordLabel, Visibility::Hidden));
     });
 
     // 密码面板（根节点覆盖层 300x150 @ (18,360)，GlobalZIndex 45）
@@ -408,21 +645,261 @@ fn spawn_storage_dialog(
         });
 
     // 格子底板不在此预生成：#281 由 storage_grid_sync_system 动态生成
+
+    // 租用扩容确认框（C# `RentButton.Click` → `MirMessageBox(ExtraStorage | ExtendYourRentalPeriod,
+    // OKCancel)`；`MirMessageBox` 面板 = `Prguse[360]` 456x190 居中 @(284,289)，
+    // Yes `Title[206..208]` @(260,157) / No `Title[210..212]` @(360,157)）
+    if let Some(bg) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 360) {
+        let confirm = spawn_panel(&mut commands, bg, 284.0, 289.0, 456.0, 190.0, 47);
+        commands.entity(confirm).insert((
+            StorageRentConfirm,
+            DialogRoot(DialogKind::Storage),
+            crate::game::dialogs::AlwaysVisible,
+            NotDraggable,
+        ));
+        commands.entity(confirm).with_children(|p| {
+            spawn_label(p, &cjk, "", 35.0, 35.0, 12.0, Color::WHITE, 9)
+                .insert(StorageRentConfirmText);
+            if let (Some(n), Some(h), Some(pr)) = (
+                load_lib_image(&mut libs, &mut images, LibraryName::Title, 206),
+                load_lib_image(&mut libs, &mut images, LibraryName::Title, 207),
+                load_lib_image(&mut libs, &mut images, LibraryName::Title, 208),
+            ) {
+                spawn_icon_button(p, n, h, pr, 260.0, 157.0, 76.0, 25.0, 10)
+                    .insert(StorageRentConfirmOk);
+            }
+            if let (Some(n), Some(h), Some(pr)) = (
+                load_lib_image(&mut libs, &mut images, LibraryName::Title, 210),
+                load_lib_image(&mut libs, &mut images, LibraryName::Title, 211),
+                load_lib_image(&mut libs, &mut images, LibraryName::Title, 212),
+            ) {
+                spawn_icon_button(p, n, h, pr, 360.0, 157.0, 76.0, 25.0, 10)
+                    .insert(StorageRentConfirmCancel);
+            }
+        });
+    }
 }
 
 /// 光标坐标 → 仓库格（按实际格数，#281）。
 /// ox/oy = 面板当前原点（拖动/推位后跟随，避免命中失准）
-fn storage_slot_at(cx: f32, cy: f32, size: usize, ox: f32, oy: f32) -> Option<usize> {
-    for i in 0..size.min(COLS * ROWS) {
-        let x = i % COLS;
-        let y = i / COLS;
-        let sx = ox + 9.0 + x as f32 * (CELL_W + 1.0);
-        let sy = oy + 60.0 + y as f32 * (CELL_H + 1.0);
+fn storage_slot_at(
+    cx: f32,
+    cy: f32,
+    page_start: usize,
+    page_end: usize,
+    ox: f32,
+    oy: f32,
+) -> Option<usize> {
+    for slot in page_start..page_end {
+        let (rx, ry) = cell_pos(slot, page_start);
+        let sx = ox + rx;
+        let sy = oy + ry;
         if cx >= sx && cx <= sx + CELL_W && cy >= sy && cy <= sy + CELL_H {
-            return Some(i);
+            return Some(slot);
         }
     }
     None
+}
+
+/// 页内格位置（C# `Grid[idx].Location = (x*36+9+x, y%8*32+60+y%8)` → 步进 37/33）
+pub fn cell_pos(slot: usize, page_start: usize) -> (f32, f32) {
+    let d = slot - page_start; // 页内下标（第 2 页 80..159 → 0..79）
+    let x = d % COLS;
+    let y = d / COLS;
+    (
+        9.0 + x as f32 * (CELL_W + 1.0),
+        60.0 + y as f32 * (CELL_H + 1.0),
+    )
+}
+
+/// C# `ClientTextKeys` 文案（`Client/Localization/Chinese.json` 逐字）
+pub const TEXT_EXPANDED_EXPIRES_ON: &str = "扩展仓库到期时间";
+pub const TEXT_EXPANDED_LOCKED: &str = "扩展仓库已锁定";
+pub const TEXT_RENT_EXTRA: &str = "是否租用额外仓库 10 天，费用为 1,000,000 金币？";
+pub const TEXT_RENT_EXTEND: &str = "是否延长租期 10 天，费用为 1,000,000 金币？";
+
+/// 页码/子控件层（C# `RefreshStorage1` / `RefreshStorage2` / `RentButton.Click`）：
+/// 页签切页与帧、租用钮与未扩容遮罩显隐、`RentalLabel` 文案与颜色、租用扩容确认框。
+#[allow(clippy::too_many_arguments)]
+fn storage_page_system(
+    mut state: ResMut<StorageState>,
+    mgr: Res<DialogManager>,
+    mut libs: ResMut<GameLibraries>,
+    mut images: ResMut<Assets<Image>>,
+    net: Res<NetConnection>,
+    mut tab1: Query<
+        (Entity, &Interaction, &mut ImageButton),
+        (With<StoragePage1Tab>, Without<StoragePage2Tab>),
+    >,
+    mut tab2: Query<
+        (Entity, &Interaction, &mut ImageButton),
+        (With<StoragePage2Tab>, Without<StoragePage1Tab>),
+    >,
+    rent_btn: Query<(Entity, &Interaction), With<StorageRentBtn>>,
+    confirm_ok: Query<
+        (Entity, &Interaction),
+        (
+            With<StorageRentConfirmOk>,
+            Without<StorageRentConfirmCancel>,
+        ),
+    >,
+    confirm_cancel: Query<
+        (Entity, &Interaction),
+        (
+            With<StorageRentConfirmCancel>,
+            Without<StorageRentConfirmOk>,
+        ),
+    >,
+    mut locked_page: Query<&mut Visibility, (With<StorageLockedPage>, Without<StorageRentConfirm>)>,
+    mut rent_vis: Query<
+        &mut Visibility,
+        (
+            With<StorageRentBtn>,
+            Without<StorageLockedPage>,
+            Without<StorageRentConfirm>,
+        ),
+    >,
+    mut confirm_vis: Query<&mut Visibility, (With<StorageRentConfirm>, Without<StorageLockedPage>)>,
+    mut rental_label: Query<(&mut Text, &mut TextColor), With<StorageRentalLabel>>,
+    mut confirm_text: Query<&mut Text, (With<StorageRentConfirmText>, Without<StorageRentalLabel>)>,
+    mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
+) {
+    fn edge(
+        e: Entity,
+        inter: &Interaction,
+        prev: &mut std::collections::HashMap<Entity, Interaction>,
+    ) -> bool {
+        let was = prev.insert(e, *inter);
+        *inter == Interaction::Pressed && was != Some(Interaction::Pressed)
+    }
+
+    // 页签点击 → 切页（C# `Storage1Button.Click` / `Storage2Button.Click`）
+    for (e, inter, _) in &mut tab1 {
+        if edge(e, inter, &mut prev_inter) {
+            state.page = StoragePage::One;
+            state.selected = None;
+        }
+    }
+    for (e, inter, _) in &mut tab2 {
+        if edge(e, inter, &mut prev_inter) {
+            state.page = StoragePage::Two;
+            state.selected = None;
+        }
+    }
+
+    // 页签帧（C# `RefreshStorage1` → 743/746、`RefreshStorage2` → 744/745）
+    let on_page1 = state.page == StoragePage::One;
+    let t1 = if on_page1 { PAGE1_TAB[0] } else { PAGE1_TAB[1] };
+    if let Some(h) = load_lib_image(&mut libs, &mut images, t1.0, t1.1) {
+        for (_, _, mut btn) in &mut tab1 {
+            if btn.normal != h {
+                btn.normal = h.clone();
+                btn.hover = h.clone();
+                btn.pressed = h.clone();
+            }
+        }
+    }
+    let t2 = if on_page1 { PAGE2_TAB[0] } else { PAGE2_TAB[1] };
+    if let Some(h) = load_lib_image(&mut libs, &mut images, t2.0, t2.1) {
+        for (_, _, mut btn) in &mut tab2 {
+            if btn.normal != h {
+                btn.normal = h.clone();
+                btn.hover = h.clone();
+                btn.pressed = h.clone();
+            }
+        }
+    }
+
+    // 第 2 页：`RentButton` 显示；未扩容 → `LockedPage` 遮罩 + 红字「扩展仓库已锁定」，
+    // 已扩容 → 白字「扩展仓库到期时间<binary 时间>」（C# `RefreshStorage2`）
+    let page2 = !on_page1;
+    let expanded = state.has_expanded_storage;
+    for mut vis in &mut rent_vis {
+        let want = if page2 {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
+        if *vis != want {
+            *vis = want;
+        }
+    }
+    for mut vis in &mut locked_page {
+        let want = if page2 && !expanded {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
+        if *vis != want {
+            *vis = want;
+        }
+    }
+    for (mut text, mut color) in &mut rental_label {
+        let (want_text, want_color) = if !page2 {
+            (String::new(), Color::WHITE)
+        } else if expanded {
+            (
+                format!("{}{}", TEXT_EXPANDED_EXPIRES_ON, state.expiry_time),
+                Color::WHITE,
+            )
+        } else {
+            // C# `RentalLabel.ForeColour = Color.Red`
+            (TEXT_EXPANDED_LOCKED.to_string(), Color::srgb(1.0, 0.0, 0.0))
+        };
+        if text.0 != want_text {
+            text.0 = want_text;
+        }
+        if color.0 != want_color {
+            color.0 = want_color;
+        }
+    }
+
+    // 租用钮点击 → 弹确认框（C# `RentButton.Click` → `MirMessageBox(..., OKCancel)`）
+    for (e, inter) in &rent_btn {
+        if edge(e, inter, &mut prev_inter) {
+            state.rent_confirm = true;
+        }
+    }
+    let storage_open = state.visible && mgr.is_open(DialogKind::Storage);
+    let confirm_open = storage_open && state.rent_confirm;
+    for mut vis in &mut confirm_vis {
+        let want = if confirm_open {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
+        if *vis != want {
+            *vis = want;
+        }
+    }
+    if confirm_open {
+        let want = if expanded {
+            TEXT_RENT_EXTEND
+        } else {
+            TEXT_RENT_EXTRA
+        };
+        for mut text in &mut confirm_text {
+            if text.0 != want {
+                text.0 = want.to_string();
+            }
+        }
+    }
+    // Yes → `C.Chat{Message="@ADDSTORAGE"}`（C# `messageBox.OKButton.Click`）
+    for (e, inter) in &confirm_ok {
+        if edge(e, inter, &mut prev_inter) {
+            net.send_packet(&mir2_shared::packets::client::chat::Chat {
+                message: "@ADDSTORAGE".to_string(),
+                linked_items: Vec::new(),
+            });
+            tracing::info!("📦 请求租用扩容仓库（@ADDSTORAGE）");
+            state.rent_confirm = false;
+        }
+    }
+    for (e, inter) in &confirm_cancel {
+        if edge(e, inter, &mut prev_inter) {
+            state.rent_confirm = false;
+        }
+    }
 }
 
 /// 显示/隐藏 + 物品图标渲染 + 选中高亮 + 关闭
@@ -565,7 +1042,8 @@ fn storage_action_system(
         })
         .unwrap_or((DIALOG_X, DIALOG_Y));
     let player = player_q.single().ok();
-    let storage_slot = storage_slot_at(cursor.x, cursor.y, state.items.len(), ox, oy)
+    let (page_start, page_end) = state.page_range();
+    let storage_slot = storage_slot_at(cursor.x, cursor.y, page_start, page_end, ox, oy)
         .filter(|i| !locked.is_locked_in(LockGrid::Storage, *i));
     let inv_slot = inv_slot_at(
         cursor.x,
@@ -744,6 +1222,10 @@ fn storage_server_events(
         if let ServerEvent::StorageOpened { items, visible } = ev {
             storage.items = items.clone();
             storage.visible = *visible;
+            // C# `StorageDialog.Show()` 末尾调 `RefreshStorage1()` → 打开即第 1 页
+            storage.page = StoragePage::One;
+            storage.rent_confirm = false;
+            storage.selected = None;
             // 原版 C#：仓库打开时同时显示背包，且背包推到 (仓宽+5, 仓Y)=(393,0)
             // 并排（NPCDialogs.cs:2967/2990 `InventoryDialog.Location = new Point(Size.Width+5, Location.Y)`）
             // —— 否则 388x346 的仓库完全罩住 316x236 的背包。
@@ -790,10 +1272,21 @@ fn storage_server_events(
             storage.unlock_panel = true;
             storage.unlock_msg.clear();
         }
-        if let ServerEvent::StorageResized { size } = ev {
-            // #281：仓库扩容（C# S.ResizeStorage → Array.Resize + RefreshStorage2）
+        if let ServerEvent::StorageResized {
+            size,
+            has_expanded_storage,
+            expiry_time,
+        } = ev
+        {
+            // #281/#2892 批B：仓库扩容（C# S.ResizeStorage → Array.Resize + RefreshStorage2）
+            storage.has_expanded_storage = *has_expanded_storage;
+            storage.expiry_time = *expiry_time;
             storage.resize(*size);
-            tracing::info!("📦 仓库扩容 -> {} 格", storage.items.len());
+            tracing::info!(
+                "📦 仓库扩容 -> {} 格（扩容状态={}）",
+                storage.items.len(),
+                storage.has_expanded_storage
+            );
         }
         if let ServerEvent::StorageUnlockResult {
             result,
@@ -889,7 +1382,8 @@ fn storage_tooltip_system(
         })
         .unwrap_or((DIALOG_X, DIALOG_Y));
     let mut hit: Option<crate::game::dialogs::inventory::InvItem> = None;
-    if let Some(i) = storage_slot_at(cursor.x, cursor.y, state.items.len(), ox, oy) {
+    let (page_start, page_end) = state.page_range();
+    if let Some(i) = storage_slot_at(cursor.x, cursor.y, page_start, page_end, ox, oy) {
         hit = state.items.get(i).and_then(|s| s.as_ref()).cloned();
     }
     let Some(item) = hit else {
@@ -1041,10 +1535,11 @@ fn storage_grid_sync_system(
     slots: Query<(Entity, &StorageSlot)>,
     panel_origin: Query<&Node, With<StorageWidget>>,
 ) {
-    let size = state.items.len().min(COLS * ROWS);
     if state.items.is_empty() && slots.is_empty() {
         return; // 进图 UserStorage 到达前：无格子可同步
     }
+    // 当前页的格区间（C# `RefreshStorage1/2`：第 2 页在未扩容时整页隐藏）
+    let (page_start, page_end) = state.page_range();
     // 面板当前原点（拖动/推位后新格与已平移格对齐；DIALOG 常量仅为初始值）
     let (ox, oy) = panel_origin
         .single()
@@ -1061,36 +1556,35 @@ fn storage_grid_sync_system(
             )
         })
         .unwrap_or((DIALOG_X, DIALOG_Y));
-    // 缩容：移除超出 size 的格子
+    // 移除不属于当前页的格子（切页时旧页格子回收，新页重建）
     for (e, s) in &slots {
-        if s.0 >= size {
+        if s.0 < page_start || s.0 >= page_end {
             commands.entity(e).despawn();
         }
     }
     let mut existing: Vec<usize> = slots
         .iter()
         .map(|(_, s)| s.0)
-        .filter(|i| *i < size)
+        .filter(|i| *i >= page_start && *i < page_end)
         .collect();
     existing.sort_unstable();
-    if existing.len() == size {
+    if existing.len() == page_end - page_start {
         return;
     }
-    // 扩容：补缺失格子
+    // 补当前页缺失的格子
     if !ui_font.0.is_strong() {
         ui_font.0 = crate::ui::sprite_ui::load_ui_font(&mut fonts);
     }
     let font = ui_font.0.clone();
     let mut next = 0usize;
-    for i in 0..size {
+    for i in page_start..page_end {
         if existing.get(next).copied() == Some(i) {
             next += 1;
             continue;
         }
-        let x = i % COLS;
-        let y = i / COLS;
-        let sx = ox + 9.0 + x as f32 * (CELL_W + 1.0);
-        let sy = oy + 60.0 + y as f32 * (CELL_H + 1.0);
+        let (rx, ry) = cell_pos(i, page_start);
+        let sx = ox + rx;
+        let sy = oy + ry;
         let cell = spawn_item_cell_ui_root(
             &mut commands,
             &mut images,
@@ -1166,13 +1660,16 @@ mod tests {
     #[test]
     fn slot_at_origin_and_drag() {
         // 初始 (0,0)：首格 (9,60)，格 36x32
-        assert_eq!(storage_slot_at(10.0, 61.0, 80, 0.0, 0.0), Some(0));
-        assert_eq!(storage_slot_at(8.0, 61.0, 80, 0.0, 0.0), None);
+        assert_eq!(storage_slot_at(10.0, 61.0, 0, 80, 0.0, 0.0), Some(0));
+        assert_eq!(storage_slot_at(8.0, 61.0, 0, 80, 0.0, 0.0), None);
         // 拖动到 (393,50)：首格绝对坐标 (402,110)
-        assert_eq!(storage_slot_at(403.0, 111.0, 80, 393.0, 50.0), Some(0));
-        assert_eq!(storage_slot_at(401.0, 111.0, 80, 393.0, 50.0), None);
+        assert_eq!(storage_slot_at(403.0, 111.0, 0, 80, 393.0, 50.0), Some(0));
+        assert_eq!(storage_slot_at(401.0, 111.0, 0, 80, 393.0, 50.0), None);
         // 初始位不再命中（面板已移走）
-        assert_eq!(storage_slot_at(10.0, 61.0, 80, 393.0, 50.0), None);
+        assert_eq!(storage_slot_at(10.0, 61.0, 0, 80, 393.0, 50.0), None);
+        // 第 2 页：页内首格仍是 (9,60)，但返回**真实槽位** 80；未放行时整页为空
+        assert_eq!(storage_slot_at(10.0, 61.0, 80, 160, 0.0, 0.0), Some(80));
+        assert_eq!(storage_slot_at(10.0, 61.0, 80, 80, 0.0, 0.0), None);
     }
 
     use super::*;
@@ -1188,6 +1685,217 @@ mod tests {
         assert_eq!(DIALOG_Y + 60.0 + 0.0 * (CELL_H + 1.0), 60.0);
         assert_eq!(DIALOG_X + 9.0 + 9.0 * (CELL_W + 1.0), 342.0);
         assert_eq!(DIALOG_Y + 60.0 + 7.0 * (CELL_H + 1.0), 291.0);
+        // 页内坐标：第 2 页页内首格仍是 (9,60)，末格 (342,291)（C# `y%8` 回绕）
+        assert_eq!(cell_pos(0, 0), (9.0, 60.0));
+        assert_eq!(cell_pos(9, 0), (342.0, 60.0));
+        assert_eq!(cell_pos(79, 0), (342.0, 291.0));
+        assert_eq!(cell_pos(80, 80), (9.0, 60.0));
+        assert_eq!(cell_pos(159, 80), (342.0, 291.0));
+    }
+
+    /// #2892 批B：C# `StorageDialog.RefreshStorage1/2` 的格子 `Visible` 规则——
+    /// 第 1 页恒显示 `ItemSlot < StorageGridSize`；第 2 页只在**扩容中**显示 `>= 80`。
+    ///
+    /// 阳性对照：把 `page_range` 的第 2 页改成无视 `has_expanded_storage`（修正前本端
+    /// 根本没有第 2 页、上限夹在 80）→ 本测试 FAILED。
+    #[test]
+    fn storage_page_range_matches_csharp_visibility_rules() {
+        let mut st = StorageState::default();
+        st.resize(160);
+        assert_eq!(st.items.len(), 160, "扩容后应有 160 格");
+        // 扩容中
+        st.has_expanded_storage = true;
+        assert_eq!(st.page_range(), (0, 80), "第 1 页 0..80");
+        st.page = StoragePage::Two;
+        assert_eq!(st.page_range(), (80, 160), "第 2 页 80..160（扩容中）");
+        // 扩容过期：第 2 页整页隐藏（C# `!HasExpandedStorage` 分支）
+        st.has_expanded_storage = false;
+        assert_eq!(st.page_range(), (80, 80), "扩容过期 → 第 2 页无可见格");
+        // 未扩容（只有 80 格）
+        let mut st2 = StorageState::default();
+        st2.resize(80);
+        st2.page = StoragePage::Two;
+        assert_eq!(st2.page_range(), (80, 80));
+        st2.page = StoragePage::One;
+        assert_eq!(st2.page_range(), (0, 80));
+    }
+
+    /// #2892 批B：`ResizeStorage` 上限从 80 放宽到 160（C# `Grid = new MirItemCell[10 * 16]`）。
+    #[test]
+    fn storage_resize_allows_expanded_160() {
+        let mut st = StorageState::default();
+        st.resize(160);
+        assert_eq!(st.items.len(), 160);
+        st.resize(999);
+        assert_eq!(st.items.len(), MAX_CELLS, "上限 = 160（10×16）");
+        st.resize(80);
+        assert_eq!(st.items.len(), 80, "缩容仍可截断");
+    }
+
+    /// #2892 批B：真实 spawn + 真实 `storage_page_system`，断言子控件层按 C# 落位与分页门控：
+    /// 第 1 页租用钮/遮罩/提示行全隐；第 2 页未扩容 → 租用钮 + 遮罩 + 红字「扩展仓库已锁定」；
+    /// 第 2 页已扩容 → 遮罩隐藏、提示行白字「扩展仓库到期时间…」。
+    ///
+    /// 阳性对照：把 `RefreshStorage2` 的门控写成「第 2 页恒显示租用钮」（即忽略
+    /// `has_expanded_storage`，修正前本端根本没有第 2 页）→ 本测试断言「第 1 页租用钮必须 Hidden」时 FAILED。
+    #[test]
+    fn storage_chrome_pages_gate_like_csharp() {
+        use crate::resources::libraries::{resolve_data_path, Libraries};
+        use bevy::ecs::system::RunSystemOnce;
+
+        if !crate::resources::libraries::data_assets_present() {
+            eprintln!("skip storage_chrome_pages_gate_like_csharp: 无 Data 资产");
+            return;
+        }
+        let mut world = World::new();
+        world.insert_resource(GameLibraries(Libraries::new(resolve_data_path())));
+        world.insert_resource(Assets::<Image>::default());
+        world.insert_resource(Assets::<Font>::default());
+        world.insert_resource(crate::ui::sprite_ui::UiFont::default());
+        world.insert_resource(crate::ui::sprite_ui::UiCjkFont::default());
+        world.insert_resource(NetConnection::default());
+        let mut mgr = DialogManager::default();
+        mgr.open.push(DialogKind::Storage);
+        world.insert_resource(mgr);
+        world
+            .run_system_once(spawn_storage_dialog)
+            .expect("spawn_storage_dialog 应成功");
+
+        // 子控件齐全（各 1 个）
+        for (name, n) in [
+            (
+                "第1页页码钮",
+                world
+                    .query_filtered::<Entity, With<StoragePage1Tab>>()
+                    .iter(&world)
+                    .count(),
+            ),
+            (
+                "第2页页码钮",
+                world
+                    .query_filtered::<Entity, With<StoragePage2Tab>>()
+                    .iter(&world)
+                    .count(),
+            ),
+            (
+                "租用扩容钮",
+                world
+                    .query_filtered::<Entity, With<StorageRentBtn>>()
+                    .iter(&world)
+                    .count(),
+            ),
+            (
+                "未扩容遮罩",
+                world
+                    .query_filtered::<Entity, With<StorageLockedPage>>()
+                    .iter(&world)
+                    .count(),
+            ),
+            (
+                "提示行",
+                world
+                    .query_filtered::<Entity, With<StorageRentalLabel>>()
+                    .iter(&world)
+                    .count(),
+            ),
+            (
+                "租用确认框",
+                world
+                    .query_filtered::<Entity, With<StorageRentConfirm>>()
+                    .iter(&world)
+                    .count(),
+            ),
+        ] {
+            assert_eq!(n, 1, "{} 应恰好 1 个", name);
+        }
+
+        fn visibility_of<T: bevy::ecs::component::Component>(world: &mut World) -> Visibility {
+            world
+                .query_filtered::<&Visibility, With<T>>()
+                .iter(world)
+                .next()
+                .copied()
+                .expect("实体应存在")
+        }
+        fn label_of<T: bevy::ecs::component::Component>(world: &mut World) -> (String, Color) {
+            let (text, color) = world
+                .query_filtered::<(&Text, &TextColor), With<T>>()
+                .iter(world)
+                .next()
+                .map(|(t, c)| (t.0.clone(), c.0))
+                .expect("实体应存在");
+            (text, color)
+        }
+
+        let mut state = StorageState {
+            visible: true,
+            ..Default::default()
+        };
+        state.resize(160);
+
+        // ---- 第 1 页：租用钮/遮罩/提示行全隐 ----
+        state.page = StoragePage::One;
+        state.has_expanded_storage = true;
+        world.insert_resource(state);
+        world
+            .run_system_once(storage_page_system)
+            .expect("storage_page_system 应成功");
+        assert_eq!(
+            visibility_of::<StorageRentBtn>(&mut world),
+            Visibility::Hidden,
+            "第 1 页不显示租用钮（C# `RefreshStorage1`）"
+        );
+        assert_eq!(
+            visibility_of::<StorageLockedPage>(&mut world),
+            Visibility::Hidden,
+            "第 1 页不显示遮罩"
+        );
+        assert_eq!(
+            label_of::<StorageRentalLabel>(&mut world).0,
+            "",
+            "第 1 页提示行为空"
+        );
+
+        // ---- 第 2 页 + 未扩容：租用钮 + 遮罩 + 红字 ----
+        {
+            let mut s = world.resource_mut::<StorageState>();
+            s.page = StoragePage::Two;
+            s.has_expanded_storage = false;
+        }
+        world
+            .run_system_once(storage_page_system)
+            .expect("storage_page_system 应成功");
+        assert_eq!(
+            visibility_of::<StorageRentBtn>(&mut world),
+            Visibility::Visible,
+            "第 2 页显示租用钮"
+        );
+        assert_eq!(
+            visibility_of::<StorageLockedPage>(&mut world),
+            Visibility::Visible,
+            "第 2 页未扩容时显示遮罩"
+        );
+        let (text, color) = label_of::<StorageRentalLabel>(&mut world);
+        assert_eq!(text, TEXT_EXPANDED_LOCKED, "未扩容提示文案");
+        assert_eq!(color, Color::srgb(1.0, 0.0, 0.0), "未扩容提示为红字");
+
+        // ---- 第 2 页 + 已扩容：遮罩隐藏、白字到期时间 ----
+        {
+            let mut s = world.resource_mut::<StorageState>();
+            s.has_expanded_storage = true;
+            s.expiry_time = 12345;
+        }
+        world
+            .run_system_once(storage_page_system)
+            .expect("storage_page_system 应成功");
+        assert_eq!(
+            visibility_of::<StorageLockedPage>(&mut world),
+            Visibility::Hidden,
+            "扩容中不显示遮罩"
+        );
+        let (text, color) = label_of::<StorageRentalLabel>(&mut world);
+        assert_eq!(text, format!("{}{}", TEXT_EXPANDED_EXPIRES_ON, 12345));
+        assert_eq!(color, Color::WHITE, "扩容中提示为白字");
     }
 
     /// 格子与面板同为根节点（GlobalZIndex 参与根排序）：格子必须高于面板

@@ -3283,3 +3283,171 @@ fn panel_sprites_batch_b5_match_csharp() {
 
     println!("  ✓ 批B 面板精灵核对（五）：掷骰 Prguse[282/290..293/282..287]+Items[2581..2586/2588..2593] / 租借浏览 Prguse3[0..6]+Prguse2[360..362]");
 }
+
+/// #2892 批B（六）：仓库窗子控件层（C# `StorageDialog`，`NPCDialogs.cs:2815-2955`）。
+///
+/// 标题 `Title[0]` @(18,8)；页码钮 `Title[743/744]` @(8,36) 与 `Title[746/745]` @(80,36)（各 72x23）；
+/// 租用钮 `Title[483/484/485]` @(283,33) 48x25；密码钮 `Title[113/114/115]` @(328,33) 48x25；
+/// 关闭钮 `Prguse2[360/361/362]` @(363,3) 24x21；未扩容遮罩 `Prguse[2443]` @(8,59) 372x265；
+/// 提示行 @(40,322)/(40,304)；格阵起点 (9,60)、步进 (37,33)（10×8 两页 = 160 格）。
+#[test]
+fn panel_sprites_batch_b6_match_csharp() {
+    use client_bevy::game::dialogs::storage as st;
+    require_assets!("panel_sprites_batch_b6_match_csharp");
+    let mut libs = Libs::new();
+
+    let (pw, ph) = libs.size(st::PANEL.0, st::PANEL.1);
+    assert_eq!((pw, ph), st::PANEL_SIZE, "[尺寸] Prguse[586] 388x346");
+
+    // 标题
+    let (tw, th) = libs.size(st::TITLE_SPRITE.0, st::TITLE_SPRITE.1);
+    assert_eq!((tw, th), (71.0, 15.0), "[尺寸] Title[0] 标题");
+    assert_inside(
+        "仓库标题",
+        st::TITLE_POS.0,
+        st::TITLE_POS.1,
+        tw,
+        th,
+        0.0,
+        0.0,
+        pw,
+        ph,
+    );
+
+    // 页码钮（每页两个帧：正常 / 另一页激活）
+    for (i, frame) in st::PAGE1_TAB.iter().enumerate() {
+        let (w, h) = libs.size(frame.0, frame.1);
+        assert_eq!(
+            (w, h),
+            (72.0, 23.0),
+            "[尺寸] 第1页页码钮帧{i} Title[{}]",
+            frame.1
+        );
+    }
+    for (i, frame) in st::PAGE2_TAB.iter().enumerate() {
+        let (w, h) = libs.size(frame.0, frame.1);
+        assert_eq!(
+            (w, h),
+            (72.0, 23.0),
+            "[尺寸] 第2页页码钮帧{i} Title[{}]",
+            frame.1
+        );
+    }
+    assert_inside(
+        "仓库第1页钮",
+        st::PAGE1_TAB_POS.0,
+        st::PAGE1_TAB_POS.1,
+        72.0,
+        23.0,
+        0.0,
+        0.0,
+        pw,
+        ph,
+    );
+    assert_inside(
+        "仓库第2页钮",
+        st::PAGE2_TAB_POS.0,
+        st::PAGE2_TAB_POS.1,
+        72.0,
+        23.0,
+        0.0,
+        0.0,
+        pw,
+        ph,
+    );
+    // 两钮相邻不重叠（C# 8..80 与 80..152）
+    assert!(
+        st::PAGE1_TAB_POS.0 + 72.0 <= st::PAGE2_TAB_POS.0,
+        "[重叠] 页码钮 1 右缘 {} 不得压住钮 2 左缘 {}",
+        st::PAGE1_TAB_POS.0 + 72.0,
+        st::PAGE2_TAB_POS.0
+    );
+
+    // 租用 / 密码 / 关闭
+    for (lib, idx) in st::RENT_SPRITES {
+        let (w, h) = libs.size(lib, idx);
+        assert_eq!((w, h), (48.0, 25.0), "[尺寸] Title[{idx}] 租用扩容钮");
+    }
+    for (lib, idx) in st::PROTECT_SPRITES {
+        let (w, h) = libs.size(lib, idx);
+        assert_eq!((w, h), (48.0, 25.0), "[尺寸] Title[{idx}] 仓库密码钮");
+    }
+    for (lib, idx) in st::CLOSE_SPRITES {
+        let (w, h) = libs.size(lib, idx);
+        assert_eq!((w, h), (24.0, 21.0), "[尺寸] Prguse2[{idx}] 关闭钮");
+    }
+    assert_inside(
+        "仓库租用钮",
+        st::RENT_BTN_POS.0,
+        st::RENT_BTN_POS.1,
+        48.0,
+        25.0,
+        0.0,
+        0.0,
+        pw,
+        ph,
+    );
+    assert_inside(
+        "仓库密码钮",
+        st::PROTECT_BTN_POS.0,
+        st::PROTECT_BTN_POS.1,
+        48.0,
+        25.0,
+        0.0,
+        0.0,
+        pw,
+        ph,
+    );
+    assert_inside(
+        "仓库关闭钮",
+        st::CLOSE_POS.0,
+        st::CLOSE_POS.1,
+        24.0,
+        21.0,
+        0.0,
+        0.0,
+        pw,
+        ph,
+    );
+    // 密码钮与关闭钮不重叠（328+48=376 ≤ 363? 否——C# 两钮在不同行：密码 (328,33)、关闭 (363,3)）
+    assert!(
+        st::PROTECT_BTN_POS.1 > st::CLOSE_POS.1,
+        "[布局] 密码钮在关闭钮下一行（C# (328,33) vs (363,3)）"
+    );
+
+    // 未扩容遮罩
+    let (lw, lh) = libs.size(st::LOCKED_PAGE_SPRITE.0, st::LOCKED_PAGE_SPRITE.1);
+    assert_eq!((lw, lh), (372.0, 265.0), "[尺寸] Prguse[2443] 未扩容遮罩");
+    assert_inside(
+        "仓库未扩容遮罩",
+        st::LOCKED_PAGE_POS.0,
+        st::LOCKED_PAGE_POS.1,
+        lw,
+        lh,
+        0.0,
+        0.0,
+        pw,
+        ph,
+    );
+
+    // 提示行在面板内（`AutoSize`，只钉左上角）
+    assert!(
+        st::RENTAL_LABEL_POS.0 < pw && st::RENTAL_LABEL_POS.1 < ph,
+        "[坐标] `RentalLabel` @(40,322) 应在面板内"
+    );
+    assert!(
+        st::PASSWORD_LABEL_POS.0 < pw && st::PASSWORD_LABEL_POS.1 < ph,
+        "[坐标] `StoragePasswordLabel` @(40,304) 应在面板内"
+    );
+
+    // 格阵不得压住页码钮（C# 钮 36..59、首行格 60..92）
+    assert!(
+        st::PAGE1_TAB_POS.1 + 23.0 <= 60.0,
+        "[重叠] 页码钮底 {} 与格阵顶 60 不得交叠",
+        st::PAGE1_TAB_POS.1 + 23.0
+    );
+    // 两页 160 格（C# `Grid = new MirItemCell[10 * 16]`）
+    assert_eq!((st::PAGE_CELLS, st::MAX_CELLS), (80, 160));
+
+    println!("  ✓ 批B 面板精灵核对（六）：仓库 Title[0/743/744/746/745/483..485/113..115] + Prguse[2443] + Prguse2[360..362]（两页 160 格）");
+}
