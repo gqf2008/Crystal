@@ -3595,3 +3595,58 @@ fn panel_sprites_batch_b7_match_csharp() {
 
     println!("  ✓ 批B 面板精灵核对（七）：行会窗 590x432@Center + 6 页签 + 6 页（1850/1851/1852/1853 页底）");
 }
+
+/// #2892 批B（八）：行会 MembersPage 行几何 + 删除钮（C# `GuildDialog.cs:335-487`）。
+///
+/// C# `MemberPageRows = 18`；`MembersName[i] @(125, 30 + i*15)` 100x14（7F 字体）、
+/// `MembersStatus[i] @(225, ·)` 100x14、`MembersRanks[i] @(24, ·)` 100x14、
+/// `MembersDelete[i] = Prguse[917] @(210, ·) 16x14`；末行页内 y = 30 + 17*15 = 285 ≤ 372。
+#[test]
+fn panel_sprites_batch_b8_match_csharp() {
+    use client_bevy::game::dialogs::guild as g;
+    require_assets!("panel_sprites_batch_b8_match_csharp");
+    let mut libs = Libs::new();
+
+    assert_eq!(g::MEMBER_ROWS, 18, "[行数] C# `MemberPageRows = 18`");
+    assert_eq!(
+        (g::MEMBER_ROW_Y0, g::MEMBER_ROW_DY),
+        (30.0, 15.0),
+        "[行几何] C# `MembersName[i] @(125, 30 + i*15)`"
+    );
+    assert_eq!(
+        (
+            g::MEMBER_COL_NAME,
+            g::MEMBER_COL_DELETE,
+            g::MEMBER_COL_STATUS
+        ),
+        (125.0, 210.0, 225.0),
+        "[列] C# 名字/删除钮/状态列"
+    );
+    // 末行不越出 MembersPage（352x372）
+    let last_y = g::MEMBER_ROW_Y0 + (g::MEMBER_ROWS as f32 - 1.0) * g::MEMBER_ROW_DY;
+    assert!(
+        last_y + 14.0 <= g::PAGE_LEFT.3,
+        "[越界] 末行 y={last_y} +14 应 ≤ 页高 {}",
+        g::PAGE_LEFT.3
+    );
+    // 列表不与「显示离线」行(310)重叠
+    assert!(
+        last_y + 14.0 <= 310.0,
+        "[重叠] 成员列表末行不得压住显示离线行 (310)"
+    );
+
+    // 删除钮精灵
+    let (dw, dh) = libs.size(g::MEMBER_DELETE_SPRITE.0, g::MEMBER_DELETE_SPRITE.1);
+    assert_eq!((dw, dh), (16.0, 14.0), "[尺寸] Prguse[917] 删除钮");
+
+    // 行号分段不重叠（成员 1..=18 / 仓库 20..=27 / 仓库页头 28）
+    assert_eq!(g::MEMBER_LINE_BASE, 1);
+    assert_eq!(g::STORAGE_LINE_BASE, 1 + g::MEMBER_ROWS);
+    assert_eq!(g::STORAGE_HEADER_LINE, g::STORAGE_LINE_BASE + 8);
+    assert!(
+        g::STORAGE_LINE_BASE > g::MEMBER_LINE_BASE + g::MEMBER_ROWS - 1,
+        "[分段] 仓库行号必须错开成员行号（旧实现共用 11..=18 会串页）"
+    );
+
+    println!("  ✓ 批B 面板精灵核对（八）：行会 MembersPage 18 行 × 15px + Prguse[917] 删除钮");
+}
