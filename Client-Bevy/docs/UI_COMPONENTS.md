@@ -99,7 +99,7 @@
 | Relationship | `dialogs/relationship.rs` | `RelationshipDialog.cs` | 实现；批4/批8（Center/按钮） |
 | Mount | `dialogs/mount.rs` | `MountDialog.cs` | 实现；批3 |
 | Report | `dialogs/report.rs` | `ReportDialog.cs` | 实现；批5/批8（布局） |
-| Hero | `dialogs/hero.rs` | `HeroDialogs.cs` | 实现；批3 |
+| ~~Hero~~（#2892 批C 已删除自造聚合窗） | `dialogs/hero.rs`（现仅 `HeroManageDialog`） | `HeroDialogs.cs` | 见 §5 批29 |
 | HeroInventory | `dialogs/hero_inventory.rs` | `HeroDialogs.cs` | 实现；批3 |
 | HeroEquipment | `dialogs/hero_equipment.rs` | `HeroDialogs.cs` | 实现；批3 |
 | HeroSkill | `dialogs/hero_skills.rs` | `HeroDialogs.cs` | 实现；批3 |
@@ -168,6 +168,7 @@
 | 批26 文本描边（C# `MirLabel` 默认 `OutLine=true`） | ① 描边副本跟随正文**位置/显隐/字号**（`sync_outline_ui_system` 补 `Node` 克隆 + 副本 1px 偏移、`Visibility`、`TextFont`；颜色刻意不镜像，副本恒黑）② 对话框文本**默认带描边**（`theme::spawn_label`/`spawn_label_center` 转调 outlined 版，约 150 处调用点零改动；新增 `*_plain` 显式无描边变体 + 两处例外：数量框 `InputTextBox`、奖励格数量黄字）③ HUD 标签补描边（HP/MP/Top/Bottom/Exp/Level/Gold/Name/Weight/Space/英雄面板/死亡提示）+ **负向断言**（聊天文本 `spawn_ui_text` 路径保持无描边）④ 文档与实机记录回填（本行） | #2818 #2819 #2822 #2823 |
 | 批27 窗口可拖动性（C# `Movable` 默认 false） | ① 给「C# 默认不可拖却被本端拖」的 7 个窗口挂 `NotDraggable`：计时器 / 掷骰 / 小地图 / 耐久面板 / 仓库 / 精炼 / 英雄主窗（`HeroManage` 显式 `Movable=true` 保持可拖）；每窗两个新单测 = 结构（该 kind 的**每个**根都带 `NotDraggable`）+ 行为（真实 spawn 出的窗口 + 真实 `dialog_drag_system`，置 Visible 后按左键断言不起拖）② §7 记录反向结构性差异（腰带/聊天/英雄腰带/好友备注/钓鱼状态/下拉框）+ 技能栏已对齐 ③ 实机截图与注入限制记录 ④ 本行 | #2830 #2833 #2834 |
 | 批28 快捷键语义（C# `GameScene.cs:532-711`） | ① 装备键（`Equipment/Equipment2`）页感知：不在角色页 → 打开并切到角色页，已在角色页 → 关窗（此前通用 toggle 会把整窗关掉）② 英雄三键补 `Hero == null` 守卫（`HeroState.current`）+ 英雄装备/技能互斥切页（C# 两页同属一个 `HeroDialog`，本端是两个独立窗）③ ESC `Closeall` 从 blanket `open.clear()` 改为 C# **集合**：直接表 31 个 kind + `NPCDialog.Hide()` 级联 8 个 kind（仅 NPC 窗可见时）+ 状态驱动 `HeroManage` 清状态；原版不关的交易窗/计时器/Buff/小地图/耐久/镶嵌/聊天公告/租赁双方窗不再被误关 ④ 本行 | #2838 #2876 #2877 #2878 |
+| 批29 Hero 按 C# 拆回原结构（#2892 批C） | 原自造 `DialogKind::Hero` 窗（`Prguse[170]` 拉伸 320x310 @(280,80)）整体删除，功能各回 C# 归属：① HUD `HeroBehaviourPanel`（4×16x17 `Prguse[1840..1847]` @ HUD+(165+16i,37)，当前行为显禁用帧；`S.UpdateHeroSpawnState` 进 `HeroState.spawn_state`）② HUD `HeroInfoPanel`（`Prguse[14]` 135x78 @(95,48) + 头像三态 `1400/1750/1379` + 名字容器 `Prguse[10]` + 血量容器 `Prguse[11]` + 三条 `Prguse[1951..1953]` 按 percent 裁绘；协议 `S.HeroInformation` 补 `max_hp/max_mp`）③ HUD `HeroMenuPanel`（`Prguse[2179]` 24x61 @(862,630) 屏幕绝对坐标 + 三钮 `2173/2170/2176` → 技能/背包/角色页）+ 召唤钮 `Prguse[2167..2169]` 20x20 @(Width-160,90) → `@SUMMONHERO`；HUD 英雄钮改 `HeroMenuPanel.Toggle()` ④ 自动药阈值回到 C# 交互：英雄背包 `Title[560..565]` 点击弹 `MirAmountBox(EnterValue, 116, 99)`（`amount_box` 支持 `min=0`）⑤ 英雄创建改走原版 `NewCharacterDialog` 英雄模式（标题 `Title[847]@(246,11)`、职业钮按 `CanCreateClass` 显隐、OK 发 `C.NewHero`；`S.HeroCreateRequest` 不再只打日志）⑥ 删除 `DialogKind::Hero` 与其 control RPC 映射、自动化依赖（列表/切换由 `HeroManageDialog` 覆盖） | #2898 #2899 #2900 #2901 #2902 + 本批 PR |
 
 ## 6. 验证基线
 
@@ -338,7 +339,8 @@
   - **本批修正的「默认不可拖却被本端拖」**：计时器（`TimerDialog.cs:29`）、掷骰（`RollDialog.cs:24`）、
     小地图（`MainDialogs.cs:1764` 未设）、耐久面板（`MainDialogs.cs:3949` `false`）、
     仓库（`NPCDialogs.cs:2798` 未设）、精炼（`NPCDialogs.cs:2726` 未设）、
-    英雄主窗（`HeroDialogs.cs:385/464` 的 `HeroMenuPanel`/`HeroInfoPanel` 未设）——
+    英雄主窗（`HeroDialogs.cs:385/464` 的 `HeroMenuPanel`/`HeroInfoPanel` 未设；**该自造窗已在
+    #2892 批C（批29）删除**，现状是 HUD 上的行为条/信息面板/菜单面板三件套）——
     各自根面板挂 `NotDraggable`（`dialogs/mod.rs:146` + `dialog_drag_system` 的 `Without<NotDraggable>`），
     且**该 kind 的每一个根**都要挂：拖动系统按 kind 聚合包围盒、起拖后平移全部可见根（`mod.rs:699-771`）。
     `HeroManageDialog`（`HeroDialogs.cs:804`）显式 `Movable = true` → `DialogKind::HeroManage` 保持可拖。

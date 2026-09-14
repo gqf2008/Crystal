@@ -8,16 +8,13 @@
 
 use bevy::prelude::*;
 
-use crate::game::dialogs::text_input::{TextInputDisplay, TextInputField, TextInputRect};
-use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot, NotDraggable};
+use crate::game::dialogs::{DialogKind, DialogRoot};
 use crate::map_renderer::GameLibraries;
 use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
 use crate::ui::sprite_ui::{shared_cjk_font, UiCjkFont, UiFont};
-use crate::ui::theme::{
-    load_lib_image, spawn_container, spawn_icon_button, spawn_image, spawn_label, spawn_panel,
-};
+use crate::ui::theme::{load_lib_image, spawn_icon_button, spawn_image, spawn_label, spawn_panel};
 
 /// 英雄状态
 #[derive(Resource)]
@@ -143,74 +140,6 @@ impl HeroState {
     }
 }
 
-#[derive(Component)]
-pub struct HeroWidget;
-
-#[derive(Component)]
-pub struct HeroClose;
-
-#[derive(Component)]
-pub struct HeroSwitchMain;
-
-#[derive(Component)]
-pub struct HeroSwitch1;
-
-/// 打开英雄背包（#203）
-#[derive(Component)]
-pub struct HeroOpenInventory;
-
-/// 打开英雄装备（#206）
-#[derive(Component)]
-pub struct HeroOpenEquipment;
-
-/// 打开英雄技能（#218）
-#[derive(Component)]
-pub struct HeroOpenSkill;
-
-#[derive(Component)]
-pub struct HeroLine(usize);
-
-/// 创建英雄按钮（C# NewHeroDialog）
-#[derive(Component)]
-pub struct HeroCreateBtn;
-
-#[derive(Component)]
-pub struct HeroAutoPotLabel;
-
-/// 英雄行为按钮（C# HeroBehaviourPanel：Prguse 1840..1843）
-#[derive(Component)]
-pub struct HeroBehaviourBtn(usize);
-
-/// 英雄阵亡复活按钮（#1216：C# HeroPanel 复活按钮，hero_hp<=0 时显示）
-#[derive(Component)]
-pub struct HeroReviveBtn;
-
-/// 创建面板
-#[derive(Component)]
-pub struct HeroCreatePanel;
-
-/// 职业/性别循环选择按钮
-#[derive(Component)]
-pub struct HeroClassCycle;
-
-#[derive(Component)]
-pub struct HeroGenderCycle;
-
-#[derive(Component)]
-pub struct HeroClassLabel;
-
-#[derive(Component)]
-pub struct HeroGenderLabel;
-
-#[derive(Component)]
-pub struct HeroCreateOk;
-
-#[derive(Component)]
-pub struct HeroCreateCancel;
-
-#[derive(Component)]
-pub struct HeroCreateMsg;
-
 /// 英雄管理窗面板（C# `HeroManageDialog`，`Prguse[1688]` 352x161 @(350,350)，`HeroDialogs.cs:800-806`）
 #[derive(Component)]
 pub struct HeroManageWidget;
@@ -261,51 +190,13 @@ impl Plugin for HeroPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<HeroState>();
         app.add_systems(Update, hero_server_events.run_if(in_state(AppState::Game)));
-        app.add_systems(OnEnter(AppState::Game), spawn_hero);
+        // #2892 批C：`DialogKind::Hero` 的自造聚合窗已删除（其功能全部回到 C# 归属：
+        // 列表/切换 = `HeroManageDialog`(本文件)、行为 = HUD `HeroBehaviourPanel`、
+        // 自动药 = 英雄背包窗、创建 = `NewCharacterDialog` 英雄模式）——
+        // 这里只保留 `HeroManageDialog` 窗口
+        app.add_systems(OnEnter(AppState::Game), spawn_hero_manage);
         app.add_systems(OnExit(AppState::Game), cleanup_hero);
-        app.add_systems(
-            Update,
-            (
-                hero_ui_system,
-                hero_button_system,
-                hero_revive_system,
-                hero_manage_system,
-            )
-                .chain()
-                .run_if(in_state(AppState::Game)),
-        );
-    }
-}
-
-/// #1216：英雄阵亡复活按钮（C# HeroPanel 复活按钮）：hero_hp<=0 显示，点击发 ReviveHeroWire
-fn hero_revive_system(
-    mut state: ResMut<HeroState>,
-    net: Res<NetConnection>,
-    mgr: Res<DialogManager>,
-    mut q: Query<(Entity, &Interaction, &mut Visibility), With<HeroReviveBtn>>,
-    mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
-) {
-    fn edge(
-        e: Entity,
-        inter: &Interaction,
-        prev: &mut std::collections::HashMap<Entity, Interaction>,
-    ) -> bool {
-        let was = prev.insert(e, *inter);
-        *inter == Interaction::Pressed && was != Some(Interaction::Pressed)
-    }
-    // 复活按钮属于 Hero 对话框：对话框未打开时不显示，避免屏幕残留孤按钮
-    let hero_open = mgr.is_open(DialogKind::Hero);
-    for (e, inter, mut vis) in &mut q {
-        *vis = if hero_open && state.hero_hp <= 0 {
-            Visibility::Visible
-        } else {
-            Visibility::Hidden
-        };
-        if edge(e, inter, &mut prev_inter) {
-            net.send_packet(&crate::network::ReviveHeroWire);
-            state.message = "已请求复活英雄…".to_string();
-            tracing::info!("🦸 请求复活英雄");
-        }
+        app.add_systems(Update, hero_manage_system.run_if(in_state(AppState::Game)));
     }
 }
 
@@ -315,301 +206,20 @@ fn cleanup_hero(mut commands: Commands, roots: Query<Entity, With<DialogRoot>>) 
     }
 }
 
-fn spawn_hero(
+/// 生成英雄管理窗（C# `HeroManageDialog`，`Prguse[1688]` 352x161 @(350,350)，`Movable = true`）
+fn spawn_hero_manage(
     mut commands: Commands,
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
     mut fonts: ResMut<Assets<Font>>,
     mut cjk_font: ResMut<UiCjkFont>,
     mut ui_font: ResMut<UiFont>,
-    kb: Res<crate::game::dialogs::keyboard_layout::KeyboardState>,
 ) {
     libs.0.ensure_initialized();
     if !ui_font.0.is_strong() {
         ui_font.0 = crate::ui::sprite_ui::load_ui_font(&mut fonts);
     }
-    let font = ui_font.0.clone();
     let cjk = shared_cjk_font(&mut fonts, &mut cjk_font);
-
-    // 面板 Prguse[170] @ (280,80)。加宽加高到 320x310：切换/创建/行为/自动药/
-    // 导航按钮全在面板内（旧 sprite 布局底部按钮 rel y=250-298 悬空 207 高面板外）
-    let Some(bg) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 170) else {
-        return;
-    };
-    let panel = spawn_panel(&mut commands, bg, 280.0, 80.0, 320.0, 310.0, 30);
-    commands
-        .entity(panel)
-        // #2825 单元①：本窗对应 C# `HeroMenuPanel`（`HeroDialogs.cs:385`，切换/创建/行为/自动药/导航钮）
-        // 与 `HeroInfoPanel`——两者都没设 `Movable` → 默认 false（`MirControl.cs:372`）→ 不可拖动。
-        // 注意 `HeroManageDialog`（`:804`）显式 `Movable = true`，所以 HeroManage 窗保持可拖。
-        .insert((DialogRoot(DialogKind::Hero), HeroWidget, NotDraggable));
-
-    commands.entity(panel).with_children(|p| {
-        // 关闭 Prguse2[360/361/362] @(300,3)
-        if let (Some(n), Some(h), Some(pr)) = (
-            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 360),
-            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 361),
-            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 362),
-        ) {
-            spawn_icon_button(p, n, h, pr, 300.0, 3.0, 20.0, 20.0, 10).insert(HeroClose);
-        }
-        // 列表行（0..5，#1135 末行显示英雄实时状态）@(18,40+22i)
-        for i in 0..6usize {
-            spawn_label(
-                p,
-                &cjk,
-                "",
-                18.0,
-                40.0 + i as f32 * 22.0,
-                12.0,
-                Color::WHITE,
-                9,
-            )
-            .insert(HeroLine(i));
-        }
-        // 切换主角色 / 英雄 1 @(20/130,150) 90x25
-        if let (Some(n), Some(h), Some(pr)) = (
-            load_lib_image(&mut libs, &mut images, LibraryName::Title, 206),
-            load_lib_image(&mut libs, &mut images, LibraryName::Title, 207),
-            load_lib_image(&mut libs, &mut images, LibraryName::Title, 208),
-        ) {
-            spawn_icon_button(
-                p,
-                n.clone(),
-                h.clone(),
-                pr.clone(),
-                20.0,
-                150.0,
-                90.0,
-                25.0,
-                10,
-            )
-            .insert(HeroSwitchMain);
-            spawn_icon_button(p, n, h, pr, 20.0, 182.0, 90.0, 25.0, 10).insert(HeroCreateBtn);
-        }
-        if let (Some(n), Some(h), Some(pr)) = (
-            load_lib_image(&mut libs, &mut images, LibraryName::Title, 210),
-            load_lib_image(&mut libs, &mut images, LibraryName::Title, 211),
-            load_lib_image(&mut libs, &mut images, LibraryName::Title, 212),
-        ) {
-            spawn_icon_button(p, n, h, pr, 130.0, 150.0, 90.0, 25.0, 10).insert(HeroSwitch1);
-        }
-        // 创建英雄说明
-        spawn_label(p, &cjk, "创建英雄", 34.0, 186.0, 12.0, Color::WHITE, 10);
-        // #2892 批C：行为按钮（`Prguse[1840..1847]`）已按 C# 移到 HUD `HeroBehaviourPanel`
-        // （`Prguse` 64x17 @ HUD+(165,37)，见 `game/hud.rs::hero_behaviour_system`）
-        // 复活按钮（默认隐藏，hero_hp<=0 时由 hero_revive_system 显示）
-        spawn_container(p, 20.0, 170.0, 160.0, 20.0, 10)
-            .insert((
-                Button,
-                HeroReviveBtn,
-                BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.0)),
-                Visibility::Hidden,
-            ))
-            .with_children(|c| {
-                // #2775：中文标签用共享宋体（Arial 会豆腐，批17 同因）
-                spawn_label(
-                    c,
-                    &cjk,
-                    "英雄已阵亡·点击复活",
-                    0.0,
-                    4.0,
-                    12.0,
-                    Color::srgb(1.0, 0.4, 0.4),
-                    11,
-                );
-            });
-        // #2892 批C：自动药阈值按钮已按 C# 归位到 `HeroInventoryDialog`
-        // （`Title[560..565]` @(58/206, H-60)，见 `dialogs/hero_inventory.rs`），
-        // 本窗不再重复绘制（原自造位置 (80/150,216)）。
-        spawn_label(
-            p,
-            &cjk,
-            "",
-            84.0,
-            220.0,
-            12.0,
-            Color::srgb(1.0, 0.9, 0.4),
-            10,
-        )
-        .insert(HeroAutoPotLabel);
-        // 英雄背包/装备/技能 文本按钮（打开对应对话框）
-        // #2775：Hint 取 C# `HeroDialogs.cs:429/445/407`（HeroInventoryButton/HeroEquipmentButton/
-        // HeroMagicsButton），文案模板「背包 ({0})/角色 ({0})/技能 ({0})」带 Hero* 键位
-        let open_key = |action: &str| {
-            crate::game::dialogs::keyboard_layout::binding_text_for(&kb.bindings, action)
-        };
-        for (x, y, marker, text, hint) in [
-            (
-                20.0,
-                250.0,
-                "inv",
-                "英雄背包",
-                format!("背包 ({})", open_key("英雄背包")),
-            ),
-            (
-                130.0,
-                250.0,
-                "eq",
-                "英雄装备",
-                format!("角色 ({})", open_key("英雄装备")),
-            ),
-            (
-                20.0,
-                280.0,
-                "skill",
-                "英雄技能",
-                format!("技能 ({})", open_key("英雄技能")),
-            ),
-        ] {
-            let mut cmds = spawn_container(p, x, y, 90.0, 18.0, 10);
-            cmds.insert((
-                Button,
-                BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.0)),
-                crate::ui::tooltip::UiHint { text: hint },
-            ));
-            if marker == "inv" {
-                cmds.insert(HeroOpenInventory);
-            } else if marker == "eq" {
-                cmds.insert(HeroOpenEquipment);
-            } else {
-                cmds.insert(HeroOpenSkill);
-            }
-            cmds.with_children(|c| {
-                // #2775：同上，按钮文案是中文
-                spawn_label(
-                    c,
-                    &cjk,
-                    text,
-                    0.0,
-                    3.0,
-                    12.0,
-                    Color::srgb(0.8, 0.9, 1.0),
-                    11,
-                );
-            });
-        }
-    });
-
-    // 创建面板（独立根节点 @(280,296) 330x200，GlobalZIndex 45 盖过主面板）
-    commands
-        .spawn((
-            Node {
-                position_type: PositionType::Absolute,
-                left: Val::Px(280.0),
-                top: Val::Px(296.0),
-                width: Val::Px(330.0),
-                height: Val::Px(200.0),
-                ..default()
-            },
-            BackgroundColor(Color::srgba(0.1, 0.1, 0.15, 0.96)),
-            HeroCreatePanel,
-            DialogRoot(DialogKind::Hero),
-            // #2825 单元①：创建英雄面板是 Hero 主窗的模态子面板（C# 里同属不可拖的
-            // `HeroMenuPanel`/`NewHeroDialog` 组合）→ 一并排除拖动
-            NotDraggable,
-            GlobalZIndex(45),
-            Visibility::Hidden,
-        ))
-        .with_children(|p| {
-            spawn_label(p, &cjk, "名字:", 10.0, 16.0, 12.0, Color::WHITE, 10);
-            // 名字输入框（TextInput 0）@(50,12)，命中矩形 (330,308,260,20)
-            spawn_container(p, 50.0, 12.0, 260.0, 20.0, 10)
-                .insert((
-                    BackgroundColor(Color::srgba(0.2, 0.2, 0.25, 0.9)),
-                    crate::game::dialogs::text_input::TextInputField(0),
-                    crate::game::dialogs::text_input::TextInputRect(330.0, 308.0, 260.0, 20.0),
-                ))
-                .with_children(|ic| {
-                    ic.spawn((
-                        Node {
-                            position_type: PositionType::Absolute,
-                            left: Val::Px(4.0),
-                            top: Val::Px(2.0),
-                            ..default()
-                        },
-                        Text::new(String::new()),
-                        TextFont {
-                            font: FontSource::Handle(font.clone()),
-                            font_size: FontSize::Px(12.0),
-                            ..default()
-                        },
-                        TextColor(Color::WHITE),
-                        ZIndex(11),
-                        crate::game::dialogs::text_input::TextInputDisplay(0),
-                    ));
-                });
-            // 职业 / 性别 循环选择
-            if let (Some(n), Some(h), Some(pr)) = (
-                load_lib_image(&mut libs, &mut images, LibraryName::Title, 206),
-                load_lib_image(&mut libs, &mut images, LibraryName::Title, 207),
-                load_lib_image(&mut libs, &mut images, LibraryName::Title, 208),
-            ) {
-                spawn_icon_button(p, n, h, pr, 20.0, 44.0, 130.0, 22.0, 10).insert(HeroClassCycle);
-            }
-            spawn_label(p, &cjk, "职业: 战士", 28.0, 48.0, 12.0, Color::WHITE, 11)
-                .insert(HeroClassLabel);
-            if let (Some(n), Some(h), Some(pr)) = (
-                load_lib_image(&mut libs, &mut images, LibraryName::Title, 210),
-                load_lib_image(&mut libs, &mut images, LibraryName::Title, 211),
-                load_lib_image(&mut libs, &mut images, LibraryName::Title, 212),
-            ) {
-                spawn_icon_button(p, n, h, pr, 170.0, 44.0, 100.0, 22.0, 10)
-                    .insert(HeroGenderCycle);
-            }
-            spawn_label(p, &cjk, "性别: 男", 178.0, 48.0, 12.0, Color::WHITE, 11)
-                .insert(HeroGenderLabel);
-            // 确定 / 取消 / 结果提示
-            if let (Some(n), Some(h), Some(pr)) = (
-                load_lib_image(&mut libs, &mut images, LibraryName::Title, 206),
-                load_lib_image(&mut libs, &mut images, LibraryName::Title, 207),
-                load_lib_image(&mut libs, &mut images, LibraryName::Title, 208),
-            ) {
-                spawn_icon_button(
-                    p,
-                    n.clone(),
-                    h.clone(),
-                    pr.clone(),
-                    20.0,
-                    80.0,
-                    70.0,
-                    23.0,
-                    10,
-                )
-                .insert(HeroCreateOk);
-                spawn_label(p, &cjk, "确定", 35.0, 84.0, 12.0, Color::WHITE, 11);
-            }
-            if let (Some(n), Some(h), Some(pr)) = (
-                load_lib_image(&mut libs, &mut images, LibraryName::Title, 210),
-                load_lib_image(&mut libs, &mut images, LibraryName::Title, 211),
-                load_lib_image(&mut libs, &mut images, LibraryName::Title, 212),
-            ) {
-                spawn_icon_button(
-                    p,
-                    n.clone(),
-                    h.clone(),
-                    pr.clone(),
-                    110.0,
-                    80.0,
-                    70.0,
-                    23.0,
-                    10,
-                )
-                .insert(HeroCreateCancel);
-                spawn_label(p, &cjk, "取消", 125.0, 84.0, 12.0, Color::WHITE, 11);
-            }
-            spawn_label(
-                p,
-                &cjk,
-                "",
-                20.0,
-                114.0,
-                12.0,
-                Color::srgb(1.0, 0.9, 0.4),
-                11,
-            )
-            .insert(HeroCreateMsg);
-        });
 
     // ===== 英雄管理窗（C# `HeroManageDialog`，#2791 单元①）=====
     // `Prguse[1688]` 352x161 @(350,350)；随 `S.ManageHeroes` 弹出（`GameScene.cs:6063-6065`），
@@ -703,139 +313,6 @@ fn spawn_hero(
 
 /// 显隐 + 列表渲染（按钮逻辑在 hero_button_system）
 #[allow(clippy::too_many_arguments)]
-fn hero_ui_system(
-    mgr: Res<DialogManager>,
-    state: Res<HeroState>,
-    mut widgets: Query<&mut Visibility, With<HeroWidget>>,
-    mut panel: Query<&mut Visibility, (With<HeroCreatePanel>, Without<HeroWidget>)>,
-    mut lines: Query<
-        (&mut Text, &HeroLine),
-        (
-            Without<HeroClassLabel>,
-            Without<HeroGenderLabel>,
-            Without<HeroCreateMsg>,
-        ),
-    >,
-    mut class_label: Query<
-        &mut Text,
-        (
-            With<HeroClassLabel>,
-            Without<HeroLine>,
-            Without<HeroGenderLabel>,
-            Without<HeroCreateMsg>,
-        ),
-    >,
-    mut gender_label: Query<
-        &mut Text,
-        (
-            With<HeroGenderLabel>,
-            Without<HeroLine>,
-            Without<HeroClassLabel>,
-            Without<HeroCreateMsg>,
-        ),
-    >,
-    mut create_msg: Query<
-        &mut Text,
-        (
-            With<HeroCreateMsg>,
-            Without<HeroLine>,
-            Without<HeroClassLabel>,
-            Without<HeroGenderLabel>,
-        ),
-    >,
-    mut auto_pot_label: Query<
-        &mut Text,
-        (
-            With<HeroAutoPotLabel>,
-            Without<HeroLine>,
-            Without<HeroClassLabel>,
-            Without<HeroGenderLabel>,
-            Without<HeroCreateMsg>,
-        ),
-    >,
-) {
-    let open = mgr.is_open(DialogKind::Hero);
-    for mut vis in widgets.iter_mut() {
-        *vis = if open {
-            Visibility::Visible
-        } else {
-            Visibility::Hidden
-        };
-    }
-    if !open {
-        // 创建面板（HeroCreatePanel）不在 widgets 里，且只在 open 分支管理显隐；
-        // 关闭对话框时必须隐藏，否则“名字:/确定/取消/职业/性别”等标签残留屏幕
-        for mut vis in &mut panel {
-            *vis = Visibility::Hidden;
-        }
-        return;
-    }
-    for mut vis in &mut panel {
-        *vis = if state.creating {
-            Visibility::Visible
-        } else {
-            Visibility::Hidden
-        };
-    }
-    // 列表
-    let current_name = state
-        .current
-        .as_ref()
-        .map(|h| h.name.clone())
-        .unwrap_or_else(|| "主角色".to_string());
-    for (mut text, line) in &mut lines {
-        text.0 = match line.0 {
-            0 => "英雄管理".to_string(),
-            1 => format!("当前: {}", current_name),
-            2 => state
-                .heroes
-                .first()
-                .map(|h| format!("{}  Lv.{}  {}", h.name, h.level, class_name(h.class)))
-                .unwrap_or_else(|| "（无英雄，点“创建英雄”创建）".to_string()),
-            3 => state.message.clone(),
-            4 => state.create_msg.clone(),
-            5 => {
-                // #1135：出战英雄实时状态（HeroHealthChanged/GainHeroExperience/HeroLevelChanged 驱动）
-                if state.hero_index > 0 {
-                    format!(
-                        "状态: HP {}  MP {}  经验 {}/{}",
-                        state.hero_hp,
-                        state.hero_mp,
-                        state.hero_exp,
-                        state.hero_max_exp.max(1)
-                    )
-                } else {
-                    String::new()
-                }
-            }
-            _ => String::new(),
-        };
-    }
-    for mut t in &mut class_label {
-        let s = format!("职业: {}", class_name(state.create_class));
-        if t.0 != s {
-            t.0 = s;
-        }
-    }
-    for mut t in &mut gender_label {
-        let s = format!("性别: {}", gender_name(state.create_gender));
-        if t.0 != s {
-            t.0 = s;
-        }
-    }
-    for mut t in &mut auto_pot_label {
-        let s = autopot_text(state.auto_pot_hp, state.auto_pot_mp);
-        if t.0 != s {
-            t.0 = s;
-        }
-    }
-    for mut t in &mut create_msg {
-        if t.0 != state.create_msg {
-            t.0 = state.create_msg.clone();
-        }
-    }
-}
-
 /// 管理窗槽位原点（C# `HeroDialogs.cs:839`：`98 + 60*(i%4)`、`61 + 40*(i/4)`）
 fn hero_slot_origin(i: usize) -> (f32, f32) {
     (98.0 + 60.0 * (i % 4) as f32, 61.0 + 40.0 * (i / 4) as f32)
@@ -1103,167 +580,6 @@ fn hero_manage_system(
     }
 }
 
-/// 英雄按钮点击（关闭/切换/创建面板）
-/// 两组 Option 查询（QueryData 元组上限 15）避免 Bevy 16 参数上限。
-#[allow(clippy::type_complexity)]
-fn hero_button_system(
-    mut mgr: ResMut<DialogManager>,
-    mut state: ResMut<HeroState>,
-    net: Res<NetConnection>,
-    mut input: ResMut<crate::game::dialogs::text_input::TextInputState>,
-    mut nav_btns: Query<(
-        Entity,
-        &Interaction,
-        Option<&HeroClose>,
-        Option<&HeroSwitchMain>,
-        Option<&HeroSwitch1>,
-        Option<&HeroOpenInventory>,
-        Option<&HeroOpenEquipment>,
-        Option<&HeroOpenSkill>,
-        Option<&HeroCreateBtn>,
-        Option<&HeroCreateCancel>,
-    )>,
-    mut cycle_btns: Query<(
-        Entity,
-        &Interaction,
-        Option<&HeroClassCycle>,
-        Option<&HeroGenderCycle>,
-        Option<&HeroCreateOk>,
-    )>,
-    mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
-) {
-    fn edge(
-        e: Entity,
-        inter: &Interaction,
-        prev: &mut std::collections::HashMap<Entity, Interaction>,
-    ) -> bool {
-        let was = prev.insert(e, *inter);
-        *inter == Interaction::Pressed && was != Some(Interaction::Pressed)
-    }
-    if !mgr.is_open(DialogKind::Hero) {
-        return;
-    }
-    for (e, inter, close, main, hero1, inv, eq, skill, create, cancel) in &mut nav_btns {
-        if !edge(e, inter, &mut prev_inter) {
-            continue;
-        }
-        if close.is_some() {
-            mgr.close(DialogKind::Hero);
-        } else if main.is_some() {
-            net.send_packet(&crate::network::ChangeHeroWire { hero_index: 0 });
-            state.message = "切换主角色…".to_string();
-            tracing::info!("🦸 切换主角色");
-        } else if hero1.is_some() {
-            net.send_packet(&crate::network::ChangeHeroWire { hero_index: 1 });
-            state.message = "切换英雄 1…".to_string();
-            tracing::info!("🦸 切换英雄 1");
-        } else if inv.is_some() {
-            mgr.toggle(DialogKind::HeroInventory);
-            tracing::info!(
-                "🎒 英雄背包: {}",
-                if mgr.is_open(DialogKind::HeroInventory) {
-                    "打开"
-                } else {
-                    "关闭"
-                }
-            );
-        } else if eq.is_some() {
-            mgr.toggle(DialogKind::HeroEquipment);
-            tracing::info!(
-                "🦸 英雄装备: {}",
-                if mgr.is_open(DialogKind::HeroEquipment) {
-                    "打开"
-                } else {
-                    "关闭"
-                }
-            );
-        } else if skill.is_some() {
-            mgr.toggle(DialogKind::HeroSkill);
-            tracing::info!(
-                "🦸 英雄技能: {}",
-                if mgr.is_open(DialogKind::HeroSkill) {
-                    "打开"
-                } else {
-                    "关闭"
-                }
-            );
-        } else if create.is_some() {
-            state.creating = !state.creating;
-            state.create_msg.clear();
-            if input.texts.len() < 1 {
-                input.texts.resize(1, String::new());
-            }
-            input.active = None;
-        } else if cancel.is_some() && state.creating {
-            state.creating = false;
-            input.active = None;
-        }
-    }
-    for (e, inter, class_btn, gender_btn, ok) in &mut cycle_btns {
-        if !edge(e, inter, &mut prev_inter) {
-            continue;
-        }
-        if class_btn.is_some() && state.creating {
-            state.create_class = next_class(state.create_class);
-        } else if gender_btn.is_some() && state.creating {
-            state.create_gender = next_gender(state.create_gender);
-        } else if ok.is_some() && state.creating {
-            let name = input.texts.get(0).cloned().unwrap_or_default();
-            net.send_packet(&mir2_shared::packets::client::hero::NewHero {
-                name: name.trim().to_string(),
-                gender: state.create_gender,
-                class: state.create_class,
-            });
-            state.create_msg = "创建中…".to_string();
-            tracing::info!("🦸 创建英雄: {}", name);
-        }
-    }
-}
-
-/// 职业显示名（C# MirClass 顺序）
-fn class_name(c: mir2_shared::enums::MirClass) -> &'static str {
-    use mir2_shared::enums::MirClass::*;
-    match c {
-        Warrior => "战士",
-        Wizard => "法师",
-        Taoist => "道士",
-        Assassin => "刺客",
-        Archer => "弓箭手",
-        _ => "未知",
-    }
-}
-
-/// 下一个职业（循环）
-fn next_class(c: mir2_shared::enums::MirClass) -> mir2_shared::enums::MirClass {
-    use mir2_shared::enums::MirClass::*;
-    match c {
-        Warrior => Wizard,
-        Wizard => Taoist,
-        Taoist => Assassin,
-        Assassin => Archer,
-        _ => Warrior,
-    }
-}
-
-/// 性别显示名
-fn gender_name(g: mir2_shared::enums::MirGender) -> &'static str {
-    use mir2_shared::enums::MirGender::*;
-    match g {
-        Male => "男",
-        Female => "女",
-        _ => "?",
-    }
-}
-
-/// 下一个性别（循环）
-fn next_gender(g: mir2_shared::enums::MirGender) -> mir2_shared::enums::MirGender {
-    use mir2_shared::enums::MirGender::*;
-    match g {
-        Male => Female,
-        _ => Male,
-    }
-}
-
 /// 消费服务端英雄事件（网络层只广播 ServerEvent）
 fn hero_server_events(
     mut events: MessageReader<crate::network::server_event::ServerEvent>,
@@ -1522,18 +838,17 @@ mod tests {
     use mir2_shared::data::client_data::{ClientHeroInformation, ClientMagic};
     use mir2_shared::enums::Spell;
 
-    /// #2825 单元①：本窗对应 C# `HeroMenuPanel`(`HeroDialogs.cs:385`)/`HeroInfoPanel`（都没设
-    /// `Movable` → 默认 false）→ `DialogKind::Hero` 必须 `NotDraggable`；而 `HeroManageDialog`
-    /// 显式 `Movable = true`（`:804`）→ `DialogKind::HeroManage` 保持可拖。
+    /// #2892 批C：自造 `DialogKind::Hero` 聚合窗删除后，英雄相关窗口只剩
+    /// `HeroManageDialog`（C# 显式 `Movable = true`，`HeroDialogs.cs:804`）→ 必须**可拖**。
     #[test]
-    fn hero_menu_window_is_not_draggable_but_manage_is() {
+    fn hero_manage_window_is_draggable() {
         use crate::game::dialogs::{DialogKind, DialogRoot, NotDraggable};
         use crate::resources::libraries::{resolve_data_path, Libraries};
         use bevy::ecs::system::RunSystemOnce;
 
         // CI 无游戏资产（Data/ 不入库）→ 跳过（详见 libraries::data_assets_present）
         if !crate::resources::libraries::data_assets_present() {
-            eprintln!("skip hero_menu_window_is_not_draggable_but_manage_is: 无 Data 资产");
+            eprintln!("skip hero_manage_window_is_draggable: 无 Data 资产");
             return;
         }
         let mut world = World::new();
@@ -1544,34 +859,27 @@ mod tests {
         world.insert_resource(Assets::<Font>::default());
         world.insert_resource(crate::ui::sprite_ui::UiCjkFont::default());
         world.insert_resource(crate::ui::sprite_ui::UiFont::default());
-        world.insert_resource(crate::game::dialogs::keyboard_layout::KeyboardState::default());
+        // #2892 批C：自造 Hero 窗删除后 spawn_hero_manage 不再读键位
         world
-            .run_system_once(super::spawn_hero)
-            .expect("spawn_hero 应成功");
+            .run_system_once(super::spawn_hero_manage)
+            .expect("spawn_hero_manage 应成功");
 
         let mut q = world.query::<(Entity, &DialogRoot)>();
         let roots: Vec<(Entity, DialogKind)> = q
             .iter(&world)
-            .filter(|(_, r)| matches!(r.0, DialogKind::Hero | DialogKind::HeroManage))
+            .filter(|(_, r)| matches!(r.0, DialogKind::HeroManage))
             .map(|(e, r)| (e, r.0))
             .collect();
         assert!(
-            roots.iter().any(|(_, k)| *k == DialogKind::Hero),
-            "应有 Hero 主窗根"
+            !roots.is_empty(),
+            "应生成 HeroManage 根（自造 Hero 窗已删除）"
         );
-        for (e, k) in &roots {
-            let not_draggable = world.entity(*e).contains::<NotDraggable>();
-            if *k == DialogKind::Hero {
-                assert!(not_draggable, "Hero 主窗根 {e:?} 应 NotDraggable");
-            } else {
-                assert!(!not_draggable, "HeroManage 根 {e:?} 应保持可拖");
-            }
+        for (e, _) in &roots {
+            assert!(
+                !world.entity(*e).contains::<NotDraggable>(),
+                "HeroManage 根 {e:?} 应可拖（C# `HeroManageDialog.Movable = true`）"
+            );
         }
-        // 行为级：Hero 主窗中心按下左键 → 不得起拖
-        crate::game::dialogs::test_support::assert_no_drag_start(
-            &mut world,
-            bevy::math::Vec2::new(440.0, 235.0),
-        );
     }
 
     /// #2775：行为按钮 Hint（C# `HeroDialogs.cs:774` `HeroBehaviourFormat` +
