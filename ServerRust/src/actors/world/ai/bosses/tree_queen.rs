@@ -81,19 +81,8 @@ pub(crate) fn root_area_cells(
     boss: (i32, i32),
     is_walkable: impl Fn(i32, i32) -> bool,
 ) -> Vec<(i32, i32)> {
-    let mut cells = Vec::with_capacity((2 * radius + 1).pow(2) as usize);
-    for y in (ay - radius)..=(ay + radius) {
-        for x in (ax - radius)..=(ax + radius) {
-            if (x, y) == boss {
-                continue;
-            }
-            if !is_walkable(x, y) {
-                continue;
-            }
-            cells.push((x, y));
-        }
-    }
-    cells
+    // #2859：面积几何收敛到 helpers::area_cells 单一来源
+    crate::actors::world::ai::helpers::area_cells(ax, ay, radius, Some(boss), is_walkable)
 }
 
 pub struct TreeQueenBehavior {

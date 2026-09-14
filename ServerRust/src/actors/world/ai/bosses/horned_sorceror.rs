@@ -24,6 +24,12 @@ const MELEE_RANGE: i32 = 1;
 const STOMP_COOLDOWN_TICKS: u64 = 200;
 /// Dust Tornado 冷却（C# _TornadoTime + 15000 = 150 ticks）
 const TORNADO_COOLDOWN_TICKS: u64 = 150;
+/// C# `HornedSorceror.cs:176`：`start = 1000`
+const TORNADO_START_MS: u64 = 1000;
+/// C# `HornedSorceror.cs:177/183`：`time = 15s`、`ExpireTime = time + start`
+const TORNADO_DURATION_MS: u64 = 15_000;
+/// C# `HornedSorceror.cs:160-165`：龙卷面积 = 自身 ±2（5×5）
+const TORNADO_RADIUS: i32 = 2;
 
 pub struct HornedSorcerorBehavior {
     /// 下次可 Charged Stomp tick
@@ -37,6 +43,30 @@ pub struct HornedSorcerorBehavior {
 impl Default for HornedSorcerorBehavior {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// #2859：C# `HornedSorceror.cs:160-194`——龙卷面积 = 自身 ±2（5×5，**不跳自身格**）、
+    /// `start = 1000`、`ExpireTime = 15s + start`、`TickSpeed = 1000`
+    #[test]
+    fn tornado_field_params_match_csharp() {
+        assert_eq!(TORNADO_RADIUS, 2);
+        assert_eq!(TORNADO_START_MS, 1000);
+        assert_eq!(TORNADO_DURATION_MS, 15_000);
+        let cells =
+            crate::actors::world::ai::helpers::area_cells(7, 7, TORNADO_RADIUS, None, |_, _| true);
+        assert_eq!(cells.len(), 25, "5×5 不跳自身格 = 25 格");
+        assert!(cells.contains(&(7, 7)));
+        let (expires_ms, last_tick_shift_ms) = crate::actors::world::spell::delayed_spell_timing(
+            TORNADO_START_MS,
+            TORNADO_DURATION_MS,
+            1000,
+        );
+        assert_eq!((expires_ms, last_tick_shift_ms), (16_000, 0));
     }
 }
 
@@ -107,20 +137,31 @@ impl MonsterBehavior for HornedSorcerorBehavior {
                 let damage =
                     crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, 0)
                         .max(1);
-                // 自身 5x5 法术场（C# location ±2 网格）
+                // 自身 5×5 法术场（C# HornedSorceror.cs:154-198：`location ±2`、`cell.Valid` 过滤、
+                // `start = 1000`、`ExpireTime = 15s + start`、`TickSpeed = 1000`、`Show` 仅锚点格）
+                let cells = crate::actors::world::ai::helpers::area_cells(
+                    monster.x,
+                    monster.y,
+                    TORNADO_RADIUS,
+                    None,
+                    |x, y| (ctx.is_walkable)(x, y),
+                );
+                if cells.is_empty() {
+                    return;
+                }
                 ctx.out_spell_fields
                     .push(crate::actors::world::ai::SpellFieldSpawn {
                         spell: Spell::HornedSorcererDustTornado,
                         x: monster.x,
                         y: monster.y,
                         value: damage,
-                        duration_ms: 15000,
+                        duration_ms: TORNADO_DURATION_MS,
                         tick_ms: 1000,
                         caster_oid: monster.object_id,
                         caster_session: 0,
-                        cells: Vec::new(),
+                        cells,
                         show: true,
-                        start_delay_ms: 0,
+                        start_delay_ms: TORNADO_START_MS,
                     });
                 return;
             }

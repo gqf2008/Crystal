@@ -24,16 +24,22 @@ pub(crate) const ROCK_FALL_ANCHOR_OFFSETS: [(i32, i32); 9] = [
     (5, 5),
 ];
 
+/// C# `HornedCommander.cs:500`：`SpawnRockSpike` 的 `start = 500`
+const ROCK_SPIKE_START_MS: u64 = 500;
+/// C# `HornedCommander.cs:506-507`：`ExpireTime = start + 10min`、`TickSpeed = 1000`
+const ROCK_SPIKE_DURATION_MS: u64 = 10 * 60 * 1000;
+
 /// #2849：C# `SpawnRockFall`（`:375-411`）每个锚点的伤害格集合 = 锚点 ±10 格（21×21 = 441 格）。
 /// C# 为每格建一个 `SpellObject`；本端用「一个对象 + `cells` 面积」表达同一伤害域。
-pub(crate) fn rock_fall_area_cells(cx: i32, cy: i32) -> Vec<(i32, i32)> {
-    let mut cells = Vec::with_capacity(21 * 21);
-    for y in (cy - 10)..=(cy + 10) {
-        for x in (cx - 10)..=(cx + 10) {
-            cells.push((x, y));
-        }
-    }
-    cells
+///
+/// #2859：补齐 C# 的两条过滤——`:385` 跳过**施法者自身所在格**、`:389` 跳过 `!cell.Valid` 的格。
+pub(crate) fn rock_fall_area_cells(
+    cx: i32,
+    cy: i32,
+    boss: (i32, i32),
+    is_walkable: impl Fn(i32, i32) -> bool,
+) -> Vec<(i32, i32)> {
+    crate::actors::world::ai::helpers::area_cells(cx, cy, 10, Some(boss), is_walkable)
 }
 
 pub struct HornedCommanderBehavior {
@@ -200,13 +206,17 @@ impl MonsterBehavior for HornedCommanderBehavior {
                             .max(1);
                     for dy in -2..=2i32 {
                         for dx in -2..=2i32 {
+                            // #2859：C# `SpawnRockSpike`（`:489-491`）跳过 `!cell.Valid` 的格
+                            if !(ctx.is_walkable)(anchor_x + dx, anchor_y + dy) {
+                                continue;
+                            }
                             ctx.out_spell_fields
                                 .push(crate::actors::world::ai::SpellFieldSpawn {
                                     spell: Spell::HornedCommanderRockSpike,
                                     x: anchor_x + dx,
                                     y: anchor_y + dy,
                                     value: damage,
-                                    duration_ms: 10 * 60 * 1000, // 10 分钟
+                                    duration_ms: ROCK_SPIKE_DURATION_MS,
                                     tick_ms: 1000,
                                     caster_oid: monster.object_id,
                                     caster_session: 0,
@@ -214,7 +224,8 @@ impl MonsterBehavior for HornedCommanderBehavior {
                                     // C# `SpawnRockSpike`：`Show = location.X == x && location.Y == y`
                                     // ——25 格里只有锚点格对客户端可见（其余是纯伤害域）
                                     show: dx == 0 && dy == 0,
-                                    start_delay_ms: 0,
+                                    // C# `start = 500`，`ExpireTime = now + start + 10min`
+                                    start_delay_ms: ROCK_SPIKE_START_MS,
                                 });
                         }
                     }
@@ -287,7 +298,12 @@ impl MonsterBehavior for HornedCommanderBehavior {
                                 tick_ms: 2000,
                                 caster_oid: monster.object_id,
                                 caster_session: 0,
-                                cells: rock_fall_area_cells(sx, sy),
+                                cells: rock_fall_area_cells(
+                                    sx,
+                                    sy,
+                                    (monster.x, monster.y),
+                                    |x, y| (ctx.is_walkable)(x, y),
+                                ),
                                 show: true,
                                 start_delay_ms: 500 + fastrand::u64(0..200),
                             });
@@ -370,12 +386,23 @@ mod tests {
         assert!(ROCK_FALL_ANCHOR_OFFSETS.contains(&(5, 5)));
         assert!(!ROCK_FALL_ANCHOR_OFFSETS.contains(&(0, 0)));
         // 每锚点 ±10 格（21×21 = 441），含边界、不含 ±11
-        let cells = rock_fall_area_cells(100, 200);
+        let cells = rock_fall_area_cells(100, 200, (0, 0), |_, _| true);
         assert_eq!(cells.len(), 441);
         assert!(cells.contains(&(100, 200)));
         assert!(cells.contains(&(90, 190)) && cells.contains(&(110, 210)));
         assert!(!cells.contains(&(89, 200)));
         assert!(!cells.contains(&(100, 211)));
+
+        // #2859：C# `SpawnRockFall` 跳过施法者自身格（`:385`）与非法格（`:389`）
+        let boss = (105, 205);
+        let excluded = rock_fall_area_cells(100, 200, boss, |_, _| true);
+        assert_eq!(excluded.len(), 440);
+        assert!(!excluded.contains(&boss));
+        let blocked = rock_fall_area_cells(100, 200, (0, 0), |x, y| (x + y) % 2 == 0);
+        assert!(blocked.iter().all(|(x, y)| (x + y) % 2 == 0));
+        assert!(blocked.len() < 441);
+        // 全不可走 → 空
+        assert!(rock_fall_area_cells(100, 200, (0, 0), |_, _| false).is_empty());
     }
     use super::*;
 

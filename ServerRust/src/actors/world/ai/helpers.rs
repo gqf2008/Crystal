@@ -103,6 +103,35 @@ pub fn ice_thrust_cells(
 }
 
 /// C# ExplosionDie（HumanAssassin.cs:296）/ FullmoonAttack distance>1（MonsterObject.cs:3795、DarkOmaKing.cs:110）：8 方向 × 1..=max_radius 圈（i%8 方向、i/8+1 距离）。
+/// #2859：C# 地面法术场最常见的「以锚点为中心的方形面积」几何——
+/// `for (y = ay-r ..= ay+r) for (x = ax-r ..= ax+r) { if (!cell.Valid) continue; ... }`。
+///
+/// - `exclude`：需要跳过的格（各 Boss 写法不一——TreeQueen/EarthGolem/HornedCommanderRockFall 跳
+///   **施法者自身格**，StoneGolem/HornedSorceror/HornedCommanderRockSpike 不跳）；
+/// - `is_walkable`：对应 C# `Cell.Valid`（本端含越界判定）。
+pub fn area_cells(
+    ax: i32,
+    ay: i32,
+    radius: i32,
+    exclude: Option<(i32, i32)>,
+    is_walkable: impl Fn(i32, i32) -> bool,
+) -> Vec<(i32, i32)> {
+    let side = 2 * radius + 1;
+    let mut cells = Vec::with_capacity((side * side).max(0) as usize);
+    for y in (ay - radius)..=(ay + radius) {
+        for x in (ax - radius)..=(ax + radius) {
+            if exclude == Some((x, y)) {
+                continue;
+            }
+            if !is_walkable(x, y) {
+                continue;
+            }
+            cells.push((x, y));
+        }
+    }
+    cells
+}
+
 pub fn eight_dir_rings(center_x: i32, center_y: i32, max_radius: u8) -> Vec<(i32, i32)> {
     let mut cells = Vec::new();
     for r in 1..=max_radius as i32 {

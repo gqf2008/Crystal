@@ -24,6 +24,20 @@ const STOMP_RADIUS: i32 = 3;
 const RAGE_COOLDOWN_TICKS: u64 = 200;
 /// 落石数量（C# _RockCount = 15）
 const ROCK_COUNT: usize = 15;
+/// C# `TucsonGeneral.cs:69`：`ExpireTime = now + 2000 + start`；对象在 `start` 生成、
+/// 首跳在 `start + 1000`（`StartTime`）⇒ 相对首跳再活 1000ms
+const ROCK_DURATION_MS: u64 = 1000;
+
+/// C# `TucsonGeneral.cs:60`：落点跳过「与自身同行**或**同列」的点（`||` 语义，注意不是 `&&`）。
+pub(crate) fn rock_location_allowed(rx: i32, ry: i32, boss_x: i32, boss_y: i32) -> bool {
+    !(rx == boss_x || ry == boss_y)
+}
+
+/// C# `TucsonGeneral.cs:62/69/75`：`start = Random(0,5000)`（对象生成时机）+
+/// `StartTime = now + 1000 + start`（首跳再晚 1 秒）⇒ 本端首跳延迟 = `start + 1000`。
+pub(crate) fn rock_start_delay_ms(rng: &mut fastrand::Rng) -> u64 {
+    rng.i64(0..5000) as u64 + 1000
+}
 
 pub struct TucsonGeneralBehavior {
     /// 下次狂暴 tick（C# _RageTime）
@@ -33,6 +47,51 @@ pub struct TucsonGeneralBehavior {
 impl Default for TucsonGeneralBehavior {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// #2859：C# `TucsonGeneral.cs:60`——落点跳过「与自身同行**或**同列」的点（`||`，不是 `&&`）
+    #[test]
+    fn rock_location_skips_same_row_or_column() {
+        let boss = (100, 100);
+        assert!(
+            !rock_location_allowed(100, 137, boss.0, boss.1),
+            "同行应跳过"
+        );
+        assert!(
+            !rock_location_allowed(137, 100, boss.0, boss.1),
+            "同列应跳过"
+        );
+        assert!(rock_location_allowed(101, 101, boss.0, boss.1));
+        assert!(rock_location_allowed(137, 137, boss.0, boss.1));
+    }
+
+    /// #2859：C# `TucsonGeneral.cs:62/69/75`——首跳延迟 = `Random(0,5000) + 1000`；
+    /// `ExpireTime = now + 2000 + start` ⇒ 本端 `(start_delay, duration)=(start+1000, 1000)`
+    /// 折算出的总寿命必须等于 `start + 2000`
+    #[test]
+    fn rock_timing_matches_csharp() {
+        let mut rng = fastrand::Rng::with_seed(9);
+        for _ in 0..200 {
+            let delay = rock_start_delay_ms(&mut rng);
+            assert!((1000..6000).contains(&delay), "首跳延迟 ∈ [1000, 6000)");
+            let (expires_ms, _) =
+                crate::actors::world::spell::delayed_spell_timing(delay, ROCK_DURATION_MS, 1000);
+            assert_eq!(expires_ms - delay, 1000, "相对首跳再活 1000ms");
+            let start = delay - 1000;
+            assert_eq!(
+                expires_ms,
+                start + 2000,
+                "总寿命 = start + 2000（C# ExpireTime）"
+            );
+        }
+        assert_eq!(ROCK_DURATION_MS, 1000);
+        // C# `Value = Random(MinDC, MaxDC)`：法术 = TucsonGeneralRock（不是 MapQuake1）
+        assert_eq!(ROCK_COUNT, 15);
     }
 }
 
@@ -60,34 +119,45 @@ impl MonsterBehavior for TucsonGeneralBehavior {
                 .into_iter()
                 .copied()
                 .collect();
+            // 落石循环统一用同一个 rng（C# 全程 `Envir.Random`）
+            let mut rng = fastrand::Rng::new();
             for _ in 0..ROCK_COUNT {
-                let (rx, ry) = if fastrand::i32(0..3) == 0 && !targets.is_empty() {
+                let (rx, ry) = if rng.i32(0..3) == 0 && !targets.is_empty() {
                     // 1/3 概率落在随机玩家身上
-                    let t = targets[fastrand::usize(0..targets.len())];
+                    let t = targets[rng.usize(0..targets.len())];
                     (t.x, t.y)
                 } else {
                     // 视野范围内随机点（C# CurrentLocation ± ViewRange）
                     (
-                        monster.x + fastrand::i32(-VIEW_RANGE..=VIEW_RANGE),
-                        monster.y + fastrand::i32(-VIEW_RANGE..=VIEW_RANGE),
+                        monster.x + rng.i32(-VIEW_RANGE..=VIEW_RANGE),
+                        monster.y + rng.i32(-VIEW_RANGE..=VIEW_RANGE),
                     )
                 };
+                // C# `TucsonGeneral.cs:60`：**与自身同行或同列**的点跳过（注意是 `||` 不是 `&&`）
+                if !rock_location_allowed(rx, ry, monster.x, monster.y) {
+                    continue;
+                }
+                // C# `Value = Random(MinDC, MaxDC)`（可 roll 到 0 ⇒ 该落石不造成伤害，由法术场
+                // 的 `Value == 0` 短路处理）
                 let value =
-                    crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0)
-                        .max(1);
+                    crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0);
+                let start_delay_ms = rock_start_delay_ms(&mut rng);
                 ctx.out_spell_fields
                     .push(crate::actors::world::ai::SpellFieldSpawn {
-                        spell: Spell::MapQuake1,
+                        // #2859：C# 用的是 `Spell.TucsonGeneralRock`（此前误写成 MapQuake1，
+                        // 导致防御类型（AC vs MAC）与客户端视觉都不对）
+                        spell: Spell::TucsonGeneralRock,
                         x: rx,
                         y: ry,
                         value,
-                        duration_ms: 2000,
+                        duration_ms: ROCK_DURATION_MS,
                         tick_ms: 1000,
                         caster_oid: monster.object_id,
                         caster_session: 0,
                         cells: Vec::new(),
-                        show: true,
-                        start_delay_ms: 0,
+                        // C# 未设置 `Show`（默认 false）⇒ 不广播 `S.ObjectSpell`
+                        show: false,
+                        start_delay_ms,
                     });
             }
             monster.next_attack_tick = ctx.tick_count + 80;
