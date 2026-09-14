@@ -294,6 +294,26 @@ fn new_character_dialog_aligned() {
         dw,
         dh,
     );
+    // #2892 批C：英雄创建模式标题 `Title[847]` @(246,11)（C# `GameScene.cs:321-322`
+    // 覆盖 `NewHeroDialog.TitleLabel` 的 Index 与 Location）
+    let (hw, hh) = libs.size(LibraryName::Title, 847);
+    assert!(hw > 0.0 && hh > 0.0, "[精灵] 英雄标题 Title[847] 应存在");
+    assert_inside(
+        "Title[847]",
+        nc::DLG_X + 246.0,
+        nc::DLG_Y + 11.0,
+        hw,
+        hh,
+        nc::DLG_X,
+        nc::DLG_Y,
+        dw,
+        dh,
+    );
+    assert_ne!(
+        libs.pixels(LibraryName::Title, 847),
+        libs.pixels(LibraryName::Title, 20),
+        "[身份] 英雄标题与玩家标题应是不同图像"
+    );
     // 预览 ChrSel[20] UseOffSet=true：绘制 = Location(120,250) + offset，必须在框内
     let (pw, ph, pox, poy) = libs.size_off(LibraryName::ChrSel, 20);
     let (pvx, pvy) = (nc::DLG_X + 120.0 + pox, nc::DLG_Y + 250.0 + poy);

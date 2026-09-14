@@ -26,20 +26,52 @@ pub struct NewCharacterPlugin;
 impl Plugin for NewCharacterPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<NewCharState>();
+        // #2892 批C：同一个对话框在 Select（玩家建角）与 Game（英雄创建，
+        // `S.HeroCreateRequest` 触发，`hero_mode = true`）两个状态下都用
+        let active = in_state(AppState::Select).or(in_state(AppState::Game));
         app.add_systems(
             Update,
             (new_char_ui_system, new_char_ime_system)
                 .chain()
-                .run_if(in_state(AppState::Select)),
+                .run_if(active.clone()),
         );
-        app.add_systems(
-            Update,
-            new_char_anim_system.run_if(in_state(AppState::Select)),
-        );
-        app.add_systems(
-            Update,
-            new_char_name_border_system.run_if(in_state(AppState::Select)),
-        );
+        app.add_systems(Update, new_char_anim_system.run_if(active.clone()));
+        app.add_systems(Update, new_char_name_border_system.run_if(active));
+        // #2892 批C：游戏内预生成（隐藏）英雄创建对话框
+        app.add_systems(OnEnter(AppState::Game), spawn_hero_create_dialog);
+        app.add_systems(OnExit(AppState::Game), cleanup_hero_create_dialog);
+    }
+}
+
+/// #2892 批C：进游戏时预生成同一个「新建角色」对话框（隐藏），
+/// 由 `S.HeroCreateRequest` 置 `hero_mode` + `visible` 后显示
+/// （C# `NewHeroDialog` 就是 `NewCharacterDialog` 的一个实例，`GameScene.cs:320`）。
+fn spawn_hero_create_dialog(
+    mut commands: Commands,
+    mut libs: ResMut<GameLibraries>,
+    mut images: ResMut<Assets<Image>>,
+    mut cache: ResMut<UiImageCache>,
+    mut fonts: ResMut<Assets<Font>>,
+    mut state: ResMut<NewCharState>,
+) {
+    libs.0.ensure_initialized();
+    let font = crate::ui::sprite_ui::load_ui_font(&mut fonts);
+    state.hero_mode = false;
+    state.visible = false;
+    spawn_new_character_dialog(
+        &mut commands,
+        &mut libs,
+        &mut images,
+        &mut cache,
+        &font,
+        &mut state,
+    );
+}
+
+/// 退出 Game 时清理英雄创建对话框实体（Select 场景的由该场景自行清理）
+fn cleanup_hero_create_dialog(mut commands: Commands, q: Query<Entity, With<NcDlg>>) {
+    for e in q.iter() {
+        commands.entity(e).despawn();
     }
 }
 
@@ -65,6 +97,12 @@ pub struct NewCharState {
     /// 法师 blend 叠加层 16 帧（ChrSel[frame+560]；对齐 C# DrawBlend）
     pub blend_handles: Vec<Handle<Image>>,
     pub blend_offsets: Vec<(f32, f32)>,
+    /// #2892 批C：英雄创建模式（C# `NewHeroDialog = new NewCharacterDialog{...}`，
+    /// `GameScene.cs:320-333`）——标题换 `Title[847]@(246,11)`、OK 发 `C.NewHero`、
+    /// 职业钮按 `can_create_class` 显隐
+    pub hero_mode: bool,
+    /// `[Warrior, Wizard, Taoist, Assassin, Archer]`（C# `S.HeroCreateRequest.CanCreateClass`）
+    pub can_create_class: [bool; 5],
 }
 
 impl Default for NewCharState {
@@ -86,6 +124,8 @@ impl Default for NewCharState {
             preview_offsets: Vec::new(),
             blend_handles: Vec::new(),
             blend_offsets: Vec::new(),
+            hero_mode: false,
+            can_create_class: [true; 5],
         }
     }
 }
@@ -134,6 +174,32 @@ struct NcNameBox;
 /// 名字输入框校验边框（4 条细线；颜色随校验结果变化：空=透明 / 不合法=红 / 合法=绿）
 #[derive(Component)]
 struct NcNameBorder;
+
+/// 玩家创建标题 `Title[20]`（英雄模式下隐藏）
+#[derive(Component)]
+struct NcTitlePlayer;
+
+/// 英雄创建标题 `Title[847]`（C# `GameScene.cs:321`；非英雄模式隐藏）
+#[derive(Component)]
+struct NcTitleHero;
+
+/// #2892 批C：提交创建——英雄模式发 `C.NewHero`，否则发 `C.NewCharacter`
+/// （C# 是同类的两个实例：`NewHeroDialog` 的 `OnCreateCharacter` 回调发 `C.NewHero`）
+fn submit_new_char(net: &NetConnection, state: &NewCharState) {
+    if state.hero_mode {
+        net.send_packet(&mir2_shared::packets::client::hero::NewHero {
+            name: state.name.clone(),
+            gender: state.gender,
+            class: state.class,
+        });
+    } else {
+        net.send_packet(&mir2_shared::packets::client::NewCharacter {
+            name: state.name.clone(),
+            gender: state.gender,
+            class: state.class,
+        });
+    }
+}
 
 /// 名字合法性（对齐原版 NewCharacterDialog 正则意图：仅允许字母数字与中文，长度 1..=15）。
 /// 原版正则 `^[A-Za-z0-9]|[一-龥]{3,15}$` 因 `|` 拼接存在缺陷，此处取其语义。
@@ -291,7 +357,16 @@ pub fn spawn_new_character_dialog(
     // 标题 Title[20]
     if let Some(h) = ui_image(libs, images, cache, LibraryName::Title, 20) {
         let e = spawn_ui_sprite(commands, h, DLG_X + 206.0, DLG_Y + 11.0, 5.0, 1.0);
-        commands.entity(e).insert((NcDlg, Visibility::Hidden));
+        commands
+            .entity(e)
+            .insert((NcDlg, NcTitlePlayer, Visibility::Hidden));
+    }
+    // #2892 批C：英雄创建标题 `Title[847]` @(246,11)（C# `GameScene.cs:321-322` 覆盖 TitleLabel）
+    if let Some(h) = ui_image(libs, images, cache, LibraryName::Title, 847) {
+        let e = spawn_ui_sprite(commands, h, DLG_X + 246.0, DLG_Y + 11.0, 5.0, 1.0);
+        commands
+            .entity(e)
+            .insert((NcDlg, NcTitleHero, Visibility::Hidden));
     }
     // 预览（初始战士男）
     load_preview_frames(libs, images, cache, state);
@@ -505,7 +580,15 @@ fn new_char_ui_system(
     mut cache: ResMut<UiImageCache>,
     windows: Query<&Window>,
     mouse: Res<ButtonInput<MouseButton>>,
-    mut dlg: Query<&mut Visibility, (With<NcDlg>, Without<NcBlend>)>,
+    mut dlg: Query<
+        (
+            &mut Visibility,
+            Option<&NcTitlePlayer>,
+            Option<&NcTitleHero>,
+            Option<&NcClassBtn>,
+        ),
+        (With<NcDlg>, Without<NcBlend>),
+    >,
     mut class_btns: Query<
         (&NcClassBtn, &mut Sprite),
         (Without<NcPreview>, Without<NcGenderBtn>, Without<NcBlend>),
@@ -530,12 +613,40 @@ fn new_char_ui_system(
 ) {
     // 显隐
     let show = state.visible;
-    for mut vis in dlg.iter_mut() {
-        *vis = if show {
-            Visibility::Visible
-        } else {
+    // #2892 批C：标题按模式二选一（玩家 `Title[20]` / 英雄 `Title[847]`），
+    // 职业钮按 `S.HeroCreateRequest.CanCreateClass` 显隐（C# `GameScene.cs:6044-6052`）
+    for (mut vis, title_player, title_hero, class_btn) in dlg.iter_mut() {
+        let want = if !show {
             Visibility::Hidden
+        } else if title_player.is_some() {
+            if state.hero_mode {
+                Visibility::Hidden
+            } else {
+                Visibility::Visible
+            }
+        } else if title_hero.is_some() {
+            if state.hero_mode {
+                Visibility::Visible
+            } else {
+                Visibility::Hidden
+            }
+        } else if let Some(btn) = class_btn {
+            let allowed = state
+                .can_create_class
+                .get(btn.class as usize)
+                .copied()
+                .unwrap_or(true);
+            if allowed {
+                Visibility::Visible
+            } else {
+                Visibility::Hidden
+            }
+        } else {
+            Visibility::Visible
         };
+        if *vis != want {
+            *vis = want;
+        }
     }
     // 法师 blend 叠加层：仅对话框可见且职业为法师时显示（对齐 C# AfterDraw: Class==Wizard）
     let blend_show = show && state.class == MirClass::Wizard;
@@ -680,11 +791,7 @@ fn new_char_ui_system(
         if lclick && over && name_valid(&state.name) {
             state.visible = false;
             state.error = None;
-            net.send_packet(&mir2_shared::packets::client::NewCharacter {
-                name: state.name.clone(),
-                gender: state.gender,
-                class: state.class,
-            });
+            submit_new_char(&net, &state);
             state.name.clear();
         }
     }
@@ -714,11 +821,7 @@ fn new_char_ui_system(
             Key::Enter if name_valid(&state.name) => {
                 state.visible = false;
                 state.error = None;
-                net.send_packet(&mir2_shared::packets::client::NewCharacter {
-                    name: state.name.clone(),
-                    gender: state.gender,
-                    class: state.class,
-                });
+                submit_new_char(&net, &state);
                 state.name.clear();
             }
             _ => {}
@@ -814,5 +917,45 @@ fn new_char_anim_system(
                 s.1.translation.y = -by;
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// #2892 批C：同一个对话框两种模式——英雄模式 OK 发 `C.NewHero`、
+    /// 玩家模式发 `C.NewCharacter`（C# 两个实例各自的回调，`GameScene.cs:323-331`）
+    #[test]
+    fn submit_routes_to_hero_or_player_packet() {
+        let (tx, rx) = crossbeam_channel::unbounded::<Vec<u8>>();
+        let mut net = NetConnection::default();
+        net.to_server = Some(tx);
+        let mut state = NewCharState::default();
+        state.name = "测试名".to_string();
+        state.gender = MirGender::Female;
+        state.class = MirClass::Taoist;
+
+        state.hero_mode = true;
+        submit_new_char(&net, &state);
+        let raw = rx.try_recv().expect("英雄模式应发包");
+        let hero: mir2_shared::packets::client::hero::NewHero =
+            mir2_shared::packets::base::deserialize_packet(&mut std::io::Cursor::new(raw))
+                .expect("应为 C.NewHero");
+        assert_eq!(
+            (hero.name.as_str(), hero.gender, hero.class),
+            ("测试名", MirGender::Female, MirClass::Taoist)
+        );
+
+        state.hero_mode = false;
+        submit_new_char(&net, &state);
+        let raw = rx.try_recv().expect("玩家模式应发包");
+        let chr: mir2_shared::packets::client::NewCharacter =
+            mir2_shared::packets::base::deserialize_packet(&mut std::io::Cursor::new(raw))
+                .expect("应为 C.NewCharacter");
+        assert_eq!(
+            (chr.name.as_str(), chr.gender, chr.class),
+            ("测试名", MirGender::Female, MirClass::Taoist)
+        );
     }
 }
