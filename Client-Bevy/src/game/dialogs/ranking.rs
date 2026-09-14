@@ -2,10 +2,12 @@
 // 排名对话框（M9 第 3 批）
 // 布局参考：C# `Client/MirScenes/Dialogs/RankingDialog.cs`
 //   - 背景 Title[728]（原生 324x441）@ C# 居中公式 (350,163)
-//   - 子控件待精灵化（页签 Title[751..768] / 关闭 Prguse2[360..362] /
-//     翻页 Prguse2[197..199]@(299,100)、[207..209]@(299,386) /
-//     滚动条 Prguse2[205/206]@(299,113) / 仅在线 Prguse[2086/2087]@(190,H-20) /
-//     MyRank @(229,36) 82x22 / 行 (0/55/150/220,0)）——见 #2892 checklist
+//   - #2892 批A 单元②：子控件全部按 C# 精灵与坐标（页签 Title[751..768] 图标、
+//     关闭 Prguse2[360..362] 24x21@(300,3)、翻页 Prguse2[197..199]@(299,100) 与
+//     [207..209]@(299,386)、滚动条 Prguse2[205/206]@(299,113)、
+//     仅在线 Prguse[2086/2087]@(190,H-20)、MyRank 82x22@(229,36)、20 行 @(32,98+i*15)
+//     四列 0/55/150/220）
+//   - 仍待办：滚动条拖动（服务端只回前 20 名 → C# 亦不动，见 `SCROLL_POS` 注释）
 // 网络：Ranking 请求 → 服务器回排名 → 显示
 // ============================================================================
 
@@ -18,7 +20,9 @@ use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
 use crate::ui::sprite_ui::{shared_cjk_font, UiCjkFont};
-use crate::ui::theme::{load_lib_image, spawn_icon_button, spawn_label, spawn_panel, ImageButton};
+use crate::ui::theme::{
+    load_lib_image, spawn_icon_button, spawn_label, spawn_label_center, spawn_panel, ImageButton,
+};
 
 /// #2892：面板几何对齐 C# `RankingDialog.cs:37-46`——
 /// `Index = 728; Library = Libraries.Title;`（原生 324x441），
@@ -30,6 +34,99 @@ use crate::ui::theme::{load_lib_image, spawn_icon_button, spawn_label, spawn_pan
 pub const PANEL_W: f32 = 324.0;
 pub const PANEL_H: f32 = 441.0;
 pub const PANEL_ORIGIN: (f32, f32) = (350.0, 163.0);
+
+// ---------------------------------------------------------------------------
+// #2892 批A 单元②：子控件几何全部按 C# `Client/MirScenes/Dialogs/RankingDialog.cs`
+// （1024x768 固定布局，下列坐标均为**面板内**相对坐标）。
+// ---------------------------------------------------------------------------
+
+/// 行：C# `RankingRow` 20 个，`Location = (32, 98 + i*15)`、`Size = (270, 15)`（`:204-211`）
+pub const ROW_COUNT: usize = 20;
+pub const ROW_X: f32 = 32.0;
+pub const ROW_Y0: f32 = 98.0;
+pub const ROW_W: f32 = 270.0;
+pub const ROW_H: f32 = 15.0;
+/// 行内四列左边界：RankLabel(0,0)/NameLabel(55,0)/ClassLabel(150,0)/LevelLabel(220,0)（`:341-382`）
+pub const ROW_LABEL_X: [f32; 4] = [0.0, 55.0, 150.0, 220.0];
+
+/// 关闭键：`Prguse2[360..362]` 24x21 @(300,3)（`:47-58`）
+pub const CLOSE_POS: (f32, f32) = (300.0, 3.0);
+pub const CLOSE_SIZE: (f32, f32) = (24.0, 21.0);
+
+/// 页签：构造顺序 All/Tao/War/Wiz/Sin/Arch，`Location = (10/40/60/80/100/120, 38)`（`:60-135`）
+pub const TAB_POS: [(f32, f32); 6] = [
+    (10.0, 38.0),
+    (40.0, 38.0),
+    (60.0, 38.0),
+    (80.0, 38.0),
+    (100.0, 38.0),
+    (120.0, 38.0),
+];
+/// 页签三帧（normal/hover/pressed）：`Title[751..753]`(All) `[760..762]`(Tao) `[754..756]`(War)
+/// `[763..765]`(Wiz) `[757..759]`(Sin) `[766..768]`(Arch)
+pub const TAB_FRAMES: [(usize, usize, usize); 6] = [
+    (751, 752, 753),
+    (760, 761, 762),
+    (754, 755, 756),
+    (763, 764, 765),
+    (757, 758, 759),
+    (766, 767, 768),
+];
+/// 页签 → `SelectRank` 值（C# 构造顺序：All→0、Tao→3、War→1、Wiz→2、Sin→4、Arch→5）
+pub const TAB_RANK: [u8; 6] = [0, 3, 1, 2, 4, 5];
+/// 页签精灵原生尺寸（`Title[751]`=28x24，其余 24x20）
+pub const TAB_SIZE: [(f32, f32); 6] = [
+    (28.0, 24.0),
+    (24.0, 20.0),
+    (24.0, 20.0),
+    (24.0, 20.0),
+    (24.0, 20.0),
+    (24.0, 20.0),
+];
+
+/// 翻页：`PrevButton Prguse2[197..199]` 12x12 @(299,100)、`NextButton [207..209]` @(299,386)（`:137-152`）
+pub const PREV_POS: (f32, f32) = (299.0, 100.0);
+pub const NEXT_POS: (f32, f32) = (299.0, 386.0);
+pub const PAGE_SIZE: (f32, f32) = (12.0, 12.0);
+
+/// 滚动条：`ScrollBar Prguse2[205/206]` 12x18 @ `(299, 100+13)`，拖动时 y 钳 [110,368]（`:153-181`）
+pub const SCROLL_POS: (f32, f32) = (299.0, 113.0);
+pub const SCROLL_SIZE: (f32, f32) = (12.0, 18.0);
+
+/// 仅在线：`OnlineOnlyButton Prguse[2086]/[2087]` @ `(190, Size.Height-20)`（`:184`）
+pub const ONLINE_POS: (f32, f32) = (190.0, PANEL_H - 20.0);
+
+/// 我的排名：`MyRank` 82x22 @(229,36)，`Color.BurlyWood`、水平垂直居中（`:197-206`）
+pub const MYRANK_POS: (f32, f32) = (229.0, 36.0);
+pub const MYRANK_SIZE: (f32, f32) = (82.0, 22.0);
+
+/// C# 行文字色（`RankingRow.Update` `:396-424`）：1=Gold、2=Silver、3=RosyBrown、
+/// 自己=Green、其余=White。注意 C# 的 `if (==3) {} else if (自己) {} else if (>3) {}`
+/// 链**会**把第 1/2 名的自己覆盖成 Green —— 原样保留该怪癖。
+const COLOR_GOLD: Color = Color::srgb(1.0, 0.843, 0.0);
+const COLOR_SILVER: Color = Color::srgb(0.753, 0.753, 0.753);
+const COLOR_ROSY_BROWN: Color = Color::srgb(0.737, 0.561, 0.561);
+const COLOR_RANK_GREEN: Color = Color::srgb(0.0, 0.502, 0.0);
+const COLOR_BURLY_WOOD: Color = Color::srgb(0.871, 0.722, 0.529);
+
+/// 行文字色（逐字复刻 C# `RankingRow.Update` 的 if/else-if 链，见 [`COLOR_GOLD`] 注释）
+fn rank_row_color(rank: i32, name: &str, self_name: &str) -> Color {
+    let mut c = Color::WHITE;
+    if rank == 1 {
+        c = COLOR_GOLD;
+    }
+    if rank == 2 {
+        c = COLOR_SILVER;
+    }
+    if rank == 3 {
+        c = COLOR_ROSY_BROWN;
+    } else if name == self_name {
+        c = COLOR_RANK_GREEN;
+    } else if rank > 3 {
+        c = Color::WHITE;
+    }
+    c
+}
 
 /// 排名条目（服务端 Rankings 包）
 #[derive(Debug, Clone, Default)]
@@ -65,6 +162,14 @@ pub struct RankingClose;
 
 #[derive(Component)]
 pub struct RankingLine(usize);
+
+/// 行内文字格（C# `RankingRow` 的 RankLabel/NameLabel/ClassLabel/LevelLabel）
+/// `field`：0=排名 1=名字 2=职业 3=等级
+#[derive(Component)]
+pub struct RankingCell {
+    pub row: usize,
+    pub field: u8,
+}
 
 /// 页签按钮（C# AllButton/WarButton/WizButton/TaoButton/SinButton/ArchButton）
 #[derive(Component)]
@@ -193,81 +298,119 @@ fn spawn_ranking(
         .insert((DialogRoot(DialogKind::Ranking), RankingWidget));
 
     commands.entity(panel).with_children(|p| {
-        // 关闭 X（C# relative (289,3) → 面板内 (296,4)）
+        // 关闭 X：C# `CloseButton Prguse2[360..362]` 24x21 @(300,3)（`:47-58`）
         if let (Some(n), Some(h), Some(pr)) = (
             crate::ui::theme::load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 360),
             crate::ui::theme::load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 361),
             crate::ui::theme::load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 362),
         ) {
-            crate::ui::theme::spawn_icon_button(p, n, h, pr, 296.0, 4.0, 20.0, 20.0, 10)
-                .insert(RankingClose);
-        }
-        // 标题
-        crate::ui::theme::spawn_label(
-            p,
-            &font,
-            "排行榜",
-            130.0,
-            0.0,
-            16.0,
-            Color::srgb(1.0, 1.0, 0.3),
-            9,
-        );
-        // 页签（C# RankingDialog：All/War/Wiz/Tao/Sin/Arch）
-        // #2775：Hint 逐项取 C# `RankingDialog.cs:65/89/101/77/113/125` 的文案
-        //（AllButton=总榜前 20、WarButton=战士前 20、WizButton=法师前 20、TaoButton=道士前 20、
-        // SinButton=刺客前 20、ArchButton=弓箭手前 20；C# `SelectRank(i)` 的 i 即此处 RankingTab 值）
-        let tabs: [(u8, &str, &str); 6] = [
-            (0, "全部", "总榜前 20"),
-            (1, "战士", "战士前 20"),
-            (2, "法师", "法师前 20"),
-            (3, "道士", "道士前 20"),
-            (4, "刺客", "刺客前 20"),
-            (5, "弓手", "弓箭手前 20"),
-        ];
-        for (i, (t, label, hint)) in tabs.iter().enumerate() {
-            crate::ui::theme::spawn_label(
+            crate::ui::theme::spawn_icon_button(
                 p,
-                &font,
-                label,
-                10.0 + i as f32 * 46.0,
-                18.0,
-                12.0,
-                Color::srgb(0.8, 0.9, 1.0),
-                9,
+                n,
+                h,
+                pr,
+                CLOSE_POS.0,
+                CLOSE_POS.1,
+                CLOSE_SIZE.0,
+                CLOSE_SIZE.1,
+                10,
             )
-            .insert((
-                RankingTab(*t),
-                Button,
-                crate::ui::tooltip::UiHint {
-                    text: (*hint).to_string(),
-                },
-            ));
+            .insert(RankingClose);
         }
-        // 上一页 / 下一页
-        crate::ui::theme::spawn_label(
-            p,
-            &font,
-            "上一页",
-            10.0,
-            410.0,
-            12.0,
-            Color::srgb(0.8, 0.9, 1.0),
-            9,
-        )
-        .insert((RankingPrev, Button));
-        crate::ui::theme::spawn_label(
-            p,
-            &font,
-            "下一页",
-            80.0,
-            410.0,
-            12.0,
-            Color::srgb(0.8, 0.9, 1.0),
-            9,
-        )
-        .insert((RankingNext, Button));
-        // 仅在线（Prguse 2086 未勾 / 2087 勾选）
+        // 页签 6 个（构造顺序 All/Tao/War/Wiz/Sin/Arch，`SelectRank` 映射见 `TAB_RANK`）。
+        // Hint 文案逐项取 C# `RankingDialog.cs:65/89/101/77/113/125`。
+        const TAB_HINTS: [&str; 6] = [
+            "总榜前 20",
+            "道士前 20",
+            "战士前 20",
+            "法师前 20",
+            "刺客前 20",
+            "弓箭手前 20",
+        ];
+        for i in 0..6usize {
+            let (n_i, h_i, p_i) = TAB_FRAMES[i];
+            if let (Some(n), Some(h), Some(pr)) = (
+                crate::ui::theme::load_lib_image(&mut libs, &mut images, LibraryName::Title, n_i),
+                crate::ui::theme::load_lib_image(&mut libs, &mut images, LibraryName::Title, h_i),
+                crate::ui::theme::load_lib_image(&mut libs, &mut images, LibraryName::Title, p_i),
+            ) {
+                crate::ui::theme::spawn_icon_button(
+                    p,
+                    n,
+                    h,
+                    pr,
+                    TAB_POS[i].0,
+                    TAB_POS[i].1,
+                    TAB_SIZE[i].0,
+                    TAB_SIZE[i].1,
+                    10,
+                )
+                .insert((
+                    RankingTab(TAB_RANK[i]),
+                    crate::ui::tooltip::UiHint {
+                        text: TAB_HINTS[i].to_string(),
+                    },
+                ));
+            }
+        }
+        // 上一页 / 下一页：C# `Prguse2[197..199]`@(299,100)、`[207..209]`@(299,386)
+        if let (Some(n), Some(h), Some(pr)) = (
+            crate::ui::theme::load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 197),
+            crate::ui::theme::load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 198),
+            crate::ui::theme::load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 199),
+        ) {
+            crate::ui::theme::spawn_icon_button(
+                p,
+                n,
+                h,
+                pr,
+                PREV_POS.0,
+                PREV_POS.1,
+                PAGE_SIZE.0,
+                PAGE_SIZE.1,
+                10,
+            )
+            .insert(RankingPrev);
+        }
+        if let (Some(n), Some(h), Some(pr)) = (
+            crate::ui::theme::load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 207),
+            crate::ui::theme::load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 208),
+            crate::ui::theme::load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 209),
+        ) {
+            crate::ui::theme::spawn_icon_button(
+                p,
+                n,
+                h,
+                pr,
+                NEXT_POS.0,
+                NEXT_POS.1,
+                PAGE_SIZE.0,
+                PAGE_SIZE.1,
+                10,
+            )
+            .insert(RankingNext);
+        }
+        // 滚动条手柄：C# `Prguse2[205/206]` 12x18 @(299,113)。
+        // 拖动（C# `OnMoving` → `RowOffset`）本端暂不接线：服务端固定只回前 20 名
+        // （`ServerRust/.../npc.rs` `take(20)`），故 C# `Move()` 的 `RankCount-20` 恒 0、
+        // `GapPerRow = ScrollHeight / 0` —— 原版在该数据下同样不动（见 #2892 记录）。
+        if let (Some(n), Some(h)) = (
+            crate::ui::theme::load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 205),
+            crate::ui::theme::load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 206),
+        ) {
+            crate::ui::theme::spawn_icon_button(
+                p,
+                n.clone(),
+                h,
+                n,
+                SCROLL_POS.0,
+                SCROLL_POS.1,
+                SCROLL_SIZE.0,
+                SCROLL_SIZE.1,
+                10,
+            );
+        }
+        // 仅在线勾选框：C# `Prguse[2086]`(未勾)/`[2087]`(勾) @(190, H-20)，右侧 LabelText
         if let (Some(u), Some(t)) = (
             crate::ui::theme::load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 2086),
             crate::ui::theme::load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 2087),
@@ -277,50 +420,65 @@ fn spawn_ranking(
                 u.clone(),
                 t.clone(),
                 u,
-                190.0,
-                410.0,
+                ONLINE_POS.0,
+                ONLINE_POS.1,
                 16.0,
-                14.0,
-                9,
+                13.0,
+                10,
             )
             .insert(RankingOnlineOnly);
         }
         crate::ui::theme::spawn_label(
             p,
             &font,
-            "仅在线",
-            210.0,
-            410.0,
+            // C# `OnlineOnlyButton.LabelText` = `ClientTextKeys.OnlineOnly`（Chinese.json「仅限在线」）
+            "仅限在线",
+            ONLINE_POS.0 + 20.0,
+            ONLINE_POS.1 + 1.0,
             12.0,
             Color::srgb(0.8, 0.9, 1.0),
             9,
         );
-        // 10 行（bevy_ui 文本 + 可点击；C# `RankingDialog.cs:336` `RankingRow.Click → Inspect()`）
-        for i in 0..10usize {
-            crate::ui::theme::spawn_label(
-                p,
-                &font,
-                "",
-                10.0,
-                98.0 + i as f32 * 28.0,
-                13.0,
-                Color::WHITE,
-                9,
-            )
-            .insert((RankingLine(i), Button));
-        }
-        // 我的排名
-        crate::ui::theme::spawn_label(
+        // 我的排名：C# `MyRank` 82x22 @(229,36) BurlyWood 居中（点击处理 `GoToMyRank()` 在 C# 是空函数）
+        crate::ui::theme::spawn_label_center(
             p,
             &font,
-            "我的排名：--",
-            10.0,
-            388.0,
+            "",
+            MYRANK_POS.0 + MYRANK_SIZE.0 / 2.0,
+            MYRANK_POS.1,
+            MYRANK_SIZE.0,
             12.0,
-            Color::srgb(1.0, 0.9, 0.3),
+            COLOR_BURLY_WOOD,
             9,
         )
         .insert(RankingMyRank);
+        // 20 行：C# `RankingRow @(32, 98+i*15) 270x15`，整行可点（`RankingRow.Click → Inspect()`），
+        // 行内四列文字 0/55/150/220。
+        for i in 0..ROW_COUNT {
+            p.spawn((
+                Button,
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: Val::Px(ROW_X),
+                    top: Val::Px(ROW_Y0 + i as f32 * ROW_H),
+                    width: Val::Px(ROW_W),
+                    height: Val::Px(ROW_H),
+                    ..default()
+                },
+                BackgroundColor(Color::NONE),
+                ZIndex(9),
+                RankingLine(i),
+            ))
+            .with_children(|row| {
+                for (field, x) in ROW_LABEL_X.iter().enumerate() {
+                    crate::ui::theme::spawn_label(row, &font, "", *x, 0.0, 12.0, Color::WHITE, 9)
+                        .insert(RankingCell {
+                            row: i,
+                            field: field as u8,
+                        });
+                }
+            });
+        }
     });
 }
 
@@ -344,8 +502,8 @@ fn ranking_ui_system(
         (Entity, &Interaction, &ImageButton, &mut ImageNode),
         (With<RankingOnlineOnly>, Without<RankingTab>),
     >,
-    mut my_rank_text: Query<&mut Text, (With<RankingMyRank>, Without<RankingLine>)>,
-    mut lines: Query<(&mut Text, &RankingLine), Without<RankingMyRank>>,
+    mut my_rank_text: Query<&mut Text, (With<RankingMyRank>, Without<RankingCell>)>,
+    mut cells: Query<(&mut Text, &mut TextColor, &RankingCell)>,
     mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
     mut requested: Local<bool>,
 ) {
@@ -379,7 +537,7 @@ fn ranking_ui_system(
         tracing::info!("🏅 请求排行榜");
     }
     let filtered = filter_rank_tab(&ranking.entries, ranking.tab);
-    let max_offset = filtered.len().saturating_sub(10);
+    let max_offset = filtered.len().saturating_sub(ROW_COUNT);
     // 页签切换
     for (e, inter, t) in &tabs {
         if edge(e, inter, &mut prev_inter) && ranking.tab != t.0 {
@@ -399,15 +557,15 @@ fn ranking_ui_system(
             );
         }
     }
-    // 上一页 / 下一页
+    // 上一页 / 下一页（C# `RankingDialog.Move(±1)` `:239-252`：RowOffset 钳在 [0, RankCount-20]）
     for (e, inter) in &prev {
         if edge(e, inter, &mut prev_inter) {
-            ranking.page_offset = ranking.page_offset.saturating_sub(10);
+            ranking.page_offset = ranking.page_offset.saturating_sub(1);
         }
     }
     for (e, inter) in &next {
         if edge(e, inter, &mut prev_inter) {
-            ranking.page_offset = (ranking.page_offset + 10).min(max_offset);
+            ranking.page_offset = (ranking.page_offset + 1).min(max_offset);
         }
     }
     ranking.page_offset = ranking.page_offset.min(max_offset);
@@ -431,33 +589,39 @@ fn ranking_ui_system(
             node.image = want.clone();
         }
     }
-    // 行文本
-    for (mut text, line) in &mut lines {
-        let idx = ranking.page_offset + line.0;
-        text.0 = match filtered.get(idx) {
-            Some(e) => format!(
-                "#{} {} ({} Lv.{})",
-                e.rank,
-                e.player_name,
-                rank_class_name(e.class),
-                e.level
-            ),
-            None => String::new(),
-        };
-    }
-    // 我的排名
+    // 行文字（C# `RankingRow` 四列：排名/名字/职业/等级 + 名次着色）
     let self_name = local_player
         .single()
         .map(|n| n.0.clone())
         .unwrap_or_default();
+    for (mut text, mut color, cell) in &mut cells {
+        let (line, want) = match (filtered.get(ranking.page_offset + cell.row), cell.field) {
+            (Some(e), f @ 0..=3) => {
+                let s = match f {
+                    0 => e.rank.to_string(),
+                    1 => e.player_name.clone(),
+                    2 => rank_class_name(e.class).to_string(),
+                    _ => e.level.to_string(),
+                };
+                (s, rank_row_color(e.rank, &e.player_name, &self_name))
+            }
+            _ => (String::new(), Color::WHITE),
+        };
+        if text.0 != line {
+            text.0 = line;
+        }
+        if color.0 != want {
+            color.0 = want;
+        }
+    }
+    // 我的排名（C# `MyRank`：`Ranked` = 「排名：{0}」/ `NotListed` = 「未列出」，`RankingDialog.cs:323-326`）
     for mut text in &mut my_rank_text {
         text.0 = if ranking.my_rank > 0 {
-            format!("我的排名：第 {} 名", ranking.my_rank)
+            format!("排名：{}", ranking.my_rank)
         } else {
-            "我的排名：未上榜".to_string()
+            "未列出".to_string()
         };
     }
-    let _ = self_name;
 }
 
 /// 行点击查看（C# `RankingDialog.cs:336` `RankingRow.Click → Inspect()`；`:374-380`：

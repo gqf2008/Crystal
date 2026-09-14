@@ -1828,3 +1828,137 @@ fn ranking_dialog_aligned() {
 
     println!("  ✓ 排行榜 Title[728] 324x441 @(350,163)（C# 居中公式）");
 }
+
+/// #2892 批A 单元②：排行榜子控件精灵与坐标对齐 C# `RankingDialog.cs`（`:47-215`）。
+/// 断言的是**代码里实际使用的常量** vs 真实精灵尺寸/C# 公式 —— 改错坐标或换错帧即红。
+#[test]
+fn ranking_children_aligned() {
+    use client_bevy::game::dialogs::ranking as rk;
+    require_assets!("ranking_children_aligned");
+    let mut libs = Libs::new();
+    let (pw, ph) = (rk::PANEL_W, rk::PANEL_H);
+    let (ox, oy) = rk::PANEL_ORIGIN;
+
+    // 页签：6 个图标按钮（C# 构造顺序 All/Tao/War/Wiz/Sin/Arch）
+    assert_eq!(
+        rk::TAB_POS,
+        [
+            (10.0, 38.0),
+            (40.0, 38.0),
+            (60.0, 38.0),
+            (80.0, 38.0),
+            (100.0, 38.0),
+            (120.0, 38.0)
+        ],
+        "[坐标] C# 页签 x=10/40/60/80/100/120、y=38"
+    );
+    assert_eq!(
+        rk::TAB_RANK,
+        [0, 3, 1, 2, 4, 5],
+        "[映射] C# 构造顺序 All→0、Tao→3、War→1、Wiz→2、Sin→4、Arch→5"
+    );
+    for (i, (n, hf, pf)) in rk::TAB_FRAMES.iter().enumerate() {
+        let (w, h) = libs.size(LibraryName::Title, *n);
+        assert_eq!(
+            (w, h),
+            rk::TAB_SIZE[i],
+            "[尺寸] 页签 {i} 应等于 Title[{n}] 原生尺寸"
+        );
+        let (x, y) = rk::TAB_POS[i];
+        assert_inside(&format!("页签{i}"), ox + x, oy + y, w, h, ox, oy, pw, ph);
+        for idx in [*hf, *pf] {
+            let (hw, hh) = libs.size(LibraryName::Title, idx);
+            assert_eq!(
+                (hw, hh),
+                (w, h),
+                "[尺寸] 页签 {i} 的 hover/pressed 帧 Title[{idx}] 应与 normal 同尺寸"
+            );
+        }
+    }
+
+    // 关闭键：C# `Prguse2[360..362]` 24x21 @(300,3)
+    let (cw, ch) = libs.size(LibraryName::Prguse2, 360);
+    assert_eq!(
+        (cw, ch),
+        rk::CLOSE_SIZE,
+        "[尺寸] 关闭键应取 Prguse2[360] 原生尺寸"
+    );
+    assert_eq!(
+        rk::CLOSE_POS,
+        (300.0, 3.0),
+        "[坐标] C# CloseButton @(300,3)"
+    );
+    assert_inside("关闭键", ox + 300.0, oy + 3.0, cw, ch, ox, oy, pw, ph);
+
+    // 翻页 + 滚动条（C# ScrollBar.Y = PrevButton.Y + 13 = 113）
+    assert_eq!(
+        rk::PREV_POS,
+        (299.0, 100.0),
+        "[坐标] C# PrevButton @(299,100)"
+    );
+    assert_eq!(
+        rk::NEXT_POS,
+        (299.0, 386.0),
+        "[坐标] C# NextButton @(299,386)"
+    );
+    assert_eq!(
+        rk::SCROLL_POS,
+        (299.0, rk::PREV_POS.1 + 13.0),
+        "[坐标] C# ScrollBar.Y = PrevButton.Y + 13"
+    );
+    assert_eq!(
+        libs.size(LibraryName::Prguse2, 205),
+        rk::SCROLL_SIZE,
+        "[尺寸] 滚动条手柄应取 Prguse2[205] 12x18"
+    );
+    for (pos, name) in [(rk::PREV_POS, "上一页"), (rk::NEXT_POS, "下一页")] {
+        assert_inside(
+            name,
+            ox + pos.0,
+            oy + pos.1,
+            rk::PAGE_SIZE.0,
+            rk::PAGE_SIZE.1,
+            ox,
+            oy,
+            pw,
+            ph,
+        );
+    }
+
+    // 仅在线勾选框：C# @(190, Size.Height-20) = (190,421)
+    assert_eq!(
+        rk::ONLINE_POS,
+        (190.0, 441.0 - 20.0),
+        "[坐标] C# OnlineOnlyButton @(190, H-20)"
+    );
+    assert_eq!(
+        libs.size(LibraryName::Prguse, 2086),
+        (16.0, 13.0),
+        "[尺寸] 未勾/勾选帧 Prguse[2086]/[2087]"
+    );
+
+    // 我的排名：C# `MyRank` 82x22 @(229,36)
+    assert_eq!(rk::MYRANK_POS, (229.0, 36.0), "[坐标] C# MyRank @(229,36)");
+    assert_eq!(rk::MYRANK_SIZE, (82.0, 22.0), "[尺寸] C# MyRank 82x22");
+
+    // 20 行：C# `RankingRow @(32, 98+i*15) 270x15`，四列 0/55/150/220
+    assert_eq!(rk::ROW_COUNT, 20, "[行数] C# `Rows = new RankingRow[20]`");
+    assert_eq!(
+        rk::ROW_LABEL_X,
+        [0.0, 55.0, 150.0, 220.0],
+        "[列] C# RankLabel/NameLabel/ClassLabel/LevelLabel = 0/55/150/220"
+    );
+    let last_bottom = rk::ROW_Y0 + (rk::ROW_COUNT as f32 - 1.0) * rk::ROW_H + rk::ROW_H;
+    assert_eq!(last_bottom, 398.0, "[行] 第 20 行底边 = 98 + 19*15 + 15");
+    assert!(
+        rk::ROW_X + rk::ROW_W <= pw,
+        "[面板] 行宽 32+270 应在面板 324 内"
+    );
+    assert!(
+        last_bottom <= rk::PANEL_H,
+        "[面板] 末行底边 {last_bottom} 应在面板高 {} 内",
+        rk::PANEL_H
+    );
+
+    println!("  ✓ 排行榜子控件：页签 6 图标 / 关闭 24x21@(300,3) / 翻页@(299,100|386) / 滚动条@(299,113) / 仅在线@(190,421) / MyRank 82x22@(229,36) / 20 行@(32,98+15i)");
+}
