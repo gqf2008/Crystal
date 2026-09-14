@@ -2956,7 +2956,7 @@ async fn exec_action(
         "SETTIMER" => {
             let key = arg0().parse::<i32>().unwrap_or(0);
             let secs = arg1().parse::<i64>().unwrap_or(0).max(0);
-            let _kind = arg2().parse::<u8>().unwrap_or(0);
+            let kind = arg2().parse::<u8>().unwrap_or(0);
             let global = arg3().eq_ignore_ascii_case("true") || arg3() == "1";
             // 世界循环 100ms/tick：1 秒 = 10 ticks
             let expire_tick = world.tick_count.saturating_add(secs as u64 * 10);
@@ -2974,6 +2974,7 @@ async fn exec_action(
                 let packet = mir2_shared::packets::server::ui_events::SetTimer {
                     timer_id: key,
                     seconds: secs as i32,
+                    kind,
                 };
                 let mut body = Vec::new();
                 if mir2_shared::packets::base::serialize_packet(

@@ -251,10 +251,12 @@ pub enum ServerEvent {
     PlaySound {
         sound_id: u32,
     },
-    /// #230 SetTimer：启动计时器（秒）
+    /// #230 SetTimer：启动计时器（秒 + C# `ClientTimer.Type` 沙漏档）
     TimerSet {
         timer_id: i32,
         seconds: i32,
+        /// C# `TimerDialog.cs:225` `Type`：0=不显示沙漏、1=`Prguse2[960]`、2=`Prguse2[440]`
+        kind: u8,
     },
     /// #230 ExpireTimer：计时器到期/关闭
     TimerExpired {

@@ -132,6 +132,8 @@ impl Packet for PlaySound {
 pub struct SetTimer {
     pub timer_id: i32,              // 计时器ID
     pub seconds: i32,               // 秒数
+    /// C# `ClientTimer.Type`（`TimerDialog.cs:225`）：0=不显示沙漏、1=`Prguse2[960]` 沙漏、2=`Prguse2[440]` 沙漏
+    pub kind: u8,
 }
 
 impl Packet for SetTimer {
@@ -142,6 +144,7 @@ impl Packet for SetTimer {
         
         writer.write_i32::<LittleEndian>(self.timer_id)?;
         writer.write_i32::<LittleEndian>(self.seconds)?;
+        writer.write_u8(self.kind)?;
         
         Ok(())
     }
@@ -149,7 +152,12 @@ impl Packet for SetTimer {
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
         let timer_id = reader.read_i32::<LittleEndian>()?;
         let seconds = reader.read_i32::<LittleEndian>()?;
-        Ok(Self { timer_id, seconds })
+        let kind = reader.read_u8()?;
+        Ok(Self {
+            timer_id,
+            seconds,
+            kind,
+        })
     }
 }
 
