@@ -6934,17 +6934,16 @@ impl WorldActor {
                 // #2853：地图落雷/岩浆（C# `SpellObject.ProcessSpell` 的 `MapLava`/`MapLightning` 分支，
                 // `SpellObject.cs:204-212`）——落点玩家 `Struck(Value, MAC)`（必中 + 仅护甲减免）；
                 // 本跳结算后 `Value = 0`（`SpellObject.cs:121`）⇒ 整段寿命只结算一次。
-                Spell::MapLightning | Spell::MapLava => {
-                    if spell_obj.tick_value > 0 {
-                        env_strikes.push((
-                            spell_obj.tick_value,
-                            spell_obj.map_index,
-                            spell_obj.x,
-                            spell_obj.y,
-                            spell_obj.spell == Spell::MapLightning,
-                        ));
-                        spell_obj.tick_value = 0;
-                    }
+                // 合并守卫（clippy::collapsible_match；语义同上，`tick_value == 0` 由 `_` 分支兜底）
+                Spell::MapLightning | Spell::MapLava if spell_obj.tick_value > 0 => {
+                    env_strikes.push((
+                        spell_obj.tick_value,
+                        spell_obj.map_index,
+                        spell_obj.x,
+                        spell_obj.y,
+                        spell_obj.spell == Spell::MapLightning,
+                    ));
+                    spell_obj.tick_value = 0;
                 }
                 _ => {}
             }

@@ -171,61 +171,60 @@ impl MonsterBehavior for TreeQueenBehavior {
         }
 
         // 近战攻击（C# TreeQueen.cs:54-100）：玩家 2 格内才攻击
-        if near_player.is_some() {
-            if ctx.tick_count >= monster.next_attack_tick {
-                monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
-                let damage =
-                    crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0);
-                // C# `if (damage == 0) return;`——本次不造成伤害（冷却已推进，与 C# 先设 ActionTime/AttackTime 一致）
-                if damage == 0 {
-                    return;
+        // （条件合并写法，clippy::collapsible_if；语义与原嵌套 `if` 相同）
+        if near_player.is_some() && ctx.tick_count >= monster.next_attack_tick {
+            monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
+            let damage =
+                crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0);
+            // C# `if (damage == 0) return;`——本次不造成伤害（冷却已推进，与 C# 先设 ActionTime/AttackTime 一致）
+            if damage == 0 {
+                return;
+            }
+            let is_fire = fastrand::i32(0..2) > 0; // C# `Random.Next(2) > 0` = 1/2
+            if is_fire {
+                // FireBombardment：自身 3 格 AOE（C# `FindAllTargets(3, CurrentLocation)` 全员命中，MACAgility）
+                ctx.out_attacks
+                    .push(crate::actors::world::ai::AttackAction::Aoe {
+                        attacker_oid: monster.object_id,
+                        center_x: monster.x,
+                        center_y: monster.y,
+                        radius: 3,
+                        damage,
+                        spell_id: 0,
+                    });
+            } else {
+                // PushAttack：C# `FindAllTargets(1, CurrentLocation)` ⇒ **只推不打**（`CompleteAttack` 的
+                // pushAttack 分支不调用 `Attacked`），方向 = 怪→目标，距离 5。动画用 `Type=1` 的
+                // ObjectAttack 广播（`Cells` 动作 + 空格集合 ⇒ 只发动画、不产生伤害）。
+                ctx.out_attacks
+                    .push(crate::actors::world::ai::AttackAction::Cells {
+                        attacker_oid: monster.object_id,
+                        center_x: monster.x,
+                        center_y: monster.y,
+                        cells: Vec::new(),
+                        damage: 0,
+                        spell_id: 0,
+                        attack_type: 1,
+                    });
+                let mut ring: Vec<(i32, i32)> = Vec::with_capacity(9);
+                for dy in -1..=1 {
+                    for dx in -1..=1 {
+                        ring.push((monster.x + dx, monster.y + dy));
+                    }
                 }
-                let is_fire = fastrand::i32(0..2) > 0; // C# `Random.Next(2) > 0` = 1/2
-                if is_fire {
-                    // FireBombardment：自身 3 格 AOE（C# `FindAllTargets(3, CurrentLocation)` 全员命中，MACAgility）
-                    ctx.out_attacks
-                        .push(crate::actors::world::ai::AttackAction::Aoe {
-                            attacker_oid: monster.object_id,
-                            center_x: monster.x,
-                            center_y: monster.y,
-                            radius: 3,
-                            damage,
-                            spell_id: 0,
-                        });
-                } else {
-                    // PushAttack：C# `FindAllTargets(1, CurrentLocation)` ⇒ **只推不打**（`CompleteAttack` 的
-                    // pushAttack 分支不调用 `Attacked`），方向 = 怪→目标，距离 5。动画用 `Type=1` 的
-                    // ObjectAttack 广播（`Cells` 动作 + 空格集合 ⇒ 只发动画、不产生伤害）。
-                    ctx.out_attacks
-                        .push(crate::actors::world::ai::AttackAction::Cells {
-                            attacker_oid: monster.object_id,
-                            center_x: monster.x,
-                            center_y: monster.y,
-                            cells: Vec::new(),
-                            damage: 0,
-                            spell_id: 0,
-                            attack_type: 1,
-                        });
-                    let mut ring: Vec<(i32, i32)> = Vec::with_capacity(9);
-                    for dy in -1..=1 {
-                        for dx in -1..=1 {
-                            ring.push((monster.x + dx, monster.y + dy));
-                        }
-                    }
-                    let pushed: Vec<(u64, i32, i32)> = ctx
-                        .find_all_targets_in_cells(&ring, monster.map_index)
-                        .iter()
-                        .map(|p| (p.session_id, p.x, p.y))
-                        .collect();
-                    for (session_id, px, py) in pushed {
-                        ctx.out_pushes.push(crate::actors::world::ai::PushPlayer {
-                            session_id,
-                            dir: crate::actors::world::ai::direction_towards(
-                                monster.x, monster.y, px, py,
-                            ),
-                            distance: 5,
-                        });
-                    }
+                let pushed: Vec<(u64, i32, i32)> = ctx
+                    .find_all_targets_in_cells(&ring, monster.map_index)
+                    .iter()
+                    .map(|p| (p.session_id, p.x, p.y))
+                    .collect();
+                for (session_id, px, py) in pushed {
+                    ctx.out_pushes.push(crate::actors::world::ai::PushPlayer {
+                        session_id,
+                        dir: crate::actors::world::ai::direction_towards(
+                            monster.x, monster.y, px, py,
+                        ),
+                        distance: 5,
+                    });
                 }
             }
         }
