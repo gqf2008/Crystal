@@ -684,6 +684,9 @@ fn has_rpc_mapping(kind: DialogKind) -> bool {
         | D::HeroManage
         | D::QuestDetail
         | D::InputBox => true,
+        // #2892 批D 单元①：备注窗由好友窗的「备注」动作打开（C# `MemoDialog.Show()`），
+        // 无独立 RPC 开关
+        D::Memo => false,
         // GuestTrade 刻意排除：网络 trade 会话驱动，无独立开关（见 parse_dialog_kind 文档）
         D::GuestTrade => false,
     }
