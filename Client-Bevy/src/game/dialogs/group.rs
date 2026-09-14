@@ -49,6 +49,9 @@ pub struct GroupState {
 
 /// 组队框背景索引（C# GroupDialog `Index = 120`，Prguse，AutoSize → 实测 232x249。
 /// 旧代码误用 Prguse[964]——实测仅 16x18 的小图，导致按钮/成员悬浮在无背景上）
+/// #2892 批B：面板精灵与 C# 原生尺寸（供 `ui_alignment` 用真实精灵核对）
+pub const PANEL: (LibraryName, usize) = (LibraryName::Prguse, 120);
+pub const PANEL_SIZE: (f32, f32) = (232.0, 249.0);
 const GROUP_BG_INDEX: usize = 120;
 
 /// 屏幕中心原点公式（C# MirControl.Center，MirControl.cs:645：
@@ -178,7 +181,7 @@ fn spawn_group(
     else {
         return;
     };
-    let panel = spawn_panel(&mut commands, bg, dx, dy, 232.0, 249.0, 30);
+    let panel = spawn_panel(&mut commands, bg, dx, dy, PANEL_SIZE.0, PANEL_SIZE.1, 30);
     commands
         .entity(panel)
         .insert((DialogRoot(DialogKind::Group), GroupWidget));

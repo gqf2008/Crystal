@@ -2653,3 +2653,88 @@ fn hero_inventory_autopot_aligned() {
         "  ✓ 英雄背包自动药：Title[560..565] 60x25 @(58/206,206) + 标签(+27) + 锁条 Prguse[1428/1429] 108x62 @(57/162,196)"
     );
 }
+
+/// #2892 批B（一）：8 个「面板 + 居中/已知原点」窗口的面板精灵核对。
+///
+/// 用真实 `.Lib` 尺寸比对**代码声明的 C# 原生尺寸**，抓「换错精灵 / 拉伸变形」这类回归
+/// （Creature 早期就用 `Prguse[170]` 244x207 拉伸成 452x376）。居中类窗口再按 C# 公式
+/// （整数除法）核对其原点常量。
+#[test]
+fn panel_sprites_batch_b1_match_csharp() {
+    use client_bevy::game::dialogs::{
+        center_origin, creature, friend, group, help, mail, mentor, notice, relationship,
+    };
+    require_assets!("panel_sprites_batch_b1_match_csharp");
+    let mut libs = Libs::new();
+
+    let cases: [(&str, (LibraryName, usize), (f32, f32)); 8] = [
+        ("Group", group::PANEL, group::PANEL_SIZE),
+        ("Friend", friend::PANEL, friend::PANEL_SIZE),
+        ("Mentor", mentor::PANEL, mentor::PANEL_SIZE),
+        (
+            "Relationship",
+            relationship::PANEL,
+            relationship::PANEL_SIZE,
+        ),
+        ("Help", help::PANEL, help::PANEL_SIZE),
+        ("Notice", notice::PANEL, (notice::BG_W, notice::BG_H)),
+        ("Mail", mail::PANEL, mail::PANEL_SIZE),
+        ("Creature", creature::PANEL, creature::PANEL_SIZE),
+    ];
+    for (name, (lib, idx), declared) in cases {
+        let real = libs.size(lib, idx);
+        assert_eq!(
+            real, declared,
+            "[尺寸] {name} 面板 {lib:?}[{idx}] 的真实尺寸应与代码声明的 C# 尺寸一致（换错精灵/拉伸即失败）"
+        );
+        assert_in_canvas(name, 0.0, 0.0, real.0, real.1);
+    }
+
+    // 居中公式（C# `Location = Center` → `((1024-W)/2, (768-H)/2)` 整数除法）
+    for (name, (lib, idx), origin) in [
+        (
+            "Friend",
+            friend::PANEL,
+            center_origin(friend::PANEL_SIZE.0, friend::PANEL_SIZE.1),
+        ),
+        (
+            "Mentor",
+            mentor::PANEL,
+            center_origin(mentor::PANEL_SIZE.0, mentor::PANEL_SIZE.1),
+        ),
+        (
+            "Relationship",
+            relationship::PANEL,
+            center_origin(relationship::PANEL_SIZE.0, relationship::PANEL_SIZE.1),
+        ),
+        (
+            "Creature",
+            creature::PANEL,
+            center_origin(creature::PANEL_SIZE.0, creature::PANEL_SIZE.1),
+        ),
+    ] {
+        let real = libs.size(lib, idx);
+        assert_eq!(
+            origin,
+            (((SW - real.0) / 2.0).floor(), ((SH - real.1) / 2.0).floor()),
+            "[居中] {name} 原点应等于按真实精灵尺寸代入的 C# 居中公式"
+        );
+    }
+    // Help：`HelpDialog.Location = Center`（代码里的 ORIGIN 常量）
+    assert_eq!(
+        help::ORIGIN,
+        center_origin(help::PANEL_SIZE.0, help::PANEL_SIZE.1),
+        "[居中] Help 原点常量应等于 C# 居中公式结果"
+    );
+    // Notice：`Location = ((1024-W)/2, (768-H)/3)`（**垂直三分之一**，不是居中）
+    assert_eq!(
+        notice::ORIGIN,
+        (
+            ((SW - notice::BG_W) / 2.0).trunc(),
+            ((SH - notice::BG_H) / 3.0).trunc()
+        ),
+        "[坐标] Notice 使用 C# 的「屏心偏上」公式（y = (768-H)/3）"
+    );
+
+    println!("  ✓ 批B 面板精灵核对：Group/Friend/Mentor/Relationship/Help/Notice/Mail/Creature");
+}

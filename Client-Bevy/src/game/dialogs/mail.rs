@@ -92,6 +92,9 @@ pub fn stamp_slots(stamped: bool) -> usize {
 // C# MailListDialog（MailDialogs.cs:32-35）布局锚点。
 const MAIL_W: f32 = 312.0;
 const MAIL_H: f32 = 444.0;
+/// #2892 批B：列表面板精灵（C# `MailListDialog.Index = 670; Library = Libraries.Title`）
+pub const PANEL: (LibraryName, usize) = (LibraryName::Title, 670);
+pub const PANEL_SIZE: (f32, f32) = (MAIL_W, MAIL_H);
 const MAIL_SCREEN_W: f32 = 1024.0;
 const MAIL_VISIBLE_ROWS: usize = 10;
 const MAIL_ROW_H: f32 = 33.0;

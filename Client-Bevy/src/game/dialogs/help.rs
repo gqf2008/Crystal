@@ -28,6 +28,10 @@ use crate::ui::theme::{
     ImageButton,
 };
 
+/// #2892 批B：面板精灵与 C# 原生尺寸（C# `HelpDialog.Index = 920; Library = Libraries.Prguse`）
+pub const PANEL: (LibraryName, usize) = (LibraryName::Prguse, 920);
+pub const PANEL_SIZE: (f32, f32) = (536.0, 509.0);
+
 /// 背景 Prguse[920] 实测 536x509；Location = Center = ((1024-536)/2, (768-509)/2)
 pub const ORIGIN: (f32, f32) = (244.0, 129.0);
 /// 快捷键页行容量（C# ShortcutPage1/2 各 18 行，留 20）
@@ -223,7 +227,7 @@ fn spawn_help(
     let Some(bg) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 920) else {
         return;
     };
-    let panel = spawn_panel(&mut commands, bg, ox, oy, 536.0, 509.0, 30);
+    let panel = spawn_panel(&mut commands, bg, ox, oy, PANEL_SIZE.0, PANEL_SIZE.1, 30);
     commands
         .entity(panel)
         .insert((DialogRoot(DialogKind::Help), HelpWidget));

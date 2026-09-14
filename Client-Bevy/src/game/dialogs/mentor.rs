@@ -22,6 +22,10 @@ use crate::ui::theme::{
     load_lib_image, spawn_container, spawn_icon_button, spawn_image, spawn_label, spawn_panel,
 };
 
+/// #2892 批B：面板精灵与 C# 原生尺寸（C# `MentorDialog.Index = 170; Library = Libraries.Prguse`）
+pub const PANEL: (LibraryName, usize) = (LibraryName::Prguse, 170);
+pub const PANEL_SIZE: (f32, f32) = (244.0, 207.0);
+
 /// 师徒状态（MentorUpdate 写入；mentor_* 字段语义同 C# MentorDialog：对方信息）
 #[derive(Resource, Default)]
 pub struct MentorState {
@@ -120,7 +124,7 @@ fn spawn_mentor(
         return;
     };
     let (px, py) = crate::game::dialogs::center_origin(244.0, 207.0);
-    let panel = spawn_panel(&mut commands, bg, px, py, 244.0, 207.0, 30);
+    let panel = spawn_panel(&mut commands, bg, px, py, PANEL_SIZE.0, PANEL_SIZE.1, 30);
     commands
         .entity(panel)
         .insert((DialogRoot(DialogKind::Mentor), MentorWidget));

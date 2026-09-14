@@ -20,6 +20,10 @@ use crate::ui::theme::{
     load_lib_image, spawn_container, spawn_icon_button, spawn_image, spawn_label, spawn_panel,
 };
 
+/// #2892 批B：面板精灵与 C# 原生尺寸（C# `FriendDialog.Index = 199; Library = Libraries.Title`）
+pub const PANEL: (LibraryName, usize) = (LibraryName::Title, 199);
+pub const PANEL_SIZE: (f32, f32) = (264.0, 272.0);
+
 /// 好友条目
 #[derive(Debug, Clone, Default)]
 pub struct FriendEntry {
@@ -154,7 +158,7 @@ fn spawn_friend(
         return;
     };
     let (px, py) = crate::game::dialogs::center_origin(264.0, 272.0);
-    let panel = spawn_panel(&mut commands, bg, px, py, 264.0, 272.0, 30);
+    let panel = spawn_panel(&mut commands, bg, px, py, PANEL_SIZE.0, PANEL_SIZE.1, 30);
     commands
         .entity(panel)
         .insert((DialogRoot(DialogKind::Friend), FriendWidget));
