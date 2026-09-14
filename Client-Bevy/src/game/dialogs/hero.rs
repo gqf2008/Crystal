@@ -174,11 +174,6 @@ pub struct HeroLine(usize);
 #[derive(Component)]
 pub struct HeroCreateBtn;
 
-/// 自动药阈值按钮（C# HeroInventoryDialog HPButton/MPButton）
-#[derive(Component)]
-pub struct HeroAutoHpCycle;
-#[derive(Component)]
-pub struct HeroAutoMpCycle;
 #[derive(Component)]
 pub struct HeroAutoPotLabel;
 
@@ -424,22 +419,9 @@ fn spawn_hero(
                     11,
                 );
             });
-        // 自动药阈值（C# HeroInventoryDialog HPButton/MPButton，Title 560/563）
-        spawn_label(p, &cjk, "自动药:", 20.0, 220.0, 12.0, Color::WHITE, 10);
-        if let (Some(n), Some(h), Some(pr)) = (
-            load_lib_image(&mut libs, &mut images, LibraryName::Title, 560),
-            load_lib_image(&mut libs, &mut images, LibraryName::Title, 561),
-            load_lib_image(&mut libs, &mut images, LibraryName::Title, 562),
-        ) {
-            spawn_icon_button(p, n, h, pr, 80.0, 216.0, 60.0, 25.0, 10).insert(HeroAutoHpCycle);
-        }
-        if let (Some(n), Some(h), Some(pr)) = (
-            load_lib_image(&mut libs, &mut images, LibraryName::Title, 563),
-            load_lib_image(&mut libs, &mut images, LibraryName::Title, 564),
-            load_lib_image(&mut libs, &mut images, LibraryName::Title, 565),
-        ) {
-            spawn_icon_button(p, n, h, pr, 150.0, 216.0, 60.0, 25.0, 10).insert(HeroAutoMpCycle);
-        }
+        // #2892 批C：自动药阈值按钮已按 C# 归位到 `HeroInventoryDialog`
+        // （`Title[560..565]` @(58/206, H-60)，见 `dialogs/hero_inventory.rs`），
+        // 本窗不再重复绘制（原自造位置 (80/150,216)）。
         spawn_label(
             p,
             &cjk,
@@ -1147,8 +1129,6 @@ fn hero_button_system(
         Option<&HeroClassCycle>,
         Option<&HeroGenderCycle>,
         Option<&HeroCreateOk>,
-        Option<&HeroAutoHpCycle>,
-        Option<&HeroAutoMpCycle>,
     )>,
     mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
 ) {
@@ -1219,7 +1199,7 @@ fn hero_button_system(
             input.active = None;
         }
     }
-    for (e, inter, class_btn, gender_btn, ok, hp_btn, mp_btn) in &mut cycle_btns {
+    for (e, inter, class_btn, gender_btn, ok) in &mut cycle_btns {
         if !edge(e, inter, &mut prev_inter) {
             continue;
         }
@@ -1236,18 +1216,6 @@ fn hero_button_system(
             });
             state.create_msg = "创建中…".to_string();
             tracing::info!("🦸 创建英雄: {}", name);
-        } else if hp_btn.is_some() {
-            state.auto_pot_hp = next_autopot(state.auto_pot_hp);
-            net.send_packet(&mir2_shared::packets::client::hero::SetAutoPotValue {
-                stat: STAT_HP,
-                value: state.auto_pot_hp as u32,
-            });
-        } else if mp_btn.is_some() {
-            state.auto_pot_mp = next_autopot(state.auto_pot_mp);
-            net.send_packet(&mir2_shared::packets::client::hero::SetAutoPotValue {
-                stat: STAT_MP,
-                value: state.auto_pot_mp as u32,
-            });
         }
     }
 }
@@ -1495,17 +1463,6 @@ pub(crate) fn behaviour_hint(i: usize) -> String {
 // C# Stat 枚举：HP=12, MP=13（服务端同）
 pub(crate) const STAT_HP: u8 = 12;
 pub(crate) const STAT_MP: u8 = 13;
-
-/// 自动药阈值循环：0 → 30 → 50 → 70 → 90 → 0
-pub(crate) fn next_autopot(v: u8) -> u8 {
-    match v {
-        0 => 30,
-        30 => 50,
-        50 => 70,
-        70 => 90,
-        _ => 0,
-    }
-}
 
 /// 自动药显示文本
 fn autopot_text(hp: u8, mp: u8) -> String {

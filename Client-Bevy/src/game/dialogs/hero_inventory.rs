@@ -14,7 +14,7 @@
 use bevy::prelude::*;
 
 use crate::actor::{LocalPlayer, MountState};
-use crate::game::dialogs::hero::{next_autopot, HeroState, STAT_HP, STAT_MP};
+use crate::game::dialogs::hero::{HeroState, STAT_HP, STAT_MP};
 use crate::game::dialogs::inventory::{
     inv_slot_at, item_use_sound_id, use_item_core, InvClickState, InvDropConfirm, InvUiState,
     ItemUseFeedback, UseItemCtx, UseOutcome,
@@ -98,8 +98,14 @@ pub struct HeroInvMpItem;
 
 pub struct HeroInventoryPlugin;
 
+/// #2892 批C：C# `HPButton`/`MPButton` → `MirAmountBox(EnterValue, 116, 99)` → OK →
+/// `C.SetAutoPotValue{Stat, Value}`；`stat` 记本次弹框属于 HP(12) 还是 MP(13)
+#[derive(Resource, Default)]
+pub struct HeroAutoPotPending(pub Option<u8>);
+
 impl Plugin for HeroInventoryPlugin {
     fn build(&self, app: &mut App) {
+        app.init_resource::<HeroAutoPotPending>();
         app.add_systems(OnEnter(AppState::Game), spawn_hero_inventory);
         app.add_systems(OnExit(AppState::Game), cleanup_hero_inventory);
         app.add_systems(
@@ -108,6 +114,8 @@ impl Plugin for HeroInventoryPlugin {
                 hero_inv_visibility_system,
                 hero_inv_data_system,
                 hero_inv_click_system,
+                // #2892 批C：自动药阈值弹框结果 → C.SetAutoPotValue
+                hero_autopot_amount_system,
             )
                 .chain()
                 .run_if(in_state(AppState::Game)),
@@ -223,6 +231,8 @@ fn hero_inv_visibility_system(
     mut mgr: ResMut<DialogManager>,
     hero: Res<HeroState>,
     net: Res<NetConnection>,
+    mut amount_box: ResMut<crate::game::dialogs::amount_box::AmountBoxState>,
+    mut pending: ResMut<HeroAutoPotPending>,
     close: Query<(Entity, &Interaction), With<HeroInvClose>>,
     hp_btn: Query<(Entity, &Interaction), With<HeroInvHpBtn>>,
     mp_btn: Query<(Entity, &Interaction), With<HeroInvMpBtn>>,
@@ -303,23 +313,49 @@ fn hero_inv_visibility_system(
             mgr.close(DialogKind::HeroInventory);
         }
     }
-    // HP/MP 阈值循环（C# HPButton → SetAutoPotValue）
+    // #2892 批C：C# `HPButton/MpButton.Click` → `MirAmountBox(EnterValue, 116, 99)` → OK →
+    // `C.SetAutoPotValue{Stat, Value}`（`:101-140`）。此前本端是「循环 0/30/50/70/90」，
+    // 与原版「弹框输入任意阈值」不同。
     for (e, inter) in &hp_btn {
         if edge(e, inter, &mut prev_inter) {
-            let v = next_autopot(hero.auto_pot_hp);
-            net.send_packet(&mir2_shared::packets::client::hero::SetAutoPotValue {
-                stat: STAT_HP,
-                value: v as u32,
-            });
+            amount_box.ask_with(
+                "输入一个值",
+                Some((LibraryName::Items, 116)),
+                99,
+                hero.auto_pot_hp as u32,
+                0,
+            );
+            pending.0 = Some(STAT_HP);
         }
     }
     for (e, inter) in &mp_btn {
         if edge(e, inter, &mut prev_inter) {
-            let v = next_autopot(hero.auto_pot_mp);
-            net.send_packet(&mir2_shared::packets::client::hero::SetAutoPotValue {
-                stat: STAT_MP,
-                value: v as u32,
-            });
+            amount_box.ask_with(
+                "输入一个值",
+                Some((LibraryName::Items, 116)),
+                99,
+                hero.auto_pot_mp as u32,
+                0,
+            );
+            pending.0 = Some(STAT_MP);
+        }
+    }
+    let _ = &net;
+}
+
+/// #2892 批C：自动药阈值弹框结果 → `C.SetAutoPotValue`（C# `amountBox.OKButton.Click`）
+fn hero_autopot_amount_system(
+    mut results: MessageReader<crate::game::dialogs::amount_box::AmountBoxResult>,
+    mut pending: ResMut<HeroAutoPotPending>,
+    net: Res<NetConnection>,
+) {
+    for r in results.read() {
+        let Some(stat) = pending.0.take() else {
+            continue;
+        };
+        if let Some(value) = r.0 {
+            net.send_packet(&mir2_shared::packets::client::hero::SetAutoPotValue { stat, value });
+            tracing::info!("🦸 自动药阈值 stat={stat} value={value}");
         }
     }
 }
@@ -607,6 +643,92 @@ fn hero_inv_click_system(
 #[cfg(test)]
 mod tests {
     use super::hero_slot_at;
+    use super::*;
+
+    /// #2892 批C：C# `HPButton/MpButton.Click` → `MirAmountBox(EnterValue, 116, 99)`：
+    /// 点击后弹框（上限 99、下限 0、初值 = 当前阈值、图标 `Items[116]`），
+    /// OK 结果按 `Stat` 发 `C.SetAutoPotValue`。
+    #[test]
+    fn autopot_buttons_open_amount_box_and_send_packet() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.init_resource::<DialogManager>();
+        app.init_resource::<crate::game::dialogs::amount_box::AmountBoxState>();
+        app.init_resource::<HeroAutoPotPending>();
+        app.insert_resource(NetConnection::default());
+        app.add_message::<crate::game::dialogs::amount_box::AmountBoxResult>();
+        app.add_systems(
+            Update,
+            (hero_inv_visibility_system, hero_autopot_amount_system).chain(),
+        );
+        let mut hero = HeroState::default();
+        hero.auto_pot_hp = 30;
+        hero.auto_pot_mp = 50;
+        app.insert_resource(hero);
+        // 打开英雄背包（`mgr` 里有该 kind），并预置 HP 按钮
+        app.world_mut()
+            .resource_mut::<DialogManager>()
+            .open(DialogKind::HeroInventory);
+        let hp_btn = app
+            .world_mut()
+            .spawn((HeroInvHpBtn, Interaction::Pressed))
+            .id();
+        app.update();
+
+        // 弹框参数 = C# `MirAmountBox(EnterValue, 116, 99)`
+        let box_state = app
+            .world()
+            .resource::<crate::game::dialogs::amount_box::AmountBoxState>();
+        assert!(box_state.visible, "点 HP 钮应打开数量框");
+        assert_eq!(
+            box_state.title, "输入一个值",
+            "C# `ClientTextKeys.EnterValue`"
+        );
+        assert_eq!((box_state.min, box_state.max), (0, 99));
+        assert_eq!(box_state.value, "30", "初值 = 当前 HP 阈值");
+        assert_eq!(
+            box_state.icon,
+            Some((LibraryName::Items, 116)),
+            "C# `MirAmountBox(EnterValue, 116, 99)` 的图标"
+        );
+        assert_eq!(
+            app.world().resource::<HeroAutoPotPending>().0,
+            Some(STAT_HP),
+            "记住本次弹框属于 HP（Stat=12）"
+        );
+
+        // OK → C.SetAutoPotValue{Stat.HP, 45}
+        let (tx, rx) = crossbeam_channel::unbounded::<Vec<u8>>();
+        app.world_mut().resource_mut::<NetConnection>().to_server = Some(tx);
+        app.world_mut()
+            .write_message(crate::game::dialogs::amount_box::AmountBoxResult(Some(45)));
+        app.update();
+        let raw = rx.try_recv().expect("确认后应发 SetAutoPotValue");
+        let pkt: mir2_shared::packets::client::hero::SetAutoPotValue =
+            mir2_shared::packets::base::deserialize_packet(&mut std::io::Cursor::new(raw))
+                .expect("应为 SetAutoPotValue 包");
+        assert_eq!((pkt.stat, pkt.value), (STAT_HP, 45));
+        assert!(
+            app.world().resource::<HeroAutoPotPending>().0.is_none(),
+            "处理完应清空 pending"
+        );
+        // 取消（None）不发包
+        app.world_mut().entity_mut(hp_btn).insert(Interaction::None);
+        app.update();
+        app.world_mut()
+            .entity_mut(hp_btn)
+            .insert(Interaction::Pressed);
+        app.update();
+        assert_eq!(
+            app.world().resource::<HeroAutoPotPending>().0,
+            Some(STAT_HP)
+        );
+        app.world_mut()
+            .write_message(crate::game::dialogs::amount_box::AmountBoxResult(None));
+        app.update();
+        assert!(rx.try_recv().is_err(), "取消不得发包");
+        assert!(app.world().resource::<HeroAutoPotPending>().0.is_none());
+    }
 
     #[test]
     fn hero_slot_hit_math() {

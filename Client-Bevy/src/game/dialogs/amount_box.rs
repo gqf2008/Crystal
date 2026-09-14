@@ -103,7 +103,9 @@ impl AmountBoxState {
         self.visible = true;
         self.title = title.into();
         self.max = max.max(1);
-        self.min = min.clamp(1, self.max);
+        // #2892 批C：允许 `min = 0`（C# `MirAmountBox(title, 116, 99)` 的自动药阈值
+        // 下限就是 0 —— 0% 表示不触发；其余调用方传 1 或 `价格+1`，行为不变）
+        self.min = min.min(self.max);
         let initial = if default_amount > 0 && default_amount <= self.max {
             default_amount
         } else {
@@ -145,7 +147,7 @@ pub fn amount_border_state(value: &str, min: u32, max: u32) -> (AmountBorder, bo
     let Ok(amount) = value.trim().parse::<u32>() else {
         return (AmountBorder::Red, false);
     };
-    if amount < min.max(1) {
+    if amount < min {
         return (AmountBorder::Red, false);
     }
     if amount >= max {
@@ -262,7 +264,7 @@ fn confirm_amount(state: &AmountBoxState) -> Option<u32> {
         .parse::<u32>()
         .ok()
         .or(Some(state.max))
-        .map(|v| v.clamp(state.min.max(1), state.max))
+        .map(|v| v.clamp(state.min, state.max))
 }
 
 /// 显示/隐藏 + 数字输入 + OK/Cancel/Close
@@ -459,6 +461,26 @@ pub(crate) fn amount_box_system(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #2892 批C：`min = 0` 场景（C# 自动药 `MirAmountBox(EnterValue, 116, 99)` 下限 0）——
+    /// 0 合法（Lime + OK 可见）、确认值不会被抬到 1
+    #[test]
+    fn amount_box_allows_zero_min() {
+        let mut state = AmountBoxState::default();
+        state.ask_with("输入数值", None, 99, 30, 0);
+        assert_eq!(state.min, 0, "下限应为 0（C# 自动药阈值）");
+        assert_eq!(state.max, 99);
+        assert_eq!(state.value, "30", "初值取当前阈值");
+        assert_eq!(
+            amount_border_state("0", 0, 99),
+            (AmountBorder::Lime, true),
+            "0 在 [0,99] 区间内 → 合法"
+        );
+        state.value = "0".to_string();
+        assert_eq!(confirm_amount(&state), Some(0), "0 不得被抬到 1");
+        state.value = "500".to_string();
+        assert_eq!(confirm_amount(&state), Some(99), "超上限钳到 max");
+    }
 
     /// #2747：C# `MirAmountBox.TextBox_TextChanged`（:172-194）的边框三态与 OK 显隐：
     /// `>= MinAmount` → Lime + OK 可见；`> MaxAmount` 先钳到 Max → `== MaxAmount` → Orange；
