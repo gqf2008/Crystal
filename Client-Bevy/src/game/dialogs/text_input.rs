@@ -33,6 +33,12 @@ pub struct TextInputRect(pub f32, pub f32, pub f32, pub f32);
 #[derive(Component, Clone, Copy)]
 pub struct TextInputDisplay(pub usize);
 
+/// #2892 批B/D：**多行**输入框标记（C# `MirTextBox.MultiLine()`）。
+/// 语义：`Enter` 插入换行而不是提交；显示文本按容器宽度自动折行。
+/// 与 `TextInputField(id)` 挂在同一个实体上。
+#[derive(Component, Clone, Copy)]
+pub struct TextInputMultiline;
+
 /// 提交消息（Enter 按下时发出，携带输入框 id）
 #[derive(Message)]
 pub struct TextInputSubmit(pub usize);
@@ -62,7 +68,12 @@ fn text_input_system(
     mut ime: ResMut<PinyinIme>,
     mouse: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window>,
-    fields: Query<(Entity, &TextInputField, &TextInputRect)>,
+    fields: Query<(
+        Entity,
+        &TextInputField,
+        &TextInputRect,
+        Option<&TextInputMultiline>,
+    )>,
     mut displays: Query<(&mut Text2d, &TextInputDisplay)>,
     // bevy_ui 迁移：输入框显示文本同时支持 bevy_ui Text（Node 内文本），
     // 与 Sprite Text2d 显示实体按组件类型互斥（Text vs Text2d），无 B0001 冲突
@@ -71,7 +82,7 @@ fn text_input_system(
     mut focus: ResMut<ImeFocus>,
 ) {
     // 输入框数量对齐
-    let max_id = fields.iter().map(|(_, f, _)| f.0).max().unwrap_or(0);
+    let max_id = fields.iter().map(|(_, f, _, _)| f.0).max().unwrap_or(0);
     if state.texts.len() <= max_id {
         state.texts.resize(max_id + 1, String::new());
     }
@@ -84,7 +95,7 @@ fn text_input_system(
         if let Ok(window) = windows.single() {
             if let Some(cursor) = window.cursor_position() {
                 let mut clicked: Option<usize> = None;
-                for (_e, f, r) in &fields {
+                for (_e, f, r, _) in &fields {
                     if cursor.x >= r.0
                         && cursor.x <= r.0 + r.2
                         && cursor.y >= r.1
@@ -95,7 +106,7 @@ fn text_input_system(
                 }
                 // 点击输入框外 → 取消聚焦
                 if clicked.is_none() && state.active.is_some() {
-                    let outside = fields.iter().all(|(_, _, r)| {
+                    let outside = fields.iter().all(|(_, _, r, _)| {
                         !(cursor.x >= r.0
                             && cursor.x <= r.0 + r.2
                             && cursor.y >= r.1
@@ -115,7 +126,7 @@ fn text_input_system(
     // 回填 IME 聚焦框（只写 Some；None 由 clear_ime_focus 每帧统一重置，
     // 避免与 Game 态其他输入框如聊天框互相覆盖）
     if let Some(active) = state.active {
-        for (_e, f, r) in &fields {
+        for (_e, f, r, _) in &fields {
             if f.0 == active {
                 focus.rect = Some((r.0, r.1, r.2, r.3));
                 break;
@@ -134,8 +145,17 @@ fn text_input_system(
         }
         if key.logical_key == Key::Enter {
             if let Some(id) = state.active {
-                submit.write(TextInputSubmit(id));
-                // Enter 提交后保持聚焦（C# 输入框连续输入）
+                // #2892：多行输入框（C# `MirTextBox.MultiLine()`）→ Enter 插入换行，不提交
+                let multiline = fields.iter().any(|(_, f, _, ml)| f.0 == id && ml.is_some());
+                if multiline {
+                    if state.texts.len() <= id {
+                        state.texts.resize(id + 1, String::new());
+                    }
+                    state.texts[id].push('\n');
+                } else {
+                    submit.write(TextInputSubmit(id));
+                    // Enter 提交后保持聚焦（C# 输入框连续输入）
+                }
             }
         }
     }
@@ -285,5 +305,54 @@ mod tests {
         assert_eq!(st.texts[0], "你好");
         // 拼音缓冲已清空、英文字母未泄漏进缓冲
         assert!(!app.world().resource::<PinyinIme>().is_composing());
+    }
+    /// #2892：多行输入框（`TextInputMultiline`，C# `MirTextBox.MultiLine()`）——
+    /// `Enter` 插入换行且**不发** `TextInputSubmit`；单行框仍然提交。
+    ///
+    /// 阳性对照：去掉 `TextInputMultiline` 分支（Enter 一律提交）→ 本测试 FAILED。
+    #[test]
+    fn multiline_enter_inserts_newline_instead_of_submit() {
+        use bevy::ecs::system::RunSystemOnce;
+        use bevy::input::keyboard::{Key, KeyboardInput};
+        use bevy::input::ButtonState;
+
+        fn run(multiline: bool) -> (String, usize) {
+            let mut world = World::new();
+            let mut st = TextInputState::default();
+            st.texts = vec![String::new(), "abc".to_string()];
+            st.active = Some(1);
+            world.insert_resource(st);
+            world.insert_resource(crate::ui::pinyin_ime::PinyinIme::new());
+            world.insert_resource(ButtonInput::<MouseButton>::default());
+            world.init_resource::<crate::ui::pinyin_ime::ImeFocus>();
+            world.init_resource::<Messages<TextInputSubmit>>();
+            world.init_resource::<Messages<KeyboardInput>>();
+            let mut e = world.spawn((TextInputField(1), TextInputRect(0.0, 0.0, 100.0, 20.0)));
+            if multiline {
+                e.insert(TextInputMultiline);
+            }
+            world.write_message(KeyboardInput {
+                key_code: bevy::input::keyboard::KeyCode::Enter,
+                logical_key: Key::Enter,
+                state: ButtonState::Pressed,
+                text: None,
+                repeat: false,
+                window: Entity::PLACEHOLDER,
+            });
+            world
+                .run_system_once(text_input_system)
+                .expect("text_input_system 应成功");
+            let text = world.resource::<TextInputState>().texts[1].clone();
+            let submits = world.resource::<Messages<TextInputSubmit>>().len();
+            (text, submits)
+        }
+
+        let (single_text, single_submits) = run(false);
+        assert_eq!(single_text, "abc", "单行框 Enter 不改文本");
+        assert_eq!(single_submits, 1, "单行框 Enter 发提交消息");
+
+        let (multi_text, multi_submits) = run(true);
+        assert_eq!(multi_text, "abc\n", "多行框 Enter 插入换行");
+        assert_eq!(multi_submits, 0, "多行框 Enter 不发提交消息");
     }
 }

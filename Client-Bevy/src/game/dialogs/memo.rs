@@ -14,7 +14,7 @@
 use bevy::prelude::*;
 
 use crate::game::dialogs::text_input::{
-    TextInputDisplay, TextInputField, TextInputRect, TextInputState,
+    TextInputDisplay, TextInputField, TextInputMultiline, TextInputRect, TextInputState,
 };
 use crate::game::dialogs::{sync_dialog_state, DialogKind, DialogManager, DialogRoot};
 use crate::map_renderer::GameLibraries;
@@ -101,11 +101,13 @@ fn spawn_memo(
 
     let input_abs = (ox + FIELD_POS.0, oy + FIELD_POS.1);
     commands.entity(panel).with_children(|p| {
-        // 文本区（C# `MemoTextBox` @(15,30) 165x100；本端单行输入占位，见文件头差异说明）
+        // 文本区（C# `MemoTextBox` @(15,30) 165x100，`MultiLine()` → 本端多行输入）
         spawn_container(p, FIELD_POS.0, FIELD_POS.1, FIELD_SIZE.0, FIELD_SIZE.1, 2)
             .insert((
                 BackgroundColor(Color::srgba(0.10, 0.10, 0.13, 0.95)),
                 TextInputField(MEMO_INPUT_ID),
+                // #2892：C# `MemoTextBox.MultiLine()` → Enter 换行、按宽度折行
+                TextInputMultiline,
                 TextInputRect(input_abs.0, input_abs.1, FIELD_SIZE.0, FIELD_SIZE.1),
                 Visibility::Hidden,
             ))
@@ -115,6 +117,8 @@ fn spawn_memo(
                         position_type: PositionType::Absolute,
                         left: Val::Px(3.0),
                         top: Val::Px(2.0),
+                        // 定宽 → bevy_ui 文本按容器宽度自动折行（多行框）
+                        width: Val::Px(FIELD_SIZE.0 - 6.0),
                         ..default()
                     },
                     Text::new(String::new()),
