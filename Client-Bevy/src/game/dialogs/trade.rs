@@ -37,6 +37,10 @@ use crate::ui::theme::{
     UiItemCellData, UiItemCellIcon,
 };
 
+/// #2892 批B：面板精灵（C# `TradeDialog.Index = 389` / `GuestTradeDialog.Index = 390`）
+pub const PANEL: (LibraryName, usize) = (LibraryName::Prguse, 389);
+pub const GUEST_PANEL: (LibraryName, usize) = (LibraryName::Prguse, 390);
+
 /// 交易物品（槽内显示用）
 #[derive(Debug, Clone)]
 pub struct TradeItem {

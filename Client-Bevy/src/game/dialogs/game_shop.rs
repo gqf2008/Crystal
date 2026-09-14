@@ -24,6 +24,10 @@ use crate::ui::theme::{
     load_lib_image, spawn_container, spawn_icon_button, spawn_image, spawn_label, spawn_panel,
 };
 
+/// #2892 批B：面板精灵与 C# 原生尺寸（C# `GameShopDialog.Index = 749; Location = Center`）
+pub const PANEL: (LibraryName, usize) = (LibraryName::Title, 749);
+pub const PANEL_SIZE: (f32, f32) = (696.0, 476.0);
+
 /// 商城商品（GameShopInfo 写入）
 #[derive(Debug, Clone, Default)]
 pub struct ShopItem {
@@ -218,7 +222,7 @@ fn spawn_game_shop(
         return;
     };
     let (px, py) = ((1024.0 - 696.0) / 2.0, (768.0 - 476.0) / 2.0);
-    let panel = spawn_panel(&mut commands, bg, px, py, 696.0, 476.0, 30);
+    let panel = spawn_panel(&mut commands, bg, px, py, PANEL_SIZE.0, PANEL_SIZE.1, 30);
     commands
         .entity(panel)
         .insert((DialogRoot(DialogKind::GameShop), GameShopWidget));

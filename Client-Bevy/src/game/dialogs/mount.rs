@@ -19,6 +19,13 @@ use crate::ui::theme::{
     load_lib_image, spawn_container, spawn_icon_button, spawn_label, spawn_panel,
 };
 
+/// #2892 批B：面板精灵与 C# 原生尺寸/坐标（C# `MountDialog.Index = 167; Location = (10,30)`；
+/// 4 孔坐骑用 `Prguse[160]`，运行时按 `slots.len()` 切换）
+pub const PANEL: (LibraryName, usize) = (LibraryName::Prguse, 167);
+pub const PANEL_4SLOT: (LibraryName, usize) = (LibraryName::Prguse, 160);
+pub const PANEL_SIZE: (f32, f32) = (324.0, 377.0);
+pub const PANEL_POS: (f32, f32) = (10.0, 30.0);
+
 const PANEL_X: f32 = 10.0;
 const PANEL_Y: f32 = 30.0;
 
@@ -93,8 +100,8 @@ fn spawn_mount(
         white.clone(),
         PANEL_X,
         PANEL_Y,
-        324.0,
-        377.0,
+        PANEL_SIZE.0,
+        PANEL_SIZE.1,
         30,
     );
     commands
@@ -173,7 +180,7 @@ fn mount_ui_system(
             Without<MountGearIcon>,
         ),
     >,
-    mut panel: Query<(&mut ImageNode, &MountPanel), Without<MountGearIcon>>,
+    mut panel: Query<(&mut ImageNode, &mut Node, &MountPanel), Without<MountGearIcon>>,
     mut names: Query<(&mut Text, Option<&MountNameText>, Option<&MountLoyaltyText>)>,
     mut gears: Query<(&mut Visibility, &mut ImageNode, &MountGearIcon)>,
     mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
@@ -224,9 +231,22 @@ fn mount_ui_system(
         .and_then(|s| s.as_ref());
 
     // 面板按坐骑孔数换图（4→160, 5→167）
-    if let Ok((mut node, _)) = panel.single_mut() {
+    if let Ok((mut node, mut layout, _)) = panel.single_mut() {
         let slot_count = mount.map(|m| m.slots.len()).unwrap_or(0);
         let idx = if slot_count == 4 { 160 } else { 167 };
+        // #2892 批B：C# `MirImageControl.Size` 跟随图片——`Prguse[160]`(272x378) 与
+        // `Prguse[167]`(324x377) 尺寸不同，换图时必须同步节点尺寸，否则 4 孔坐骑被拉伸到 324 宽
+        let (iw, ih) = libs
+            .0
+            .get_image(LibraryName::Prguse, idx)
+            .map(|i| (i.width.max(0) as f32, i.height.max(0) as f32))
+            .unwrap_or(PANEL_SIZE);
+        if layout.width != Val::Px(iw) {
+            layout.width = Val::Px(iw);
+        }
+        if layout.height != Val::Px(ih) {
+            layout.height = Val::Px(ih);
+        }
         if let Some(h) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, idx) {
             if node.image != h {
                 node.image = h;

@@ -17,6 +17,9 @@ use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
 use crate::ui::theme::{load_lib_image, spawn_icon_button, spawn_image, ImageButton};
 
+/// #2892 批B：面板精灵（C# `SocketDialog.Index = 20; Library = Libraries.Prguse3`）
+pub const PANEL: (LibraryName, usize) = (LibraryName::Prguse3, 20);
+
 /// 背包背景 Title[196] 缺失时的兜底尺寸（真实值运行时从库读取）
 const INV_W_FALLBACK: f32 = 316.0;
 const INV_H_FALLBACK: f32 = 236.0;

@@ -33,6 +33,10 @@ use crate::ui::theme::{
     load_lib_image, spawn_container, spawn_icon_button, spawn_image, spawn_label, spawn_panel,
 };
 
+/// #2892 批B：面板精灵与 C# 原生尺寸（C# `KeyboardLayoutDialog.Index = 119; Location = Center`）
+pub const PANEL: (LibraryName, usize) = (LibraryName::Title, 119);
+pub const PANEL_SIZE: (f32, f32) = (512.0, 430.0);
+
 /// 单个键位绑定（动作 + 组 + 当前键）
 #[derive(Clone)]
 pub struct KeyBinding {

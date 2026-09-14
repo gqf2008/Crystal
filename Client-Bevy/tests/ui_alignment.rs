@@ -2738,3 +2738,119 @@ fn panel_sprites_batch_b1_match_csharp() {
 
     println!("  ✓ 批B 面板精灵核对：Group/Friend/Mentor/Relationship/Help/Notice/Mail/Creature");
 }
+
+/// #2892 批B（二）：10 个窗口的面板精灵/原点/尺寸核对。
+///
+/// 覆盖 Storage / NpcGoods / Mount（含 4 孔变体尺寸差异）/ Inspect / NpcAwake / GameShop /
+/// KeyboardLayout / HeroManage / Trade / GuestTrade / Socket。
+#[test]
+fn panel_sprites_batch_b2_match_csharp() {
+    use client_bevy::game::dialogs::{
+        center_origin, game_shop, hero, inspect, keyboard_layout, mount, npc_awake, npc_goods,
+        socket, storage, trade,
+    };
+    require_assets!("panel_sprites_batch_b2_match_csharp");
+    let mut libs = Libs::new();
+
+    // 尺寸：真实精灵 == 代码声明的 C# 原生尺寸
+    for (name, (lib, idx), declared) in [
+        ("Storage", storage::PANEL, storage::PANEL_SIZE),
+        ("NpcGoods", npc_goods::PANEL, npc_goods::PANEL_SIZE),
+        ("Mount(5孔)", mount::PANEL, mount::PANEL_SIZE),
+        ("Inspect", inspect::PANEL, inspect::PANEL_SIZE),
+        ("NpcAwake", npc_awake::PANEL, npc_awake::PANEL_SIZE),
+        ("GameShop", game_shop::PANEL, game_shop::PANEL_SIZE),
+        (
+            "KeyboardLayout",
+            keyboard_layout::PANEL,
+            keyboard_layout::PANEL_SIZE,
+        ),
+        ("HeroManage", hero::MANAGE_PANEL, hero::MANAGE_PANEL_SIZE),
+        ("Trade", trade::PANEL, (trade::TRADE_W, trade::TRADE_H)),
+        (
+            "GuestTrade",
+            trade::GUEST_PANEL,
+            (trade::TRADE_W, trade::TRADE_H),
+        ),
+    ] {
+        assert_eq!(
+            libs.size(lib, idx),
+            declared,
+            "[尺寸] {name} 面板 {lib:?}[{idx}] 真实尺寸应与代码声明的 C# 尺寸一致"
+        );
+    }
+    // 坐骑 4 孔面板**与 5 孔不同尺寸**（C# 换图后 `Size` 跟随图片）→ 代码必须在换图时同步尺寸
+    let four = libs.size(mount::PANEL_4SLOT.0, mount::PANEL_4SLOT.1);
+    assert_eq!(
+        four,
+        (272.0, 378.0),
+        "[尺寸] 4 孔坐骑 Prguse[160] 应为 272x378"
+    );
+    assert_ne!(
+        four,
+        mount::PANEL_SIZE,
+        "[尺寸] 4/5 孔坐骑面板尺寸不同 → 换图时必须同步节点尺寸，否则被拉伸"
+    );
+
+    // 原点：C# 明确坐标
+    assert_eq!(
+        npc_goods::PANEL_POS,
+        (0.0, 224.0),
+        "C# `NPCGoodsDialog @(0,224)`"
+    );
+    assert_eq!(mount::PANEL_POS, (10.0, 30.0), "C# `MountDialog @(10,30)`");
+    assert_eq!(
+        (inspect::BG_X, inspect::BG_Y),
+        (536.0, 0.0),
+        "C# `InspectDialog @(536,0)`"
+    );
+    assert_eq!(
+        hero::MANAGE_PANEL_POS,
+        (350.0, 350.0),
+        "C# `HeroManageDialog @(350,350)`"
+    );
+    // 交易窗：C# `(1024/2 - W - 10, 768 - 350)` 与 `(1024/2 + 10, 768 - 350)`
+    assert_eq!(
+        (trade::TRADE_X, trade::TRADE_Y),
+        (SW / 2.0 - trade::TRADE_W - 10.0, SH - 350.0),
+        "[坐标] TradeDialog"
+    );
+    assert_eq!(
+        (trade::GUEST_X, trade::GUEST_Y),
+        (SW / 2.0 + 10.0, SH - 350.0),
+        "[坐标] GuestTradeDialog"
+    );
+    assert!(
+        trade::TRADE_X + trade::TRADE_W < trade::GUEST_X,
+        "[重叠] 两个交易窗不得重叠"
+    );
+    // 居中类：GameShop / KeyboardLayout
+    for (name, size, origin) in [
+        (
+            "GameShop",
+            game_shop::PANEL_SIZE,
+            center_origin(game_shop::PANEL_SIZE.0, game_shop::PANEL_SIZE.1),
+        ),
+        (
+            "KeyboardLayout",
+            keyboard_layout::PANEL_SIZE,
+            center_origin(keyboard_layout::PANEL_SIZE.0, keyboard_layout::PANEL_SIZE.1),
+        ),
+    ] {
+        let expected = (((SW - size.0) / 2.0).floor(), ((SH - size.1) / 2.0).floor());
+        assert_eq!(
+            origin, expected,
+            "[居中] {name} 应按 C# `Location = Center` 居中"
+        );
+    }
+    // Socket：`Prguse3[20]` 81x62 @(0,0)
+    assert_eq!(
+        libs.size(socket::PANEL.0, socket::PANEL.1),
+        (81.0, 62.0),
+        "C# `SocketDialog.Index = 20; Library = Libraries.Prguse3`"
+    );
+    // Storage：`Prguse[586]` @(0,0)
+    assert_eq!((storage::DIALOG_X, storage::DIALOG_Y), (0.0, 0.0));
+
+    println!("  ✓ 批B 面板精灵核对（二）：Storage/NpcGoods/Mount/Inspect/NpcAwake/GameShop/KeyboardLayout/HeroManage/Trade/GuestTrade/Socket");
+}

@@ -31,6 +31,10 @@ use crate::ui::theme::{
     spawn_panel, UiItemCell, UiItemCellData, UiItemCellIcon,
 };
 
+/// #2892 批B：面板精灵与 C# 原生尺寸（C# `StorageDialog.Index = 586; Library = Libraries.Prguse`）
+pub const PANEL: (LibraryName, usize) = (LibraryName::Prguse, 586);
+pub const PANEL_SIZE: (f32, f32) = (388.0, 346.0);
+
 /// 仓库数据（网络 UserStorage 写入）
 #[derive(Resource, Default)]
 pub struct StorageState {
@@ -63,8 +67,8 @@ impl StorageState {
 
 /// 窗口原点 (0,0)：C# StorageDialog 显式 `Location = new Point(0, 0)`（NPCDialogs.cs:2812）。
 /// 旧值 (600,60) 是移植期自定右置，与 C# 左上角原点不符。
-const DIALOG_X: f32 = 0.0;
-const DIALOG_Y: f32 = 0.0;
+pub const DIALOG_X: f32 = 0.0;
+pub const DIALOG_Y: f32 = 0.0;
 /// 仓库宽（Prguse[586] 实测 388x346）。C# Show 时背包推到 (仓宽+5, 仓Y)=(393,0) 并排
 /// （NPCDialogs.cs:2967/2990）——避免仓库完全罩住背包
 const STORAGE_W: f32 = 388.0;
@@ -173,7 +177,7 @@ fn spawn_storage_dialog(
         DIALOG_X,
         DIALOG_Y,
         STORAGE_W,
-        346.0,
+        PANEL_SIZE.1,
         STORAGE_PANEL_Z,
     );
     commands

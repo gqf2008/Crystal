@@ -22,6 +22,10 @@ use crate::ui::theme::{
     spawn_label, spawn_panel, UiDropDown,
 };
 
+/// #2892 批B：面板精灵与 C# 原生尺寸（C# `NPCAwakeDialog.Index = 710; Library = Libraries.Title`）
+pub const PANEL: (LibraryName, usize) = (LibraryName::Title, 710);
+pub const PANEL_SIZE: (f32, f32) = (360.0, 420.0);
+
 /// #1356：觉醒面板服务模式（C# PanelType：Awakening/Disassemble/Downgrade/Reset）
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum NpcAwakeService {
@@ -150,7 +154,7 @@ fn spawn_npc_awake(
     let Some(bg) = load_lib_image(&mut libs, &mut images, LibraryName::Title, 710) else {
         return;
     };
-    let panel = spawn_panel(&mut commands, bg, 0.0, 0.0, 360.0, 420.0, 30);
+    let panel = spawn_panel(&mut commands, bg, 0.0, 0.0, PANEL_SIZE.0, PANEL_SIZE.1, 30);
     commands
         .entity(panel)
         .insert((DialogRoot(DialogKind::NpcAwake), NpcAwakeWidget));
