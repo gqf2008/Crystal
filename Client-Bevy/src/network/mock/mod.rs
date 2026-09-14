@@ -1882,6 +1882,9 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                             &server::ui_events::SetTimer {
                                                 timer_id: 1,
                                                 seconds: 5,
+                                                // C# `SETTIMER <key> <secs> <type>`：mock 走 1 号沙漏
+                                                // （`Prguse2[960]`），与地图特效脚本一致
+                                                kind: 1,
                                             },
                                         );
                                         // #232：上马（本地玩家）

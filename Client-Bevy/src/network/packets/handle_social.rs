@@ -725,8 +725,14 @@ pub(crate) fn handle_social(
                 server_events.write(ServerEvent::TimerSet {
                     timer_id: p.timer_id,
                     seconds: p.seconds,
+                    kind: p.kind,
                 });
-                tracing::info!("⏱️ 设置计时器 id={} 秒={}", p.timer_id, p.seconds);
+                tracing::info!(
+                    "⏱️ 设置计时器 id={} 秒={} 类型={}",
+                    p.timer_id,
+                    p.seconds,
+                    p.kind
+                );
             }
         }
         x if x == ServerPacketIds::ExpireTimer as i16 => {

@@ -1962,3 +1962,97 @@ fn ranking_children_aligned() {
 
     println!("  ✓ 排行榜子控件：页签 6 图标 / 关闭 24x21@(300,3) / 翻页@(299,100|386) / 滚动条@(299,113) / 仅在线@(190,421) / MyRank 82x22@(229,36) / 20 行@(32,98+15i)");
 }
+
+/// #2892 批C：计时器窗对齐 C# `TimerDialog`（`TimerDialog.cs:27-97`）——
+/// `MirControl`（无背景图）120x100 @ `(ScreenWidth-120, ScreenHeight-230)` = (904,538)；
+/// 沙漏 `Prguse2[960..965]`(Type1) / `[440..445]`(Type2) 52x52 @(23,0)；
+/// 数字位 = `Prguse2[900+数字]` @ x=0/22/58/80、y=70；冒号 `Prguse2[910]` @(44,70)。
+#[test]
+fn timer_dialog_aligned() {
+    use client_bevy::game::dialogs::timer as tm;
+    require_assets!("timer_dialog_aligned");
+    let mut libs = Libs::new();
+
+    assert_eq!(
+        tm::PANEL_ORIGIN,
+        (904.0, 538.0),
+        "[坐标] C# `(ScreenWidth-120, ScreenHeight-230)`"
+    );
+    let (ox, oy) = tm::PANEL_ORIGIN;
+    assert_in_canvas("计时器", ox, oy, tm::PANEL_W, tm::PANEL_H);
+
+    // 沙漏两档：各 6 帧、全部 52x52（C# `_eggTimer.Size` 取精灵原生尺寸）
+    for base in [tm::EGG_BASE_KIND1, tm::EGG_BASE_KIND2] {
+        for i in 0..tm::EGG_FRAMES {
+            let (w, h) = libs.size(LibraryName::Prguse2, base + i);
+            assert_eq!(
+                (w, h),
+                tm::EGG_SIZE,
+                "[尺寸] 沙漏帧 Prguse2[{}] 应为 52x52",
+                base + i
+            );
+        }
+    }
+
+    // 数字位 10 个精灵与冒号都必须存在且非空
+    for d in 0..10usize {
+        let (w, h) = libs.size(LibraryName::Prguse2, tm::DIGIT_BASE + d);
+        assert!(
+            w > 0.0 && h > 0.0,
+            "[精灵] 数字 Prguse2[{}] 应存在且非空",
+            tm::DIGIT_BASE + d
+        );
+    }
+    let (cw, ch) = libs.size(LibraryName::Prguse2, tm::COLON_INDEX);
+    assert!(cw > 0.0 && ch > 0.0, "[精灵] 冒号 Prguse2[910] 应存在");
+
+    assert_eq!(tm::EGG_POS, (23.0, 0.0), "[坐标] C# `_eggTimer @(23,0)`");
+    assert_eq!(
+        tm::DIGIT_X,
+        [0.0, 22.0, 58.0, 80.0],
+        "[坐标] C# `_1000/_100/_10/_1` x = 0/22/58/80"
+    );
+    assert_eq!(tm::DIGIT_Y, 70.0, "[坐标] C# 数字位 y = 70");
+    assert_eq!(tm::COLON_POS, (44.0, 70.0), "[坐标] C# `_colon @(44,70)`");
+
+    // 子控件全部落在原版 120x100 容器内（`Prguse[170]` 320x262 时代是戳出去的）
+    assert_inside(
+        "沙漏",
+        ox + tm::EGG_POS.0,
+        oy + tm::EGG_POS.1,
+        tm::EGG_SIZE.0,
+        tm::EGG_SIZE.1,
+        ox,
+        oy,
+        tm::PANEL_W,
+        tm::PANEL_H,
+    );
+    for (i, x) in tm::DIGIT_X.iter().enumerate() {
+        assert_inside(
+            &format!("数字位{i}"),
+            ox + x,
+            oy + tm::DIGIT_Y,
+            20.0,
+            22.0,
+            ox,
+            oy,
+            tm::PANEL_W,
+            tm::PANEL_H,
+        );
+    }
+    assert_inside(
+        "冒号",
+        ox + tm::COLON_POS.0,
+        oy + tm::COLON_POS.1,
+        cw,
+        ch,
+        ox,
+        oy,
+        tm::PANEL_W,
+        tm::PANEL_H,
+    );
+
+    println!(
+        "  ✓ 计时器 120x100 @(904,538)：沙漏 52x52 x2 档 6 帧、数字 900+x @70、冒号 910 @(44,70)"
+    );
+}

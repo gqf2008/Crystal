@@ -5624,7 +5624,7 @@ impl Message<ChatRequest> for WorldActor {
                     let Ok(seconds) = parts[2].parse::<i64>() else {
                         return;
                     };
-                    let _timer_type = parts[3].parse::<u8>().unwrap_or(0);
+                    let timer_type = parts[3].parse::<u8>().unwrap_or(0);
                     // 世界循环 100ms/tick：1 秒 = 10 ticks（对齐 NPC 脚本 SETTIMER）
                     let expire_tick = self.tick_count.saturating_add(seconds.max(0) as u64 * 10);
                     self.npc_timers
@@ -5634,6 +5634,7 @@ impl Message<ChatRequest> for WorldActor {
                     let packet = mir2_shared::packets::server::ui_events::SetTimer {
                         timer_id: key,
                         seconds: seconds as i32,
+                        kind: timer_type,
                     };
                     let mut body = Vec::new();
                     if mir2_shared::packets::base::serialize_packet(
