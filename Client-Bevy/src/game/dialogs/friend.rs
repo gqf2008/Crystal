@@ -38,7 +38,6 @@ pub struct FriendEntry {
 /// 待处理输入动作（添加/备注）
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum FriendPending {
-    Add,
     Memo(usize),
 }
 
@@ -79,10 +78,6 @@ pub struct FriendWhisper;
 /// 发邮件给选中好友（C# FriendDialog EmailButton）
 #[derive(Component)]
 pub struct FriendEmail;
-
-/// 内嵌输入框（添加/备注）
-#[derive(Component)]
-pub struct FriendInputBox;
 
 /// 好友页签（C# FriendLabel）
 #[derive(Component)]
@@ -222,33 +217,7 @@ fn spawn_friend(
                 ));
             }
         }
-        // 内嵌输入框（TextInput id 30）@(18,245) 180x20
-        spawn_container(p, 18.0, 245.0, 180.0, 20.0, 10)
-            .insert((
-                FriendInputBox,
-                BackgroundColor(Color::srgba(0.2, 0.2, 0.25, 0.9)),
-                crate::game::dialogs::text_input::TextInputField(30),
-                crate::game::dialogs::text_input::TextInputRect(318.0, 345.0, 180.0, 20.0),
-            ))
-            .with_children(|ic| {
-                ic.spawn((
-                    Node {
-                        position_type: PositionType::Absolute,
-                        left: Val::Px(4.0),
-                        top: Val::Px(2.0),
-                        ..default()
-                    },
-                    Text::new(String::new()),
-                    TextFont {
-                        font: FontSource::Handle(font.clone()),
-                        font_size: FontSize::Px(12.0),
-                        ..default()
-                    },
-                    TextColor(Color::WHITE),
-                    ZIndex(11),
-                    crate::game::dialogs::text_input::TextInputDisplay(30),
-                ));
-            });
+
         // 页签（好友/黑名单）@(18,18)/(70,18)
         spawn_label(p, &font, "好友", 18.0, 18.0, 12.0, Color::WHITE, 10)
             .insert((Button, FriendTabFriend));
@@ -297,16 +266,7 @@ fn friend_ui_system(
     rows: Query<(Entity, &Interaction, &FriendLine), Without<FriendLineText>>,
     mut line_texts: Query<(&mut Text, &mut TextColor, &FriendLineText)>,
     mut input: ResMut<crate::game::dialogs::text_input::TextInputState>,
-    mut submits: MessageReader<crate::game::dialogs::text_input::TextInputSubmit>,
-    mut input_box: Query<&mut Visibility, With<FriendInputBox>>,
-    mut widgets: Query<
-        &mut Visibility,
-        (
-            With<FriendWidget>,
-            Without<FriendInputBox>,
-            Without<FriendLineText>,
-        ),
-    >,
+    mut widgets: Query<&mut Visibility, (With<FriendWidget>, Without<FriendLineText>)>,
     mut local: Local<FriendLocal>,
 ) {
     fn edge(
@@ -321,14 +281,6 @@ fn friend_ui_system(
     let open = mgr.is_open(DialogKind::Friend);
     for mut vis in widgets.iter_mut() {
         *vis = if open {
-            Visibility::Visible
-        } else {
-            Visibility::Hidden
-        };
-    }
-    let show_input = open && friend.pending.is_some();
-    for mut vis in &mut input_box {
-        *vis = if show_input {
             Visibility::Visible
         } else {
             Visibility::Hidden
@@ -463,35 +415,6 @@ fn friend_ui_system(
                 local.offset = 0;
             }
         }
-    }
-    // 内嵌输入提交（Enter）
-    for sub in submits.read() {
-        if sub.0 != 30 {
-            continue;
-        }
-        let name = input.texts.get(30).cloned().unwrap_or_default();
-        let name = name.trim().to_string();
-        if name.is_empty() {
-            friend.pending = None;
-            input.active = None;
-            continue;
-        }
-        match friend.pending.take() {
-            Some(FriendPending::Add) => {
-                net.send_packet(&mir2_shared::packets::client::friend::AddFriend {
-                    name: name.clone(),
-                    blocked: friend.blocked_tab,
-                });
-            }
-            Some(FriendPending::Memo(idx)) => {
-                // #2892 批D 单元①：备注改由独立备注窗的 OK 键提交（C# `MemoDialog.OKButton.Click`），
-                // 这里不再处理（`friend_memo_open_system` 会在同一帧把 pending 消费掉）
-                let _ = idx;
-            }
-            None => {}
-        }
-        input.texts[30].clear();
-        input.active = None;
     }
 }
 
