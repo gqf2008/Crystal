@@ -3702,3 +3702,104 @@ fn panel_sprites_batch_b9_match_csharp() {
 
     println!("  ✓ 批B 面板精灵核对（九）：行会仓库 8×14 格阵（窗口 8 行）+ 金币行 Prguse[917/918]");
 }
+
+/// #2892 批D 单元①：好友备注窗（C# `MemoDialog`，`FriendDialog.cs:480-568`）。
+///
+/// 面板 `Title[209]` 实测 196x166 + `Location = Center` → (414,301)（`Movable = true` → 本端
+/// `DialogRoot(DialogKind::Memo)` 吃通用拖动）；`MemoTextBox` @(15,30) 165x100；
+/// OK `Title[382/383/384]` @(30,133) 48x25、Cancel `Title[385/386/387]` @(115,133) 48x25、
+/// Close `Prguse2[360/361/362]` @(168,3) 24x21。
+#[test]
+fn panel_sprites_batch_b18_match_memo_dialog() {
+    use client_bevy::game::dialogs::memo as m;
+    require_assets!("panel_sprites_batch_b18_match_memo_dialog");
+    let mut libs = Libs::new();
+
+    let (pw, ph) = libs.size(m::PANEL.0, m::PANEL.1);
+    assert_eq!((pw, ph), m::PANEL_SIZE, "[尺寸] Title[209] 196x166");
+    assert_eq!(
+        client_bevy::game::dialogs::center_origin(pw, ph),
+        ((SW - pw) / 2.0, (SH - ph) / 2.0),
+        "[坐标] C# `Location = Center`"
+    );
+    assert_in_canvas("备注窗", (SW - pw) / 2.0, (SH - ph) / 2.0, pw, ph);
+    // 文本区（C# `MemoTextBox` @(15,30) 165x100）
+    assert_inside(
+        "备注文本区",
+        m::FIELD_POS.0,
+        m::FIELD_POS.1,
+        m::FIELD_SIZE.0,
+        m::FIELD_SIZE.1,
+        0.0,
+        0.0,
+        pw,
+        ph,
+    );
+    // OK / Cancel / Close 精灵尺寸
+    for idx in m::OK_SPRITES {
+        assert_eq!(
+            libs.size(LibraryName::Title, idx),
+            (48.0, 25.0),
+            "[尺寸] Title[{idx}] OK"
+        );
+    }
+    for idx in m::CANCEL_SPRITES {
+        assert_eq!(
+            libs.size(LibraryName::Title, idx),
+            (48.0, 25.0),
+            "[尺寸] Title[{idx}] Cancel"
+        );
+    }
+    for idx in m::CLOSE_SPRITES {
+        assert_eq!(
+            libs.size(LibraryName::Prguse2, idx),
+            (24.0, 21.0),
+            "[尺寸] Prguse2[{idx}] Close"
+        );
+    }
+    // 三个按钮都在面板内
+    assert_inside(
+        "备注OK",
+        m::OK_POS.0,
+        m::OK_POS.1,
+        m::BTN_SIZE.0,
+        m::BTN_SIZE.1,
+        0.0,
+        0.0,
+        pw,
+        ph,
+    );
+    assert_inside(
+        "备注Cancel",
+        m::CANCEL_POS.0,
+        m::CANCEL_POS.1,
+        m::BTN_SIZE.0,
+        m::BTN_SIZE.1,
+        0.0,
+        0.0,
+        pw,
+        ph,
+    );
+    assert_inside(
+        "备注Close",
+        m::CLOSE_POS.0,
+        m::CLOSE_POS.1,
+        m::CLOSE_SIZE.0,
+        m::CLOSE_SIZE.1,
+        0.0,
+        0.0,
+        pw,
+        ph,
+    );
+    // OK 与 Cancel 不重叠（30..78 与 115..163），且都在文本区下方（30+100=130 ≤ 133）
+    assert!(
+        m::OK_POS.0 + m::BTN_SIZE.0 <= m::CANCEL_POS.0,
+        "[重叠] OK 不得压住 Cancel"
+    );
+    assert!(
+        m::FIELD_POS.1 + m::FIELD_SIZE.1 <= m::OK_POS.1,
+        "[重叠] 文本区不得压住按钮行"
+    );
+
+    println!("  ✓ 批D 面板精灵核对：好友备注窗 Title[209] 196x166@Center + Title[382..387] + Prguse2[360..362]");
+}

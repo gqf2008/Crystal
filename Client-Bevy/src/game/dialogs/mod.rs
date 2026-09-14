@@ -64,6 +64,8 @@ pub mod text_input;
 pub mod timer;
 pub mod trade;
 // #2892 批D 单元①：C# `MirControl.Movable` 窗口拖动（腰带/聊天/备注/钓鱼/下拉框）
+/// #2892 批D 单元①：C# `MemoDialog`（好友备注窗）
+pub mod memo;
 pub mod window_drag;
 
 use bevy::prelude::*;
@@ -135,6 +137,10 @@ pub enum DialogKind {
     /// `S.GuildRequestWar`（宣战目标行会名，`GameScene.cs:5784-5802`）。
     /// 独立 kind：`Modal` 语义需要「在世界输入锁里算一个打开窗口」（`blocks_world_click`）。
     InputBox,
+    /// #2892 批D 单元①：C# `MemoDialog`（好友备注窗，`Title[209]` 196x166 居中、
+    /// `Movable = true`，`FriendDialog.cs:480-568`）。独立 kind：C# 是**独立可拖小窗**，
+    /// 本端此前把备注做成好友窗内嵌输入框，按 C# 拆窗后拖动归一 kind 聚合。
+    Memo,
 }
 
 /// 对话框管理（打开栈，栈顶在最前）
@@ -1187,6 +1193,8 @@ impl Plugin for DialogsPlugin {
                 .run_if(in_state(AppState::Game)),
         );
         app.add_plugins(text_input::TextInputPlugin);
+        // #2892 批D 单元①：好友备注窗（C# `MemoDialog`）
+        app.add_plugins(memo::MemoPlugin);
         // #2892 批D 单元①：可拖窗口偏移状态 + 拖动系统（C# `MirControl.Movable`）
         app.init_resource::<window_drag::WindowDragState>();
         app.add_systems(

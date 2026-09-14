@@ -126,6 +126,12 @@ impl Plugin for FriendPlugin {
         app.add_systems(OnEnter(AppState::Game), spawn_friend);
         app.add_systems(OnExit(AppState::Game), cleanup_friend);
         app.add_systems(Update, friend_ui_system.run_if(in_state(AppState::Game)));
+        app.add_systems(
+            Update,
+            friend_memo_open_system
+                .after(friend_ui_system)
+                .run_if(in_state(AppState::Game)),
+        );
     }
 }
 
@@ -409,9 +415,9 @@ fn friend_ui_system(
             }
         } else if act.is_memo {
             if let Some(idx) = friend.selected {
+                // #2892 批D 单元①：C# `MemoButton.Click → MemoDialog.Show()`——由
+                // `friend_memo_open_system` 打开独立备注窗（本系统已满 16 参，不能再加资源）
                 friend.pending = Some(FriendPending::Memo(idx));
-                input.texts[30].clear();
-                input.active = Some(30);
             }
         } else if act.is_email {
             if let Some(f) = friend.selected.and_then(|i| list.get(i)).cloned() {
@@ -468,18 +474,42 @@ fn friend_ui_system(
                 });
             }
             Some(FriendPending::Memo(idx)) => {
-                if let Some(f) = list.get(idx) {
-                    net.send_packet(&mir2_shared::packets::client::friend::AddMemo {
-                        character_index: f.object_id as i32,
-                        memo: name.clone(),
-                    });
-                }
+                // #2892 批D 单元①：备注改由独立备注窗的 OK 键提交（C# `MemoDialog.OKButton.Click`），
+                // 这里不再处理（`friend_memo_open_system` 会在同一帧把 pending 消费掉）
+                let _ = idx;
             }
             None => {}
         }
         input.texts[30].clear();
         input.active = None;
     }
+}
+
+/// #2892 批D 单元①：`MemoButton.Click` → 打开独立备注窗（C# `MemoDialog.Show()`，
+/// `FriendDialog.cs:551-566`：预填该好友现有备注并聚焦）。
+/// 单列一个系统是因为 `friend_ui_system` 已到 Bevy 的 16 参上限。
+fn friend_memo_open_system(
+    mut friend: ResMut<FriendState>,
+    mut memo: ResMut<crate::game::dialogs::memo::MemoState>,
+    mut input: ResMut<crate::game::dialogs::text_input::TextInputState>,
+) {
+    let Some(FriendPending::Memo(idx)) = friend.pending else {
+        return;
+    };
+    friend.pending = None;
+    let Some(f) = friend.friends.get(idx).cloned() else {
+        return;
+    };
+    memo.open = true;
+    memo.target = Some(f.object_id as i32);
+    if input.texts.len() <= crate::game::dialogs::memo::MEMO_INPUT_ID {
+        input
+            .texts
+            .resize(crate::game::dialogs::memo::MEMO_INPUT_ID + 1, String::new());
+    }
+    input.texts[crate::game::dialogs::memo::MEMO_INPUT_ID] = f.memo.clone();
+    input.active = Some(crate::game::dialogs::memo::MEMO_INPUT_ID);
+    tracing::info!("👥 打开好友备注窗: {}", f.name);
 }
 
 /// 消费服务端好友事件（网络层只广播 ServerEvent）
