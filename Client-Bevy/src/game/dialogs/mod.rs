@@ -135,6 +135,108 @@ pub struct DialogManager {
     pub open: Vec<DialogKind>,
 }
 
+/// #2836 单元③：C# `KeybindOptions.Closeall`（ESC）**直接** Hide 的窗口
+/// （`Client/MirScenes/GameScene.cs:669-708`）。
+///
+/// 逐条对应（C# → Bevy kind）：InventoryDialog→Inventory、CharacterDialog→Character、
+/// OptionDialog→Settings、MenuDialog→Menu、NPCDialog→Npc、HelpDialog→Help、
+/// KeyboardLayoutDialog→KeyboardLayout、RankingDialog→Ranking、
+/// IntelligentCreatureDialog（+Options/Grade 两个子窗）→Creature、MountDialog→Mount、
+/// FishingDialog→Fishing、FriendDialog→Friend、RelationshipDialog→Relationship、
+/// MentorDialog→Mentor、GameShopDialog→GameShop、GroupDialog→Group、GuildDialog→Guild、
+/// InspectDialog→Inspect、StorageDialog→Storage、TrustMerchantDialog→Market、
+/// QuestListDialog/QuestLogDialog→QuestLog、QuestDetailDialog→QuestDetail、
+/// NPCAwakeDialog→NpcAwake、RefineDialog→Refine、BigMapDialog→BigMap、
+/// Mail*（5 个 mail 窗）→Mail、ItemRentalDialog（浏览窗）→ItemRentalBrowse、NoticeDialog→Notice、
+/// HeroInventoryDialog→HeroInventory、HeroDialog→HeroEquipment/HeroSkill、HeroManageDialog→HeroManage（状态驱动，见 `closeall`）。
+///
+/// **刻意不在表内**（原版 ESC 不关这些）：`Trade`/`GuestTrade`（交易窗）、`Timer`、
+/// `Buff`、`Minimap`、`DuraStatus`（`CharacterDuraPanel.Hide()` 在 `:691` 被注释掉）、
+/// `Socket`、`ChatNotice`、`ItemRental`（出租方/租客窗，只有浏览窗在表内）。
+pub const CLOSEALL_DIRECT: &[DialogKind] = &[
+    DialogKind::Inventory,
+    DialogKind::Character,
+    DialogKind::Settings,
+    DialogKind::Menu,
+    DialogKind::Npc,
+    DialogKind::Help,
+    DialogKind::KeyboardLayout,
+    DialogKind::Ranking,
+    DialogKind::Creature,
+    DialogKind::Mount,
+    DialogKind::Fishing,
+    DialogKind::Friend,
+    DialogKind::Relationship,
+    DialogKind::Mentor,
+    DialogKind::GameShop,
+    DialogKind::Group,
+    DialogKind::Guild,
+    DialogKind::Inspect,
+    DialogKind::Storage,
+    DialogKind::Market,
+    DialogKind::QuestLog,
+    DialogKind::QuestDetail,
+    DialogKind::NpcAwake,
+    DialogKind::Refine,
+    DialogKind::BigMap,
+    DialogKind::Mail,
+    DialogKind::ItemRentalBrowse,
+    DialogKind::Notice,
+    DialogKind::HeroInventory,
+    DialogKind::HeroEquipment,
+    DialogKind::HeroSkill,
+];
+
+/// #2836 单元③：`NPCDialog.Hide()` 的**级联**（`NPCDialogs.cs:1020-1040`）——仅当 NPC 对话窗
+/// 当时可见时才发生（C# `if (NPCDialog.Visible) NPCDialog.Hide();`）：
+/// NPCGoods/NPCSubGoods/NPCCraftGoods/NPCDrop→`NpcGoods`、NPCAwakeDialog→`NpcAwake`、
+/// RefineDialog→`Refine`、StorageDialog→`Storage`、TrustMerchantDialog→`Market`、
+/// QuestListDialog→`QuestLog`、RollControl→`Roll`、GuildTerritoryDialog→`GuildTerritory`、
+/// BigButtonDialog（本端无独立窗）。
+pub const CLOSEALL_NPC_CASCADE: &[DialogKind] = &[
+    DialogKind::NpcGoods,
+    DialogKind::NpcAwake,
+    DialogKind::Refine,
+    DialogKind::Storage,
+    DialogKind::Market,
+    DialogKind::QuestLog,
+    DialogKind::Roll,
+    DialogKind::GuildTerritory,
+];
+
+/// #2836 单元③：执行一次 C# 语义的 `Closeall`，返回是否关掉了任何窗口。
+///
+/// 顺序照 C#：先 `NPCDialog.Hide()`（含级联，仅当 NPC 窗当时可见），再逐条 Hide 直接表；
+/// 状态驱动窗（`HeroManage`：`HeroManageDialog?.Hide()`）单独清状态。
+pub fn closeall(
+    mgr: &mut DialogManager,
+    hero_managing: &mut bool,
+    hero_confirm: &mut Option<usize>,
+) -> bool {
+    let mut changed = false;
+    if mgr.is_open(DialogKind::Npc) {
+        for kind in CLOSEALL_NPC_CASCADE {
+            if mgr.is_open(*kind) {
+                mgr.close(*kind);
+                changed = true;
+            }
+        }
+    }
+    for kind in CLOSEALL_DIRECT {
+        if mgr.is_open(*kind) {
+            mgr.close(*kind);
+            changed = true;
+        }
+    }
+    // C# `HeroManageDialog?.Hide()`（`GameScene.cs:707`）：本端 `HeroManage` 是状态驱动窗
+    if *hero_managing {
+        *hero_managing = false;
+        *hero_confirm = None;
+        changed = true;
+    }
+    changed
+}
+
 /// 恒可见标记：挂该组件的实体不随 `DialogManager.open` 门控显隐（如 C# DuraStatusDialog
 /// 切换钮——对话框关闭也恒可见）。`enforce_dialog_visibility` 会跳过它。
 #[derive(Component)]
@@ -342,6 +444,51 @@ mod tests {
             Display::Grid,
             "重新打开时恢复根原有 Display 模式"
         );
+    }
+
+    /// node_rect：根面板 Node Px 字段 → 屏幕矩形
+    ///
+    /// #2836 单元③：`closeall` 纯函数——C# 集合语义（直接表 + NPC 级联 + HeroManage 状态重置），
+    /// 且**不动**交易窗等原版不关的窗口。
+    #[test]
+    fn closeall_matches_csharp_set() {
+        let mut mgr = DialogManager::default();
+        for k in [
+            DialogKind::Npc,
+            DialogKind::NpcGoods, // 只在 Npc 开着时才级联
+            DialogKind::Inventory,
+            DialogKind::Mail,
+            DialogKind::Trade,      // 原版不关
+            DialogKind::Timer,      // 原版不关
+            DialogKind::DuraStatus, // 原版不关（`CharacterDuraPanel.Hide()` 被注释）
+        ] {
+            mgr.open(k);
+        }
+        let (mut managing, mut confirm) = (true, Some(1usize));
+        assert!(
+            closeall(&mut mgr, &mut managing, &mut confirm),
+            "有关闭动作应返回 true"
+        );
+        for k in [
+            DialogKind::Npc,
+            DialogKind::NpcGoods,
+            DialogKind::Inventory,
+            DialogKind::Mail,
+        ] {
+            assert!(!mgr.is_open(k), "{k:?} 应被 Closeall 关闭");
+        }
+        for k in [DialogKind::Trade, DialogKind::Timer, DialogKind::DuraStatus] {
+            assert!(mgr.is_open(k), "{k:?} 不在 Closeall 集合内，不应被关");
+        }
+        assert!(
+            !managing && confirm.is_none(),
+            "HeroManage 是状态驱动窗，需一并清状态"
+        );
+
+        // 无窗口可关时返回 false（不刷日志）
+        let mut empty = DialogManager::default();
+        let (mut m2, mut c2) = (false, None);
+        assert!(!closeall(&mut empty, &mut m2, &mut c2));
     }
 
     /// node_rect：根面板 Node Px 字段 → 屏幕矩形

@@ -42,6 +42,8 @@ pub fn esc_close_dialogs_system(
     player_menu: Res<crate::game::player_menu::PlayerMenuState>,
     mut mgr: ResMut<DialogManager>,
     mut input: ResMut<crate::game::dialogs::text_input::TextInputState>,
+    // #2836 单元③：C# `HeroManageDialog?.Hide()`（`GameScene.cs:707`）——本端该窗状态驱动
+    mut hero: ResMut<crate::game::dialogs::hero::HeroState>,
 ) {
     if !keys.just_pressed(KeyCode::Escape) {
         return;
@@ -59,9 +61,14 @@ pub fn esc_close_dialogs_system(
     if player_menu.visible {
         return;
     }
-    if !mgr.open.is_empty() {
-        mgr.open.clear();
-        tracing::info!("⌨️ ESC 关闭全部对话框");
+    // #2836 单元③：按 C# `KeybindOptions.Closeall` 的**集合**关闭（`GameScene.cs:668-711`），
+    // 不再 blanket `open.clear()` —— 原版 ESC **不关** 交易窗/计时器/Buff/小地图/耐久面板/
+    // 镶嵌窗/聊天公告/租赁双方窗（见 `dialogs::CLOSEALL_DIRECT` 注释）。
+    let (mut managing, mut confirm_slot) = (hero.managing, hero.confirm_slot);
+    if crate::game::dialogs::closeall(&mut mgr, &mut managing, &mut confirm_slot) {
+        hero.managing = managing;
+        hero.confirm_slot = confirm_slot;
+        tracing::info!("⌨️ ESC 关闭对话框（C# Closeall 集合）");
     }
 }
 
@@ -257,6 +264,8 @@ mod tests {
         app.init_resource::<DialogManager>();
         app.init_resource::<crate::game::dialogs::amount_box::AmountBoxState>();
         app.init_resource::<crate::game::player_menu::PlayerMenuState>();
+        // #2836 单元③：ESC 现按 C# Closeall 集合关窗，系统新增 `ResMut<HeroState>`
+        app.init_resource::<crate::game::dialogs::hero::HeroState>();
         app.add_systems(Update, esc_close_dialogs_system);
         app.world_mut()
             .resource_mut::<ButtonInput<KeyCode>>()
@@ -321,6 +330,94 @@ mod tests {
             app.world().resource::<DialogManager>().open.is_empty(),
             "无输入聚焦时 Esc 应关闭全部对话框"
         );
+    }
+
+    /// #2836 单元③：ESC 只关 C# `Closeall` 集合里的窗口（`GameScene.cs:668-711` + `NPCDialog.Hide()`
+    /// 级联 `NPCDialogs.cs:1026-1037`）——**交易窗/计时器/Buff/小地图/耐久/镶嵌/聊天公告/租赁双方窗
+    /// 原版 ESC 不关**，本端此前 blanket `open.clear()` 会一律关掉。
+    #[test]
+    fn esc_closes_closeall_set_only() {
+        use crate::game::dialogs::DialogKind as K;
+
+        let mut app = esc_app(false, None);
+        {
+            let mut mgr = app.world_mut().resource_mut::<DialogManager>();
+            mgr.open.clear();
+            // C# 直接关的 + NPC 级联（需 Npc 开着才级联）
+            for k in [
+                K::Inventory,
+                K::Character,
+                K::Mail,
+                K::Npc,
+                K::NpcGoods, // 级联
+                K::Market,   // 级联
+            ] {
+                mgr.open(k);
+            }
+            // 原版 ESC **不关** 的
+            for k in [
+                K::Trade,
+                K::GuestTrade,
+                K::Timer,
+                K::Buff,
+                K::Minimap,
+                K::DuraStatus,
+                K::Socket,
+                K::ChatNotice,
+                K::ItemRental,
+            ] {
+                mgr.open(k);
+            }
+        }
+        app.update();
+        let mgr = app.world().resource::<DialogManager>();
+        for k in [
+            K::Inventory,
+            K::Character,
+            K::Mail,
+            K::Npc,
+            K::NpcGoods,
+            K::Market,
+        ] {
+            assert!(!mgr.is_open(k), "{k:?} 应在 C# Closeall 集合内被关闭");
+        }
+        for k in [
+            K::Trade,
+            K::GuestTrade,
+            K::Timer,
+            K::Buff,
+            K::Minimap,
+            K::DuraStatus,
+            K::Socket,
+            K::ChatNotice,
+            K::ItemRental,
+        ] {
+            assert!(
+                mgr.is_open(k),
+                "{k:?} 不在 C# Closeall 集合内，ESC 不应关它"
+            );
+        }
+    }
+
+    /// #2836 单元③：NPC 级联只在 `Npc` 窗开着时发生（C# `if (NPCDialog.Visible) NPCDialog.Hide();`）
+    #[test]
+    fn esc_npc_cascade_requires_npc_open() {
+        use crate::game::dialogs::DialogKind as K;
+
+        let mut app = esc_app(false, None);
+        {
+            let mut mgr = app.world_mut().resource_mut::<DialogManager>();
+            mgr.open.clear();
+            mgr.open(K::NpcGoods);
+            mgr.open(K::Inspect); // 直接表内
+        }
+        app.update();
+        let mgr = app.world().resource::<DialogManager>();
+        assert!(
+            mgr.is_open(K::NpcGoods),
+            "NPC 窗没开时不应发生级联（商店留着）"
+        );
+        assert!(!mgr.is_open(K::Inspect), "直接表内的 Inspect 仍应关闭");
     }
 
     /// #2604：数量输入框（模态）开着 → Esc 让路（amount_box_system 自己消费
