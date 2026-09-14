@@ -196,6 +196,9 @@ struct ControlQueries<'w, 's> {
     hero: ResMut<'w, crate::game::dialogs::hero::HeroState>,
     /// #2801 单元②③：任务详情窗状态（`quest_detail` RPC 直接指定任务/分页首行/询问框）
     quest_detail: ResMut<'w, crate::game::dialogs::quest_log::QuestDetailState>,
+    /// #2892 批C：`MirInputBox` 是状态驱动窗（服务端 `S.GuildNameRequest`/`S.GuildRequestWar`
+    /// 打开），RPC 直接切 `InputBoxState.open` 以便实机取证
+    input_box: ResMut<'w, crate::game::dialogs::input_box::InputBoxState>,
     map_cameras: Query<
         'w,
         's,
@@ -621,6 +624,9 @@ fn parse_dialog_kind(s: &str) -> Option<DialogKind> {
         // #2801：C# `QuestDetailDialog`（任务详情窗，`Prguse[960]`；由任务日记行左键打开，
         // 也可由 RPC 直接开关以便实机取证）
         "quest_detail" => D::QuestDetail,
+        // #2892 批C：C# `MirInputBox`（服务端发起式取名；由 `S.GuildNameRequest` /
+        // `S.GuildRequestWar` 打开，RPC 仅用于实机取证时确认根节点存在）
+        "input_box" => D::InputBox,
         _ => return None,
     })
 }
@@ -678,7 +684,8 @@ fn has_rpc_mapping(kind: DialogKind) -> bool {
         | D::Storage
         | D::Skills
         | D::HeroManage
-        | D::QuestDetail => true,
+        | D::QuestDetail
+        | D::InputBox => true,
         // GuestTrade 刻意排除：网络 trade 会话驱动，无独立开关（见 parse_dialog_kind 文档）
         D::GuestTrade => false,
     }
@@ -757,6 +764,17 @@ fn apply_control_commands(
                             q.hero.confirm_slot = None;
                         }
                         DialogAction::Toggle => q.hero.managing = !q.hero.managing,
+                    }
+                } else if kind == DialogKind::InputBox {
+                    // #2892 批C：`MirInputBox` 由业务状态驱动（服务端发起），RPC 直接切状态
+                    match action {
+                        DialogAction::Open => {
+                            q.input_box.open = true;
+                            q.input_box.purpose =
+                                crate::game::dialogs::input_box::InputPurpose::None;
+                        }
+                        DialogAction::Close => q.input_box.open = false,
+                        DialogAction::Toggle => q.input_box.open = !q.input_box.open,
                     }
                 } else {
                     match action {
@@ -1079,6 +1097,7 @@ mod tests {
             "item_rental_browse",
             "hero_manage",
             "quest_detail",
+            "input_box",
         ];
         // #2599：trust_merchant/npc_drop 是历史别名（→ Market/Npc，真实现移壳后保留工具兼容），
         // 与 market/npc 重复映射——互异断言计数时先去掉这 2 个别名。
@@ -1091,11 +1110,11 @@ mod tests {
             seen.dedup_by_key(|k| format!("{k:?}"));
             seen
         };
-        assert_eq!(all.len(), 49);
+        assert_eq!(all.len(), 50);
         assert_eq!(
             uniq.len(),
-            47,
-            "49 个名字（含 trust_merchant/npc_drop 两个别名）应映射到 47 个不同变体"
+            48,
+            "50 个名字（含 trust_merchant/npc_drop 两个别名）应映射到 48 个不同变体"
         );
         // 名单与 witness 一致：每个可解析名都有 RPC 映射
         assert!(

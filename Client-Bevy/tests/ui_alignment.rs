@@ -66,6 +66,15 @@ impl Libs {
             i.offset_y as f32,
         )
     }
+
+    /// 真实精灵像素（RGBA）；用于区分「尺寸相同但内容不同」的帧。
+    fn pixels(&mut self, lib: LibraryName, idx: usize) -> Vec<u8> {
+        let i = self
+            .0
+            .get_image(lib, idx)
+            .unwrap_or_else(|| panic!("{:?}[{}] 缺失", lib, idx));
+        i.rgba.unwrap_or_default()
+    }
 }
 
 /// 断言对话框原点按真实精灵居中。
@@ -2054,5 +2063,106 @@ fn timer_dialog_aligned() {
 
     println!(
         "  ✓ 计时器 120x100 @(904,538)：沙漏 52x52 x2 档 6 帧、数字 900+x @70、冒号 910 @(44,70)"
+    );
+}
+
+/// #2892 批C：游戏内 `MirInputBox` 对齐 C# `Client/MirControls/MirInputBox.cs`——
+/// 面板 `Prguse[660]`（原生 288x156）居中 (368,306)；标题 (25,25) 235x40；
+/// 输入框 (23,86) 240x19（1px Lime 边框）；OK `Title[200..202]`@(60,123)、
+/// Cancel `Title[203..205]`@(160,123)。
+#[test]
+fn input_box_aligned() {
+    use client_bevy::game::dialogs::input_box as ib;
+    require_assets!("input_box_aligned");
+    let mut libs = Libs::new();
+
+    let (w, h) = libs.size(LibraryName::Prguse, ib::PANEL_INDEX);
+    assert_eq!(
+        (w, h),
+        (ib::PANEL_W, ib::PANEL_H),
+        "[尺寸] 面板应取 Prguse[660] 原生 288x156，不得拉伸"
+    );
+    let (ox, oy) = ib::PANEL_ORIGIN;
+    assert_centered(
+        "输入框",
+        ox,
+        oy,
+        LibraryName::Prguse,
+        ib::PANEL_INDEX,
+        &mut libs,
+    );
+    assert_eq!(
+        (ox, oy),
+        (368.0, 306.0),
+        "[坐标] C# 居中 ((1024-288)/2,(768-156)/2)"
+    );
+    assert_in_canvas("输入框", ox, oy, w, h);
+
+    // 标题与输入框在原版面板内
+    assert_inside(
+        "标题",
+        ox + ib::CAPTION_POS.0,
+        oy + ib::CAPTION_POS.1,
+        ib::CAPTION_SIZE.0,
+        ib::CAPTION_SIZE.1,
+        ox,
+        oy,
+        w,
+        h,
+    );
+    // 输入框容器 1px 边框外扩（spawn 里取 (22,85) 242x21）
+    assert_inside(
+        "输入框",
+        ox + ib::INPUT_POS.0 - 1.0,
+        oy + ib::INPUT_POS.1 - 1.0,
+        ib::INPUT_SIZE.0 + 2.0,
+        ib::INPUT_SIZE.1 + 2.0,
+        ox,
+        oy,
+        w,
+        h,
+    );
+
+    // OK / Cancel：`Title[200..205]` 六帧同尺寸，位置取 C# 坐标
+    let (bw, bh) = libs.size(LibraryName::Title, ib::OK_FRAMES.0);
+    assert!(bw > 0.0 && bh > 0.0, "[精灵] OK 键 Title[200] 应存在");
+    for idx in [
+        ib::OK_FRAMES.0,
+        ib::OK_FRAMES.1,
+        ib::OK_FRAMES.2,
+        ib::CANCEL_FRAMES.0,
+        ib::CANCEL_FRAMES.1,
+        ib::CANCEL_FRAMES.2,
+    ] {
+        assert_eq!(
+            libs.size(LibraryName::Title, idx),
+            (bw, bh),
+            "[尺寸] Title[{idx}] 应与 OK 键同尺寸"
+        );
+    }
+    assert_eq!((bw, bh), (76.0, 25.0), "[尺寸] C# `Title[200..205]` 76x25");
+    // 身份守卫：`MirMessageBox` 的 Yes/No 是 `Title[206..208]`，同为 76x25 ——
+    // 只比尺寸分不出用错帧，这里比像素确认 OK/Cancel 用的是 `[200..205]` 那一对。
+    let ok_px = libs.pixels(LibraryName::Title, ib::OK_FRAMES.0);
+    let cancel_px = libs.pixels(LibraryName::Title, ib::CANCEL_FRAMES.0);
+    let msg_px = libs.pixels(LibraryName::Title, 206);
+    assert!(!ok_px.is_empty() && !cancel_px.is_empty());
+    assert_ne!(
+        ok_px, msg_px,
+        "[身份] OK 键不得误用 MirMessageBox 的 `Title[206]`（Yes）"
+    );
+    assert_ne!(
+        cancel_px, msg_px,
+        "[身份] Cancel 键不得误用 MirMessageBox 的 `Title[206]`（Yes）"
+    );
+    assert_ne!(ok_px, cancel_px, "[身份] OK 与 Cancel 必须是不同帧");
+    for (name, pos) in [("OK", ib::OK_POS), ("Cancel", ib::CANCEL_POS)] {
+        assert_inside(name, ox + pos.0, oy + pos.1, bw, bh, ox, oy, w, h);
+    }
+    assert_eq!(ib::OK_POS, (60.0, 123.0));
+    assert_eq!(ib::CANCEL_POS, (160.0, 123.0));
+
+    println!(
+        "  ✓ MirInputBox Prguse[660] 288x156 @(368,306)：标题(25,25) 235x40、输入(23,86) 240x19、OK/Cancel 76x25 @(60/160,123)"
     );
 }
