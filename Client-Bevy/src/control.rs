@@ -589,7 +589,6 @@ fn parse_dialog_kind(s: &str) -> Option<DialogKind> {
         "relationship" => D::Relationship,
         "mount" => D::Mount,
         "report" => D::Report,
-        "hero" => D::Hero,
         "hero_inventory" => D::HeroInventory,
         "hero_equipment" => D::HeroEquipment,
         "hero_skill" => D::HeroSkill,
@@ -658,7 +657,6 @@ fn has_rpc_mapping(kind: DialogKind) -> bool {
         | D::Relationship
         | D::Mount
         | D::Report
-        | D::Hero
         | D::HeroInventory
         | D::HeroEquipment
         | D::HeroSkill
@@ -1068,7 +1066,6 @@ mod tests {
             "relationship",
             "mount",
             "report",
-            "hero",
             "hero_inventory",
             "hero_equipment",
             "hero_skill",
@@ -1110,11 +1107,11 @@ mod tests {
             seen.dedup_by_key(|k| format!("{k:?}"));
             seen
         };
-        assert_eq!(all.len(), 50);
+        assert_eq!(all.len(), 49);
         assert_eq!(
             uniq.len(),
-            48,
-            "50 个名字（含 trust_merchant/npc_drop 两个别名）应映射到 48 个不同变体"
+            47,
+            "49 个名字（含 trust_merchant/npc_drop 两个别名）应映射到 47 个不同变体"
         );
         // 名单与 witness 一致：每个可解析名都有 RPC 映射
         assert!(

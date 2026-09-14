@@ -429,9 +429,6 @@ pub(crate) fn auto_hero_test(
             if *t < 8.0 {
                 return;
             }
-            if !mgr.is_open(client_bevy::game::dialogs::DialogKind::Hero) {
-                mgr.toggle(client_bevy::game::dialogs::DialogKind::Hero);
-            }
             net.send_packet(&client_bevy::network::ChangeHeroWire { hero_index: 1 });
             tracing::info!("[HEROTEST] 切换英雄 1");
             *stage = 1;
@@ -606,9 +603,6 @@ pub(crate) fn auto_hero_exp_test(
             if *t < 8.0 {
                 return;
             }
-            if !mgr.is_open(client_bevy::game::dialogs::DialogKind::Hero) {
-                mgr.toggle(client_bevy::game::dialogs::DialogKind::Hero);
-            }
             net.send_packet(&client_bevy::network::ChangeHeroWire { hero_index: 1 });
             tracing::info!("[HEROEXP] 部署英雄 1");
             *stage = 1;
@@ -685,9 +679,6 @@ pub(crate) fn auto_hero_battle_test(
         0 => {
             if *t < 8.0 {
                 return;
-            }
-            if !mgr.is_open(client_bevy::game::dialogs::DialogKind::Hero) {
-                mgr.toggle(client_bevy::game::dialogs::DialogKind::Hero);
             }
             net.send_packet(&client_bevy::network::ChangeHeroWire { hero_index: 1 });
             tracing::info!("[HEROBATTLE] 部署英雄 1");

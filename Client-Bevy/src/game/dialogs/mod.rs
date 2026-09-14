@@ -95,7 +95,6 @@ pub enum DialogKind {
     Relationship,
     Mount,
     Report,
-    Hero,
     HeroInventory,
     HeroEquipment,
     HeroSkill,
@@ -156,6 +155,8 @@ pub struct DialogManager {
 /// NPCAwakeDialog→NpcAwake、RefineDialog→Refine、BigMapDialog→BigMap、
 /// Mail*（5 个 mail 窗）→Mail、ItemRentalDialog（浏览窗）→ItemRentalBrowse、NoticeDialog→Notice、
 /// HeroInventoryDialog→HeroInventory、HeroDialog→HeroEquipment/HeroSkill、HeroManageDialog→HeroManage（状态驱动，见 `closeall`）。
+/// **#2892 批C 变更**：原 `DialogKind::Hero` 自造聚合窗已删除——`HeroDialog`（C# 是
+/// `CharacterDialog` 实例）对应本端 `HeroEquipment`/`HeroSkill` 两窗，不再有独立 kind。
 ///
 /// **刻意不在表内**（原版 ESC 不关这些）：`Trade`/`GuestTrade`（交易窗）、`Timer`、
 /// `Buff`、`Minimap`、`DuraStatus`（`CharacterDuraPanel.Hide()` 在 `:691` 被注释掉）、
