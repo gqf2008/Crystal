@@ -972,6 +972,294 @@ fn e2e_refine_full_success_path() {
     });
 }
 
+/// #2865：觉醒**成功路径**端到端（材料齐全档）+ 缺材料对照。
+///
+/// 真机需要把角色摆到觉醒 NPC 旁并准备可觉醒装备 + 两种觉醒材料（`ItemType.Awakening=35`，
+/// shape = 类型 shape / 100），成本高；本用例用真实 gate/world 协议做可回归覆盖：
+/// `awakening_cfg.success_rate = 100`（C# `rand(0,100) <= rate` ⇒ 恒成功），
+/// 材料需求取默认表 `(Dc, grade=1, level=0) = [1,1]`。
+#[test]
+fn e2e_awakening_success_path() {
+    const WEAPON_UID: u64 = 9501;
+    const WEAPON2_UID: u64 = 9504;
+    const AWAKE_TYPE_DC: u8 = mir2_shared::enums::AwakeType::Dc as u8; // shared 枚举值 = 4
+    const CHAR: &str = "AwakeOkChar";
+
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .thread_stack_size(8 * 1024 * 1024)
+        .enable_time()
+        .build()
+        .unwrap();
+    rt.block_on(async {
+        let session_id = 43u64;
+        let (gate_ref, _tx, mut rx) = setup_gate_and_session(session_id).await;
+        let db_pool = e2e_setup_login(&gate_ref, session_id, &mut rx).await;
+
+        // 地图 0 + 觉醒 NPC（[@AWAKENING] 是引擎级 key，任何 NPC 都可，无需脚本行）
+        sqlx::query("INSERT INTO map_infos (idx, file_name, title) VALUES (0, '0', 'TestMap')")
+            .execute(&db_pool)
+            .await
+            .expect("insert map_infos");
+        sqlx::query(
+            "INSERT INTO npc_infos (idx, map_index, file_name, name, x, y) \
+             VALUES (1, 0, 'Blacksmith_Carlos', 'Blacksmith_Carlos', 10, 10)",
+        )
+        .execute(&db_pool)
+        .await
+        .expect("insert npc_infos");
+
+        // 物品表：可觉醒武器（type=1/grade=1/can_awakening=1）+ 两种觉醒材料（type=35/grade=1/shape=0 与 100）
+        let item_infos: [(i32, &str, i32, i32, i32, i32); 3] = [
+            (100, "TestAwakeBlade", 1, 1, 0, 1),
+            (400, "AwakeMatDc", 35, 1, 0, 0),
+            (401, "AwakeMatCommon", 35, 1, 100, 0),
+        ];
+        for (idx, name, item_type, grade, shape, can_awakening) in item_infos {
+            sqlx::query(
+                "INSERT INTO item_infos (idx, name, type, grade, shape, can_awakening, stats_json) \
+                 VALUES (?, ?, ?, ?, ?, ?, '{}')",
+            )
+            .bind(idx)
+            .bind(name)
+            .bind(item_type)
+            .bind(grade)
+            .bind(shape)
+            .bind(can_awakening)
+            .execute(&db_pool)
+            .await
+            .expect("insert item_infos");
+        }
+
+        let social_ref = SocialActor::spawn(SocialActorArgs {
+            gate_ref: gate_ref.clone(),
+            db_pool: db_pool.clone(),
+            config: SocialActorConfig::default(),
+        });
+        let world_ref = WorldActor::spawn(WorldActorArgs {
+            tick_interval_ms: 1000,
+            gate_ref: gate_ref.clone(),
+            map_dir: std::path::PathBuf::from("."),
+            spawn_dir: None,
+            quest_dir: std::path::PathBuf::from("."),
+            npc_script_dir: std::path::PathBuf::from("."),
+            db_pool: db_pool.clone(),
+            social_ref,
+            conquest_cfg: crate::util::config::ConquestConfig::default(),
+            rested_cfg: crate::util::config::RestedConfig::default(),
+            pvp_cfg: crate::util::config::PvpConfig::default(),
+            health_regen_weight: 10,
+            mana_regen_weight: 10,
+            goods_hide_added_stats: true,
+            goods_on: true,
+            goods_max_stored: 15,
+            goods_buy_back_time_minutes: 60,
+            goods_buy_back_max_stored: 20,
+            safe_zone_healing: false,
+            archive_inactive_after_months: 12,
+            monster_recall_enabled: true,
+            monster_recall_range: 12,
+            monster_recall_cooldown_ms: 5000,
+            exp_mob_level_difference: true,
+            refine_cfg: crate::util::config::RefineConfig::default(),
+            replace_wedring_cost: 125,
+            lover_exp_bonus: 5,
+            mentor_exp_boost: 10,
+            mentor_damage_boost: 10,
+            mentor_skill_boost: true,
+            mentee_exp_bank: 1,
+            orbs_exp_list: Vec::new(),
+            orbs_dmg_list: Vec::new(),
+            orbs_def_list: Vec::new(),
+            // #2865：确定性观察——成功必中（C# `rand(0,100) <= success_rate`）
+            awakening_cfg: crate::util::ini::AwakeningIniSettings {
+                success_rate: 100,
+                ..Default::default()
+            },
+            gem_cfg: Default::default(),
+            hero_exp_list: Vec::new(),
+            setup_cfg: Default::default(),
+            drop_rate: 1.0,
+            exp_rate: 1.0,
+            experience_list: Vec::new(),
+            item_timeout_ticks: 300,
+            max_drop_gold: 2000,
+            drop_gold: true,
+            rarity_cfg: crate::util::config::RarityConfig::default(),
+            notice_path: "Notice.txt".to_string(),
+            death_exp_penalty_percent: 0,
+            movement_pacing_ms: 0,
+            fishing_cfg: crate::util::ini::FishingConfig::default(),
+            random_item_stats: Vec::new(),
+            guild_buff_infos: Vec::new(),
+        });
+        let _ = gate_ref.ask(SetWorldRef { world_ref }).await;
+
+        // 建角
+        let mut nc_body = Vec::new();
+        let _ = mir2_shared::binary::write_dotnet_string(&mut nc_body, CHAR);
+        nc_body.push(0u8);
+        nc_body.push(0u8);
+        let _ = gate_ref
+            .ask(ClientData {
+                session_id,
+                data: build_packet_bytes(
+                    mir2_shared::enums::ClientPacketIds::NewCharacter as i16,
+                    &nc_body,
+                ),
+            })
+            .await;
+        assert!(
+            wait_opcode_body(
+                &mut rx,
+                mir2_shared::enums::ServerPacketIds::NewCharacterSuccess as i16,
+                3
+            )
+            .await
+            .is_some(),
+            "NewCharacterSuccess"
+        );
+
+        // 背包：0 = 待觉醒武器、1/2 = 两种觉醒材料各 1、3 = 第二把武器（缺材料对照）
+        let backpack: [(i32, i32, u64, u16); 4] = [
+            (0, 100, WEAPON_UID, 1000),
+            (1, 400, 9502, 1000),
+            (2, 401, 9503, 1000),
+            (3, 100, WEAPON2_UID, 1000),
+        ];
+        for (grid, item_index, uid, dura) in backpack {
+            let mut item = mir2_shared::data::item::UserItem::default();
+            item.item_index = item_index;
+            item.unique_id = uid;
+            item.count = 1;
+            item.current_dura = dura;
+            item.max_dura = dura;
+            let item_json = serde_json::to_string(&item).expect("serialize item");
+            sqlx::query(
+                "INSERT INTO inventory_backpack (character_name, grid, item_json) VALUES (?, ?, ?)",
+            )
+            .bind(CHAR)
+            .bind(grid)
+            .bind(item_json)
+            .execute(&db_pool)
+            .await
+            .expect("insert backpack item");
+        }
+        // 金币：觉醒费 = 1500 * (1 + level*2) * grade = 1500
+        sqlx::query("UPDATE characters SET gold = 100000 WHERE name = ?")
+            .bind(CHAR)
+            .execute(&db_pool)
+            .await
+            .expect("grant gold");
+        // 站到 NPC 旁（CallNPC 有 2 格距离校验）
+        sqlx::query("UPDATE characters SET map_index = 0, x = 11, y = 10 WHERE name = ?")
+            .bind(CHAR)
+            .execute(&db_pool)
+            .await
+            .expect("place character next to npc");
+
+        // StartGame → 抓 ObjectNpc
+        let _ = gate_ref
+            .ask(ClientData {
+                session_id,
+                data: build_packet_bytes(
+                    mir2_shared::enums::ClientPacketIds::StartGame as i16,
+                    &0i32.to_le_bytes().to_vec(),
+                ),
+            })
+            .await;
+        assert!(
+            wait_opcode_body(
+                &mut rx,
+                mir2_shared::enums::ServerPacketIds::StartGame as i16,
+                5
+            )
+            .await
+            .is_some(),
+            "StartGame"
+        );
+        let npc_body = wait_opcode_body(
+            &mut rx,
+            mir2_shared::enums::ServerPacketIds::ObjectNpc as i16,
+            5,
+        )
+        .await
+        .expect("ObjectNpc（觉醒 NPC）未下发——地图/NPC 载入失败");
+        let npc_oid = u32::from_le_bytes(npc_body[0..4].try_into().unwrap());
+
+        // 请 [@AWAKENING] 页（C# :8808 要求 AwakeningKey）
+        let mut call_body = Vec::new();
+        call_body.extend_from_slice(&npc_oid.to_le_bytes());
+        let _ = mir2_shared::binary::write_dotnet_string(&mut call_body, "[@AWAKENING]");
+        let _ = gate_ref
+            .ask(ClientData {
+                session_id,
+                data: build_packet_bytes(
+                    mir2_shared::enums::ClientPacketIds::CallNPC as i16,
+                    &call_body,
+                ),
+            })
+            .await;
+        assert!(
+            wait_opcode_body(
+                &mut rx,
+                mir2_shared::enums::ServerPacketIds::NPCAwakening as i16,
+                3
+            )
+            .await
+            .is_some(),
+            "NPCAwakening（[@AWAKENING] 页）未返回"
+        );
+
+        let awakening = |uid: u64| {
+            let mut body = Vec::new();
+            body.extend_from_slice(&uid.to_le_bytes());
+            body.push(AWAKE_TYPE_DC);
+            body.extend_from_slice(&0u32.to_le_bytes());
+            build_packet_bytes(mir2_shared::enums::ClientPacketIds::Awakening as i16, &body)
+        };
+
+        // ===== 第一段：材料齐全 ⇒ SUCCESS(1) =====
+        let _ = gate_ref
+            .ask(ClientData {
+                session_id,
+                data: awakening(WEAPON_UID),
+            })
+            .await;
+        let res = wait_opcode_body(
+            &mut rx,
+            mir2_shared::enums::ServerPacketIds::Awakening as i16,
+            5,
+        )
+        .await
+        .expect("觉醒结果包（S.Awakening）缺失");
+        assert_eq!(
+            i32::from_le_bytes(res[0..4].try_into().unwrap()),
+            mir2_shared::packets::server::awakening_system::AWAKE_RESULT_SUCCESS,
+            "材料齐全 + success_rate=100 时必须返回 SUCCESS（1）"
+        );
+
+        // ===== 第二段：材料已在上一段被消耗 ⇒ NO_MATERIALS(-4) =====
+        let _ = gate_ref
+            .ask(ClientData {
+                session_id,
+                data: awakening(WEAPON2_UID),
+            })
+            .await;
+        let res = wait_opcode_body(
+            &mut rx,
+            mir2_shared::enums::ServerPacketIds::Awakening as i16,
+            5,
+        )
+        .await
+        .expect("第二段觉醒结果包缺失");
+        assert_eq!(
+            i32::from_le_bytes(res[0..4].try_into().unwrap()),
+            mir2_shared::packets::server::awakening_system::AWAKE_RESULT_NO_MATERIALS,
+            "缺材料必须返回 NO_MATERIALS（-4），证明第一段不是恒定成功"
+        );
+    });
+}
+
 #[tokio::test]
 async fn e2e_client_version_handshake() {
     let session_id = 1u64;
