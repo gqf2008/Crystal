@@ -1911,6 +1911,9 @@ pub struct WorldActor {
     pub(crate) session_pearl_shop: std::collections::HashSet<u64>,
     /// 游戏配置：NPC 脚本 ((npc_index, page_name) -> lines)
     pub(crate) npc_scripts: HashMap<(i32, String), Vec<String>>,
+    /// #2867：任务 ↔ NPC 关联（来自 NPC 脚本 `[QUESTS]` 段，C# `NPCScript.ParseQuests`）：
+    /// `(quest index, 是否交任务) -> [npc db_index]`
+    pub(crate) quest_npc_links: HashMap<(i32, bool), Vec<i32>>,
     /// 游戏配置：任务信息
     pub(crate) quest_infos: HashMap<i32, db::QuestInfo>,
     /// 游戏配置：魔法信息（key = spell ID）
@@ -2573,6 +2576,7 @@ impl WorldActor {
             market_search_next_ms: HashMap::new(),
             session_pearl_shop: std::collections::HashSet::new(),
             npc_scripts: HashMap::new(),
+            quest_npc_links: HashMap::new(),
             quest_infos: HashMap::new(),
             magic_infos: HashMap::new(),
             dragon_info: None,
@@ -8129,6 +8133,14 @@ impl Actor for WorldActor {
         let quest_infos: HashMap<i32, db::QuestInfo> =
             quest_infos_list.into_iter().map(|q| (q.index, q)).collect();
 
+        // #2867：任务 ↔ NPC 关联（C# `NPCScript.ParseQuests`）——权威来源是 NPC 脚本的 `[QUESTS]` 段，
+        // 而不是 `npc_infos.collect_quest_indexes` / `finish_quest_indexes`（真实库两列实测全空）。
+        let quest_npc_links = quest::build_quest_npc_links(&npc_scripts, &quest_infos);
+        info!(
+            "Loaded {} quest↔npc links from NPC [QUESTS] pages",
+            quest_npc_links.len()
+        );
+
         let magic_infos_list = match db::load_magic_infos(&args.db_pool).await {
             Ok(m) => {
                 info!("Loaded {} magic configs from database", m.len());
@@ -8618,6 +8630,7 @@ impl Actor for WorldActor {
             market_search_next_ms: HashMap::new(),
             session_pearl_shop: std::collections::HashSet::new(),
             npc_scripts,
+            quest_npc_links,
             quest_infos,
             magic_infos,
             dragon_info,
@@ -11445,13 +11458,17 @@ fn build_client_recipe_info(
 fn build_client_quest_info(
     q: &db::QuestInfo,
     item_infos: &std::collections::HashMap<i32, db::ItemInfo>,
+    npc_ids: &std::collections::HashMap<(i32, bool), u32>,
 ) -> mir2_shared::data::client_data::ClientQuestInfo {
     use mir2_shared::enums::{QuestType, RequiredClass};
     // C# QuestType：General=0 Daily=1 Repeatable=2 Story=3；SharedRust 枚举 +3
     let quest_type = QuestType::try_from(q.quest_type as u8 + 3).unwrap_or(QuestType::General);
+    // #2867：C# `QuestInfo.CreateClientQuestInfo` 下发 `NpcIndex`/`FinishNpcIndex`
+    // （= NPC 脚本 `[QUESTS]` 段登记时写入的 NPC ObjectID；无关联时为 0）
+    let (npc_index, finish_npc_index) = quest::quest_client_npc_ids(npc_ids, q.index);
     mir2_shared::data::client_data::ClientQuestInfo {
         index: q.index,
-        npc_index: 0, // 暂无任务 NPC 索引（C# CreateClientQuestInfo 从任务文件取）
+        npc_index,
         name: q.name.clone(),
         group: q.group_name.clone(),
         description: q.goto_message.iter().cloned().collect(),
@@ -11499,11 +11516,42 @@ fn build_client_quest_info(
                 count: r.count,
             })
             .collect(),
-        finish_npc_index: 0,
+        finish_npc_index,
     }
 }
 
 /// 发送完整的游戏进入序列到客户端
+impl WorldActor {
+    /// #2867：登录下发全部任务定义（C# `PlayerObject.CheckQuestInfo` → `QuestInfo.CreateClientQuestInfo`）。
+    ///
+    /// 必须在**本会话的 NPC 生成之后**调用：C# 的 `NpcIndex`/`FinishNpcIndex` 是 NPC 脚本 `[QUESTS]`
+    /// 段登记时写入的 **NPC ObjectID**，而本端 NPC object_id 是 per-session 分配的，只有先生成才能映射。
+    pub(crate) async fn send_quest_infos(&self, session_id: u64, spawned_npcs: &[(i32, u32)]) {
+        let npc_ids = quest::quest_npc_object_ids(&self.quest_npc_links, spawned_npcs);
+        for q in self.quest_infos.values() {
+            let client_quest = build_client_quest_info(q, &self.item_infos, &npc_ids);
+            let packet = mir2_shared::packets::server::quest::NewQuestInfo {
+                quest: client_quest,
+            };
+            let mut body = Vec::new();
+            if mir2_shared::packets::base::serialize_packet(
+                &mut std::io::Cursor::new(&mut body),
+                &packet,
+            )
+            .is_ok()
+            {
+                let _ = self
+                    .gate_ref
+                    .tell(SendToClient {
+                        session_id,
+                        data: body,
+                    })
+                    .await;
+            }
+        }
+    }
+}
+
 async fn send_game_entry_sequence(
     gate_ref: ActorRef<GateActor>,
     session_id: u64,
@@ -11512,7 +11560,6 @@ async fn send_game_entry_sequence(
     map_title: &str,
     mi: Option<&db::MapInfo>,
     item_infos: &std::collections::HashMap<i32, db::ItemInfo>,
-    quest_infos: &std::collections::HashMap<i32, db::QuestInfo>,
     recipe_infos: &[db::RecipeInfo],
 ) {
     use mir2_shared::enums::ServerPacketIds;
@@ -11582,28 +11629,6 @@ async fn send_game_entry_sequence(
             || quest.status == crate::actors::quest::QuestStatus::InProgress
         {
             crate::actors::social_packets::send_quest_change_packet(&gate_ref, session_id, quest);
-        }
-    }
-
-    // C# StartGame GetQuestInfo（:1185）：登录下发全部任务定义（客户端任务日志依赖 NewQuestInfo）
-    for q in quest_infos.values() {
-        let client_quest = build_client_quest_info(q, item_infos);
-        let packet = mir2_shared::packets::server::quest::NewQuestInfo {
-            quest: client_quest,
-        };
-        let mut body = Vec::new();
-        if mir2_shared::packets::base::serialize_packet(
-            &mut std::io::Cursor::new(&mut body),
-            &packet,
-        )
-        .is_ok()
-        {
-            let _ = gate_ref
-                .tell(SendToClient {
-                    session_id: sid,
-                    data: body,
-                })
-                .await;
         }
     }
 
