@@ -510,6 +510,9 @@ pub enum ServerEvent {
     GuildNotice {
         notice: Vec<String>,
     },
+    /// #2892 批C：`S.GuildNameRequest`——服务端要求玩家输入公会名
+    /// （C# `GameScene.cs:5772-5800`：`MirInputBox` → `C.GuildNameReturn`）
+    GuildNameRequested,
     /// ChangeQuest：任务进度更新（C# 语义：仅更新，移除由 CompleteQuest 负责）
     QuestChanged {
         entry: QuestEntry,

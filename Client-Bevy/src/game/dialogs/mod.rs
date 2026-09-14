@@ -27,6 +27,8 @@ pub mod hero_belt;
 pub mod hero_equipment;
 pub mod hero_inventory;
 pub mod hero_skills;
+/// #2892 批C：C# `MirInputBox`（服务端发起式取名提示框）
+pub mod input_box;
 pub mod inspect;
 pub mod inventory;
 pub mod item_rental;
@@ -127,6 +129,11 @@ pub enum DialogKind {
     /// `QuestDialogs.cs:463-628`）。由任务日记行左键打开（`QuestSingleQuestItem._questLabel.Click`，
     /// `QuestDialogs.cs:1928-1935`）；`Movable = true` 独立拖动，故独立 kind 不复用 `QuestLog`
     QuestDetail,
+    /// #2892 批C：C# `MirInputBox`（玩家取名提示框，`Prguse[660]` 288x156 居中，
+    /// `Modal = true` / `Movable = false`）。服务端发起：`S.GuildNameRequest`（行会取名）、
+    /// `S.GuildRequestWar`（宣战目标行会名，`GameScene.cs:5784-5802`）。
+    /// 独立 kind：`Modal` 语义需要「在世界输入锁里算一个打开窗口」（`blocks_world_click`）。
+    InputBox,
 }
 
 /// 对话框管理（打开栈，栈顶在最前）
@@ -1177,6 +1184,8 @@ impl Plugin for DialogsPlugin {
                 .run_if(in_state(AppState::Game)),
         );
         app.add_plugins(text_input::TextInputPlugin);
+        // #2892 批C：游戏内 `MirInputBox`（服务端发起式取名）
+        app.add_plugins(input_box::InputBoxPlugin);
         app.add_plugins((
             (
                 inventory::InventoryDialogPlugin,

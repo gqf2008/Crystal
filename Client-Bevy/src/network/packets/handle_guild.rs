@@ -91,7 +91,9 @@ pub(crate) fn handle_guild(
         }
         x if x == ServerPacketIds::GuildNameRequest as i16 => {
             if miscellaneous::GuildNameRequest::read_body(&mut cur).is_ok() {
-                tracing::info!("🏴 行会名请求");
+                // #2892 批C：C# `GameScene.GuildNameRequest` → `MirInputBox` → `C.GuildNameReturn`
+                server_events.write(ServerEvent::GuildNameRequested);
+                tracing::info!("🏴 行会名请求 → 输入框");
             }
         }
         // ---- M18: 仓库 ----
