@@ -922,6 +922,10 @@ fn monster_melee_defence_type_for_kind(
             if matches!(n.as_str(), "kingguard") {
                 return DefenceType::Mac;
             }
+            // DarkOmaKing.cs:145：远程弹道分支 `DelayedAction(..., DefenceType.MAC)`
+            if matches!(n.as_str(), "darkomaking") {
+                return DefenceType::Mac;
+            }
         }
         MonsterDefenceKind::Line => {
             if matches!(n.as_str(), "crystalspider") {
@@ -947,6 +951,12 @@ fn monster_melee_defence_type_for_kind(
                 } else {
                     DefenceType::Mac
                 };
+            }
+            // TreeQueen.cs:81：FireBombardment `FindAllTargets(3)` 全员 `Attacked(..., MACAgility)`
+            // （同文件 :89-92 的 Push Attack 分支在 C# `CompleteAttack` 里**只推不打**，本端 PushAttack
+            //  也只推不伤，故此处仅炸弹幕一种 AOE 需要覆盖）
+            if matches!(n.as_str(), "treequeen") {
+                return DefenceType::MacAgility;
             }
         }
         // HellSlasher.cs:41：HalfmoonAttack(damage, 500, AC)

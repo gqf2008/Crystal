@@ -300,8 +300,6 @@ mod tests {
         }
         assert!(max_distance_seen > 5, "多次抽样应覆盖环带而非常量");
 
-        let (count, distance) = quake_count_and_spread(&mut rng, false);
-
         // 落点分布在 player ± distance 内（切比雪夫），value 与 start 落在 C# 取值域
         let (count, distance) = quake_count_and_spread(&mut rng, false);
         let spawns = quake_spawns(&mut rng, 100, 100, count, distance, 10, 30, |_, _| true);
