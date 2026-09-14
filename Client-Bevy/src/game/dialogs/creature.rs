@@ -285,6 +285,9 @@ fn cleanup_creature(mut commands: Commands, roots: Query<Entity, With<DialogRoot
 
 const CREATURE_W: f32 = 452.0;
 const CREATURE_H: f32 = 376.0;
+/// #2892 批B：面板精灵（C# `IntelligentCreatureDialog.Index = 468; Library = Libraries.Title`）
+pub const PANEL: (LibraryName, usize) = (LibraryName::Title, 468);
+pub const PANEL_SIZE: (f32, f32) = (CREATURE_W, CREATURE_H);
 const CREATURE_SLOT_X0: f32 = 44.0;
 const CREATURE_SLOT_Y0: f32 = 259.0;
 const CREATURE_SLOT_DX: f32 = 81.0;

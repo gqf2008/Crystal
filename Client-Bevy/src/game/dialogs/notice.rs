@@ -25,6 +25,9 @@ use crate::ui::theme::{
     load_lib_image, spawn_icon_button, spawn_label, spawn_label_center, spawn_panel,
 };
 
+/// #2892 批B：面板精灵（C# `NoticeDialog.Index = 961; Library = Libraries.Prguse`）
+pub const PANEL: (LibraryName, usize) = (LibraryName::Prguse, 961);
+
 // —— 布局常量（NoticeDialog.cs；Prguse[961] 实测 316x466）——
 pub const BG_W: f32 = 316.0;
 pub const BG_H: f32 = 466.0;
@@ -187,7 +190,7 @@ fn spawn_notice(
     let Some(bg) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 961) else {
         return;
     };
-    let panel = spawn_panel(&mut commands, bg, ox, oy, 316.0, 466.0, 30);
+    let panel = spawn_panel(&mut commands, bg, ox, oy, BG_W, BG_H, 30);
     commands
         .entity(panel)
         .insert((DialogRoot(DialogKind::Notice), NoticeWidget));

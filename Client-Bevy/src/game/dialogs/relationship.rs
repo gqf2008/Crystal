@@ -24,6 +24,10 @@ use crate::ui::theme::{
     load_lib_image, spawn_container, spawn_icon_button, spawn_label, spawn_panel,
 };
 
+/// #2892 批B：面板精灵与 C# 原生尺寸（C# `RelationshipDialog.Index = 583; Library = Libraries.Prguse`）
+pub const PANEL: (LibraryName, usize) = (LibraryName::Prguse, 583);
+pub const PANEL_SIZE: (f32, f32) = (284.0, 194.0);
+
 /// 婚姻状态
 #[derive(Resource, Default)]
 pub struct RelationshipState {
@@ -179,7 +183,7 @@ fn spawn_relationship(
         return;
     };
     let (px, py) = crate::game::dialogs::center_origin(284.0, 194.0);
-    let panel = spawn_panel(&mut commands, bg, px, py, 284.0, 194.0, 30);
+    let panel = spawn_panel(&mut commands, bg, px, py, PANEL_SIZE.0, PANEL_SIZE.1, 30);
     commands
         .entity(panel)
         .insert((DialogRoot(DialogKind::Relationship), RelationshipWidget));
