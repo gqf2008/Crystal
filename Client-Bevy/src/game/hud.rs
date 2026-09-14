@@ -156,6 +156,41 @@ pub struct HeroBehaviourBtn {
     pub disabled: Handle<Image>,
 }
 
+// ---------------------------------------------------------------------------
+// #2892 批C：C# `HeroMenuPanel`（`HeroDialogs.cs:385-455`）——
+// `Prguse[2179]` 24x61 @ `(((1024-24)/2)+362, 768-61-77)` = (862,630)，
+// 3 个 16x16 钮：技能 `Prguse[2173..2175]`@(3,3)、背包 `[2170..2172]`@(3,20)、
+// 角色 `[2176..2178]`@(3,37)；由 HUD `HeroMenuButton`（`Prguse[2164..2166]`）`Toggle()`。
+// HUD 另有召唤钮 `Prguse[2167..2169]` 20x20 @ `(Width-160, 90)` → 发聊天 `@SUMMONHERO`。
+// ---------------------------------------------------------------------------
+pub const HERO_MENU_PANEL_INDEX: usize = 2179;
+pub const HERO_MENU_PANEL_ORIGIN: (f32, f32) = (862.0, 630.0);
+pub const HERO_MENU_PANEL_SIZE: (f32, f32) = (24.0, 61.0);
+pub const HERO_MENU_BTN_SIZE: (f32, f32) = (16.0, 16.0);
+/// `(首帧索引, x, y)`：顺序 = 技能 / 背包 / 角色（C# 构造顺序）
+pub const HERO_MENU_BUTTONS: [(usize, f32, f32); 3] =
+    [(2173, 3.0, 3.0), (2170, 3.0, 20.0), (2176, 3.0, 37.0)];
+/// 召唤钮（HUD 相对：`main_x + bg_w - 160, main_y + 90`）
+pub const HERO_SUMMON_OFFSET: (f32, f32) = (-160.0, 90.0);
+pub const HERO_SUMMON_SIZE: (f32, f32) = (20.0, 20.0);
+pub const HERO_SUMMON_FRAMES: (usize, usize, usize) = (2167, 2168, 2169);
+/// C# `HeroSummonButton.Click` → `C.Chat{ "@SUMMONHERO" }`
+pub const HERO_SUMMON_COMMAND: &str = "@SUMMONHERO";
+
+/// `HeroMenuPanel.Visible`（C# 由 HUD 按钮 `Toggle()` 切换）
+#[derive(Resource, Default)]
+pub struct HeroMenuOpen(pub bool);
+
+#[derive(Component)]
+pub struct HeroMenuPanel;
+
+/// 菜单三钮（0=技能 1=背包 2=角色）
+#[derive(Component)]
+pub struct HeroMenuBtn(pub usize);
+
+#[derive(Component)]
+pub struct HeroSummonBtn;
+
 /// HUD 显示数据快照（#70 试点：挂 HUD 根实体；值变化时才写组件，
 /// hud_update_system 用 Changed<HudData> 门控，血条/文字只在数据变化帧更新）
 #[derive(Component, Default, PartialEq, Clone)]
@@ -235,7 +270,9 @@ fn hero_panel_system(
     >,
     mut blink: Local<(f32, bool)>,
 ) {
-    let show = hero.current.is_some();
+    // C# `GameScene.cs:6188`：`HeroInfoPanel.Visible = p.State > HeroSpawnState.Unsummoned`
+    let show = hero.current.is_some()
+        && hero.spawn_state as u8 > mir2_shared::enums::HeroSpawnState::Unsummoned as u8;
     if !show {
         *blink = (0.0, false);
     }
@@ -332,13 +369,102 @@ fn hero_btn_system(
     hero: Res<crate::game::dialogs::hero::HeroState>,
     mut btns: Query<&mut Visibility, With<HeroBtn>>,
 ) {
-    let show = hero.current.is_some();
+    // C# `GameScene.cs:6189`：`HeroMenuButton.Visible = p.State > HeroSpawnState.Unsummoned`
+    let show = hero.current.is_some()
+        && hero.spawn_state as u8 > mir2_shared::enums::HeroSpawnState::Unsummoned as u8;
     for mut v in &mut btns {
         *v = if show {
             Visibility::Visible
         } else {
             Visibility::Hidden
         };
+    }
+}
+
+/// #2892 批C：英雄菜单面板（C# `HeroMenuPanel`）——显隐 + 三钮动作
+/// （技能 `Prguse[2173..2175]`@(3,3) / 背包 `[2170..2172]`@(3,20) / 角色 `[2176..2178]`@(3,37)）
+fn hero_menu_system(
+    state: Res<HeroMenuOpen>,
+    hero: Res<crate::game::dialogs::hero::HeroState>,
+    mut mgr: ResMut<DialogManager>,
+    menu_btns: Query<(&UiButton, &HeroMenuBtn)>,
+    mut vis: Query<&mut Visibility, Or<(With<HeroMenuPanel>, With<HeroMenuBtn>)>>,
+) {
+    // C# `GameScene.cs:6191`：`HeroMenuPanel.Visible &&= HeroMenuButton.Visible`
+    let show = state.0
+        && hero.current.is_some()
+        && hero.spawn_state as u8 > mir2_shared::enums::HeroSpawnState::Unsummoned as u8;
+    for mut v in &mut vis {
+        let want = if show {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
+        if *v != want {
+            *v = want;
+        }
+    }
+    if !show {
+        return;
+    }
+    for (btn, kind) in &menu_btns {
+        if !btn.clicked {
+            continue;
+        }
+        // 三钮动作与 C# 同义（`HeroDialogs.cs:396-455`）：
+        // 技能 → `HeroDialog.ShowSkillPage()`；背包 → `HeroInventoryDialog.Visible` 取反；
+        // 角色 → `HeroDialog.ShowCharacterPage()`；本端装备/技能是两个独立窗 → 打开目标页时关另一页
+        match kind.0 {
+            0 => {
+                if mgr.is_open(DialogKind::HeroSkill) {
+                    mgr.close(DialogKind::HeroSkill);
+                } else {
+                    mgr.close(DialogKind::HeroEquipment);
+                    mgr.open(DialogKind::HeroSkill);
+                }
+                tracing::info!("🦸 英雄菜单：技能页");
+            }
+            1 => {
+                mgr.toggle(DialogKind::HeroInventory);
+                tracing::info!("🦸 英雄菜单：背包");
+            }
+            _ => {
+                if mgr.is_open(DialogKind::HeroEquipment) {
+                    mgr.close(DialogKind::HeroEquipment);
+                } else {
+                    mgr.close(DialogKind::HeroSkill);
+                    mgr.open(DialogKind::HeroEquipment);
+                }
+                tracing::info!("🦸 英雄菜单：角色页");
+            }
+        }
+    }
+}
+
+/// #2892 批C：HUD 召唤钮（C# `HeroSummonButton`：`Visible = HasHero`（`p.State > None`），
+/// 点击发聊天 `@SUMMONHERO`，`MainDialogs.cs:334-348`）
+fn hero_summon_system(
+    hero: Res<crate::game::dialogs::hero::HeroState>,
+    net: Res<NetConnection>,
+    mut btns: Query<(&UiButton, &mut Visibility), With<HeroSummonBtn>>,
+) {
+    let has_hero = hero.spawn_state as u8 > mir2_shared::enums::HeroSpawnState::None as u8;
+    for (btn, mut vis) in &mut btns {
+        let want = if has_hero {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
+        if *vis != want {
+            *vis = want;
+        }
+        if has_hero && btn.clicked {
+            net.send_packet(&mir2_shared::packets::client::chat::Chat {
+                message: HERO_SUMMON_COMMAND.to_string(),
+                linked_items: Vec::new(),
+            });
+            tracing::info!("🦸 召唤英雄（{HERO_SUMMON_COMMAND}）");
+        }
     }
 }
 
@@ -458,6 +584,7 @@ fn hud_button_hint(kind: HudButtonKind, kb: &KeyboardState) -> Option<(String, S
 fn hud_button_system(
     mut mgr: ResMut<DialogManager>,
     mut page: ResMut<CharPage>,
+    mut menu: ResMut<HeroMenuOpen>,
     buttons: Query<(&UiButton, &HudButton)>,
 ) {
     for (btn, kind) in &buttons {
@@ -479,7 +606,9 @@ fn hud_button_system(
                 HudButtonKind::Option => mgr.toggle(DialogKind::Settings),
                 HudButtonKind::Menu => mgr.toggle(DialogKind::Menu),
                 HudButtonKind::GameShop => mgr.toggle(DialogKind::GameShop),
-                HudButtonKind::Hero => mgr.toggle(DialogKind::Hero),
+                // #2892 批C：C# `HeroMenuButton.Click → HeroMenuPanel.Toggle()`
+                // （原版 HUD 钮开的是菜单面板，不是窗口）
+                HudButtonKind::Hero => menu.0 = !menu.0,
             }
         }
     }
@@ -639,6 +768,8 @@ impl Plugin for HudPlugin {
         // inventory_events（dialogs/inventory.rs）、belt_restock_events（dialogs/potion_belt.rs），
         // 均入 GameSet::PlayerState（.before(Hud)，维持「写方在读方前」）；步9 双写删除。
         app.init_resource::<DeathDialogState>();
+        // #2892 批C：`HeroMenuPanel.Visible`（HUD 英雄钮 `Toggle()`）
+        app.init_resource::<HeroMenuOpen>();
         app.add_systems(OnEnter(AppState::Game), spawn_hud);
         app.add_systems(OnExit(AppState::Game), cleanup_hud);
         // #2632：放宽 11 系统 .chain() 全串行——只保留确有数据依赖的排序，其余解链并行。
@@ -661,6 +792,9 @@ impl Plugin for HudPlugin {
                 hero_panel_system,
                 // #2892 批C：英雄行为条（C# HeroBehaviourPanel）
                 hero_behaviour_system,
+                // #2892 批C：英雄菜单面板 + HUD 召唤钮（C# HeroMenuPanel / HeroSummonButton）
+                hero_menu_system,
+                hero_summon_system,
                 hud_space_weight_system,
                 hud_tooltip_system,
             )
@@ -686,6 +820,7 @@ fn spawn_hud(
     mut ui_font: ResMut<UiFont>,
     opt: Res<OptionState>,
     mmap: Res<MiniMapMode>,
+    kb: Res<KeyboardState>,
 ) {
     if !crate::ui::sprite_ui::ui_enabled("hud") {
         return;
@@ -1168,6 +1303,92 @@ fn spawn_hud(
                 crate::ui::tooltip::TooltipHint(crate::game::dialogs::hero::behaviour_hint(i)),
             ));
         }
+    }
+
+    // #2892 批C：英雄菜单面板（C# `HeroMenuPanel`，`HeroDialogs.cs:385-455`）
+    // `Prguse[2179]` 24x61 @(862,630)；由 HUD 英雄钮 `Toggle()`，非 HUD 常驻控件
+    if let Some(h) = ui_image(
+        &mut libs,
+        &mut images,
+        &mut cache,
+        LibraryName::Prguse,
+        HERO_MENU_PANEL_INDEX,
+    ) {
+        let e = spawn_ui_sprite(
+            &mut commands,
+            h,
+            // C# 该面板用的是**屏幕绝对坐标**（`ScreenWidth/ScreenHeight`），不随 HUD 背景偏移
+            HERO_MENU_PANEL_ORIGIN.0,
+            HERO_MENU_PANEL_ORIGIN.1,
+            3.4,
+            1.0,
+        );
+        commands
+            .entity(e)
+            .insert((HeroMenuPanel, Visibility::Hidden));
+    }
+    // 三钮 Hint 取 C# `HeroSkills/HeroInventory/HeroCharacter` 模板 + 当前键位
+    let menu_hints = [
+        crate::game::dialogs::keyboard_layout::hint_with_key(
+            &kb.bindings,
+            "技能 ({0})",
+            "英雄技能",
+        ),
+        crate::game::dialogs::keyboard_layout::hint_with_key(
+            &kb.bindings,
+            "背包 ({0})",
+            "英雄背包",
+        ),
+        crate::game::dialogs::keyboard_layout::hint_with_key(
+            &kb.bindings,
+            "角色 ({0})",
+            "英雄装备",
+        ),
+    ];
+    for (i, (base, dx, dy)) in HERO_MENU_BUTTONS.iter().enumerate() {
+        if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
+            &mut commands,
+            &mut libs,
+            &mut images,
+            &mut cache,
+            LibraryName::Prguse,
+            *base,
+            base + 1,
+            base + 2,
+            HERO_MENU_PANEL_ORIGIN.0 + dx,
+            HERO_MENU_PANEL_ORIGIN.1 + dy,
+            3.5,
+            HERO_MENU_BTN_SIZE.0,
+            HERO_MENU_BTN_SIZE.1,
+        ) {
+            commands.entity(e).insert((
+                HeroMenuBtn(i),
+                Visibility::Hidden,
+                crate::ui::tooltip::TooltipHint(menu_hints[i].clone()),
+            ));
+        }
+    }
+    // HUD 召唤钮（C# `HeroSummonButton`：`Prguse[2167..2169]` 20x20 @(Width-160, 90)）
+    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
+        &mut commands,
+        &mut libs,
+        &mut images,
+        &mut cache,
+        LibraryName::Prguse,
+        HERO_SUMMON_FRAMES.0,
+        HERO_SUMMON_FRAMES.1,
+        HERO_SUMMON_FRAMES.2,
+        main_x + bg_w + HERO_SUMMON_OFFSET.0,
+        main_y + HERO_SUMMON_OFFSET.1,
+        3.0,
+        HERO_SUMMON_SIZE.0,
+        HERO_SUMMON_SIZE.1,
+    ) {
+        commands.entity(e).insert((
+            HeroSummonBtn,
+            Visibility::Hidden,
+            crate::ui::tooltip::TooltipHint("召唤英雄".to_string()),
+        ));
     }
 
     // 死亡弹窗（对齐 C# GameScene.ShowReviveMessage → MirMessageBox(YesNo)）：
@@ -1795,6 +2016,163 @@ mod tests {
     use super::*;
 
     /// #2892 批C：C# `HeroBehaviourPanel`（`HeroDialogs.cs:751-793`）几何——
+    /// （见同文件 `hero_behaviour_geometry_matches_csharp`）
+    #[test]
+    fn hero_menu_geometry_matches_csharp() {
+        assert_eq!(HERO_MENU_PANEL_INDEX, 2179);
+        assert_eq!(HERO_MENU_PANEL_SIZE, (24.0, 61.0));
+        assert_eq!(
+            HERO_MENU_PANEL_ORIGIN,
+            (
+                ((1024.0 - HERO_MENU_PANEL_SIZE.0) / 2.0) + 362.0,
+                768.0 - HERO_MENU_PANEL_SIZE.1 - 77.0
+            ),
+            "C# `(((ScreenWidth-W)/2)+362, ScreenHeight-H-77)`"
+        );
+        assert_eq!(HERO_MENU_PANEL_ORIGIN, (862.0, 630.0));
+        assert_eq!(HERO_MENU_BTN_SIZE, (16.0, 16.0));
+        assert_eq!(
+            HERO_MENU_BUTTONS,
+            [(2173, 3.0, 3.0), (2170, 3.0, 20.0), (2176, 3.0, 37.0)],
+            "C# 技能/背包/角色三钮帧基址与坐标"
+        );
+        assert_eq!(HERO_SUMMON_FRAMES, (2167, 2168, 2169));
+        assert_eq!(HERO_SUMMON_SIZE, (20.0, 20.0));
+        assert_eq!(HERO_SUMMON_OFFSET, (-160.0, 90.0), "C# `(Width-160, 90)`");
+        assert_eq!(HERO_SUMMON_COMMAND, "@SUMMONHERO");
+    }
+
+    /// #2892 批C：英雄菜单面板行为（三钮动作 + 显隐按出战状态）+ HUD 召唤钮发包
+    #[test]
+    fn hero_menu_actions_and_summon_click() {
+        use crate::game::dialogs::hero::HeroState;
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.init_resource::<DialogManager>();
+        app.insert_resource(NetConnection::default());
+        app.insert_resource(HeroMenuOpen(true));
+        let mut hero = HeroState::default();
+        hero.current = Some(mir2_shared::data::client_data::ClientHeroInformation {
+            index: 1,
+            name: "英雄甲".to_string(),
+            level: 30,
+            class: mir2_shared::enums::MirClass::Warrior,
+            gender: mir2_shared::enums::MirGender::Male,
+        });
+        hero.spawn_state = mir2_shared::enums::HeroSpawnState::Summoned;
+        app.insert_resource(hero);
+        app.add_systems(Update, (hero_menu_system, hero_summon_system));
+
+        let (tx, rx) = crossbeam_channel::unbounded::<Vec<u8>>();
+        app.world_mut().resource_mut::<NetConnection>().to_server = Some(tx);
+
+        let panel = app
+            .world_mut()
+            .spawn((HeroMenuPanel, Visibility::Hidden))
+            .id();
+        let mut btns = Vec::new();
+        for i in 0..3usize {
+            btns.push(
+                app.world_mut()
+                    .spawn((
+                        HeroMenuBtn(i),
+                        UiButton {
+                            rect: (0.0, 0.0, 16.0, 16.0),
+                            clicked: false,
+                        },
+                        Visibility::Hidden,
+                    ))
+                    .id(),
+            );
+        }
+        let summon = app
+            .world_mut()
+            .spawn((
+                HeroSummonBtn,
+                UiButton {
+                    rect: (0.0, 0.0, 20.0, 20.0),
+                    clicked: false,
+                },
+                Visibility::Hidden,
+            ))
+            .id();
+        app.update();
+
+        // 出战 + 菜单开关为真 → 面板与三钮可见
+        assert_eq!(
+            *app.world().entity(panel).get::<Visibility>().unwrap(),
+            Visibility::Visible
+        );
+        for e in &btns {
+            assert_eq!(
+                *app.world().entity(*e).get::<Visibility>().unwrap(),
+                Visibility::Visible
+            );
+        }
+        assert_eq!(
+            *app.world().entity(summon).get::<Visibility>().unwrap(),
+            Visibility::Visible,
+            "State > None → 召唤钮可见"
+        );
+
+        // 点「技能」→ 开 HeroSkill
+        let click = |app: &mut App, e: Entity| {
+            app.world_mut().entity_mut(e).insert(UiButton {
+                rect: (0.0, 0.0, 16.0, 16.0),
+                clicked: true,
+            });
+            app.update();
+        };
+        click(&mut app, btns[0]);
+        assert!(app
+            .world()
+            .resource::<DialogManager>()
+            .is_open(DialogKind::HeroSkill));
+        // 点「角色」→ 开 HeroEquipment 并关掉技能页
+        click(&mut app, btns[2]);
+        let mgr = app.world().resource::<DialogManager>();
+        assert!(mgr.is_open(DialogKind::HeroEquipment));
+        assert!(
+            !mgr.is_open(DialogKind::HeroSkill),
+            "两页互斥（C# 同属一窗）"
+        );
+        // 点「背包」→ 开关 HeroInventory
+        click(&mut app, btns[1]);
+        assert!(app
+            .world()
+            .resource::<DialogManager>()
+            .is_open(DialogKind::HeroInventory));
+
+        // 召唤钮 → 发聊天 @SUMMONHERO
+        app.world_mut().entity_mut(summon).insert(UiButton {
+            rect: (0.0, 0.0, 20.0, 20.0),
+            clicked: true,
+        });
+        app.update();
+        let raw = rx.try_recv().expect("召唤钮应发聊天包");
+        let chat: mir2_shared::packets::client::chat::Chat =
+            mir2_shared::packets::base::deserialize_packet(&mut std::io::Cursor::new(raw))
+                .expect("应为 Chat 包");
+        assert_eq!(chat.message, HERO_SUMMON_COMMAND);
+
+        // 收回英雄（Unsummoned）→ 菜单与召唤钮的显隐按 C# 规则分别收敛
+        app.world_mut()
+            .resource_mut::<crate::game::dialogs::hero::HeroState>()
+            .spawn_state = mir2_shared::enums::HeroSpawnState::Unsummoned;
+        app.update();
+        assert_eq!(
+            *app.world().entity(panel).get::<Visibility>().unwrap(),
+            Visibility::Hidden,
+            "Unsummoned → 菜单隐藏（State > Unsummoned 才显示）"
+        );
+        assert_eq!(
+            *app.world().entity(summon).get::<Visibility>().unwrap(),
+            Visibility::Visible,
+            "Unsummoned 仍是「有英雄」（State > None）→ 召唤钮可见"
+        );
+    }
+
+    /// #2892 批C：C# `HeroBehaviourPanel`（`HeroDialogs.cs:751-793`）几何——
     /// （见下方 `hero_behaviour_geometry_matches_csharp`）
     #[test]
     fn hero_info_panel_geometry_and_formats() {
@@ -1849,6 +2227,8 @@ mod tests {
         hero.hero_max_mp = 200; // 0%
         hero.hero_exp = 1000;
         hero.hero_max_exp = 5000; // 20%
+                                  // C# `HeroInfoPanel.Visible = p.State > Unsummoned`
+        hero.spawn_state = mir2_shared::enums::HeroSpawnState::Summoned;
         app.insert_resource(hero);
         app.add_systems(Update, hero_panel_system);
 
@@ -2164,6 +2544,8 @@ mod tests {
                 PlayerName(String::new()),
             ));
             world.insert_resource(MiniMapMode::default());
+            // #2892 批C：spawn_hud 现在还要读键位（英雄菜单钮 Hint）
+            world.insert_resource(crate::game::dialogs::keyboard_layout::KeyboardState::default());
             world.run_system_once(spawn_hud).expect("spawn_hud 应成功");
             world
                 .run_system_once(hud_update_system)
@@ -2211,6 +2593,8 @@ mod tests {
         world.insert_resource(UiCjkFont::default());
         world.insert_resource(OptionState::default());
         world.insert_resource(MiniMapMode::default());
+        // #2892 批C：spawn_hud 现在还要读键位（英雄菜单钮 Hint）
+        world.insert_resource(crate::game::dialogs::keyboard_layout::KeyboardState::default());
         world.run_system_once(spawn_hud).expect("spawn_hud 应成功");
 
         fn assert_outlined<M: Component>(world: &mut World, name: &str) {
@@ -2306,6 +2690,8 @@ mod tests {
             opt.mode_view = mode_view;
             world.insert_resource(opt);
             world.insert_resource(MiniMapMode::default());
+            // #2892 批C：spawn_hud 现在还要读键位（英雄菜单钮 Hint）
+            world.insert_resource(crate::game::dialogs::keyboard_layout::KeyboardState::default());
             world.run_system_once(spawn_hud).expect("spawn_hud 应成功");
             let mut sq = world.query_filtered::<&Visibility, With<SModeText>>();
             let s = sq.iter(&world).copied().next().expect("应有 SModeText");
@@ -2397,6 +2783,8 @@ mod tests {
         world.insert_resource(crate::game::combat::AttackModeState::default());
         world.insert_resource(OptionState::default());
         world.insert_resource(MiniMapMode::default());
+        // #2892 批C：spawn_hud 现在还要读键位（英雄菜单钮 Hint）
+        world.insert_resource(crate::game::dialogs::keyboard_layout::KeyboardState::default());
         let bare = world
             .spawn((
                 AttackModeText,
