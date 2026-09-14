@@ -167,11 +167,12 @@
 | 批25 任务详情富文本收尾 | ① 消息区 `{文本/颜色}` 彩色叠加（C# `NewColour`，`QuestDialogs.cs:1008/1321-1353`；基础白字 + 原位叠加标签，颜色名走 `Color.FromName` 子集）② 行内链接 `[MONSTER\|NPC\|ITEM:idx(\|name)]` / `<$KIND:idx>` 换名（`NPCDialogs.cs:24-26/920-955`：内嵌名 > 查表 > `Item {idx}` 回退）+ 常色青/悬停橙 + 悬停提示（`NewLink` `:1355-1382`；探针可驱动）③ 奖励格悬停物品说明（`QuestCell.OnMouseEnter` `:1663-1683` → 复用背包 `item_tooltip_lines`，耐久取 `Item.Durability`）④ 文档与实机记录回填（本行） | #2812 #2813 #2815 #2816 |
 | 批26 文本描边（C# `MirLabel` 默认 `OutLine=true`） | ① 描边副本跟随正文**位置/显隐/字号**（`sync_outline_ui_system` 补 `Node` 克隆 + 副本 1px 偏移、`Visibility`、`TextFont`；颜色刻意不镜像，副本恒黑）② 对话框文本**默认带描边**（`theme::spawn_label`/`spawn_label_center` 转调 outlined 版，约 150 处调用点零改动；新增 `*_plain` 显式无描边变体 + 两处例外：数量框 `InputTextBox`、奖励格数量黄字）③ HUD 标签补描边（HP/MP/Top/Bottom/Exp/Level/Gold/Name/Weight/Space/英雄面板/死亡提示）+ **负向断言**（聊天文本 `spawn_ui_text` 路径保持无描边）④ 文档与实机记录回填（本行） | #2818 #2819 #2822 #2823 |
 | 批27 窗口可拖动性（C# `Movable` 默认 false） | ① 给「C# 默认不可拖却被本端拖」的 7 个窗口挂 `NotDraggable`：计时器 / 掷骰 / 小地图 / 耐久面板 / 仓库 / 精炼 / 英雄主窗（`HeroManage` 显式 `Movable=true` 保持可拖）；每窗两个新单测 = 结构（该 kind 的**每个**根都带 `NotDraggable`）+ 行为（真实 spawn 出的窗口 + 真实 `dialog_drag_system`，置 Visible 后按左键断言不起拖）② §7 记录反向结构性差异（腰带/聊天/英雄腰带/好友备注/钓鱼状态/下拉框）+ 技能栏已对齐 ③ 实机截图与注入限制记录 ④ 本行 | #2830 #2833 #2834 |
+| 批28 快捷键语义（C# `GameScene.cs:532-711`） | ① 装备键（`Equipment/Equipment2`）页感知：不在角色页 → 打开并切到角色页，已在角色页 → 关窗（此前通用 toggle 会把整窗关掉）② 英雄三键补 `Hero == null` 守卫（`HeroState.current`）+ 英雄装备/技能互斥切页（C# 两页同属一个 `HeroDialog`，本端是两个独立窗）③ ESC `Closeall` 从 blanket `open.clear()` 改为 C# **集合**：直接表 31 个 kind + `NPCDialog.Hide()` 级联 8 个 kind（仅 NPC 窗可见时）+ 状态驱动 `HeroManage` 清状态；原版不关的交易窗/计时器/Buff/小地图/耐久/镶嵌/聊天公告/租赁双方窗不再被误关 ④ 本行 | #2838 #2876 #2877 #2878 |
 
 ## 6. 验证基线
 
 - `cargo check --tests`（Client-Bevy）通过。
-- `cargo test`（Client-Bevy）：**535 lib** + 2 bin + 1 smoke + 24 alignment 通过（批27 单元① 后基线；批26 收尾时 528 lib，批25 收尾时 523 lib，批24 收尾时 514 lib）；ServerRust **680 lib** + 6 integration（同上，含 `QuestItemReward` ItemInfo 协议）；SharedRust **187 + 11**（2 ignored，含 `QuestItemReward` 往返无损）。
+- `cargo test`（Client-Bevy）：**542 lib** + 2 bin + 1 smoke + 24 alignment 通过（批28 单元③ 后基线；批27 收尾时 535 lib，批26 收尾时 528 lib，批25 收尾时 523 lib，批24 收尾时 514 lib）；ServerRust **680 lib** + 6 integration（同上，含 `QuestItemReward` ItemInfo 协议）；SharedRust **187 + 11**（2 ignored，含 `QuestItemReward` 往返无损）。
 - Report 的 C# `Prguse[1633]` 在当前本地 Data 包缺失；已使用按 C# 控件边界推导的 360x244 深色兜底面板并保留对应子控件坐标，待资源包更新后自动加载正确背景。
 - ServerRust：680 lib + 6 integration 通过（批24 单元③ 后；批16 基线为 673 lib）；SharedRust 187 + 11（2 ignored）；`MapEditor/SharedRust` `cargo check` 通过（副本同步，批24 单元③ 改 `QuestItemReward` 时同步）。
 - 关键实机/定向验证：UI 子树泄漏截图、Character 技能页、AssignKey 模态输入、Timer 穿透、登录安全键盘资源；批7 复验 Mail/Buff；批8 复验 Center 窗口。
@@ -264,6 +265,17 @@
     → 断言 `DialogDrag.dragging == None`。该断言已用「删掉 `Without<NotDraggable>`」反向验证会红。
   - 未覆盖：`RollDialog`/`RefineDialog` 的实机开窗（需要服务端掷骰/精炼流程触发），二者由上述单测覆盖。
 
+- 批28 快捷键语义复验（2026-09-14，`--auto-enter` + Control API `dialog`/`screenshot`）：
+  - 三处语义均由**系统级单测**覆盖（不是纯函数）：`equipment_hotkey_is_page_aware`（未开窗→开+角色页 /
+    技能页按→切页不关 / 角色页按→关）、`hero_hotkeys_require_hero_and_are_page_aware`（无英雄不动作 /
+    有英雄正常 / 装备⇄技能互斥切页 / 已在页→关）、`esc_closes_closeall_set_only` +
+    `esc_npc_cascade_requires_npc_open` + `closeall_matches_csharp_set`（集合语义与级联条件）。
+  - **真机按键取证仍不可得**：本机 `SetForegroundWindow` 返回 0、前台窗口不是客户端（同批27 记录），
+    键鼠注入到不了 winit，故按键类行为只能由「真实系统 + 合成 `ButtonInput` 状态」的用例覆盖；
+    实机只用于确认窗口正常渲染（角色/英雄/交易/计时器等窗在改动后仍正常开关）。
+  - 未覆盖：`NPCDialog.Hide()` 级联在**真实 NPC 流程**中的表现（需服务端脚本触发 NPC 商店/修理等），
+    当前由 `Npc` 窗可见性条件 + 级联表单测覆盖。
+
 ## 7. 已知有意偏差
 
 - Creature：C# `CreatureRenameButton` 构造即 `Visible = false` 且再无置真处（原版死控件，改名入口点不到）；Bevy 保留可用的「改名」按钮（功能补齐见 #1281），仅坐标/精灵与 C# 对齐。
@@ -337,3 +349,16 @@
     「并入同窗的状态行」「模态输入框」「UI 弹层」，都没有独立的可拖窗口与位置状态；补齐需先引入
     「窗口拖动偏移 + 持久化」模型（`hero_belt.rs` 头部已单独记录同样理由）。技能栏（`SkillBarDialog`，
     `MainDialogs.cs:1535`）**已对齐**：本端技能栏有自己的拖动 + 位置持久化（#1235）。
+
+- 快捷键语义（批28 已对齐；基准 `GameScene.cs:532-711` 的键盘 `switch`）：
+  - **页感知**：`Equipment/Equipment2` 与英雄装备/技能键在 C# 是「不在该页 → 切到该页；在该页 → 关窗」
+    （`:563-606` 的 `!XxxPage.Visible` 分支）。本端装备键与英雄三键已照此实现
+    （`dialogs/keyboard_layout.rs`：装备键用 `CharPage == 0` 判定；英雄装备/技能是两个独立窗 → 互斥切换并关掉另一页）。
+  - **`Hero == null` 守卫**：英雄三键在 C# 开头即 `if (Hero == null) break;`（`:582/588/598`），
+    本端取 `HeroState.current.is_some()`（与 HUD 英雄按钮显隐同判据）。
+  - **`Closeall`（ESC）集合**：C# 是**枚举**窗口（`:669-708` + `NPCDialog.Hide()` 级联 `NPCDialogs.cs:1026-1037`），
+    本端按同一集合实现（`dialogs/mod.rs::CLOSEALL_DIRECT`/`CLOSEALL_NPC_CASCADE`/`closeall()`）。
+    与 C# 一致**不关**：交易窗（`TradeDialog`/`GuestTradeDialog`）、`TimerDialog`、`BuffDialog`、
+    `MiniMapDialog`、`CharacterDuraPanel`（`:691` 的 `Hide()` 原版被注释）、`SocketDialog`、
+    `ChatNoticeDialog`、租赁双方窗（仅浏览窗 `ItemRentalDialog` 在表内）。
+    `FishingStatusDialog.bEscExit` 的 `Cancel()`（`:698`）在本端对应钓鱼窗被关闭时状态行一并隐藏（同窗结构）。
