@@ -357,6 +357,12 @@ pub struct UiDropDown {
     pub popup_rows: usize,
     /// 滚动偏移
     pub scroll: usize,
+    /// #2892 批D 单元①：弹出面板的**基准相对坐标**（父面板坐标系，C# `MirDropDownBox.Movable`）
+    pub base_rel: (f32, f32),
+    /// 拖动偏移（相对基准位置；C# `OnMouseMove` 改 `Location`）
+    pub drag_offset: (f32, f32),
+    /// 正在拖动时的抓取点（光标 − 弹出面板左上角，屏幕坐标）
+    pub drag_grab: Option<(f32, f32)>,
 }
 
 /// 弹出面板标记
@@ -484,16 +490,30 @@ pub fn spawn_dropdown_ui<'a>(
         row_h,
         popup_rows,
         scroll: 0,
+        base_rel: (x - 2.0, y + h),
+        drag_offset: (0.0, 0.0),
+        drag_grab: None,
     });
     cmds.entity(box_e)
 }
 
 /// bevy_ui 下拉框系统：展开/收起/选择/滚轮/点击外部关闭
+/// 弹出面板矩形（屏幕坐标，含拖动偏移）——C# `MirDropDownBox.Movable` 拖动后命中也要跟着走
+fn popup_rect(dd: &UiDropDown) -> (f32, f32, f32, f32) {
+    (
+        dd.popup_pos.0 + dd.drag_offset.0,
+        dd.popup_pos.1 + dd.drag_offset.1,
+        dd.popup_w,
+        dd.row_h * dd.popup_rows as f32,
+    )
+}
+
 pub fn dropdown_ui_system(
     mut dd_q: Query<(Entity, &Interaction, &mut UiDropDown)>,
     options: Query<&Interaction, Without<UiDropDown>>,
     mut texts: Query<&mut Text>,
-    mut popups: Query<&mut Visibility, With<UiDropDownPopup>>,
+    // #2892 批D 单元①：弹出面板还要能拖动（C# `MirDropDownBox.Movable = true`）→ 需要 Node
+    mut popups: Query<(&mut Visibility, &mut Node), With<UiDropDownPopup>>,
     mut wheels: MessageReader<MouseWheel>,
     mouse: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window>,
@@ -519,6 +539,53 @@ pub fn dropdown_ui_system(
         if edge(e, inter, &mut prev_inter) {
             dd.open = !dd.open;
             dd.scroll = 0;
+            // C# `Show()` 时把弹出面板放回闭合框下方：重新打开时清掉上次的拖动偏移
+            if dd.open {
+                dd.drag_offset = (0.0, 0.0);
+                dd.drag_grab = None;
+            }
+        }
+    }
+
+    // 1.5 弹出面板拖动（C# `MirControl.Movable`：按下**非选项行**区域才起拖，选项行仍是选择）
+    {
+        let mut any_row_pressed = false;
+        for (_, _, dd) in dd_q.iter() {
+            if !dd.open {
+                continue;
+            }
+            if dd.option_rows.iter().any(|ent| {
+                options
+                    .get(*ent)
+                    .map(|i| *i == Interaction::Pressed)
+                    .unwrap_or(false)
+            }) {
+                any_row_pressed = true;
+                break;
+            }
+        }
+        if mouse.just_pressed(MouseButton::Left) && !any_row_pressed {
+            for (_, _, mut dd) in dd_q.iter_mut() {
+                if !dd.open {
+                    continue;
+                }
+                let (px, py, pw, ph) = popup_rect(&dd);
+                if cursor.x >= px && cursor.x <= px + pw && cursor.y >= py && cursor.y <= py + ph {
+                    dd.drag_grab = Some((cursor.x - px, cursor.y - py));
+                    break;
+                }
+            }
+        }
+        for (_, _, mut dd) in dd_q.iter_mut() {
+            let Some(grab) = dd.drag_grab else {
+                continue;
+            };
+            if mouse.pressed(MouseButton::Left) {
+                let (bx, by) = dd.popup_pos;
+                dd.drag_offset = (cursor.x - grab.0 - bx, cursor.y - grab.1 - by);
+            } else {
+                dd.drag_grab = None;
+            }
         }
     }
 
@@ -536,8 +603,8 @@ pub fn dropdown_ui_system(
                 continue;
             }
             let (px, py, pw, ph) = (
-                dd.popup_pos.0,
-                dd.popup_pos.1,
+                dd.popup_pos.0 + dd.drag_offset.0,
+                dd.popup_pos.1 + dd.drag_offset.1,
                 dd.popup_w,
                 dd.row_h * dd.popup_rows as f32,
             );
@@ -557,8 +624,8 @@ pub fn dropdown_ui_system(
                 continue;
             }
             let (px, py, pw, ph) = (
-                dd.popup_pos.0,
-                dd.popup_pos.1,
+                dd.popup_pos.0 + dd.drag_offset.0,
+                dd.popup_pos.1 + dd.drag_offset.1,
                 dd.popup_w,
                 dd.row_h * dd.popup_rows as f32,
             );
@@ -602,12 +669,21 @@ pub fn dropdown_ui_system(
                 t.0 = sel_text;
             }
         }
-        if let Ok(mut v) = popups.get_mut(dd.popup) {
+        if let Ok((mut v, mut node)) = popups.get_mut(dd.popup) {
             *v = if dd.open {
                 Visibility::Visible
             } else {
                 Visibility::Hidden
             };
+            // #2892 批D 单元①：弹出面板位置 = 基准相对坐标 + 拖动偏移（C# `Location`）
+            let want_left = Val::Px(dd.base_rel.0 + dd.drag_offset.0);
+            let want_top = Val::Px(dd.base_rel.1 + dd.drag_offset.1);
+            if node.left != want_left {
+                node.left = want_left;
+            }
+            if node.top != want_top {
+                node.top = want_top;
+            }
         }
         if dd.open {
             for (i, ent) in dd.option_texts.iter().enumerate() {
@@ -886,6 +962,44 @@ pub fn item_cell_ui_system(
 
 #[cfg(test)]
 mod tests {
+    /// #2892 批D 单元①：下拉框弹出面板的命中矩形必须带上拖动偏移
+    /// （C# `MirDropDownBox.Movable = true`：拖走后选项行/滚轮/点击外部关闭都要跟着走）。
+    ///
+    /// 阳性对照：把 `popup_rect` 改成只用 `popup_pos`（忽略偏移）→ 本测试 FAILED。
+    #[test]
+    fn dropdown_popup_rect_includes_drag_offset() {
+        let mut dd = UiDropDown {
+            items: vec!["a".to_string(), "b".to_string()],
+            selected: None,
+            open: true,
+            popup: Entity::PLACEHOLDER,
+            text: Entity::PLACEHOLDER,
+            box_rect: (0.0, 0.0, 10.0, 10.0),
+            option_rows: Vec::new(),
+            option_texts: Vec::new(),
+            popup_pos: (100.0, 50.0),
+            popup_w: 80.0,
+            row_h: 14.0,
+            popup_rows: 4,
+            scroll: 0,
+            base_rel: (10.0, 5.0),
+            drag_offset: (0.0, 0.0),
+            drag_grab: None,
+        };
+        // 未拖动：与基准位置一致
+        assert_eq!(popup_rect(&dd), (100.0, 50.0, 80.0, 56.0));
+        // 拖动后：命中矩形整体平移（宽高不变）
+        dd.drag_offset = (12.0, -8.0);
+        assert_eq!(popup_rect(&dd), (112.0, 42.0, 80.0, 56.0));
+        // 节点位置 = 基准相对坐标 + 偏移（`base_rel` 是父面板坐标系）
+        assert_eq!(
+            (
+                dd.base_rel.0 + dd.drag_offset.0,
+                dd.base_rel.1 + dd.drag_offset.1
+            ),
+            (22.0, -3.0)
+        );
+    }
     use super::*;
     use bevy::ecs::world::CommandQueue;
 
