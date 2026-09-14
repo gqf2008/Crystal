@@ -184,6 +184,43 @@ pub struct GuildStorageIcon(pub usize);
 #[derive(Component)]
 pub struct GuildStorageCount(pub usize);
 
+// C# `GuildRankOptions`（`Shared/Enums.cs:1898-1908`）的位值
+pub const GUILD_OPT_CHANGE_RANK: u8 = 1;
+pub const GUILD_OPT_RECRUIT: u8 = 2;
+pub const GUILD_OPT_KICK: u8 = 4;
+pub const GUILD_OPT_STORE_ITEM: u8 = 8;
+pub const GUILD_OPT_RETRIEVE_ITEM: u8 = 16;
+pub const GUILD_OPT_ALTER_ALLIANCE: u8 = 32;
+pub const GUILD_OPT_CHANGE_NOTICE: u8 = 64;
+pub const GUILD_OPT_ACTIVATE_BUFF: u8 = 128;
+
+/// 本地玩家在自己行会里的权限位（C# `GuildDialog.MyOptions` 的等价推导）：
+/// 按名字在成员列表里找到自己 → 用 `rank_index` 查 `rank_defs` 的 options。
+/// `None` = 找不到（未入会/成员表未到）→ 调用方按「不隐藏页签」处理。
+pub fn guild_my_options(guild: &GuildState, my_name: Option<&str>) -> Option<u8> {
+    let me = my_name?;
+    let member = guild.members.iter().find(|m| m.name == me)?;
+    guild
+        .rank_defs
+        .get(member.rank_index as usize)
+        .map(|(_, options)| *options)
+}
+
+/// 页签是否可见（C# `RefreshInterface`/`GuildStatus` 处理 + `BuffButton` 规则）。
+/// `opts = None`（拿不到自己的权限）按「不隐藏」处理，避免服务端未同步时功能整块消失。
+pub fn guild_tab_visible(page: GuildPage, opts: Option<u8>, has_buff_catalog: bool) -> bool {
+    match page {
+        GuildPage::Members | GuildPage::Status => true,
+        GuildPage::Notice => opts.is_none_or(|o| o & GUILD_OPT_CHANGE_NOTICE != 0),
+        GuildPage::Storage => {
+            opts.is_none_or(|o| o & (GUILD_OPT_STORE_ITEM | GUILD_OPT_RETRIEVE_ITEM) != 0)
+        }
+        GuildPage::Rank => opts.is_none_or(|o| o & GUILD_OPT_CHANGE_RANK != 0),
+        // C# `RefreshInterface`：`GuildBuffInfos.Count == 0 → BuffButton.Visible = false`
+        GuildPage::Buff => has_buff_catalog,
+    }
+}
+
 /// 显示离线复选框图（C# `MembersShowOfflineButton` = `Prguse[1346]`）
 #[derive(Component)]
 pub struct GuildShowOfflineCheck;
@@ -1149,7 +1186,10 @@ fn spawn_guild(
 /// 非当前页整页 `Visibility::Hidden`（页面是根面板的子实体，关闭窗口时随根一起不渲染）。
 fn guild_page_system(
     mut guild: ResMut<GuildState>,
-    mut pages: Query<(&GuildPageRoot, &mut Visibility)>,
+    mut pages: Query<(&GuildPageRoot, &mut Visibility), Without<GuildTab>>,
+    // #2892 批B 单元10：页签可见性按玩家行会权限门控（C# `RefreshInterface` 与 `GuildStatus` 处理）
+    mut tab_vis: Query<(&GuildTab, &mut Visibility), Without<GuildPageRoot>>,
+    local_name: Query<&crate::actor::PlayerName, With<crate::actor::LocalPlayer>>,
     tabs: Query<(Entity, &GuildTab, &Interaction)>,
     mut prev_inter: Local<HashMap<Entity, Interaction>>,
 ) {
@@ -1173,6 +1213,42 @@ fn guild_page_system(
         };
         if *vis != want {
             *vis = want;
+        }
+    }
+    // 页签可见性（C# `RefreshInterface`：`CanChangeNotice→NoticeButton`、`CanChangeRank→RankButton`、
+    // `CanStoreItem|CanRetrieveItem→StorageButton`、缓存非空→`BuffButton`；Members/Status 恒可见）。
+    // 本端 `my_options` 由「本地玩家成员行 → `rank_defs[rank_index].options`」推导
+    // （服务端自定义信息体未带 C# `MyOptions`，见 §7）。
+    let me = local_name.iter().next().map(|n| n.0.as_str());
+    let opts = guild_my_options(&guild, me);
+    let mut page_hidden = false;
+    for (tab, mut vis) in &mut tab_vis {
+        let want = guild_tab_visible(tab.0, opts, !guild.buff_catalog.is_empty());
+        let want_vis = if want {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
+        if *vis != want_vis {
+            *vis = want_vis;
+        }
+        if !want && tab.0 == want_page {
+            page_hidden = true;
+        }
+    }
+    // 当前页被权限关掉时退回 `Members`（C# 是按钮消失后玩家自行切页，本端补一次兜底切页）
+    if page_hidden {
+        guild.page = GuildPage::Members;
+        guild.show_buff_page = false;
+        for (root, mut vis) in &mut pages {
+            let want = if root.0 == GuildPage::Members {
+                Visibility::Visible
+            } else {
+                Visibility::Hidden
+            };
+            if *vis != want {
+                *vis = want;
+            }
         }
     }
 }
@@ -2341,5 +2417,102 @@ mod tests {
             crate::game::dialogs::center_origin(GUILD_W, GUILD_H),
             (GUILD_X, GUILD_Y)
         );
+    }
+    /// #2892 批B 单元10：行会页签权限门控（C# `GuildRankOptions` 位值 + `RefreshInterface` 规则）。
+    ///
+    /// 阳性对照：把 `Storage` 一档改成 `GUILD_OPT_CHANGE_NOTICE`（= 用错权限位）→ 本测试 FAILED。
+    #[test]
+    fn guild_tab_visibility_follows_csharp_options() {
+        use GuildPage::*;
+        // 位值来自 `Shared/Enums.cs:1898-1908`
+        assert_eq!(
+            (
+                GUILD_OPT_CHANGE_RANK,
+                GUILD_OPT_RECRUIT,
+                GUILD_OPT_KICK,
+                GUILD_OPT_STORE_ITEM,
+                GUILD_OPT_RETRIEVE_ITEM,
+                GUILD_OPT_ALTER_ALLIANCE,
+                GUILD_OPT_CHANGE_NOTICE,
+                GUILD_OPT_ACTIVATE_BUFF
+            ),
+            (1, 2, 4, 8, 16, 32, 64, 128)
+        );
+        // 全权限：该显示的都显示
+        let all = Some(255u8);
+        for p in [Notice, Members, Storage, Rank, Status, Buff] {
+            assert!(guild_tab_visible(p, all, true), "{p:?} 全权限应可见");
+        }
+        // 无权限：Notice/Storage/Rank 隐藏，Members/Status 恒可见
+        let none = Some(0u8);
+        assert!(!guild_tab_visible(Notice, none, true));
+        assert!(!guild_tab_visible(Storage, none, true));
+        assert!(!guild_tab_visible(Rank, none, true));
+        assert!(guild_tab_visible(Members, none, true));
+        assert!(guild_tab_visible(Status, none, true));
+        // 只有存取其一 → Storage 可见（C# `CanStoreItem || CanRetrieveItem`）
+        assert!(guild_tab_visible(Storage, Some(GUILD_OPT_STORE_ITEM), true));
+        assert!(guild_tab_visible(
+            Storage,
+            Some(GUILD_OPT_RETRIEVE_ITEM),
+            true
+        ));
+        // 公告位只管 Notice
+        assert!(guild_tab_visible(
+            Notice,
+            Some(GUILD_OPT_CHANGE_NOTICE),
+            true
+        ));
+        assert!(!guild_tab_visible(
+            Storage,
+            Some(GUILD_OPT_CHANGE_NOTICE),
+            true
+        ));
+        // 职务位只管 Rank
+        assert!(guild_tab_visible(Rank, Some(GUILD_OPT_CHANGE_RANK), true));
+        assert!(!guild_tab_visible(
+            Notice,
+            Some(GUILD_OPT_CHANGE_RANK),
+            true
+        ));
+        // Buff 只看目录是否非空
+        assert!(!guild_tab_visible(Buff, all, false));
+        assert!(guild_tab_visible(Buff, none, true));
+        // 拿不到自己的权限（未入会/成员表未到）→ 不隐藏
+        for p in [Notice, Storage, Rank] {
+            assert!(guild_tab_visible(p, None, true), "{p:?} 权限未知时应可见");
+        }
+    }
+
+    /// #2892 批B 单元10：`my_options` 推导 —— 本地玩家成员行 → `rank_defs[rank_index].options`
+    #[test]
+    fn guild_my_options_derives_from_member_rank() {
+        let mut st = GuildState::default();
+        st.rank_defs = vec![("会长".to_string(), 255u8), ("成员".to_string(), 0u8)];
+        st.members = vec![
+            GuildMember {
+                name: "bob".to_string(),
+                rank: 0,
+                rank_index: 0,
+                online: true,
+            },
+            GuildMember {
+                name: "alice".to_string(),
+                rank: 1,
+                rank_index: 1,
+                online: true,
+            },
+        ];
+        assert_eq!(guild_my_options(&st, Some("bob")), Some(255));
+        assert_eq!(guild_my_options(&st, Some("alice")), Some(0));
+        assert_eq!(
+            guild_my_options(&st, Some("carol")),
+            None,
+            "不在成员表 → None"
+        );
+        assert_eq!(guild_my_options(&st, None), None, "无本地名 → None");
+        // rank_index 越界 → None（不 panic）
+        st.members[0].rank_index = 9;
+        assert_eq!(guild_my_options(&st, Some("bob")), None);
     }
 }
