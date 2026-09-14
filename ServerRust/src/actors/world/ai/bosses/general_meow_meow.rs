@@ -28,6 +28,8 @@ const THUNDER_MIN_TICKS: u64 = 20;
 const THUNDER_MAX_TICKS: u64 = 40;
 /// Energy Shield 持续时间：30s = 300 ticks（C# ShieldUpDuration = Settings.Second * 30）
 const SHIELD_DURATION_TICKS: u64 = 300;
+/// C# `GeneralMeowMeow.cs:161`：雷对象 `DelayedAction(Spawn, now + 2000)`
+const THUNDER_START_MS: u64 = 2000;
 /// 召唤池（C# Settings.GeneralMeowMeowMob1..4）
 const SLAVE_NAMES: [&str; 4] = ["StainHammerCat", "BlackHammerCat", "StrayCat", "CatShaman"];
 
@@ -43,6 +45,29 @@ pub struct GeneralMeowMeowBehavior {
 impl Default for GeneralMeowMeowBehavior {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// #2859：C# `GeneralMeowMeow.cs:149-162`——雷对象 `ExpireTime = 1000`、`TickSpeed = 500`、
+    /// **`DelayedAction(Spawn, now + 2000)`**（生成即晚 2 秒）
+    #[test]
+    fn thunder_field_params_match_csharp() {
+        assert_eq!(THUNDER_START_MS, 2000);
+        let (expires_ms, last_tick_shift_ms) =
+            crate::actors::world::spell::delayed_spell_timing(THUNDER_START_MS, 1000, 500);
+        assert_eq!((expires_ms, last_tick_shift_ms), (3000, 1500));
+    }
+
+    /// #2859：C# `ThunderAttackTime = now + max(Random(2000), Random(4000))`
+    /// ——本端两个随机上限的 tick 常量必须仍是 20 / 40
+    #[test]
+    fn thunder_cooldown_bounds_match_csharp() {
+        assert_eq!(THUNDER_MIN_TICKS, 20);
+        assert_eq!(THUNDER_MAX_TICKS, 40);
     }
 }
 
@@ -144,7 +169,8 @@ impl MonsterBehavior for GeneralMeowMeowBehavior {
                         caster_session: 0,
                         cells: Vec::new(),
                         show: true,
-                        start_delay_ms: 0,
+                        // C# `DelayedAction(DelayedType.Spawn, Envir.Time + 2000, spellObj)`（`:161`）
+                        start_delay_ms: THUNDER_START_MS,
                     });
             }
         }

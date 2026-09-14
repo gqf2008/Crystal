@@ -23,6 +23,12 @@ const MELEE_RANGE: i32 = 1;
 const WAKE_RANGE: i32 = 4;
 /// FearTime 持续（C# Envir.Time + 2000）
 const FEAR_TICKS: u64 = 20;
+/// C# `EarthGolem.cs:99`：`EarthGolemPile` 的 `start = 500`
+const PILE_START_MS: u64 = 500;
+/// C# `EarthGolem.cs:105`：`ExpireTime = 1200 + start`
+const PILE_DURATION_MS: u64 = 1200;
+/// C# `EarthGolem.cs:81-91`：`EarthGolemPile` 面积 = 目标点 ±1（3×3）
+const PILE_RADIUS: i32 = 1;
 
 pub struct EarthGolemBehavior {
     /// 是否石化休眠（继承 ZumaMonster Stoned）
@@ -91,7 +97,19 @@ impl MonsterBehavior for EarthGolemBehavior {
                         attack_type: 0,
                     });
             } else {
-                // 远程：目标点 3x3 地面冲击法术场（C# EarthGolemPile）
+                // 远程：目标点 3×3 地面冲击法术场（C# EarthGolem.cs:79-117）
+                // ——跳怪自身格 + `cell.Valid` 过滤、`start = 500`（总寿命 1200 + start）、`TickSpeed = 1000`、
+                //    `Show` 仅锚点格（本端聚合为「1 对象 + cells」并在锚点广播）
+                let cells = crate::actors::world::ai::helpers::area_cells(
+                    target.x,
+                    target.y,
+                    PILE_RADIUS,
+                    Some((monster.x, monster.y)),
+                    |x, y| (ctx.is_walkable)(x, y),
+                );
+                if cells.is_empty() {
+                    return;
+                }
                 let damage =
                     crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, 0)
                         .max(1);
@@ -101,13 +119,13 @@ impl MonsterBehavior for EarthGolemBehavior {
                         x: target.x,
                         y: target.y,
                         value: damage,
-                        duration_ms: 1200,
+                        duration_ms: PILE_DURATION_MS,
                         tick_ms: 1000,
                         caster_oid: monster.object_id,
                         caster_session: 0,
-                        cells: Vec::new(),
+                        cells,
                         show: true,
-                        start_delay_ms: 0,
+                        start_delay_ms: PILE_START_MS,
                     });
             }
             return;
@@ -127,5 +145,33 @@ impl MonsterBehavior for EarthGolemBehavior {
             monster.next_move_tick = ctx.tick_count + monster.ai_profile.move_interval;
             monster.ai_state = crate::actors::world::MonsterAiState::Chase;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// #2859：C# `EarthGolem.cs:79-115`——`EarthGolemPile` 面积 = 目标点 ±1（3×3）、跳自身格、
+    /// `start = 500`、`ExpireTime = 1200 + start`、`TickSpeed = 1000`
+    #[test]
+    fn pile_field_params_match_csharp() {
+        assert_eq!(PILE_RADIUS, 1);
+        assert_eq!(PILE_START_MS, 500);
+        assert_eq!(PILE_DURATION_MS, 1200);
+        let cells = crate::actors::world::ai::helpers::area_cells(
+            0,
+            0,
+            PILE_RADIUS,
+            Some((0, 0)),
+            |_, _| true,
+        );
+        assert_eq!(cells.len(), 8, "3×3 跳自身格 = 8 格");
+        let (expires_ms, last_tick_shift_ms) = crate::actors::world::spell::delayed_spell_timing(
+            PILE_START_MS,
+            PILE_DURATION_MS,
+            1000,
+        );
+        assert_eq!((expires_ms, last_tick_shift_ms), (1700, -500));
     }
 }

@@ -21,12 +21,41 @@ const MELEE_RANGE: i32 = 1;
 const QUAKE_OFFSET: i32 = 3;
 /// 5x5 法术场半径（C# y-2..=y+2, x-2..=x+2）
 const QUAKE_RADIUS: i32 = 2;
+/// C# `StoneGolem.cs:76`：`start = 500`（`ExpireTime = 800 + start`）
+const QUAKE_START_MS: u64 = 500;
+/// C# `StoneGolem.cs:82`：`ExpireTime = 800 + start`
+const QUAKE_DURATION_MS: u64 = 800;
 
 pub struct StoneGolemBehavior;
 
 impl Default for StoneGolemBehavior {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// #2859：C# `StoneGolem.cs:56-96`——`PointMove(Direction,3)` 处 5×5（**不跳自身格**）、
+    /// `start = 500`、`ExpireTime = 800 + start`、`TickSpeed = 1000`
+    #[test]
+    fn quake_field_params_match_csharp() {
+        assert_eq!(QUAKE_OFFSET, 3);
+        assert_eq!(QUAKE_RADIUS, 2);
+        assert_eq!(QUAKE_START_MS, 500);
+        assert_eq!(QUAKE_DURATION_MS, 800);
+        let cells =
+            crate::actors::world::ai::helpers::area_cells(50, 50, QUAKE_RADIUS, None, |_, _| true);
+        assert_eq!(cells.len(), 25);
+        assert!(cells.contains(&(50, 50)));
+        let (expires_ms, last_tick_shift_ms) = crate::actors::world::spell::delayed_spell_timing(
+            QUAKE_START_MS,
+            QUAKE_DURATION_MS,
+            1000,
+        );
+        assert_eq!((expires_ms, last_tick_shift_ms), (1300, -500));
     }
 }
 
@@ -72,24 +101,31 @@ impl MonsterBehavior for StoneGolemBehavior {
                 let value =
                     crate::combat::attack::get_attack_power(monster.min_mc, monster.max_mc, 0)
                         .max(1);
-                // 5x5 法术场：C# 每格一个 SpellObject（全 25 格）
-                for oy in -QUAKE_RADIUS..=QUAKE_RADIUS {
-                    for ox in -QUAKE_RADIUS..=QUAKE_RADIUS {
-                        ctx.out_spell_fields
-                            .push(crate::actors::world::ai::SpellFieldSpawn {
-                                spell: Spell::StoneGolemQuake,
-                                x: center_x + ox,
-                                y: center_y + oy,
-                                value,
-                                duration_ms: 800,
-                                tick_ms: 1000,
-                                caster_oid: monster.object_id,
-                                caster_session: 0,
-                                cells: Vec::new(),
-                                show: true,
-                                start_delay_ms: 0,
-                            });
-                    }
+                // 5×5 法术场（C# StoneGolem.cs:56-96）：`cell.Valid` 过滤、**不跳自身格**、
+                // `start = 500`（总寿命 800 + start）、`TickSpeed = 1000`、`Show` 仅锚点格
+                // （C# 每格一个 SpellObject，本端聚合为「1 对象 + cells」并在锚点广播）
+                let cells = crate::actors::world::ai::helpers::area_cells(
+                    center_x,
+                    center_y,
+                    QUAKE_RADIUS,
+                    None,
+                    |x, y| (ctx.is_walkable)(x, y),
+                );
+                if !cells.is_empty() {
+                    ctx.out_spell_fields
+                        .push(crate::actors::world::ai::SpellFieldSpawn {
+                            spell: Spell::StoneGolemQuake,
+                            x: center_x,
+                            y: center_y,
+                            value,
+                            duration_ms: QUAKE_DURATION_MS,
+                            tick_ms: 1000,
+                            caster_oid: monster.object_id,
+                            caster_session: 0,
+                            cells,
+                            show: true,
+                            start_delay_ms: QUAKE_START_MS,
+                        });
                 }
             }
             return;
