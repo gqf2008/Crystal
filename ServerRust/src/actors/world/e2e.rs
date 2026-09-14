@@ -519,12 +519,16 @@ fn e2e_refine_full_success_path() {
         .await
         .expect("insert npc_infos");
 
-        // 物品表：武器(type=1 ⇒ 满足 OnlyRefineWeapon) / DC-MC-SC 材料 / 矿石（name == RefineConfig.ore_name）
+        // 物品表：武器(type=1 ⇒ 满足 OnlyRefineWeapon) / 属性材料 / 矿石（name == RefineConfig.ore_name）
+        //
+        // 注意 `stats_json` 的键是 **C# `Stat` 枚举值**，`load_item_infos` 会统一 `+3` 转成 SharedRust Stat
+        // （`db/mod.rs:4589-4593`）⇒ 下面三件材料实际贡献（SharedRust）：MaxMC(10)=5、MaxSC(12)=4、Agility(14)=5/HP(15)=9。
+        // 精炼按严格最大值选属性 ⇒ 这三件里以 **MaxMC(5)** 胜出，与真机复验（#2863 评论）一致的 `MaxMC +1` 路径。
         let item_infos: [(i32, &str, i32, &str); 5] = [
             (100, "TestBlade", 1, "{}"),
-            (200, "TestDcMat", 0, "{\"7\":5,\"8\":15}"),
-            (201, "TestMcMat", 0, "{\"9\":5,\"10\":12}"),
-            (202, "TestScMat", 0, "{\"11\":5,\"12\":9}"),
+            (200, "TestMaxMcMat", 0, "{\"7\":5}"),
+            (201, "TestMaxScMat", 0, "{\"9\":4}"),
+            (202, "TestAgilityHpMat", 0, "{\"11\":5,\"12\":9}"),
             (300, "BlackIronOre", 14, "{}"),
         ];
         for (idx, name, item_type, stats_json) in item_infos {
@@ -628,7 +632,8 @@ fn e2e_refine_full_success_path() {
             "NewCharacterSuccess"
         );
 
-        // 背包：0 = 精炼武器、1..3 = DC/MC/SC 材料、4 = 矿石、5 = 第二段武器、7/8 = 第二段材料（**无矿石**）
+        // 背包：0 = 精炼武器、1..3 = 属性材料（MaxMC/MaxSC/Agility+HP，见上）、4 = 矿石、
+        //       5 = 第二段武器、7/8 = 第二段材料（**无矿石**）
         let backpack: [(i32, i32, u64, u16); 6] = [
             (0, 100, WEAPON_UID, 1000),
             (1, 200, 9301, 1000),
