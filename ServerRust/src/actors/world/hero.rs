@@ -108,6 +108,12 @@ impl WorldActor {
             .get(&session_id)
             .map(|ai| ai.mp)
             .unwrap_or(0);
+        // #2892 批C：HUD `HeroInfoPanel` 的百分比条需要最大值（C# 取 `Stats[Stat.HP/MP]`）
+        let (ai_max_hp, ai_max_mp) = self
+            .hero_ai_states
+            .get(&session_id)
+            .map(|ai| (ai.max_hp, ai.max_mp))
+            .unwrap_or((0, 0));
 
         let packet = mir2_shared::packets::server::hero::HeroInformation {
             object_id: hero_oid,
@@ -118,6 +124,8 @@ impl WorldActor {
             hair: 0,
             hp: ai_hp,
             mp: ai_mp,
+            max_hp: ai_max_hp,
+            max_mp: ai_max_mp,
             experience: 0,
             // #2418：英雄信息下发用当前 max_experience（替代硬编码 100）
             max_experience: hero.max_experience as i64,

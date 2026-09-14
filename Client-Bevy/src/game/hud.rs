@@ -64,6 +64,79 @@ pub struct HeroBtn;
 #[derive(Component)]
 pub struct HeroPanel;
 
+// ---------------------------------------------------------------------------
+// #2892 批C：C# `HeroInfoPanel`（`HeroDialogs.cs:464-700`）子控件
+//   · 面板 `Prguse[14]` 135x78 @(95,48)
+//   · 头像 `Prguse[1400]` 52x45 @(14,19)；危险 `1750`（血量≤20% 每 400ms 闪烁）/ 死亡 `1379`
+//   · 名字容器 `Prguse[10]` 104x31 @(26,60)：等级 (3,-1) 17x14 居中、名字 (2,14) 97x14 居中
+//   · 血量容器 `Prguse[11]` 72x45 @(57,26)：三条 52x8 条 `Prguse[1951/1952/1953]` @(18,6/19/32)
+//   · 文本：HP @(71,28) 55x18、MP @(71,41) 55x18、EXP @(71,54) 65x18
+// ---------------------------------------------------------------------------
+pub const HERO_PANEL_ORIGIN: (f32, f32) = (95.0, 48.0);
+pub const HERO_PANEL_SIZE: (f32, f32) = (135.0, 78.0);
+pub const HERO_AVATAR_POS: (f32, f32) = (14.0, 19.0);
+pub const HERO_NAME_BOX_POS: (f32, f32) = (26.0, 60.0);
+pub const HERO_LEVEL_POS: (f32, f32) = (3.0, -1.0);
+pub const HERO_LEVEL_SIZE: (f32, f32) = (17.0, 14.0);
+pub const HERO_NAME_POS: (f32, f32) = (2.0, 14.0);
+pub const HERO_NAME_SIZE: (f32, f32) = (97.0, 14.0);
+pub const HERO_HEALTH_BOX_POS: (f32, f32) = (57.0, 26.0);
+/// 三条百分比条的相对位置（HP/MP/EXP，容器内）
+pub const HERO_BAR_POS: [(f32, f32); 3] = [(18.0, 6.0), (18.0, 19.0), (18.0, 32.0)];
+pub const HERO_BAR_SIZE: (f32, f32) = (52.0, 8.0);
+pub const HERO_HP_LABEL_POS: (f32, f32) = (71.0, 28.0);
+pub const HERO_MP_LABEL_POS: (f32, f32) = (71.0, 41.0);
+pub const HERO_EXP_LABEL_POS: (f32, f32) = (71.0, 54.0);
+/// C# `Avatar_BeforeDraw`：血量 ≤ 20% 时危险头像每 400ms 闪一次
+pub const HERO_AVATAR_BLINK_SECS: f32 = 0.4;
+
+#[derive(Component)]
+pub struct HeroPanelAvatarBase;
+#[derive(Component)]
+pub struct HeroPanelAvatarDanger;
+#[derive(Component)]
+pub struct HeroPanelAvatarDead;
+/// 百分比条（0=HP 1=MP 2=EXP）；`full_w` = C# `Size.Width`（52）
+#[derive(Component)]
+pub struct HeroPanelBar {
+    pub kind: usize,
+    pub full_w: f32,
+}
+#[derive(Component)]
+pub struct HeroPanelLevel;
+#[derive(Component)]
+pub struct HeroPanelName;
+#[derive(Component)]
+pub struct HeroPanelHp;
+#[derive(Component)]
+pub struct HeroPanelMp;
+#[derive(Component)]
+pub struct HeroPanelExp;
+
+/// 英雄面板子树标记（一次查询统一控显隐，避免多查询争用 `Visibility`）
+#[derive(Component)]
+pub struct HeroPanelChild;
+
+/// C# `HealthBar_/ManaBar_/ExperienceBar_BeforeDraw`：`sectionWidth = (int)(Size.Width * percent)`
+pub fn hero_bar_width(full_w: f32, percent: f32) -> f32 {
+    (full_w * percent.clamp(0.0, 1.0)).floor()
+}
+
+/// C# `Hplabel.Text = HP + "/" + Stats[Stat.HP]`（MP 同）
+pub fn hero_vital_text(value: i32, max: i32) -> String {
+    format!("{}/{}", value.max(0), max.max(0))
+}
+
+/// C# `ExLabel.Text = string.Format("{0:F2}%", Experience / MaxExperience * 100)`
+pub fn hero_exp_text(exp: i64, max_exp: i64) -> String {
+    let pct = if max_exp > 0 {
+        exp as f64 / max_exp as f64 * 100.0
+    } else {
+        0.0
+    };
+    format!("{pct:.2}%")
+}
+
 /// #2892 批C：C# `HeroBehaviourPanel`（`HeroDialogs.cs:751-793`）——
 /// `Size = 64x17`、`DrawImage = false`、`Location = MainDialog + (165,37)`；
 /// 4 个 16x17 图标 `Prguse[1840..1843]`，**当前行为**显示 `Prguse[1844..1847]` 禁用帧。
@@ -82,8 +155,6 @@ pub struct HeroBehaviourBtn {
     /// 禁用帧 `Prguse[1844+i]`（C# `DisabledIndex`）
     pub disabled: Handle<Image>,
 }
-#[derive(Component)]
-pub struct HeroPanelText(usize);
 
 /// HUD 显示数据快照（#70 试点：挂 HUD 根实体；值变化时才写组件，
 /// hud_update_system 用 Changed<HudData> 门控，血条/文字只在数据变化帧更新）
@@ -133,39 +204,126 @@ fn hud_space_weight_system(
     }
 }
 
-/// #1357：HUD 英雄状态小面板（C# HeroInfoPanel：名字 Lv/HP/MP/经验，有英雄才显示）
+/// #2892 批C：C# `HeroInfoPanel`（`HeroDialogs.cs:464-700`）——
+/// 显隐、头像三态（`Avatar_BeforeDraw`）、三条百分比条（`*_BeforeDraw`）、HP/MP/EXP 文本。
+#[allow(clippy::type_complexity)]
 fn hero_panel_system(
     hero: Res<crate::game::dialogs::hero::HeroState>,
-    mut texts: Query<(&mut Text2d, &HeroPanelText)>,
-    mut widgets: Query<&mut Visibility, (With<HeroPanel>, Without<HeroPanelText>)>,
-    mut text_vis: Query<&mut Visibility, (With<HeroPanelText>, Without<HeroPanel>)>,
+    time: Res<Time>,
+    mut widgets: Query<
+        (
+            &mut Visibility,
+            Option<&HeroPanel>,
+            Option<&HeroPanelAvatarBase>,
+            Option<&HeroPanelAvatarDanger>,
+            Option<&HeroPanelAvatarDead>,
+            Option<&HeroPanelBar>,
+        ),
+        With<HeroPanelChild>,
+    >,
+    mut bars: Query<(&HeroPanelBar, &mut Sprite)>,
+    mut texts: Query<
+        (
+            &mut Text2d,
+            Option<&HeroPanelLevel>,
+            Option<&HeroPanelName>,
+            Option<&HeroPanelHp>,
+            Option<&HeroPanelMp>,
+            Option<&HeroPanelExp>,
+        ),
+        With<HeroPanelChild>,
+    >,
+    mut blink: Local<(f32, bool)>,
 ) {
     let show = hero.current.is_some();
-    for mut v in &mut widgets {
-        *v = if show {
-            Visibility::Visible
-        } else {
-            Visibility::Hidden
-        };
+    if !show {
+        *blink = (0.0, false);
     }
-    for mut v in &mut text_vis {
-        *v = if show {
-            Visibility::Visible
-        } else {
+    let dead = hero.spawn_state == mir2_shared::enums::HeroSpawnState::Dead;
+    let hp_pct = if hero.hero_max_hp > 0 {
+        hero.hero_hp as f32 / hero.hero_max_hp as f32
+    } else {
+        0.0
+    };
+    // C# `Avatar_BeforeDraw`：≤20% 时每 400ms 闪一次危险头像；>20% 恒隐藏；死亡显死亡头像
+    let danger_on = if show && !dead && hp_pct <= 0.2 {
+        blink.0 += time.delta_secs();
+        if blink.0 >= HERO_AVATAR_BLINK_SECS {
+            blink.0 -= HERO_AVATAR_BLINK_SECS;
+            blink.1 = !blink.1;
+        }
+        blink.1
+    } else {
+        blink.1 = false;
+        false
+    };
+    for (mut vis, panel, base, danger, dead_avatar, bar) in &mut widgets {
+        let want = if !show {
             Visibility::Hidden
+        } else if panel.is_some() || base.is_some() || bar.is_some() {
+            Visibility::Visible
+        } else if danger.is_some() {
+            if danger_on {
+                Visibility::Visible
+            } else {
+                Visibility::Hidden
+            }
+        } else if dead_avatar.is_some() {
+            if dead {
+                Visibility::Visible
+            } else {
+                Visibility::Hidden
+            }
+        } else {
+            Visibility::Visible
         };
+        if *vis != want {
+            *vis = want;
+        }
     }
     if !show {
         return;
     }
-    let cur = hero.current.as_ref().unwrap();
-    for (mut text, kind) in &mut texts {
-        text.0 = match kind.0 {
-            0 => format!("{} Lv.{}", cur.name, cur.level),
-            1 => format!("HP {}", hero.hero_hp),
-            2 => format!("MP {}", hero.hero_mp),
-            _ => format!("经验 {}/{}", hero.hero_exp, hero.hero_max_exp),
+    // 百分比条（`sectionWidth = (int)(Size.Width * percent)`；percent<=0 时 C# 直接 return）
+    let mp_pct = if hero.hero_max_mp > 0 {
+        hero.hero_mp as f32 / hero.hero_max_mp as f32
+    } else {
+        0.0
+    };
+    let exp_pct = if hero.hero_max_exp > 0 {
+        hero.hero_exp as f32 / hero.hero_max_exp as f32
+    } else {
+        0.0
+    };
+    for (bar, mut sprite) in &mut bars {
+        let pct = match bar.kind {
+            0 => hp_pct,
+            1 => mp_pct,
+            _ => exp_pct,
         };
+        let w = hero_bar_width(bar.full_w, pct);
+        sprite.rect = Some(Rect::new(0.0, 0.0, w, HERO_BAR_SIZE.1));
+        sprite.custom_size = Some(Vec2::new(w, HERO_BAR_SIZE.1));
+    }
+    // 文本（C# `LevelLabel` / `NameLabel` / `Hplabel` / `Mplabel` / `ExLabel`）
+    let cur = hero.current.as_ref().expect("show 已判定有英雄");
+    for (mut text, level, name, hp, mp, exp) in &mut texts {
+        let want = if level.is_some() {
+            cur.level.to_string()
+        } else if name.is_some() {
+            cur.name.clone()
+        } else if hp.is_some() {
+            hero_vital_text(hero.hero_hp, hero.hero_max_hp)
+        } else if mp.is_some() {
+            hero_vital_text(hero.hero_mp, hero.hero_max_mp)
+        } else if exp.is_some() {
+            hero_exp_text(hero.hero_exp, hero.hero_max_exp)
+        } else {
+            continue;
+        };
+        if text.0 != want {
+            text.0 = want;
+        }
     }
 }
 
@@ -808,38 +966,158 @@ fn spawn_hud(
     // #1357：英雄状态小面板（C# HeroInfoPanel Prguse[14] @(95,48)，有英雄才显示）
     if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Prguse, 14) {
         let e = spawn_ui_sprite(&mut commands, h, main_x + 95.0, main_y + 48.0, 3.0, 1.0);
-        commands.entity(e).insert((HeroPanel, Visibility::Hidden));
+        commands
+            .entity(e)
+            .insert((HeroPanel, HeroPanelChild, Visibility::Hidden));
     }
-    let panel_texts: [(&str, f32, f32); 4] = [
-        ("", 26.0, 8.0),
-        ("", 8.0, 28.0),
-        ("", 8.0, 44.0),
-        ("", 8.0, 60.0),
-    ];
-    for (i, (_, dx, dy)) in panel_texts.iter().enumerate() {
+    // #2892 批C：面板子控件按 C# `HeroInfoPanel`（`HeroDialogs.cs:464-700`）
+    let panel_x = main_x + HERO_PANEL_ORIGIN.0;
+    let panel_y = main_y + HERO_PANEL_ORIGIN.1;
+    // 头像三态（基 `Prguse[1400]` / 危险 `1750` / 死亡 `1379`，同坐标 (14,19)）
+    for (idx, kind) in [(1400usize, 0u8), (1750, 1), (1379, 2)] {
+        if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Prguse, idx) {
+            let e = spawn_ui_sprite(
+                &mut commands,
+                h,
+                panel_x + HERO_AVATAR_POS.0,
+                panel_y + HERO_AVATAR_POS.1,
+                3.1,
+                1.0,
+            );
+            let mut ec = commands.entity(e);
+            ec.insert((HeroPanelChild, Visibility::Hidden));
+            match kind {
+                0 => ec.insert(HeroPanelAvatarBase),
+                1 => ec.insert(HeroPanelAvatarDanger),
+                _ => ec.insert(HeroPanelAvatarDead),
+            };
+        }
+    }
+    // 名字容器 `Prguse[10]` @(26,60)
+    if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Prguse, 10) {
+        let e = spawn_ui_sprite(
+            &mut commands,
+            h,
+            panel_x + HERO_NAME_BOX_POS.0,
+            panel_y + HERO_NAME_BOX_POS.1,
+            3.1,
+            1.0,
+        );
+        commands
+            .entity(e)
+            .insert((HeroPanelChild, Visibility::Hidden));
+    }
+    // 等级 / 名字（C# `TextFormatFlags.HorizontalCenter` → `Anchor::TOP_CENTER`，
+    // x = 容器左边 + 框内偏移 + 框宽/2）
+    let level_x = panel_x + HERO_NAME_BOX_POS.0 + HERO_LEVEL_POS.0 + HERO_LEVEL_SIZE.0 / 2.0;
+    let level_y = panel_y + HERO_NAME_BOX_POS.1 + HERO_LEVEL_POS.1;
+    let e = crate::ui::sprite_ui::spawn_ui_text_anchored(
+        &mut commands,
+        &font,
+        "",
+        Anchor::TOP_CENTER,
+        level_x,
+        level_y,
+        10.0,
+        Color::WHITE,
+        3.2,
+    );
+    commands
+        .entity(e)
+        .insert((HeroPanelLevel, HeroPanelChild, Visibility::Hidden));
+    let name_x = panel_x + HERO_NAME_BOX_POS.0 + HERO_NAME_POS.0 + HERO_NAME_SIZE.0 / 2.0;
+    let name_y = panel_y + HERO_NAME_BOX_POS.1 + HERO_NAME_POS.1;
+    let e = crate::ui::sprite_ui::spawn_ui_text_anchored(
+        &mut commands,
+        &font,
+        "",
+        Anchor::TOP_CENTER,
+        name_x,
+        name_y,
+        10.0,
+        Color::WHITE,
+        3.2,
+    );
+    commands
+        .entity(e)
+        .insert((HeroPanelName, HeroPanelChild, Visibility::Hidden));
+    // 血量容器 `Prguse[11]` @(57,26) + 三条 52x8 百分比条（`Prguse[1951..1953]`）
+    if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Prguse, 11) {
+        let e = spawn_ui_sprite(
+            &mut commands,
+            h,
+            panel_x + HERO_HEALTH_BOX_POS.0,
+            panel_y + HERO_HEALTH_BOX_POS.1,
+            3.1,
+            1.0,
+        );
+        commands
+            .entity(e)
+            .insert((HeroPanelChild, Visibility::Hidden));
+    }
+    for i in 0..3usize {
+        if let Some(h) = ui_image(
+            &mut libs,
+            &mut images,
+            &mut cache,
+            LibraryName::Prguse,
+            1951 + i,
+        ) {
+            let e = spawn_ui_sprite(
+                &mut commands,
+                h,
+                panel_x + HERO_HEALTH_BOX_POS.0 + HERO_BAR_POS[i].0,
+                panel_y + HERO_HEALTH_BOX_POS.1 + HERO_BAR_POS[i].1,
+                3.2,
+                1.0,
+            );
+            commands.entity(e).insert((
+                HeroPanelBar {
+                    kind: i,
+                    full_w: HERO_BAR_SIZE.0,
+                },
+                HeroPanelChild,
+                Visibility::Hidden,
+            ));
+        }
+    }
+    // HP / MP / EXP 文本（C# `Hplabel`/`Mplabel`/`ExLabel`）
+    for (kind, pos) in [
+        (0u8, HERO_HP_LABEL_POS),
+        (1, HERO_MP_LABEL_POS),
+        (2, HERO_EXP_LABEL_POS),
+    ] {
         let e = spawn_ui_text(
             &mut commands,
             &font,
             "",
-            main_x + 95.0 + dx,
-            main_y + 48.0 + dy,
-            11.0,
+            panel_x + pos.0,
+            panel_y + pos.1,
+            10.0,
             Color::WHITE,
-            3.2,
+            3.3,
         );
-        commands
-            .entity(e)
-            .insert((HeroPanelText(i), Visibility::Hidden));
-        // #2817：C# `HeroInfoPanel` 的三行也是 `MirLabel` → 带描边
+        // #2817：C# `HeroInfoPanel` 的文本都是 `MirLabel` → 带描边
         crate::ui::outlined_text::outline_on(
             &mut commands,
             e,
             "",
             font.clone(),
-            11.0,
+            10.0,
             Anchor::TOP_LEFT,
             false,
         );
+        match kind {
+            0 => commands
+                .entity(e)
+                .insert((HeroPanelHp, HeroPanelChild, Visibility::Hidden)),
+            1 => commands
+                .entity(e)
+                .insert((HeroPanelMp, HeroPanelChild, Visibility::Hidden)),
+            _ => commands
+                .entity(e)
+                .insert((HeroPanelExp, HeroPanelChild, Visibility::Hidden)),
+        };
     }
 
     // #2892 批C：英雄行为条（C# `HeroBehaviourPanel`，`HeroDialogs.cs:751-793`）——
@@ -1515,6 +1793,182 @@ fn death_overlay_system(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #2892 批C：C# `HeroBehaviourPanel`（`HeroDialogs.cs:751-793`）几何——
+    /// （见下方 `hero_behaviour_geometry_matches_csharp`）
+    #[test]
+    fn hero_info_panel_geometry_and_formats() {
+        assert_eq!(HERO_PANEL_ORIGIN, (95.0, 48.0));
+        assert_eq!(HERO_PANEL_SIZE, (135.0, 78.0));
+        assert_eq!(HERO_AVATAR_POS, (14.0, 19.0));
+        assert_eq!(HERO_NAME_BOX_POS, (26.0, 60.0));
+        assert_eq!(
+            (HERO_LEVEL_POS, HERO_LEVEL_SIZE),
+            ((3.0, -1.0), (17.0, 14.0))
+        );
+        assert_eq!((HERO_NAME_POS, HERO_NAME_SIZE), ((2.0, 14.0), (97.0, 14.0)));
+        assert_eq!(HERO_HEALTH_BOX_POS, (57.0, 26.0));
+        assert_eq!(HERO_BAR_POS, [(18.0, 6.0), (18.0, 19.0), (18.0, 32.0)]);
+        assert_eq!(HERO_BAR_SIZE, (52.0, 8.0));
+        assert_eq!(
+            [HERO_HP_LABEL_POS, HERO_MP_LABEL_POS, HERO_EXP_LABEL_POS],
+            [(71.0, 28.0), (71.0, 41.0), (71.0, 54.0)]
+        );
+        // C# `sectionWidth = (int)(Size.Width * percent)`（percent 上限 1）
+        assert_eq!(hero_bar_width(52.0, 0.0), 0.0);
+        assert_eq!(hero_bar_width(52.0, 0.5), 26.0);
+        assert_eq!(hero_bar_width(52.0, 0.2), 10.0);
+        assert_eq!(hero_bar_width(52.0, 1.0), 52.0);
+        assert_eq!(hero_bar_width(52.0, 1.5), 52.0, "percent 超 1 应截断");
+        assert_eq!(hero_bar_width(52.0, -1.0), 0.0);
+        // 文本（C# `HP + "/" + Stats[HP]`、`{0:F2}%`）
+        assert_eq!(hero_vital_text(300, 600), "300/600");
+        assert_eq!(hero_vital_text(-5, 0), "0/0");
+        assert_eq!(hero_exp_text(1000, 5000), "20.00%");
+        assert_eq!(hero_exp_text(1, 3), "33.33%");
+        assert_eq!(hero_exp_text(0, 0), "0.00%");
+    }
+
+    /// #2892 批C：`HeroInfoPanel` 系统级——条宽/文本/显隐跟随 `HeroState`
+    #[test]
+    fn hero_panel_bars_and_labels_follow_hero_state() {
+        use crate::game::dialogs::hero::HeroState;
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        let mut hero = HeroState::default();
+        hero.current = Some(mir2_shared::data::client_data::ClientHeroInformation {
+            index: 1,
+            name: "英雄甲".to_string(),
+            level: 42,
+            class: mir2_shared::enums::MirClass::Warrior,
+            gender: mir2_shared::enums::MirGender::Male,
+        });
+        hero.hero_hp = 300;
+        hero.hero_max_hp = 600; // 50%
+        hero.hero_mp = 0;
+        hero.hero_max_mp = 200; // 0%
+        hero.hero_exp = 1000;
+        hero.hero_max_exp = 5000; // 20%
+        app.insert_resource(hero);
+        app.add_systems(Update, hero_panel_system);
+
+        let panel = app
+            .world_mut()
+            .spawn((HeroPanel, HeroPanelChild, Visibility::Hidden))
+            .id();
+        let mut bars = Vec::new();
+        for i in 0..3usize {
+            bars.push(
+                app.world_mut()
+                    .spawn((
+                        HeroPanelBar {
+                            kind: i,
+                            full_w: HERO_BAR_SIZE.0,
+                        },
+                        HeroPanelChild,
+                        Sprite::default(),
+                        Visibility::Hidden,
+                    ))
+                    .id(),
+            );
+        }
+        let level = app
+            .world_mut()
+            .spawn((
+                Text2d::new(""),
+                HeroPanelLevel,
+                HeroPanelChild,
+                Visibility::Hidden,
+            ))
+            .id();
+        let name = app
+            .world_mut()
+            .spawn((
+                Text2d::new(""),
+                HeroPanelName,
+                HeroPanelChild,
+                Visibility::Hidden,
+            ))
+            .id();
+        let hp = app
+            .world_mut()
+            .spawn((
+                Text2d::new(""),
+                HeroPanelHp,
+                HeroPanelChild,
+                Visibility::Hidden,
+            ))
+            .id();
+        let mp = app
+            .world_mut()
+            .spawn((
+                Text2d::new(""),
+                HeroPanelMp,
+                HeroPanelChild,
+                Visibility::Hidden,
+            ))
+            .id();
+        let exp = app
+            .world_mut()
+            .spawn((
+                Text2d::new(""),
+                HeroPanelExp,
+                HeroPanelChild,
+                Visibility::Hidden,
+            ))
+            .id();
+
+        app.update();
+        assert_eq!(
+            *app.world().entity(panel).get::<Visibility>().unwrap(),
+            Visibility::Visible,
+            "有英雄 → 面板可见"
+        );
+        let width = |app: &App, e: Entity| {
+            app.world()
+                .entity(e)
+                .get::<Sprite>()
+                .unwrap()
+                .rect
+                .map(|r| r.max.x)
+                .unwrap_or(0.0)
+        };
+        assert_eq!(width(&app, bars[0]), 26.0, "HP 50% → 26px");
+        assert_eq!(
+            width(&app, bars[1]),
+            0.0,
+            "MP 0% → 0px（C# percent<=0 直接 return）"
+        );
+        assert_eq!(width(&app, bars[2]), 10.0, "EXP 20% → 10px");
+        assert_eq!(app.world().entity(level).get::<Text2d>().unwrap().0, "42");
+        assert_eq!(
+            app.world().entity(name).get::<Text2d>().unwrap().0,
+            "英雄甲"
+        );
+        assert_eq!(app.world().entity(hp).get::<Text2d>().unwrap().0, "300/600");
+        assert_eq!(app.world().entity(mp).get::<Text2d>().unwrap().0, "0/200");
+        assert_eq!(app.world().entity(exp).get::<Text2d>().unwrap().0, "20.00%");
+
+        // 无英雄 → 全部隐藏
+        app.world_mut()
+            .resource_mut::<crate::game::dialogs::hero::HeroState>()
+            .current = None;
+        app.update();
+        for e in [panel, level, name, hp, mp, exp] {
+            assert_eq!(
+                *app.world().entity(e).get::<Visibility>().unwrap(),
+                Visibility::Hidden,
+                "无英雄 → 面板与文本都隐藏"
+            );
+        }
+        for e in &bars {
+            assert_eq!(
+                *app.world().entity(*e).get::<Visibility>().unwrap(),
+                Visibility::Hidden,
+                "无英雄 → 条也隐藏"
+            );
+        }
+    }
 
     /// #2892 批C：C# `HeroBehaviourPanel`（`HeroDialogs.cs:751-793`）几何——
     /// 64x17、HUD+(165,37)、4 个 16x17 图标、可用/禁用帧基址 1840/1844

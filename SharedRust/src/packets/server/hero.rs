@@ -191,6 +191,11 @@ pub struct HeroInformation {
     pub hair: u8,
     pub hp: i32,
     pub mp: i32,
+    /// #2892 批C：英雄最大 HP/MP —— C# 客户端 `HeroInfoPanel` 的百分比条需要
+    /// `Stats[Stat.HP]/Stats[Stat.MP]`（`HeroDialogs.cs:668-695`）；C# 从英雄对象读，
+    /// Rust 由服务端随包下发（原 wire 只有当前值）。
+    pub max_hp: i32,
+    pub max_mp: i32,
     pub experience: i64,
     pub max_experience: i64,
     /// 英雄背包（None = 无数据，与 C# bool 标志对应）
@@ -217,6 +222,8 @@ impl Packet for HeroInformation {
         let hair = reader.read_u8()?;
         let hp = reader.read_i32::<LittleEndian>()?;
         let mp = reader.read_i32::<LittleEndian>()?;
+        let max_hp = reader.read_i32::<LittleEndian>()?;
+        let max_mp = reader.read_i32::<LittleEndian>()?;
         let experience = reader.read_i64::<LittleEndian>()?;
         let max_experience = reader.read_i64::<LittleEndian>()?;
 
@@ -271,6 +278,8 @@ impl Packet for HeroInformation {
             hair,
             hp,
             mp,
+            max_hp,
+            max_mp,
             experience,
             max_experience,
             inventory,
@@ -293,6 +302,8 @@ impl Packet for HeroInformation {
         writer.write_u8(self.hair)?;
         writer.write_i32::<LittleEndian>(self.hp)?;
         writer.write_i32::<LittleEndian>(self.mp)?;
+        writer.write_i32::<LittleEndian>(self.max_hp)?;
+        writer.write_i32::<LittleEndian>(self.max_mp)?;
         writer.write_i64::<LittleEndian>(self.experience)?;
         writer.write_i64::<LittleEndian>(self.max_experience)?;
 
@@ -421,6 +432,8 @@ mod tests {
             hair: 3,
             hp: 500,
             mp: 200,
+            max_hp: 800,
+            max_mp: 400,
             experience: 12345,
             max_experience: 99999,
             inventory: Some(vec![Some(item.clone()), None, Some(item.clone())]),
@@ -459,6 +472,8 @@ mod tests {
         assert_eq!(read.equipment.as_ref().unwrap().len(), 2);
         assert_eq!(read.magics.len(), 1);
         assert!(read.auto_pot);
+        // #2892 批C：最大 HP/MP 随包往返（HUD 百分比条用）
+        assert_eq!((read.max_hp, read.max_mp), (800, 400));
     }
 
     #[test]

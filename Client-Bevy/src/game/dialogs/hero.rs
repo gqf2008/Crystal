@@ -60,6 +60,9 @@ pub struct HeroState {
     pub object_id: u32,
     pub hero_hp: i32,
     pub hero_mp: i32,
+    /// #2892 批C：英雄最大 HP/MP（HUD `HeroInfoPanel` 百分比条；C# `Stats[Stat.HP/MP]`）
+    pub hero_max_hp: i32,
+    pub hero_max_mp: i32,
     pub hero_exp: i64,
     pub hero_max_exp: i64,
     pub auto_pot: bool,
@@ -92,6 +95,8 @@ impl Default for HeroState {
             object_id: 0,
             hero_hp: 0,
             hero_mp: 0,
+            hero_max_hp: 0,
+            hero_max_mp: 0,
             hero_exp: 0,
             hero_max_exp: 0,
             auto_pot: false,
@@ -1417,6 +1422,8 @@ fn hero_server_events(
                 magics,
                 hp,
                 mp,
+                max_hp,
+                max_mp,
                 exp,
                 max_exp,
                 auto_pot,
@@ -1432,6 +1439,9 @@ fn hero_server_events(
                 hero.object_id = *object_id;
                 hero.hero_hp = *hp;
                 hero.hero_mp = *mp;
+                // #2892 批C：HUD 百分比条用的最大值（C# `Stats[Stat.HP/MP]`）
+                hero.hero_max_hp = *max_hp;
+                hero.hero_max_mp = *max_mp;
                 hero.hero_exp = *exp;
                 hero.hero_max_exp = *max_exp;
                 hero.auto_pot = *auto_pot;
