@@ -336,12 +336,22 @@ pub(crate) fn apply_user_info_items(
     else {
         return;
     };
-    inventory.items = items.clone();
-    inventory.quest_inventory = quest_inventory.clone();
+    // #2870：`S.UserInformation` 有**轻量变体**（服务端属性刷新时不带背包/装备/任务段），客户端会把这些段解析成
+    // **空 Vec**；若无条件覆盖，任何一次属性刷新都会把玩家背包/装备"清空"——
+    // 真机 `--refine-test` 的取回步骤正是因此拿到「背包视图 0 格」并报"背包已满"。
+    // 判据：空 Vec = 未携带（服务端全量包即便背包全空也会写满 `backpack_size` 个槽位，不会是空 Vec）。
+    if !items.is_empty() {
+        inventory.items = items.clone();
+    }
+    if !quest_inventory.is_empty() {
+        inventory.quest_inventory = quest_inventory.clone();
+    }
     // #1544：RefreshStats 重量（max_weight=服务端 bag_weight；weight 由物品重算）
     inventory.max_weight = (*bag_weight).max(0) as u32;
     inventory.refresh_weight();
-    loadout.slots = equipment.clone();
+    if !equipment.is_empty() {
+        loadout.slots = equipment.clone();
+    }
 }
 
 /// 单一写映射：player_vitals_events / apply_pending_events 共用（#2633 R1，防双份漂移）。

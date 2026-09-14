@@ -657,22 +657,41 @@ pub(crate) fn auto_refine_test(
                     *stage = 9;
                     return;
                 }
-                match inv_q
-                    .single()
-                    .ok()
-                    .and_then(|inv| inv.items.iter().position(|s| s.is_none()))
-                {
+                // #2870：取回目标格——先找第一个空槽；若客户端视图里没有空槽（`Inventory.items` 与真实背包
+                // 容量可能不同步：物品入包/出包/存入精炼后元素状态未必补齐），回退用「最后一个已占用格 + 1」，
+                // 交由服务端按自己的背包容量校验 `to`（失败会回 `success=false` 的确认包）。
+                let inv_len = inv_q.single().map(|inv| inv.items.len()).unwrap_or(0);
+                // 诊断（#2870）：区分「视图里没有空槽」与「查询不到/查询到多个 LocalPlayer 实体」
+                tracing::info!(
+                    "[REFINETEST] 背包查询：Inventory 实体数={}、LocalPlayer 实体数={}、items 长度={}",
+                    inv_q.iter().count(),
+                    players.iter().count(),
+                    inv_len
+                );
+                match inv_q.single().ok().and_then(|inv| {
+                    inv.items
+                        .iter()
+                        .position(|s| s.is_none())
+                        .or_else(|| inv.items.iter().rposition(|s| s.is_some()).map(|i| i + 1))
+                }) {
                     Some(grid) => {
                         net.send_packet(&client_bevy::network::RefineRetrieveWire {
                             from: 0,
                             to: grid as i32,
                         });
-                        tracing::info!("[REFINETEST] 取回精炼物品到背包格 {}", grid);
+                        tracing::info!(
+                            "[REFINETEST] 取回精炼物品到背包格 {}（背包视图 {} 格）",
+                            grid,
+                            inv_len
+                        );
                         *stage = 8;
                         *t = 0.0;
                     }
                     None => {
-                        tracing::warn!("[REFINETEST] ❌ 背包已满，无法取回");
+                        tracing::warn!(
+                            "[REFINETEST] ❌ 背包已满，无法取回（背包视图 {} 格）",
+                            inv_len
+                        );
                         *stage = 9;
                     }
                 }
