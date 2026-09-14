@@ -11520,8 +11520,48 @@ fn build_client_quest_info(
     }
 }
 
+/// #2872：玩家侧状态变化（属性/背包/装备/金币）后，请求 world 下发一次**完整** `S.UserInformation`
+/// （C# `PlayerObject.GetUserInfo` 语义；玩家 actor 没有 `item_infos`，无法自行补齐物品 `info`）。
+pub struct RefreshUserInformation {
+    pub session_id: u64,
+}
+
+impl Message<RefreshUserInformation> for WorldActor {
+    type Reply = ();
+
+    async fn handle(&mut self, msg: RefreshUserInformation, _ctx: &mut Context<Self, Self::Reply>) {
+        self.send_full_user_information(msg.session_id).await;
+    }
+}
+
 /// 发送完整的游戏进入序列到客户端
 impl WorldActor {
+    /// #2872：C# `PlayerObject.GetUserInfo`（`PlayerObject.cs:1649-1700`）——`S.UserInformation`
+    /// **每次都带完整 `Inventory`/`Equipment`/`QuestInventory`**（`new UserItem[Info.Inventory.Length]` 三行固定分配）。
+    ///
+    /// 本端此前在玩家侧有一处「轻量 UserInformation」刷新（属性/背包/装备/金币变化时发半截包，不带这三段），
+    /// 与 C# 语义不符：任何按 C# 语义解析的客户端都会把背包/装备视图清空（真机 #2870 复现，Bevy 侧已加防御）。
+    /// 现统一改由 world 侧发送完整包（world 持有 `item_infos`，能给物品补 `info`）。
+    pub(crate) async fn send_full_user_information(&self, session_id: u64) {
+        let Some(record) = self.players.get(&session_id) else {
+            return;
+        };
+        if let Ok(Some(state)) = record
+            .actor_ref
+            .ask(crate::actors::player::GetPlayerState)
+            .await
+        {
+            let packet = build_user_information_packet(&state, &self.item_infos);
+            let _ = self
+                .gate_ref
+                .tell(SendToClient {
+                    session_id,
+                    data: packet,
+                })
+                .await;
+        }
+    }
+
     /// #2867：登录下发全部任务定义（C# `PlayerObject.CheckQuestInfo` → `QuestInfo.CreateClientQuestInfo`）。
     ///
     /// 必须在**本会话的 NPC 生成之后**调用：C# 的 `NpcIndex`/`FinishNpcIndex` 是 NPC 脚本 `[QUESTS]`

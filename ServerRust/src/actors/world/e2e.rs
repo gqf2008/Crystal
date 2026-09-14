@@ -834,6 +834,36 @@ fn e2e_refine_full_success_path() {
             WEAPON_UID
         );
 
+        // #2872：精炼开始会扣金币 ⇒ 触发一次 UserInformation 刷新；该刷新必须是**完整包**
+        // （带背包/装备段，C# `PlayerObject.GetUserInfo` 语义），而不是本端此前的"轻量半截包"——
+        // 半截包会让按 C# 语义解析的客户端把背包/装备视图清空（#2870 真机复现）。
+        let ui_body = wait_opcode_body(
+            &mut rx,
+            mir2_shared::enums::ServerPacketIds::UserInformation as i16,
+            3,
+        )
+        .await
+        .expect("金币变化后的 UserInformation 刷新包缺失");
+        use mir2_shared::packets::base::Packet as _;
+        let info = mir2_shared::packets::server::user::UserInformation::read_body(
+            &mut std::io::Cursor::new(&ui_body),
+        )
+        .expect("刷新包解析失败（说明发的是半截包）");
+        assert!(
+            info.inventory
+                .as_ref()
+                .map(|inv| !inv.is_empty())
+                .unwrap_or(false),
+            "刷新包必须带完整背包段（C# GetUserInfo：每次都给 Inventory/Equipment/QuestInventory）"
+        );
+        assert!(
+            info.equipment
+                .as_ref()
+                .map(|eq| !eq.is_empty())
+                .unwrap_or(false),
+            "刷新包必须带完整装备段"
+        );
+
         // 查看页 + CheckRefine → 成功分支的发包是 ItemUpgraded（失败分支发 S.RefineItem + 粉碎消息）
         let _ = gate_ref
             .ask(ClientData {
