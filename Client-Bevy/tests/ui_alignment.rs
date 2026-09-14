@@ -3803,3 +3803,68 @@ fn panel_sprites_batch_b18_match_memo_dialog() {
 
     println!("  ✓ 批D 面板精灵核对：好友备注窗 Title[209] 196x166@Center + Title[382..387] + Prguse2[360..362]");
 }
+
+/// #2892 批B：行会公告页 = C# `Notice` **多行可编辑框**（`GuildDialog.cs:215-316`）。
+///
+/// `Notice` 322x330 @(13,1)（`MirTextBox.MultiLine()`）；翻页 `NoticeUpButton` `Prguse2[197/198/199]`
+/// @(337,1)、`NoticeDownButton` `Prguse2[207/208/209]` @(337,318)（C# 控件 16x14、art 12x12）；
+/// 保存 `Prguse[554/555/556]` @(20,342)。本端翻页 = 平移显示实体 `scroll * 行高`（框裁剪）。
+#[test]
+fn panel_sprites_batch_b20_match_notice_editor() {
+    use client_bevy::game::dialogs::guild as g;
+    require_assets!("panel_sprites_batch_b20_match_notice_editor");
+    let mut libs = Libs::new();
+
+    // 公告框：322x330 @(13,1) 在 NoticePage（352x372）内
+    assert_inside(
+        "公告框",
+        13.0,
+        1.0,
+        322.0,
+        330.0,
+        0.0,
+        0.0,
+        g::PAGE_LEFT.2,
+        g::PAGE_LEFT.3,
+    );
+    // 可见行数 × 行高不得超出框高（320 ≤ 330）
+    assert!(
+        g::NOTICE_ROWS as f32 * g::NOTICE_ROW_DY <= 330.0,
+        "[越界] {} 行 × {}px 超出 C# `Notice` 框高 330",
+        g::NOTICE_ROWS,
+        g::NOTICE_ROW_DY
+    );
+    // 翻页钮 art 尺寸（C# 控件 Size 16x14，帧 12x12）
+    for idx in [197, 198, 199, 207, 208, 209] {
+        assert_eq!(
+            libs.size(LibraryName::Prguse2, idx),
+            (12.0, 12.0),
+            "[尺寸] Prguse2[{idx}] 公告翻页钮帧"
+        );
+    }
+    // C# 翻页钮 @(337,·) 控件宽 16 → 右缘 353 越出 NoticePage 352 一像素（原版页面不裁剪，
+    // 只有对话框整体裁剪）——按原样保留，不当作越界错误
+    assert!(
+        337.0 + 16.0 > g::PAGE_LEFT.2,
+        "[记录] C# 公告翻页钮右缘 353 比页宽 352 多 1px（原版即如此）"
+    );
+    // 保存键 Prguse[554..556]（28x25）@(20,342)
+    for idx in [554, 555, 556] {
+        assert_eq!(
+            libs.size(LibraryName::Prguse, idx),
+            (28.0, 25.0),
+            "[尺寸] Prguse[{idx}] 公告保存键"
+        );
+    }
+    assert_inside(
+        "公告保存键",
+        20.0,
+        342.0,
+        28.0,
+        25.0,
+        0.0,
+        0.0,
+        g::PAGE_LEFT.2,
+        g::PAGE_LEFT.3,
+    );
+}

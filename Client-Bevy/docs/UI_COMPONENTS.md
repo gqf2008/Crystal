@@ -180,6 +180,7 @@
 | 批38 #2892 批B（单元11：行会 NoticePage 正文 + 翻页） | NoticePage 补公告正文渲染（服务端 `GuildNotice` 行数组 → `(13, 1 + i*16)` 20 行，覆盖 C# `Notice` 文本框 322x330 区域）与 C# 滚动语义（新增纯函数 `notice_next_scroll`：`NoticeScrollIndex` 首行下标，上 0 停/下 `len-1` 停、公告变短自动收敛，接 `guild_notice_system`）；翻页钮改用 C# `Prguse2[197/198/199]`@(337,1)、`Prguse2[207/208/209]`@(337,318)；`StatusPage` 标题行收回为只显示行会名（C# `StatusGuildName`，金币/公告各有归属）。残留：编辑仍是单行输入框（C# `Notice` 为可编辑多行框）。 | #2914 |
 | 批39 #2892 批B（单元12：行会成员行内控件按 C# `UpdateMembers`） | 新增 `guild_member_rows_system` 逐帧同步 4 项：① `MembersRanks[i]` 职务下拉（100x14 @(24, 30+i*15)，`Items=Ranks`、`SelectedIndex=成员职务`、`Enabled = CanChangeRank && 成员职务下标 >= MyRankId`，改选发 `EditGuildMember{change_type=2}`）② `MembersName[i]` 只显示成员名（此前拼「名字（离线）(职务)」）③ `MembersStatus[i]`@(225,·) 在线 `LimeGreen`/离线 `White` ④ `MembersDelete[i].Visible = CanKick && 职务下标 >= MyRankId && 不是自己`（此前 18 个恒可见）。新增纯函数 `can_change_member_rank` / `can_kick_member` / `guild_my_rank_index` 并逐个钉断言。差异：`UiDropDown` 无 enabled 态（禁用时强制收起）、离线状态无「上次登录时间」（服务端自定义信息体未带 `LastLogin`）、改职无确认框（C# `OnNewRank` 有）。 | #2915 |
 | 批40 #2892 批D 单元②（三种隐身显示粒度） | 服务端 `combat/buff.rs` 把单一 `Invisibility` 拆成 C# 的 `Hiding`/`MoonLight`/`DarkBody` 三个变体，新增 `is_invisible_type`；`player.rs` tag 由「全部 10」改为 31/10/32（↔ C# `BuffDialog.cs:435-460` 图标 17/65/70），`buff_values`/死亡清理/破隐移除同步（`RemoveBuff` 对三种隐身一并清除并逐个下发 `S.RemoveBuff`）；`npc_script.rs` 脚本关键字 `HIDING`/`INVISIBILITY`/`MOONLIGHT`/`DARKBODY` 分别映射；`combat.rs` `SPELL_HIDING`+MassHiding→`Hiding`、`SPELL_MOON_LIGHT`+MoonMist→`MoonLight`；`tick.rs`/`session.rs`/`world/mod.rs` 的隐身判定统一走 `is_invisible_type`；客户端 `buff_display` 补 tag 31「隐身」(17)/32「暗身术」(70)（文案逐字取 `Chinese.json`）。未拆：`Rage`/`Impact` 仍共用 `AttackBoost`；三者的**可见性规则**仍共用一套（C# 各不相同）。 | #2916 |
+| 批47 #2892 批B 收尾（行会公告页改多行可编辑框） | `Notice` 区域（322x330 @(13,1)）由「20 行只读 + 单行输入」改为**多行可编辑框**：裁剪容器 + `TextInputField(2)` + `TextInputMultiline`（批46 基建），显示实体定宽 316 折行；翻页钮（C# `Prguse2[197..199]`/`[207..209]` @(337,1)/(337,318)）改为平移显示实体 `top = 2 - scroll*16`（等价 C# `UpdateNotice` 的 `ScrollToCaret()` 逐行滚动）；保存键 `Prguse[554..556]` @(20,342) 不变。记录：C# 翻页钮右缘 353 比页宽 352 多 1px；未做 `NoticePositionBar`（`Prguse2[206]`）与滚轮滚动。 | #2923 |
 | 批46 多行文本输入基建（`TextInputMultiline`） | `text_input` 增 `TextInputMultiline` 标记（挂在 `TextInputField(id)` 同实体）：`Enter` 插入换行且**不发** `TextInputSubmit`；显示实体定宽 → bevy_ui 按容器宽度折行。好友备注窗文本框（C# `MemoTextBox.MultiLine()`）改为多行，`PANEL`/坐标不变。 | #2922 |
 | 批45 #2892 批D 单元①收尾（好友备注拆窗 + 拖动，6 窗全清） | 按 C# `MemoDialog`（`FriendDialog.cs:480-568`）把备注从「好友窗内嵌输入框」拆成独立窗：新增 `DialogKind::Memo` + `dialogs/memo.rs`（`Title[209]` 196x166 `@ Center`(414,301)、`MemoTextBox` @(15,30) 165x100、OK `Title[382..384]`@(30,133)、Cancel `Title[385..387]`@(115,133)、Close `Prguse2[360..362]`@(168,3)；OK → `C.AddMemo` → `Hide()`）；挂 `DialogRoot` 即吃通用拖动（C# `Movable = true`）；好友窗「备注」动作改由 `friend_memo_open_system` 打开并预填现有备注（`friend_ui_system` 已到 16 参上限）。差异：C# 文本框 `MultiLine()`，本端单行占位。 | #2921 |
 | 批44 #2892 批D 单元①续（下拉框拖动 + 钓鱼窗核对） | `UiDropDown` 补 `base_rel`/`drag_offset`/`drag_grab`，弹出面板位置 = 基准 + 偏移，命中统一走 `popup_rect()`（含偏移）→ 滚轮/选项/点外关闭都跟随；起拖仅按**非选项行**区域（选项行仍是选择），重新展开归零 —— 对齐 C# `MirDropDownBox.Movable = true`。顺带核对：钓鱼窗本端已是 `DialogRoot(DialogKind::Fishing)` 且无 `NotDraggable`，走通用 `dialog_drag_system` 即可拖动（C# `FishingStatusDialog.Movable = true` 已满足；尺寸 200x287 vs C# 244x128 另记）。 | #2920 |
@@ -190,7 +191,7 @@
 ## 6. 验证基线
 
 - `cargo check --tests`（Client-Bevy）通过。
-- `cargo test`（Client-Bevy）：**588 lib** + 2 bin + 1 smoke + **43 alignment** 通过（批46 后基线；批45 时为 587 lib + 43 alignment，批44 时为 587 lib + 42 alignment，批43 时为 586 lib + 42 alignment，批42 时为 585 lib + 42 alignment，批41 时为 583 lib + 42 alignment，批40 时为 583 lib + 42 alignment（ServerRust 740 lib），批39 单元⑫ 时为 583 lib + 42 alignment（ServerRust 739 lib），批38 单元⑪ 时为 582 lib + 42 alignment，批37 单元⑩ 时为 581 lib + 42 alignment，批36 单元⑨ 时为 579 lib + 42 alignment，批35 单元⑧ 时为 579 lib + 41 alignment，批34 单元⑦ 时为 579 lib + 40 alignment，批33 单元⑥ 时为 579 lib + 39 alignment，批32 单元⑤ 时为 576 lib + 38 alignment，批31 单元④ 时为 571 lib + 37 alignment，批28 单元③ 时为 542 lib + 24 alignment，批27 收尾时 535 lib，批26 收尾时 528 lib，批25 收尾时 523 lib，批24 收尾时 514 lib）；ServerRust **741 lib** + 6 integration（同上，含 `QuestItemReward` ItemInfo 协议 + `ClientGTMap` 字段）；SharedRust **187 + 11**（2 ignored，含 `QuestItemReward` 往返无损）。三侧 `cargo fmt -- --check` 净零差异。
+- `cargo test`（Client-Bevy）：**588 lib** + 2 bin + 1 smoke + **44 alignment** 通过（批47 后基线；批46 时为 588 lib + 43 alignment，批45 时为 587 lib + 43 alignment，批44 时为 587 lib + 42 alignment，批43 时为 586 lib + 42 alignment，批42 时为 585 lib + 42 alignment，批41 时为 583 lib + 42 alignment，批40 时为 583 lib + 42 alignment（ServerRust 740 lib），批39 单元⑫ 时为 583 lib + 42 alignment（ServerRust 739 lib），批38 单元⑪ 时为 582 lib + 42 alignment，批37 单元⑩ 时为 581 lib + 42 alignment，批36 单元⑨ 时为 579 lib + 42 alignment，批35 单元⑧ 时为 579 lib + 41 alignment，批34 单元⑦ 时为 579 lib + 40 alignment，批33 单元⑥ 时为 579 lib + 39 alignment，批32 单元⑤ 时为 576 lib + 38 alignment，批31 单元④ 时为 571 lib + 37 alignment，批28 单元③ 时为 542 lib + 24 alignment，批27 收尾时 535 lib，批26 收尾时 528 lib，批25 收尾时 523 lib，批24 收尾时 514 lib）；ServerRust **741 lib** + 6 integration（同上，含 `QuestItemReward` ItemInfo 协议 + `ClientGTMap` 字段）；SharedRust **187 + 11**（2 ignored，含 `QuestItemReward` 往返无损）。三侧 `cargo fmt -- --check` 净零差异。
 - 批31（#2892 批B）门禁：`cargo fmt -- --check` 0 差异；`cargo test --test ui_alignment` 37 passed；`cargo test` 全量 571+2+1+37 passed。**阳性对照**：把耐久内层灰底的 alpha 由 0.4 改成 1.0（去掉 C# `Opacity = 0.4F`）→ `game::dialogs::dura_status::tests::spawned_panel_renders_inner_layers` 如期 FAILED（"下层 = C# `GrayBackground.Opacity = 0.4F`，实际 alpha 1"），改回即绿。
 - 批31 断言覆盖口径：每个窗口断言「**面板精灵索引 → `.Lib` 实测尺寸**」+「**本端常量坐标 = C# `Location`**」+ 面板不越画布 / 子控件在父矩形内；用 `Libs::pixels` 做精灵身份守卫（不同索引像素必须不同）防止「索引写错但尺寸巧合相同」。
 - 批32（#2892 批B 单元5）门禁：`cargo fmt -- --check` 0 差异；`cargo test` 576 lib + 2 bin + 1 smoke + 38 alignment 全绿
@@ -367,6 +368,10 @@
   单行框 Enter → 文本不变 + 1 条 `TextInputSubmit`；多行框 Enter → `"abc\n"` + 0 条提交）。
   **阳性对照**：把 `let multiline = fields.iter().any(...)` 改成 `false` → 该测试如期 FAILED
   （`"abc" != "abc\n"`），改回即绿。
+
+- 批47（#2892 批B 收尾：公告页多行编辑）门禁：`cargo fmt -- --check` 0 差异；Client-Bevy `cargo test` 588 lib + 2 bin + 1 smoke + 44 alignment 全绿
+  （新增 `panel_sprites_batch_b20_match_notice_editor`）。
+  **阳性对照**：把 `NOTICE_ROW_DY` 改成 17 → 该测试如期 FAILED（"[越界] 20 行 × 17px 超出 C# `Notice` 框高 330"），改回即绿。
 
 ## 7. 已知有意偏差
 
@@ -558,7 +563,7 @@
   **批35 已把 MembersPage 行几何与删除钮对齐**（见下条）；**仍未对齐的页内细节**（后续单元）：
   ① MembersPage 的 `MembersRanks` 职务下拉、状态列与「能否踢人」规则已在批39 落地（见下条）；
   ② StoragePage 金币输入是 Bevy 扩展（C# 只有 `StorageGoldText` + 加减钮）—— 格阵已在批36 对齐（见下条）；
-  ③ NoticePage 已在批38 补正文渲染与滚动（见下条）；残留：编辑仍是单行输入框（C# `Notice` 是可编辑多行框）；
+  ③ NoticePage 已在批47 改成**多行可编辑框**（见下条），该条已消；
   ④ RankPage 的权限位用 `Prguse[1346/1347]` 复选框图 + 文字标签（C# 文案由 `RanksOptionsTexts` 给），
      但「加职务」「调职」是本端扩展（C# 职务由服务端定义）；
   ⑤ 页签可见性已在批37 按玩家行会权限门控（见下条）；差异：C# 的 `MyOptions` 来自服务端
@@ -601,7 +606,19 @@
   **差异**：C# 的 `MyOptions` 是服务端 `GuildStatus` 的第 13 个字段，本端服务端自定义信息体未带它，
   故改为客户端推导；拿不到自己的权限位时**不隐藏**页签（C# 该字段恒有值，无此分支）。
 
-- 行会 NoticePage（批38 / #2892 批B 单元11 已对齐主体）：
+- 行会 NoticePage 多行编辑（批47 / #2892 批B 收尾）：C# `Notice` 是 322x330 @(13,1) 的
+  **可编辑多行框**（`MirTextBox.MultiLine()`），翻页由 `UpdateNotice()` 的 `ScrollToCaret()` 逐行滚动，
+  `NoticeScrollIndex` 配合上下翻页钮。本端此前是「20 行只读文本 + 单行输入框」的近似。
+  现在改为：公告框 = 322x330 裁剪容器 + `TextInputField(2)` + `TextInputMultiline`（批46 基建），
+  显示实体定宽 316 折行；翻页钮仍按 C# `Prguse2[197..199]`/`[207..209]` @(337,1)/(337,318)，
+  作用改为**平移显示实体** `top = 2 - notice_scroll * 16`（框 `Overflow::clip` 裁掉超出部分），
+  等价 C# 的逐行滚动；保存仍是 `Prguse[554..555..556]` @(20,342) → `C.EditGuildNotice`。
+  行高 16px × 20 行 = 320 ≤ 330（C# 用 8F 字体、约 24 行可见；本端字号不同故行数不同，已断言不越框）。
+  **记录**：C# 翻页钮控件宽 16 @x=337 → 右缘 353 比页宽 352 多 1px（原版页面不裁剪，只有对话框整体裁剪）。
+  **差异**：C# `NotePositionBar`（`Prguse2[206]` @(337,16)，`Movable`）与鼠标滚轮滚动本端未实现
+  （只有上下翻页钮）；C# 保存/编辑键是同位置二选一显示（`NoticeEditButton` 560..562），本端只挂保存键。
+
+- 行会 NoticePage（批38 / #2892 批B 单元11 正文渲染，批47 已并入多行编辑）：
   C# `Notice`（322x330 @(13,1)）、`NoticeUpButton Prguse2[197/198/199]` @(337,1)、
   `NoticeDownButton Prguse2[207/208/209]` @(337,318)、`NoticePositionBar Prguse2[206]` @(337,16)、
   `NoticeEditButton Prguse[560..562]` / `NoticeSaveButton Prguse[554..556]` @(20,342)（二选一显示）。
