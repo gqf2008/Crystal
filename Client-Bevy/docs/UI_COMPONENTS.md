@@ -175,11 +175,12 @@
 | 批33 #2892 批B（单元6：仓库窗子控件层 + 两页 160 格，批B 收官） | 仓库窗从「自造单层」改回 C# 结构：标题 `Title[0]`@(18,8)；页码钮 `Title[743/744]`@(8,36)+`Title[746/745]`@(80,36)（帧随页切换）；租用扩容钮 `Title[483..485]`@(283,33)（仅第 2 页）→ `MirMessageBox`（中文文案逐字取 `Localization/Chinese.json`）→ Yes 发 `@ADDSTORAGE`；密码钮由自造 `Title[206..208]`@(18,330) 改回 C# `ProtectButton` `Title[113..115]`@(328,33)；关闭钮 20x20→C# 24x21@(363,3)；未扩容遮罩 `Prguse[2443]`@(8,59)；提示行 `RentalLabel`@(40,322)（红/白两态）。**功能性补齐**：`StorageState` 上限 80→160，第 1/2 页 = 槽位 0..79 / 80..159（页内 `y%8` 回绕复用 10×8 版面），未扩容时第 2 页整页隐藏；`ServerEvent::StorageResized` 补 `has_expanded_storage`/`expiry_time`（此前客户端只取 `size`，扩容页无从判断）。C# 死控件 `StoragePasswordLabel` 同坐标恒隐藏。 | #2909 |
 | 批34 #2892 批B（单元7：行会窗外壳按 C# 拆回「6 页签 + 6 页」） | 行会窗由自造 **590x740 @(217,14)** 单窗垂直堆叠改回 C# `GuildDialog`：面板 `Prguse[180]` 590x432 @ `Center`(217,168)（背景图作根面板贴图，删掉「下方深色延伸区」）；标题 `Title[25]`@(18,9)；6 个页签按 C# 精灵/坐标（`Title[93/99/105/101/103/95]` + pressed 帧，间距 71px）；关闭钮 `Prguse2[360..362]`@(565,4) 24x21（原为自造 20x20 @(340,3)）；六页矩形与底图照抄（左侧四页 @(0,60) 352x372、Status @(355,60) 230x372、Buff @(360,61) 352x372；底图 `Prguse[1852]/[1851]/[1850]/[1853]`）；新增 `guild_page_system` 切页；内容按 C# 归属搬进各页（成员/显示离线 → Members、公告 → Notice、职务 → Rank、金币+物品+翻页 → Storage、行会名+招募 → Status、Buff 槽 → Buff）；Buff 行改用独立 `GuildBuffLine(0..8)`（不再复用成员行），命中区随页面原点重算。残余页内偏差见 §7。 | #2910 |
 | 批35 #2892 批B（单元8：行会 MembersPage 18 行 × 15px + 行内删除钮） | MembersPage 按 C# `MemberPageRows = 18` 重排：行 `(125, 30 + i*15)`（原 10 行 × 20px）、列位 125/210/225、每行 `Prguse[917]` 删除钮（点击即对该行成员发 `EditGuildMember{change_type=1}`，C# `MembersDelete[i].Click`）；`UiScrollList` 同步 18×15（rect (125,90,200,270)、track (337,61,16,300)）；**行号分段重排**为成员 `1..=18` / 仓库 `20..=27` / 页头 `28`（旧实现成员与仓库行号相邻，改行数会串页）；三个命中区常量化为 `MEMBER_*`/`STORAGE_*` 并补「末行不越页、不压显示离线行」断言。 | #2911 |
+| 批36 #2892 批B（单元9：行会 StoragePage 8×14 格阵 + 协议按槽位） | StoragePage 由「8 行单列文本列表（13 页）」改回 C# `StorageGrid = new MirItemCell[8*14]`：64 个可见格按 `(x*35+31+x, (y-StorageIndex)*35+20+(y-StorageIndex))` 落位、35x35，内嵌 `Items[image]` 图标 + 数量；`storage_page` 改作 C# `StorageIndex`（0..=6 行窗口，`y>7` 不可见）；点击按 `idx = 8*(StorageIndex + r) + x` 命中；金币行改由 `StorageGoldText`(194,312) 显示 `gold`、加减钮 `Prguse[918/917]`@(158/142,313)。**协议配套**：`ServerEvent::GuildStorage` 改为按槽位 `Vec<Option<(uid, index, count, name, image)>>`（原先 `filter_map` 把空格丢掉、物品整体上移，格阵位置对不上也画不出图），`StorageItem` 补 `image`（`ItemInfo.image`）。 | #2912 |
 
 ## 6. 验证基线
 
 - `cargo check --tests`（Client-Bevy）通过。
-- `cargo test`（Client-Bevy）：**579 lib** + 2 bin + 1 smoke + **41 alignment** 通过（批35 单元⑧ 后基线；批34 单元⑦ 时为 579 lib + 40 alignment，批33 单元⑥ 时为 579 lib + 39 alignment，批32 单元⑤ 时为 576 lib + 38 alignment，批31 单元④ 时为 571 lib + 37 alignment，批28 单元③ 时为 542 lib + 24 alignment，批27 收尾时 535 lib，批26 收尾时 528 lib，批25 收尾时 523 lib，批24 收尾时 514 lib）；ServerRust **739 lib** + 6 integration（同上，含 `QuestItemReward` ItemInfo 协议 + `ClientGTMap` 字段）；SharedRust **187 + 11**（2 ignored，含 `QuestItemReward` 往返无损）。三侧 `cargo fmt -- --check` 净零差异。
+- `cargo test`（Client-Bevy）：**579 lib** + 2 bin + 1 smoke + **42 alignment** 通过（批36 单元⑨ 后基线；批35 单元⑧ 时为 579 lib + 41 alignment，批34 单元⑦ 时为 579 lib + 40 alignment，批33 单元⑥ 时为 579 lib + 39 alignment，批32 单元⑤ 时为 576 lib + 38 alignment，批31 单元④ 时为 571 lib + 37 alignment，批28 单元③ 时为 542 lib + 24 alignment，批27 收尾时 535 lib，批26 收尾时 528 lib，批25 收尾时 523 lib，批24 收尾时 514 lib）；ServerRust **739 lib** + 6 integration（同上，含 `QuestItemReward` ItemInfo 协议 + `ClientGTMap` 字段）；SharedRust **187 + 11**（2 ignored，含 `QuestItemReward` 往返无损）。三侧 `cargo fmt -- --check` 净零差异。
 - 批31（#2892 批B）门禁：`cargo fmt -- --check` 0 差异；`cargo test --test ui_alignment` 37 passed；`cargo test` 全量 571+2+1+37 passed。**阳性对照**：把耐久内层灰底的 alpha 由 0.4 改成 1.0（去掉 C# `Opacity = 0.4F`）→ `game::dialogs::dura_status::tests::spawned_panel_renders_inner_layers` 如期 FAILED（"下层 = C# `GrayBackground.Opacity = 0.4F`，实际 alpha 1"），改回即绿。
 - 批31 断言覆盖口径：每个窗口断言「**面板精灵索引 → `.Lib` 实测尺寸**」+「**本端常量坐标 = C# `Location`**」+ 面板不越画布 / 子控件在父矩形内；用 `Libs::pixels` 做精灵身份守卫（不同索引像素必须不同）防止「索引写错但尺寸巧合相同」。
 - 批32（#2892 批B 单元5）门禁：`cargo fmt -- --check` 0 差异；`cargo test` 576 lib + 2 bin + 1 smoke + 38 alignment 全绿
@@ -200,6 +201,10 @@
 - 批35（#2892 批B 单元8）门禁：`cargo fmt -- --check` 0 差异；`cargo test` 579 lib + 2 bin + 1 smoke + 41 alignment 全绿。
   **阳性对照**：把 `MEMBER_ROWS` 改回 10（= 修正前的行数）→ `panel_sprites_batch_b8_match_csharp`
   如期 FAILED（"[行数] C# `MemberPageRows = 18`"），改回即绿。
+- 批36（#2892 批B 单元9）门禁：`cargo fmt -- --check` 0 差异；`cargo test` 579 lib + 2 bin + 1 smoke + 42 alignment 全绿
+  （`guild::tests` 21 passed，含新的 `storage_cell_rect_origin_and_drag`）。
+  **阳性对照**：把 `STORAGE_COLS` 改回 1（= 修正前的单列列表）→ `panel_sprites_batch_b9_match_csharp`
+  如期 FAILED（"[列数] C# 8 列"），改回即绿。
 - Report 的 C# `Prguse[1633]` 在当前本地 Data 包缺失；已使用按 C# 控件边界推导的 360x244 深色兜底面板并保留对应子控件坐标，待资源包更新后自动加载正确背景。
 - ServerRust：680 lib + 6 integration 通过（批24 单元③ 后；批16 基线为 673 lib）；SharedRust 187 + 11（2 ignored）；`MapEditor/SharedRust` `cargo check` 通过（副本同步，批24 单元③ 改 `QuestItemReward` 时同步）。
 - 关键实机/定向验证：UI 子树泄漏截图、Character 技能页、AssignKey 模态输入、Timer 穿透、登录安全键盘资源；批7 复验 Mail/Buff；批8 复验 Center 窗口。
@@ -444,8 +449,7 @@
   `PointsLeft` @(118,3) 与 ↑↓ @(337,1)/(337,318) 进 BuffPage；成员/仓库/Buff 三个命中区随页面原点重算。
   **批35 已把 MembersPage 行几何与删除钮对齐**（见下条）；**仍未对齐的页内细节**（后续单元）：
   ① MembersPage 未建 `MembersRanks` 职务下拉（100x14 @(24, ·)，需 `CanChangeRank` 才可用）；
-  ② StoragePage 物品仍是 8 行单列（C# `StorageGrid = new MirItemCell[8*14]`，35x35 步进 36、
-     `StorageIndex` 行窗口 0..6）；金币输入是 Bevy 扩展（C# 只有 `StorageGoldText` + 加减钮）；
+  ② StoragePage 金币输入是 Bevy 扩展（C# 只有 `StorageGoldText` + 加减钮）—— 格阵已在批36 对齐（见下条）；
   ③ NoticePage 是单行输入 + 保存钮（C# `Notice` 为 322x330 多行文本框 + 编辑/保存 + 滚动条）；
   ④ RankPage 的权限位用 `Prguse[1346/1347]` 复选框图 + 文字标签（C# 文案由 `RanksOptionsTexts` 给），
      但「加职务」「调职」是本端扩展（C# 职务由服务端定义）；
@@ -464,3 +468,16 @@
   （`rect_rel (125,90,200,270)`、`track_rel (337,61,16,300)`）。
   **行号分段重排**：成员 `GuildLine(1..=18)`、仓库 `20..=27`、仓库页头 `28`
   （旧实现成员 1..=10 与仓库 11..=18 相邻，改行数就会串页）。
+
+- 行会 StoragePage 格阵（批36 / #2892 批B 单元9 已对齐）：
+  C# `StorageGrid = new MirItemCell[8 * 14]`、`Size 35x35`、`Location = (x*35+31+x, (y-StorageIndex)*35+20+(y-StorageIndex))`、
+  `if (y > 7) Visible = false`（可见 8 行窗口）、`StorageIndex` 0..=6；
+  `StorageGoldText` @(194,312)（文案 `Gold > 0 ? "{0:###,###,###}" : "0"`，`:634`）、
+  `StorageGoldAdd Prguse[918]` @(158,313)、`StorageGoldRemove Prguse[917]` @(142,313)。
+  本端此前是 **8 行单列文本列表**（13 页 × 8 格）。现在：64 个可见格按 C# 位置落位（列 `x`、窗口行 `r`），
+  每格 35x35、内嵌物品图标（`Items[image]`）+ 数量；`storage_page` 改作 C# `StorageIndex`（0..=6 行窗口，
+  下钳位 `STORAGE_MAX_START`）；点击命中按列/窗口行换算 `idx = 8*(StorageIndex + r) + x`。
+  **协议配套修正**：`ServerEvent::GuildStorage` 由「过滤掉空格的紧凑列表」改为**按槽位**的
+  `Vec<Option<(unique_id, item_index, count, name, image)>>`（`handle_guild.rs` 不再 `filter_map` 丢空格，
+  上限取 C# 格阵 112），`StorageItem` 补 `image`（= `ItemInfo.image`）—— 否则空格会被后面的物品顶上，
+  格阵位置与 C# `StorageGrid[idx]` 对不上、也画不出物品图。

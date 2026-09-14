@@ -221,21 +221,21 @@ pub(crate) fn handle_guild(
             let mut cur = std::io::Cursor::new(body);
             match mir2_shared::packets::server::guild::GuildStorageList::read_body(&mut cur) {
                 Ok(p) => {
-                    let items: Vec<(u64, i32, u16, String)> = p
+                    // #2892 批B 单元9：**保留空槽位**（C# `StorageGrid[idx]` 按槽取物），
+                    // 上限取 C# 格阵大小 8*14=112；图标索引 = `info.image`
+                    let items: Vec<Option<(u64, i32, u16, String, i32)>> = p
                         .items
                         .iter()
-                        .take(100)
-                        .filter_map(|opt| {
+                        .take(112)
+                        .map(|opt| {
                             opt.as_ref().map(|gsi| {
+                                let info = gsi.item.info.as_ref();
                                 (
                                     gsi.item.unique_id,
                                     gsi.item.item_index,
                                     gsi.item.count,
-                                    gsi.item
-                                        .info
-                                        .as_ref()
-                                        .map(|i| i.name.clone())
-                                        .unwrap_or_default(),
+                                    info.map(|i| i.name.clone()).unwrap_or_default(),
+                                    info.map(|i| i.image as i32).unwrap_or(0),
                                 )
                             })
                         })
