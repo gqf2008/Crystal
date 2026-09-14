@@ -38,6 +38,8 @@ pub struct RankingState {
     pub online_only: bool,
     /// 我的排名（C# MyRank；0=未上榜）
     pub my_rank: i32,
+    /// 当前页首行在过滤后列表中的下标（翻页游标；跨系统共享，见 `ranking_row_click_system`）
+    pub page_offset: usize,
 }
 
 #[derive(Component)]
@@ -93,6 +95,33 @@ pub fn filter_rank_tab(entries: &[RankEntry], tab: u8) -> Vec<RankEntry> {
         .collect()
 }
 
+/// C# `GameScene.InspectTime = CMain.Time + 500`（`RankingDialog.cs:376-378`）——排行榜行点击 500ms 节流
+const RANK_INSPECT_COOLDOWN_SECS: f64 = 0.5;
+
+/// #1225：当前页第 `line` 行对应的条目（C# `RankingRow` 是全局序号，本端按 `offset + line` 的页窗口取值）。
+fn rank_row_entry<'a>(
+    filtered: &'a [RankEntry],
+    offset: usize,
+    line: usize,
+) -> Option<&'a RankEntry> {
+    filtered.get(offset + line)
+}
+
+/// #1225：行点击节流判定（C# `if (CMain.Time <= GameScene.InspectTime) return;`——相等也算冷却中）
+fn rank_inspect_allowed(now_secs: f64, cooldown_until_secs: f64) -> bool {
+    now_secs > cooldown_until_secs
+}
+
+/// Interaction 边沿检测：仅当从非 Pressed → Pressed 那帧触发一次（bevy_ui 无 just_pressed）
+fn edge(
+    e: Entity,
+    inter: &Interaction,
+    prev: &mut std::collections::HashMap<Entity, Interaction>,
+) -> bool {
+    let was = prev.insert(e, *inter);
+    *inter == Interaction::Pressed && was != Some(Interaction::Pressed)
+}
+
 pub struct RankingPlugin;
 
 impl Plugin for RankingPlugin {
@@ -106,7 +135,7 @@ impl Plugin for RankingPlugin {
         app.add_systems(OnExit(AppState::Game), cleanup_ranking);
         app.add_systems(
             Update,
-            (ranking_ui_system,).run_if(in_state(AppState::Game)),
+            (ranking_ui_system, ranking_row_click_system).run_if(in_state(AppState::Game)),
         );
     }
 }
@@ -243,7 +272,7 @@ fn spawn_ranking(
             Color::srgb(0.8, 0.9, 1.0),
             9,
         );
-        // 10 行（bevy_ui 文本；行点击查看暂缓，后续做成可点击行）
+        // 10 行（bevy_ui 文本 + 可点击；C# `RankingDialog.cs:336` `RankingRow.Click → Inspect()`）
         for i in 0..10usize {
             crate::ui::theme::spawn_label(
                 p,
@@ -255,7 +284,7 @@ fn spawn_ranking(
                 Color::WHITE,
                 9,
             )
-            .insert(RankingLine(i));
+            .insert((RankingLine(i), Button));
         }
         // 我的排名
         crate::ui::theme::spawn_label(
@@ -296,18 +325,7 @@ fn ranking_ui_system(
     mut lines: Query<(&mut Text, &RankingLine), Without<RankingMyRank>>,
     mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
     mut requested: Local<bool>,
-    mut offset: Local<usize>,
 ) {
-    // Interaction 边沿检测：仅当从非 Pressed → Pressed 那帧触发一次（bevy_ui 无 just_pressed）
-    fn edge(
-        e: Entity,
-        inter: &Interaction,
-        prev: &mut std::collections::HashMap<Entity, Interaction>,
-    ) -> bool {
-        let was = prev.insert(e, *inter);
-        *inter == Interaction::Pressed && was != Some(Interaction::Pressed)
-    }
-
     let open = ranking.visible || mgr.is_open(DialogKind::Ranking);
     for mut vis in widgets.iter_mut() {
         *vis = if open {
@@ -318,7 +336,7 @@ fn ranking_ui_system(
     }
     if !open {
         *requested = false;
-        *offset = 0;
+        ranking.page_offset = 0;
         return;
     }
 
@@ -343,7 +361,7 @@ fn ranking_ui_system(
     for (e, inter, t) in &tabs {
         if edge(e, inter, &mut prev_inter) && ranking.tab != t.0 {
             ranking.tab = t.0;
-            *offset = 0;
+            ranking.page_offset = 0;
             net.send_packet(&mir2_shared::packets::client::misc::GetRanking {
                 rank_index: t.0,
                 online_only: ranking.online_only,
@@ -361,20 +379,20 @@ fn ranking_ui_system(
     // 上一页 / 下一页
     for (e, inter) in &prev {
         if edge(e, inter, &mut prev_inter) {
-            *offset = offset.saturating_sub(10);
+            ranking.page_offset = ranking.page_offset.saturating_sub(10);
         }
     }
     for (e, inter) in &next {
         if edge(e, inter, &mut prev_inter) {
-            *offset = (*offset + 10).min(max_offset);
+            ranking.page_offset = (ranking.page_offset + 10).min(max_offset);
         }
     }
-    *offset = (*offset).min(max_offset);
+    ranking.page_offset = ranking.page_offset.min(max_offset);
     // 仅在线（切换 + 帧同步）
     for (e, inter, ib, mut node) in &mut online {
         if edge(e, inter, &mut prev_inter) {
             ranking.online_only = !ranking.online_only;
-            *offset = 0;
+            ranking.page_offset = 0;
             net.send_packet(&mir2_shared::packets::client::misc::GetRanking {
                 rank_index: ranking.tab,
                 online_only: ranking.online_only,
@@ -392,7 +410,7 @@ fn ranking_ui_system(
     }
     // 行文本
     for (mut text, line) in &mut lines {
-        let idx = *offset + line.0;
+        let idx = ranking.page_offset + line.0;
         text.0 = match filtered.get(idx) {
             Some(e) => format!(
                 "#{} {} ({} Lv.{})",
@@ -416,7 +434,53 @@ fn ranking_ui_system(
             "我的排名：未上榜".to_string()
         };
     }
-    let _ = self_name; // 行点击查看（Inspect）暂缓迁移
+    let _ = self_name;
+}
+
+/// 行点击查看（C# `RankingDialog.cs:336` `RankingRow.Click → Inspect()`；`:374-380`：
+/// `if (CMain.Time <= GameScene.InspectTime) return;` 500ms 节流 → `InspectDialog.InspectID = Index`
+/// → `C.Inspect{ObjectID, Ranking=true}`）
+///
+/// 独立成系统：`ranking_ui_system` 参数已达 Bevy 16 上限（加查询即编译失败须拆独立系统）。
+fn ranking_row_click_system(
+    mut mgr: ResMut<DialogManager>,
+    ranking: Res<RankingState>,
+    net: Res<NetConnection>,
+    rows: Query<(Entity, &Interaction, &RankingLine)>,
+    mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
+    time: Res<Time>,
+    mut inspect_cooldown_until: Local<f64>,
+) {
+    if !(ranking.visible || mgr.is_open(DialogKind::Ranking)) {
+        return;
+    }
+    let filtered = filter_rank_tab(&ranking.entries, ranking.tab);
+    for (e, inter, line) in &rows {
+        if !edge(e, inter, &mut prev_inter) {
+            continue;
+        }
+        let Some(entry) = rank_row_entry(&filtered, ranking.page_offset, line.0) else {
+            continue;
+        };
+        let now = time.elapsed_secs_f64();
+        if !rank_inspect_allowed(now, *inspect_cooldown_until) {
+            continue;
+        }
+        *inspect_cooldown_until = now + RANK_INSPECT_COOLDOWN_SECS;
+        if !mgr.is_open(DialogKind::Inspect) {
+            mgr.open(DialogKind::Inspect);
+        }
+        net.send_packet(&mir2_shared::packets::client::chat::Inspect {
+            object_id: entry.player_id,
+            ranking: true,
+            name: entry.player_name.clone(),
+        });
+        tracing::info!(
+            "🔍 查看排行榜玩家 {} (id={})",
+            entry.player_name,
+            entry.player_id
+        );
+    }
 }
 
 /// 消费服务端排行榜事件（网络层只广播 ServerEvent）
@@ -468,6 +532,106 @@ mod tests {
         assert_eq!(filter_rank_tab(&entries, 4)[0].rank, 4);
         assert_eq!(filter_rank_tab(&entries, 5)[0].rank, 5);
         assert!(filter_rank_tab(&entries, 6).is_empty());
+    }
+
+    /// #1225：行点击 → 当前页条目映射 + 500ms 节流（C# `RankingDialog.cs:374-380`）
+    #[test]
+    fn rank_row_click_window_and_throttle() {
+        let entries: Vec<RankEntry> = (1..=25).map(|i| entry(i, 0)).collect();
+        let filtered = filter_rank_tab(&entries, 0);
+        // 第一页第 0 行 = 第 1 名
+        assert_eq!(rank_row_entry(&filtered, 0, 0).map(|e| e.rank), Some(1));
+        // 第二页（offset=10）第 0 行 = 第 11 名、第 4 行 = 第 15 名
+        assert_eq!(rank_row_entry(&filtered, 10, 0).map(|e| e.rank), Some(11));
+        assert_eq!(rank_row_entry(&filtered, 10, 4).map(|e| e.rank), Some(15));
+        // 越界行（列表不足）→ None，不发包
+        assert!(rank_row_entry(&filtered, 20, 5).is_none());
+        // 节流：冷却期内不允许；`<=` 边界同样算冷却中（C# `CMain.Time <= InspectTime`）
+        assert!(rank_inspect_allowed(1.0, 0.0));
+        assert!(rank_inspect_allowed(1.51, 1.0));
+        assert!(!rank_inspect_allowed(1.4, 1.5));
+        assert!(!rank_inspect_allowed(1.5, 1.5));
+    }
+
+    /// #1225 行为级：真实 `App` + 真实 [`ranking_row_click_system`] —— 按下行 → 发
+    /// `Inspect{object_id, ranking:true}` + 打开查看窗；500ms 冷却内再按不发包，冷却过后恢复。
+    #[test]
+    fn rank_row_click_emits_inspect_with_cooldown() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.init_resource::<DialogManager>();
+        app.insert_resource(NetConnection::default());
+        app.add_systems(Update, ranking_row_click_system);
+        // 第二页（offset=10）第 1 行 → 第 12 名（player_id=120，仅 id 递增便于断言）
+        let mut ranking = RankingState {
+            visible: true,
+            ..Default::default()
+        };
+        ranking.entries = (1..=12)
+            .map(|i| RankEntry {
+                player_id: i as u32 * 10,
+                ..entry(i, 0)
+            })
+            .collect();
+        ranking.page_offset = 10;
+        app.insert_resource(ranking);
+        let (tx, rx) = crossbeam_channel::unbounded::<Vec<u8>>();
+        app.world_mut().resource_mut::<NetConnection>().to_server = Some(tx);
+        let row = app
+            .world_mut()
+            .spawn((RankingLine(1), Interaction::None))
+            .id();
+        // 让 `Time` 走过 1s，脱离「启动瞬间 = 0」以免被 C# 同款 `<=` 边界挡住
+        advance_time(&mut app, 1.0);
+
+        // 帧 1：按下 → 发包 + 打开查看窗
+        app.world_mut().entity_mut(row).insert(Interaction::Pressed);
+        app.update();
+        let raw = rx.try_recv().expect("按下排行榜行后应发出 Inspect 包");
+        let mut cur = std::io::Cursor::new(raw);
+        let inspect: mir2_shared::packets::client::chat::Inspect =
+            mir2_shared::packets::base::deserialize_packet(&mut cur).expect("应为 Inspect 包");
+        assert_eq!(
+            inspect.object_id, 120,
+            "应查看「当前页第 1 行」的条目（页窗口 offset + line）"
+        );
+        assert!(inspect.ranking, "排行榜查看须置 Ranking=true");
+        assert_eq!(inspect.name, "p12");
+        assert!(
+            app.world()
+                .resource::<DialogManager>()
+                .is_open(DialogKind::Inspect),
+            "行点击应打开查看窗"
+        );
+
+        // 帧 2：持续按下（无边沿）→ 不重复发包
+        app.update();
+        assert!(rx.try_recv().is_err(), "持续按下不应连续发包");
+
+        // 帧 3-4：松开再按下 → 冷却中仍不发包
+        app.world_mut().entity_mut(row).insert(Interaction::None);
+        app.update();
+        app.world_mut().entity_mut(row).insert(Interaction::Pressed);
+        app.update();
+        assert!(
+            rx.try_recv().is_err(),
+            "500ms 冷却内再按不发包（C# `CMain.Time <= GameScene.InspectTime`）"
+        );
+
+        // 冷却过后（>500ms）恢复响应
+        advance_time(&mut app, 1.0);
+        app.world_mut().entity_mut(row).insert(Interaction::None);
+        app.update();
+        app.world_mut().entity_mut(row).insert(Interaction::Pressed);
+        app.update();
+        assert!(rx.try_recv().is_ok(), "冷却过后应恢复响应");
+    }
+
+    /// 测试用：把虚拟时间推进 `secs`（`Time` 由 `MinimalPlugins` 的 `TimePlugin` 从它派生）。
+    fn advance_time(app: &mut App, secs: f64) {
+        app.world_mut()
+            .resource_mut::<bevy::time::Time<bevy::time::Virtual>>()
+            .advance_by(std::time::Duration::from_secs_f64(secs));
     }
 
     #[test]
