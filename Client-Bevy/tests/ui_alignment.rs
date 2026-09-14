@@ -2470,3 +2470,88 @@ fn hero_info_panel_aligned() {
         "  ✓ HeroInfoPanel Prguse[14] 135x78 @(95,48)：头像 52x45@(14,19)、名字容器 104x31@(26,60)、血量容器 72x45@(57,26) + 三 52x8 条"
     );
 }
+
+/// #2892 批C：`HeroMenuPanel` + HUD 召唤钮对齐 C#——
+/// 菜单 `Prguse[2179]` 24x61 @(862,630)，三钮 `Prguse[2173/2170/2176]` 16x16 @(3,3)/(3,20)/(3,37)；
+/// 召唤钮 `Prguse[2167..2169]` 20x20 @ HUD+(bg_w-160, 90)。
+#[test]
+fn hero_menu_panel_aligned() {
+    use client_bevy::game::hud;
+    require_assets!("hero_menu_panel_aligned");
+    let mut libs = Libs::new();
+    let (bg_w, bg_h) = libs.size(LibraryName::Prguse, 1);
+    let (main_x, main_y) = ((SW - bg_w) / 2.0, SH - bg_h);
+
+    let (pw, ph) = libs.size(LibraryName::Prguse, hud::HERO_MENU_PANEL_INDEX);
+    assert_eq!(
+        (pw, ph),
+        hud::HERO_MENU_PANEL_SIZE,
+        "[尺寸] 菜单面板应取 Prguse[2179] 24x61"
+    );
+    // C# 该面板用**屏幕绝对坐标**（`((ScreenWidth-W)/2)+362, ScreenHeight-H-77`）
+    let (px, py) = hud::HERO_MENU_PANEL_ORIGIN;
+    assert_eq!((px, py), (862.0, 630.0));
+    assert_in_canvas("英雄菜单", px, py, pw, ph);
+
+    for (base, dx, dy) in hud::HERO_MENU_BUTTONS {
+        let (w, h) = libs.size(LibraryName::Prguse, base);
+        assert_eq!(
+            (w, h),
+            hud::HERO_MENU_BTN_SIZE,
+            "[尺寸] 菜单钮 Prguse[{base}] 应为 16x16"
+        );
+        for idx in [base + 1, base + 2] {
+            assert_eq!(
+                libs.size(LibraryName::Prguse, idx),
+                (w, h),
+                "[尺寸] Prguse[{idx}]（hover/pressed）应与 normal 同尺寸"
+            );
+        }
+        assert_inside(
+            &format!("菜单钮{base}"),
+            px + dx,
+            py + dy,
+            w,
+            h,
+            px,
+            py,
+            pw,
+            ph,
+        );
+    }
+    // 三钮不重叠（16 高、间距 17 = 16+1）
+    let ys: Vec<f32> = hud::HERO_MENU_BUTTONS.iter().map(|(_, _, y)| *y).collect();
+    for i in 1..ys.len() {
+        assert!(
+            ys[i] - ys[i - 1] >= hud::HERO_MENU_BTN_SIZE.1,
+            "[重叠] 菜单钮纵向不得重叠"
+        );
+    }
+
+    // 召唤钮 `Prguse[2167..2169]` 20x20 @(Width-160, 90)
+    let (sw, sh) = libs.size(LibraryName::Prguse, hud::HERO_SUMMON_FRAMES.0);
+    assert_eq!(
+        (sw, sh),
+        hud::HERO_SUMMON_SIZE,
+        "[尺寸] 召唤钮应取 Prguse[2167] 20x20"
+    );
+    for idx in [hud::HERO_SUMMON_FRAMES.1, hud::HERO_SUMMON_FRAMES.2] {
+        assert_eq!(libs.size(LibraryName::Prguse, idx), (sw, sh));
+    }
+    assert_in_canvas(
+        "召唤钮",
+        main_x + bg_w + hud::HERO_SUMMON_OFFSET.0,
+        main_y + hud::HERO_SUMMON_OFFSET.1,
+        sw,
+        sh,
+    );
+    // 与英雄菜单钮（同列）不重叠：召唤钮 y=+90，英雄钮 y=+65 高 20 → 不重叠
+    assert!(
+        hud::HERO_SUMMON_OFFSET.1 >= 65.0 + 20.0,
+        "[重叠] 召唤钮不得压住英雄钮（Y=65 高 20）"
+    );
+
+    println!(
+        "  ✓ HeroMenuPanel Prguse[2179] 24x61 @(862,630) + 三钮 16x16；召唤钮 Prguse[2167..2169] 20x20 @(Width-160, 90)"
+    );
+}
