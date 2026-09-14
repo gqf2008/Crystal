@@ -20,21 +20,37 @@ use crate::scenes::AppState;
 use crate::ui::sprite_ui::{shared_cjk_font, UiCjkFont, UiFont};
 use crate::ui::theme::{load_lib_image, spawn_icon_button, spawn_image, spawn_label, spawn_panel};
 
+/// #2892 批B：C# `ItemRentalDialog` 面板与子控件精灵（`ItemRentalDialog.cs:16-105`）
+pub const PANEL: (LibraryName, usize) = (LibraryName::Prguse3, 1);
+pub const TITLE: (LibraryName, usize) = (LibraryName::Prguse3, 0);
+pub const RENTED_TAB_SPRITE: (LibraryName, usize) = (LibraryName::Prguse3, 2);
+pub const BORROWED_TAB_SPRITE: (LibraryName, usize) = (LibraryName::Prguse3, 3);
+pub const RENT_BTN_SPRITES: [(LibraryName, usize); 3] = [
+    (LibraryName::Prguse3, 4),
+    (LibraryName::Prguse3, 5),
+    (LibraryName::Prguse3, 6),
+];
+pub const CLOSE_SPRITES: [(LibraryName, usize); 3] = [
+    (LibraryName::Prguse2, 360),
+    (LibraryName::Prguse2, 361),
+    (LibraryName::Prguse2, 362),
+];
 /// C# `ItemRentalDialog` 面板原生尺寸（Prguse3[1]）
-const PANEL_W: f32 = 400.0;
-const PANEL_H: f32 = 174.0;
+pub const PANEL_W: f32 = 400.0;
+pub const PANEL_H: f32 = 174.0;
 /// C# 控件锚点
-const TITLE_POS: (f32, f32) = (22.0, 8.0);
-const RENTED_TAB: (f32, f32, f32, f32) = (8.0, 32.0, 72.0, 23.0);
-const BORROWED_TAB: (f32, f32, f32, f32) = (81.0, 32.0, 84.0, 23.0);
-const RENT_BTN_POS: (f32, f32) = (295.0, 144.0);
-const CLOSE_POS: (f32, f32) = (375.0, 3.0);
+pub const TITLE_POS: (f32, f32) = (22.0, 8.0);
+pub const RENTED_TAB: (f32, f32, f32, f32) = (8.0, 32.0, 72.0, 23.0);
+pub const BORROWED_TAB: (f32, f32, f32, f32) = (81.0, 32.0, 84.0, 23.0);
+pub const RENT_BTN_POS: (f32, f32) = (295.0, 144.0);
+pub const RENT_BTN_SIZE: (f32, f32) = (85.0, 29.0);
+pub const CLOSE_POS: (f32, f32) = (375.0, 3.0);
 /// C# `ItemRow`：`Location = (0, 78 + i*21)`
-const ROW_Y0: f32 = 78.0;
-const ROW_DY: f32 = 21.0;
+pub const ROW_Y0: f32 = 78.0;
+pub const ROW_DY: f32 = 21.0;
 pub const RENTAL_ROWS: usize = 3;
 /// 行内三列（C# `ItemRow` 内三个 MirLabel）
-const ROW_COL_X: [f32; 3] = [5.0, 137.0, 264.0];
+pub const ROW_COL_X: [f32; 3] = [5.0, 137.0, 264.0];
 /// C# `RequestRentedItems()`：60 秒节流
 const REQUEST_THROTTLE_SECS: f64 = 60.0;
 
@@ -105,7 +121,7 @@ fn spawn_item_rental_browse(
     let cjk = shared_cjk_font(&mut fonts, &mut cjk_font);
 
     // 面板 C# Prguse3[1]（400x174）居中
-    let Some(bg) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse3, 1) else {
+    let Some(bg) = load_lib_image(&mut libs, &mut images, PANEL.0, PANEL.1) else {
         return;
     };
     let (px, py) = crate::game::dialogs::center_origin(PANEL_W, PANEL_H);
@@ -117,10 +133,15 @@ fn spawn_item_rental_browse(
 
     commands.entity(panel).with_children(|p| {
         // 标题 Prguse3[0]（52x18）+ 两个页签（C# 两页签 Enabled=false，仅作当前页标识）
-        if let Some(title) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse3, 0) {
+        if let Some(title) = load_lib_image(&mut libs, &mut images, TITLE.0, TITLE.1) {
             spawn_image(p, title, TITLE_POS.0, TITLE_POS.1, 52.0, 18.0, 9);
         }
-        if let Some(tab) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse3, 2) {
+        if let Some(tab) = load_lib_image(
+            &mut libs,
+            &mut images,
+            RENTED_TAB_SPRITE.0,
+            RENTED_TAB_SPRITE.1,
+        ) {
             spawn_image(
                 p,
                 tab,
@@ -131,7 +152,12 @@ fn spawn_item_rental_browse(
                 9,
             );
         }
-        if let Some(tab) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse3, 3) {
+        if let Some(tab) = load_lib_image(
+            &mut libs,
+            &mut images,
+            BORROWED_TAB_SPRITE.0,
+            BORROWED_TAB_SPRITE.1,
+        ) {
             spawn_image(
                 p,
                 tab,
@@ -144,18 +170,58 @@ fn spawn_item_rental_browse(
         }
         // 租借按钮 Prguse3[4..6]（84x28；C# Size 85x29）@(295,144)
         if let (Some(n), Some(h), Some(pr)) = (
-            load_lib_image(&mut libs, &mut images, LibraryName::Prguse3, 4),
-            load_lib_image(&mut libs, &mut images, LibraryName::Prguse3, 5),
-            load_lib_image(&mut libs, &mut images, LibraryName::Prguse3, 6),
+            load_lib_image(
+                &mut libs,
+                &mut images,
+                RENT_BTN_SPRITES[0].0,
+                RENT_BTN_SPRITES[0].1,
+            ),
+            load_lib_image(
+                &mut libs,
+                &mut images,
+                RENT_BTN_SPRITES[1].0,
+                RENT_BTN_SPRITES[1].1,
+            ),
+            load_lib_image(
+                &mut libs,
+                &mut images,
+                RENT_BTN_SPRITES[2].0,
+                RENT_BTN_SPRITES[2].1,
+            ),
         ) {
-            spawn_icon_button(p, n, h, pr, RENT_BTN_POS.0, RENT_BTN_POS.1, 85.0, 29.0, 10)
-                .insert(ItemRentalRentBtn);
+            spawn_icon_button(
+                p,
+                n,
+                h,
+                pr,
+                RENT_BTN_POS.0,
+                RENT_BTN_POS.1,
+                RENT_BTN_SIZE.0,
+                RENT_BTN_SIZE.1,
+                10,
+            )
+            .insert(ItemRentalRentBtn);
         }
         // 关闭 Prguse2[360..362]（24x21）@(375,3)
         if let (Some(n), Some(h), Some(pr)) = (
-            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 360),
-            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 361),
-            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 362),
+            load_lib_image(
+                &mut libs,
+                &mut images,
+                CLOSE_SPRITES[0].0,
+                CLOSE_SPRITES[0].1,
+            ),
+            load_lib_image(
+                &mut libs,
+                &mut images,
+                CLOSE_SPRITES[1].0,
+                CLOSE_SPRITES[1].1,
+            ),
+            load_lib_image(
+                &mut libs,
+                &mut images,
+                CLOSE_SPRITES[2].0,
+                CLOSE_SPRITES[2].1,
+            ),
         ) {
             spawn_icon_button(p, n, h, pr, CLOSE_POS.0, CLOSE_POS.1, 24.0, 21.0, 10)
                 .insert(ItemRentalBrowseClose);
