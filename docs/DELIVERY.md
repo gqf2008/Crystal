@@ -118,15 +118,16 @@ pwsh scripts/run_real_e2e.ps1      # 默认用仓库内 debug 产物与测试库
 补鱼竿的鱼钩与鱼饵、恢复精炼/交易所需物品——这些开关和消耗品会被用例改动并被服务端**存档**，
 不复位会出现「上一轮跑通、下一轮偶发失败」。
 
-**精炼用例的前置由 `scripts/e2e_refine_prep.py` 自动完成**（`run_real_e2e.ps1` 在开服前
-`prepare`、单客户端用例跑完后 `restore`），不再需要手工步骤：
+**精炼用例的前置由 `scripts/e2e_refine_prep.py` 自动完成**，`run_real_e2e.ps1` 按
+「开服前 `config` → 该用例前 `prepare-db` → 该用例后 `restore-db`」三段调用（也可手工
+`prepare <db> <server.toml> <out.toml>` 一把跑），不再需要手工步骤：
 
 - 角色摆到 246 图铁匠 `Blacksmith_Carlos` 旁（`CallNPC` 距离校验 ≤2 格）；
 - 背包格 0 放可精炼武器（客户端脚本固定存入「背包第一件」）、`refine_log` 预置 3 件属性材料 + 1 块矿石
   （否则结算走「无 RefinedValue → 必碎」分支）；
 - 生成**临时**服务端配置（`[refine] base_chance=100 / time_minutes=0`）并通过
   `mir2_server <config>` 启动参数启用 —— 仓库里的 `config/server.toml` **不被改动**；
-- 跑完 `restore`：角色回钓鱼点、清精炼状态并删掉测试武器（否则后续配对用例的同图摆位会错）。
+- 跑完 `restore-db`：角色回钓鱼点、清精炼状态并删掉测试武器（否则后续配对用例的同图摆位会错）。
 
 ---
 
