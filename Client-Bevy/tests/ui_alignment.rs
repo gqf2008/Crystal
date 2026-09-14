@@ -3650,3 +3650,55 @@ fn panel_sprites_batch_b8_match_csharp() {
 
     println!("  ✓ 批B 面板精灵核对（八）：行会 MembersPage 18 行 × 15px + Prguse[917] 删除钮");
 }
+
+/// #2892 批B（九）：行会 StoragePage 格阵（C# `GuildDialog.cs:672-750`）。
+///
+/// C# `StorageGrid = new MirItemCell[8 * 14]`、`Size = 35x35`、
+/// `Location = (x*35+31+x, (y-StorageIndex)*35+20+(y-StorageIndex))`，
+/// `if (y > 7) StorageGrid[idx].Visible = false`（可见窗口 8 行）；
+/// `StorageIndex` 0..6 为行窗口起点；金币行 `StorageGoldAdd Prguse[918]` @(158,313) /
+/// `StorageGoldRemove Prguse[917]` @(142,313)、`StorageGoldText` @(194,312)。
+#[test]
+fn panel_sprites_batch_b9_match_csharp() {
+    use client_bevy::game::dialogs::guild as g;
+    require_assets!("panel_sprites_batch_b9_match_csharp");
+    let mut libs = Libs::new();
+
+    assert_eq!(g::STORAGE_COLS, 8, "[列数] C# 8 列");
+    assert_eq!(g::STORAGE_ROWS_TOTAL, 14, "[行数] C# 14 行数据");
+    assert_eq!(
+        g::STORAGE_WINDOW_ROWS,
+        8,
+        "[窗口] 可见 8 行（`y > 7` 隐藏）"
+    );
+    assert_eq!(g::STORAGE_MAX_START, 6, "[窗口] `StorageIndex` 0..=6");
+    assert_eq!((g::STORAGE_CELL, g::STORAGE_CELL_STEP), (35.0, 36.0));
+    assert_eq!((g::STORAGE_GRID_X, g::STORAGE_GRID_Y), (31.0, 20.0));
+
+    // 格阵整体落在 StoragePage（352x372）内：31 + 7*36 + 35 = 318 ≤ 352；20 + 7*36 + 35 = 307 ≤ 372
+    let right =
+        g::STORAGE_GRID_X + (g::STORAGE_COLS as f32 - 1.0) * g::STORAGE_CELL_STEP + g::STORAGE_CELL;
+    let bottom = g::STORAGE_GRID_Y
+        + (g::STORAGE_WINDOW_ROWS as f32 - 1.0) * g::STORAGE_CELL_STEP
+        + g::STORAGE_CELL;
+    assert!(
+        right <= g::PAGE_LEFT.2,
+        "[越界] 格阵右缘 {right} ≤ 页宽 {}",
+        g::PAGE_LEFT.2
+    );
+    assert!(
+        bottom <= g::PAGE_LEFT.3,
+        "[越界] 格阵下缘 {bottom} ≤ 页高 {}",
+        g::PAGE_LEFT.3
+    );
+    // 不与金币行 (313) / 翻页钮 (318) 重叠
+    assert!(bottom <= 313.0, "[重叠] 格阵不得压住金币行 (313)");
+
+    // 金币行精灵（C# `StorageGoldAdd` / `StorageGoldRemove`）
+    let (aw, ah) = libs.size(LibraryName::Prguse, 918);
+    let (rw, rh) = libs.size(LibraryName::Prguse, 917);
+    assert_eq!((aw, ah), (16.0, 14.0), "[尺寸] Prguse[918] 金币加");
+    assert_eq!((rw, rh), (16.0, 14.0), "[尺寸] Prguse[917] 金币减");
+
+    println!("  ✓ 批B 面板精灵核对（九）：行会仓库 8×14 格阵（窗口 8 行）+ 金币行 Prguse[917/918]");
+}

@@ -160,6 +160,30 @@ pub const STORAGE_HEADER_LINE: usize = STORAGE_LINE_BASE + 8;
 #[derive(Component)]
 pub struct GuildMemberDelete(pub usize);
 
+/// StoragePage 格阵（C# `StorageGrid = new MirItemCell[8 * 14]`）
+pub const STORAGE_COLS: usize = 8;
+/// 数据行数（C# 14 行）
+pub const STORAGE_ROWS_TOTAL: usize = 14;
+/// 可见行窗口（C# `if (y > 7) StorageGrid[idx].Visible = false`）
+pub const STORAGE_WINDOW_ROWS: usize = 8;
+/// 单元格尺寸/步进（C# `Size = (35,35)`、`Location = (x*35+31+x, y*35+20+y)`）
+pub const STORAGE_CELL: f32 = 35.0;
+pub const STORAGE_CELL_STEP: f32 = 36.0;
+pub const STORAGE_GRID_X: f32 = 31.0;
+pub const STORAGE_GRID_Y: f32 = 20.0;
+/// 行窗口起点上限（C# `if (StorageIndex >= 6) StorageIndex = 5;` 到 6 为止）
+pub const STORAGE_MAX_START: usize = STORAGE_ROWS_TOTAL - STORAGE_WINDOW_ROWS;
+
+/// 格阵单元（`idx = STORAGE_COLS*y + x`，即 C# `StorageGrid[idx]`）
+#[derive(Component)]
+pub struct GuildStorageCell(pub usize);
+/// 单元格物品图标
+#[derive(Component)]
+pub struct GuildStorageIcon(pub usize);
+/// 单元格数量标签
+#[derive(Component)]
+pub struct GuildStorageCount(pub usize);
+
 /// 显示离线复选框图（C# `MembersShowOfflineButton` = `Prguse[1346]`）
 #[derive(Component)]
 pub struct GuildShowOfflineCheck;
@@ -193,6 +217,8 @@ pub struct StorageItem {
     pub item_index: i32,
     pub name: String,
     pub count: u16,
+    /// 物品图标索引（`ItemInfo.image`，C# `StorageGrid[idx]` 画的就是它）
+    pub image: i32,
 }
 
 /// 行会状态
@@ -832,20 +858,42 @@ fn spawn_guild(
                     TextInputDisplay(3),
                 ));
             });
-        // C# 格阵起点 (31,20)，步进 36（`StorageGrid[idx].Location = (x*35+31+x, y*35+20+y)`）；
-        // 本端沿用 8 行单列列表（deviation，见 §7），行高 18
-        for i in 0..8usize {
-            spawn_label(
-                p,
-                &cjk,
-                "",
-                31.0,
-                20.0 + i as f32 * 18.0,
-                11.0,
-                Color::WHITE,
-                8,
-            )
-            .insert(GuildLine(STORAGE_LINE_BASE + i));
+        // C# `StorageGrid = new MirItemCell[8 * 14]`：8 列 × 14 行、`Size 35x35`、
+        // `Location = (x*35+31+x, (y-StorageIndex)*35+20+(y-StorageIndex))`，可见窗口 8 行。
+        // 本端把可见窗口的 64 格全部实体化（图标 + 数量），行窗口由 `storage_page`(=StorageIndex) 平移。
+        let white = images.add(crate::map_renderer::make_image(
+            vec![255, 255, 255, 255],
+            1,
+            1,
+        ));
+        for r in 0..STORAGE_WINDOW_ROWS {
+            for c in 0..STORAGE_COLS {
+                let slot = STORAGE_COLS * r + c;
+                let x = STORAGE_GRID_X + c as f32 * STORAGE_CELL_STEP;
+                let y = STORAGE_GRID_Y + r as f32 * STORAGE_CELL_STEP;
+                spawn_container(p, x, y, STORAGE_CELL, STORAGE_CELL, 8)
+                    .insert((
+                        GuildStorageCell(slot),
+                        BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.10)),
+                    ))
+                    .with_children(|cell| {
+                        cell.spawn((
+                            Node {
+                                position_type: PositionType::Absolute,
+                                left: Val::Px(0.0),
+                                top: Val::Px(0.0),
+                                width: Val::Px(STORAGE_CELL),
+                                height: Val::Px(STORAGE_CELL),
+                                ..default()
+                            },
+                            ImageNode::new(white.clone()),
+                            GuildStorageIcon(slot),
+                            Visibility::Hidden,
+                        ));
+                        spawn_label(cell, &cjk, "", 1.0, 1.0, 9.0, Color::WHITE, 1)
+                            .insert(GuildStorageCount(slot));
+                    });
+            }
         }
         // 存入/取出（**Bevy 扩展**；C# 靠点击格子搬运）
         if let (Some(n), Some(h), Some(pr)) = (
@@ -1391,19 +1439,14 @@ fn guild_ui_system(
                     None => String::new(),
                 }
             }
-            i if (STORAGE_LINE_BASE..STORAGE_LINE_BASE + 8).contains(&i) => {
-                let slot = guild.storage_page * 8 + (i - STORAGE_LINE_BASE);
-                match guild.storage_items.get(slot).and_then(|s| s.as_ref()) {
-                    Some(it) => format!(
-                        "{:02}: {} x{}",
-                        slot + 1,
-                        guild.item_name(it.item_index),
-                        it.count
-                    ),
-                    None => format!("{:02}: 空", slot + 1),
+            // C# `StorageGoldText`（`:634`）：`Gold > 0 ? "{0:###,###,###}" : "0"`
+            i if i == STORAGE_HEADER_LINE => {
+                if guild.gold > 0 {
+                    format!("{}", guild.gold)
+                } else {
+                    "0".to_string()
                 }
             }
-            i if i == STORAGE_HEADER_LINE => format!("仓库 第{}/13页", guild.storage_page + 1),
             _ => String::new(),
         };
         // #140 成员选中行高亮（踢出目标可见）
@@ -1481,19 +1524,22 @@ fn guild_ui_system(
                     }
                 }
                 // 仓库格子点击选中（取出目标，原版 C# StorageGrid 点击语义）
-                for i in STORAGE_LINE_BASE..STORAGE_LINE_BASE + 8 {
-                    let (rx, ry, rw, rh) = guild_storage_row_rect(i, ox, oy);
-                    if cursor.x >= rx
-                        && cursor.x <= rx + rw
-                        && cursor.y >= ry
-                        && cursor.y <= ry + rh
-                    {
-                        let slot = guild.storage_page * 8 + (i - STORAGE_LINE_BASE);
-                        if slot < guild.storage_items.len() {
-                            guild.selected_storage = Some(slot);
-                            tracing::info!("🏰 选中仓库格子 {}", slot);
+                // C# `StorageGrid[idx]`：列 `x`、窗口行 `r` → `idx = 8*(StorageIndex + r) + x`
+                'grid: for r in 0..STORAGE_WINDOW_ROWS {
+                    for c in 0..STORAGE_COLS {
+                        let (rx, ry, rw, rh) = guild_storage_cell_rect(r, c, ox, oy);
+                        if cursor.x >= rx
+                            && cursor.x <= rx + rw
+                            && cursor.y >= ry
+                            && cursor.y <= ry + rh
+                        {
+                            let slot = STORAGE_COLS * (guild.storage_page + r) + c;
+                            if slot < guild.storage_items.len() {
+                                guild.selected_storage = Some(slot);
+                                tracing::info!("🏰 选中仓库格子 {}", slot);
+                            }
+                            break 'grid;
                         }
-                        break;
                     }
                 }
             }
@@ -1512,13 +1558,13 @@ fn guild_member_row_rect(i: usize, ox: f32, oy: f32) -> (f32, f32, f32, f32) {
     )
 }
 
-/// 仓库行命中矩形：StoragePage 内 (31, 20 + j*18)
-fn guild_storage_row_rect(i: usize, ox: f32, oy: f32) -> (f32, f32, f32, f32) {
+/// 仓库格命中矩形（窗口行列 `r`/`c`）：StoragePage 内 `(31 + c*36, 20 + r*36)` 35x35
+fn guild_storage_cell_rect(r: usize, c: usize, ox: f32, oy: f32) -> (f32, f32, f32, f32) {
     (
-        ox + 31.0,
-        oy + PAGE_LEFT.1 + 20.0 + (i - STORAGE_LINE_BASE) as f32 * 18.0,
-        292.0,
-        16.0,
+        ox + STORAGE_GRID_X + c as f32 * STORAGE_CELL_STEP,
+        oy + PAGE_LEFT.1 + STORAGE_GRID_Y + r as f32 * STORAGE_CELL_STEP,
+        STORAGE_CELL,
+        STORAGE_CELL,
     )
 }
 
@@ -1776,6 +1822,15 @@ fn guild_storage_system(
     withdraw_btn: Query<(Entity, &Interaction), With<GuildItemWithdraw>>,
     up_btn: Query<(Entity, &Interaction), With<GuildStorageUp>>,
     down_btn: Query<(Entity, &Interaction), With<GuildStorageDown>>,
+    // #2892 批B 单元9：C# `StorageGrid` 的 64 个可见格（图标 + 数量）
+    mut libs: ResMut<GameLibraries>,
+    mut images: ResMut<Assets<Image>>,
+    mut icons: Query<
+        (&GuildStorageIcon, &mut ImageNode, &mut Visibility),
+        (With<GuildStorageCell>, Without<GuildStorageCount>),
+    >,
+    mut counts: Query<(&GuildStorageCount, &mut Text), Without<GuildStorageIcon>>,
+    mut loaded: Local<HashMap<usize, i32>>,
     mut prev_inter: Local<HashMap<Entity, Interaction>>,
     mut requested: Local<bool>,
 ) {
@@ -1786,7 +1841,55 @@ fn guild_storage_system(
     let open = mgr.is_open(DialogKind::Guild);
     if !open {
         *requested = false;
+        loaded.clear();
         return;
+    }
+    // 格阵渲染：`slot = 8*(StorageIndex + r) + c`（本端实体按窗口行 0..8 排布）
+    for (icon, mut node, mut vis) in &mut icons {
+        let slot = STORAGE_COLS * guild.storage_page + icon.0;
+        let item = guild.storage_items.get(slot).and_then(|s| s.as_ref());
+        match item {
+            Some(it) => {
+                if loaded.get(&icon.0).copied() != Some(it.item_index) {
+                    if let Some(h) = load_lib_image(
+                        &mut libs,
+                        &mut images,
+                        LibraryName::Items,
+                        it.image as usize,
+                    ) {
+                        node.image = h;
+                        loaded.insert(icon.0, it.item_index);
+                    }
+                }
+                if *vis != Visibility::Visible {
+                    *vis = Visibility::Visible;
+                }
+            }
+            None => {
+                loaded.remove(&icon.0);
+                if *vis != Visibility::Hidden {
+                    *vis = Visibility::Hidden;
+                }
+            }
+        }
+    }
+    for (cell, mut text) in &mut counts {
+        let slot = STORAGE_COLS * guild.storage_page + cell.0;
+        let want = guild
+            .storage_items
+            .get(slot)
+            .and_then(|s| s.as_ref())
+            .map(|it| {
+                if it.count > 1 {
+                    format!("{}", it.count)
+                } else {
+                    String::new()
+                }
+            })
+            .unwrap_or_default();
+        if text.0 != want {
+            text.0 = want;
+        }
     }
     // 打开瞬间请求仓库物品列表（原版 C# GuildStorageItemChange type=3 语义）
     if !*requested {
@@ -1805,7 +1908,8 @@ fn guild_storage_system(
         }
     }
     for (e, inter) in &down_btn {
-        if edge(e, inter, &mut prev_inter) && guild.storage_page + 1 < 13 {
+        // C# `StorageDownButton.Click`：`StorageIndex` 上限 6（14 行 - 8 行窗口）
+        if edge(e, inter, &mut prev_inter) && guild.storage_page < STORAGE_MAX_START {
             guild.storage_page += 1;
         }
     }
@@ -1987,6 +2091,7 @@ fn guild_server_events(
                                     item_index: item.item_index,
                                     name: item.name.clone(),
                                     count: item.count,
+                                    image: item.image as i32,
                                 });
                             }
                         }
@@ -2009,6 +2114,7 @@ fn guild_server_events(
                                     item_index: item.item_index,
                                     name: item.name.clone(),
                                     count: item.count,
+                                    image: item.image as i32,
                                 });
                             } else {
                                 guild.storage_items[*to as usize] = moved;
@@ -2027,22 +2133,26 @@ fn guild_server_events(
             ServerEvent::GuildStorage { items } => {
                 guild.storage_items = items
                     .iter()
-                    .map(|(unique_id, item_index, count, info_name)| {
-                        let name = if !info_name.is_empty() {
-                            info_name.clone()
-                        } else {
-                            guild
-                                .item_names
-                                .get(item_index)
-                                .cloned()
-                                .unwrap_or_default()
-                        };
-                        Some(StorageItem {
-                            unique_id: *unique_id,
-                            item_index: *item_index,
-                            name,
-                            count: *count,
-                        })
+                    .map(|slot| {
+                        slot.as_ref()
+                            .map(|(unique_id, item_index, count, info_name, image)| {
+                                let name = if !info_name.is_empty() {
+                                    info_name.clone()
+                                } else {
+                                    guild
+                                        .item_names
+                                        .get(item_index)
+                                        .cloned()
+                                        .unwrap_or_default()
+                                };
+                                StorageItem {
+                                    unique_id: *unique_id,
+                                    item_index: *item_index,
+                                    name,
+                                    count: *count,
+                                    image: *image,
+                                }
+                            })
                     })
                     .collect();
                 guild.storage_received = true;
@@ -2124,17 +2234,27 @@ mod tests {
         );
     }
 
-    /// 仓库格命中：初始等价 + 拖动跟随
+    /// #2892 批B 单元9：仓库**格阵**命中（C# `StorageGrid[idx]`，列 `x`/窗口行 `r`）。
+    /// 页面原点 (0,60)、格阵起点 (31,20)、步进 36、格 35x35。
     #[test]
-    fn storage_row_rect_origin_and_drag() {
-        let (rx, ry, _, _) = guild_storage_row_rect(STORAGE_LINE_BASE, GUILD_X, GUILD_Y);
+    fn storage_cell_rect_origin_and_drag() {
+        let (rx, ry, rw, rh) = guild_storage_cell_rect(0, 0, GUILD_X, GUILD_Y);
+        assert_eq!((rx, ry, rw, rh), (248.0, 248.0, 35.0, 35.0));
+        // 第 8 列 / 第 8 窗口行：31+7*36=283 → 屏幕 500；20+7*36=272 → 屏幕 500
+        let (rx2, ry2, _, _) = guild_storage_cell_rect(7, 7, GUILD_X, GUILD_Y);
+        assert_eq!((rx2, ry2), (500.0, 500.0));
+        // 拖动后跟随面板原点
+        let (rx3, ry3, _, _) = guild_storage_cell_rect(0, 0, 330.0, 100.0);
+        assert_eq!((rx3, ry3), (361.0, 180.0));
+        // 8×14 数据格、可见窗口 8 行、行窗口上限 6（C# `if (StorageIndex >= 6) StorageIndex = 5;` 上下钳位）
         assert_eq!(
-            (rx, ry),
-            (248.0, 248.0),
-            "StoragePage @(0,60) 内首行 (31,20)"
+            (
+                STORAGE_COLS * STORAGE_ROWS_TOTAL,
+                STORAGE_WINDOW_ROWS,
+                STORAGE_MAX_START
+            ),
+            (112, 8, 6)
         );
-        let (rx2, ry2, _, _) = guild_storage_row_rect(STORAGE_LINE_BASE, 330.0, 100.0);
-        assert_eq!((rx2, ry2), (361.0, 180.0), "拖动后跟随");
     }
 
     /// Buff 行命中：初始等价 + 拖动跟随

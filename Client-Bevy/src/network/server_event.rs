@@ -479,9 +479,10 @@ pub enum ServerEvent {
         members: Vec<GuildMember>,
         gold: u32,
     },
-    /// GuildStorageList：行会仓库物品（unique_id, item_index, count, info_name）
+    /// GuildStorageList：行会仓库物品**按槽位**（`None` = 空格，与 C# `StorageGrid[idx]` 同构）
+    /// 每格 `(unique_id, item_index, count, info_name, image)`
     GuildStorage {
-        items: Vec<(u64, i32, u16, String)>,
+        items: Vec<Option<(u64, i32, u16, String, i32)>>,
     },
     /// GroupMembersMap：组队成员全量
     GroupMembers {
