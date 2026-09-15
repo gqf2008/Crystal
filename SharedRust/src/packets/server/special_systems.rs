@@ -478,10 +478,12 @@ impl Packet for Rankings {
 
 /// GuildTerritoryPage - 公会领地页面 (276)
 ///
-/// #2892 批C：线格式与字段**对齐 C# `S.GuildTerritoryPage`**（`Shared/ServerPackets.cs:4273-4295`
-/// + `ClientGTMap`（`Shared/Data/SharedData.cs:139-176`））：
-/// `length(i32) + count(i32) + count × { index(i32), Name, Owner, Leader, Leader2, price(i32),
+/// #2892 批C：线格式与字段**对齐 C# `S.GuildTerritoryPage`**
+/// （`Shared/ServerPackets.cs:4273-4295` 与 `ClientGTMap`（`Shared/Data/SharedData.cs:139-176`））：
+///
+/// `length(i32)` + `count(i32)` + `count × { index(i32), Name, Owner, Leader, Leader2, price(i32),
 /// days(i32), begin(i32) }`（字符串均为 .NET 7-bit 前缀）。
+///
 /// Rust 在每项**前置** `id(i32)`：本端购买走领地 ID（C# 用 Owner 公会名），属协议自洽扩展。
 #[derive(Debug, Clone, Default)]
 pub struct GuildTerritoryPage {

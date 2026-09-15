@@ -2853,7 +2853,7 @@ impl Message<RemoveBuff> for PlayerActor {
                     crate::combat::buff::BuffType::DarkBody,
                 ]
             } else {
-                vec![msg.buff_type.clone()]
+                vec![msg.buff_type]
             };
         for t in &targets {
             crate::combat::buff::remove_buff_by_type(&mut self.state.buffs, t);
