@@ -862,7 +862,7 @@ impl Message<StartGameRequest> for WorldActor {
         if loaded_state
             .buffs
             .iter()
-            .any(|b| crate::combat::buff::is_invisible_type(&b.buff_type))
+            .any(|b| crate::combat::buff::is_sneaking_type(&b.buff_type))
         {
             self.invisible_sessions.insert(msg.session_id);
         }
@@ -2055,7 +2055,7 @@ impl WorldActor {
             let is_invisible = ep_state
                 .buffs
                 .iter()
-                .any(|b| crate::combat::buff::is_invisible_type(&b.buff_type));
+                .any(|b| crate::combat::buff::is_sneaking_type(&b.buff_type));
             if is_invisible {
                 continue;
             }
@@ -2082,7 +2082,7 @@ impl WorldActor {
         if mover_state
             .buffs
             .iter()
-            .any(|b| crate::combat::buff::is_invisible_type(&b.buff_type))
+            .any(|b| crate::combat::buff::is_sneaking_type(&b.buff_type))
         {
             return;
         }
