@@ -194,15 +194,6 @@ impl MagicsState {
     }
 }
 
-#[derive(Component)]
-pub struct SkillsWidget;
-
-#[derive(Component)]
-pub struct SkillsClose;
-
-#[derive(Component)]
-pub struct SkillsLine(usize);
-
 /// 技能快捷栏根实体（整栏随拖动移动、随设置开关显隐；对齐 C# SkillBarDialog 整体 Show/Hide）。
 /// .0 = 栏号（C# BarIndex 0/1；C# 共两条栏，Settings.SkillBar=true 时全部显示）
 #[derive(Component)]
@@ -331,9 +322,7 @@ impl Plugin for SkillsPlugin {
         app.init_resource::<MagicsState>();
         app.init_resource::<MagicCooldowns>();
         app.insert_resource(SkillBarState::load());
-        app.add_systems(OnEnter(AppState::Game), spawn_skills_window);
         app.add_systems(OnEnter(AppState::Game), spawn_skill_bar);
-        app.add_systems(OnExit(AppState::Game), cleanup_skills_window);
         // #2632：原先 5 次独立 add_systems 各挂 .run_if(in_state(Game))，归并为
         // Skills 集统一门控。这些系统彼此本无显式排序，合并进同一元组（非 .chain()）
         // 不增删任何 ordering，保持行为等价。
@@ -342,7 +331,6 @@ impl Plugin for SkillsPlugin {
             Update,
             // #148 技能快捷键改由 dialog_hotkey_system 按键位设置处理（可重绑）
             (
-                skills_window_system,
                 skill_bar_show_system,
                 skill_bar_icon_system,
                 skill_bar_cooldown_system,
@@ -871,186 +859,6 @@ fn skills_server_events(
             }
             _ => {}
         }
-    }
-}
-
-// ============================================================================
-// 技能窗口（#136 C# MagicWindow）：显示已学技能列表（名称/等级/快捷键）
-// ============================================================================
-
-const SKILLS_DX: f32 = 360.0;
-const SKILLS_DY: f32 = 180.0;
-
-fn spawn_skills_window(
-    mut commands: Commands,
-    mut libs: ResMut<GameLibraries>,
-    mut images: ResMut<Assets<Image>>,
-    mut fonts: ResMut<Assets<Font>>,
-    mut cjk_font: ResMut<UiCjkFont>,
-    mut ui_font: ResMut<UiFont>,
-) {
-    libs.0.ensure_initialized();
-    if !ui_font.0.is_strong() {
-        ui_font.0 = crate::ui::sprite_ui::load_ui_font(&mut fonts);
-    }
-    let font = ui_font.0.clone();
-    let cjk = shared_cjk_font(&mut fonts, &mut cjk_font);
-
-    // 面板背景 Title[508]（C# CharacterDialog 技能页背景；248x284 @ (360,180)）
-    let panel = if let Some(bg) = load_lib_image(&mut libs, &mut images, LibraryName::Title, 508) {
-        let p = spawn_panel(&mut commands, bg, SKILLS_DX, SKILLS_DY, 248.0, 284.0, 30);
-        commands.entity(p).insert((
-            DialogRoot(DialogKind::Skills),
-            SkillsWidget,
-            // #89 技能列表滚轮（10 行 × 20px）
-            UiScrollList {
-                rect_rel: (12.0, 36.0, 270.0, 200.0),
-                row_h: 20.0,
-                visible: 10,
-                total: 0,
-                offset: 0,
-                step: 3,
-                track_rel: (288.0, 36.0, 4.0, 200.0),
-                thumb: None,
-                z: 9,
-            },
-        ));
-        p
-    } else {
-        // 兜底：纹理缺失时退回半透明深色面板
-        let white = images.add(crate::map_renderer::make_image(
-            vec![255, 255, 255, 255],
-            1,
-            1,
-        ));
-        let p = spawn_panel(&mut commands, white, SKILLS_DX, SKILLS_DY, 300.0, 360.0, 30);
-        commands.entity(p).insert((
-            DialogRoot(DialogKind::Skills),
-            SkillsWidget,
-            UiScrollList {
-                rect_rel: (12.0, 36.0, 270.0, 200.0),
-                row_h: 20.0,
-                visible: 10,
-                total: 0,
-                offset: 0,
-                step: 3,
-                track_rel: (288.0, 36.0, 4.0, 200.0),
-                thumb: None,
-                z: 9,
-            },
-        ));
-        p
-    };
-
-    commands.entity(panel).with_children(|p| {
-        // 滚动条（面板子节点）
-        spawn_scroll_bar_ui(p, (288.0, 36.0, 4.0, 200.0), 9);
-        // 标题
-        spawn_label(
-            p,
-            &cjk,
-            "技能",
-            12.0,
-            8.0,
-            15.0,
-            Color::srgb(1.0, 0.9, 0.3),
-            9,
-        );
-        // 关闭
-        if let (Some(n), Some(h), Some(pr)) = (
-            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 360),
-            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 361),
-            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 362),
-        ) {
-            spawn_icon_button(p, n, h, pr, 272.0, 3.0, 20.0, 20.0, 10).insert(SkillsClose);
-        }
-        // 列表（10 行 × 20px）@(12,36+20i)
-        for i in 0..10usize {
-            spawn_label(
-                p,
-                &cjk,
-                "",
-                12.0,
-                36.0 + i as f32 * 20.0,
-                12.0,
-                Color::WHITE,
-                9,
-            )
-            .insert(SkillsLine(i));
-        }
-    });
-}
-
-fn cleanup_skills_window(mut commands: Commands, roots: Query<Entity, With<DialogRoot>>) {
-    for e in roots.iter() {
-        commands.entity(e).despawn();
-    }
-}
-
-/// 显示/隐藏 + 技能列表渲染 + 关闭
-fn skills_window_system(
-    mut mgr: ResMut<DialogManager>,
-    magics: Res<MagicsState>,
-    close: Query<(Entity, &Interaction), With<SkillsClose>>,
-    mut widgets: Query<&mut Visibility, With<SkillsWidget>>,
-    mut lines: Query<(&mut Text, &SkillsLine)>,
-    mut scroll: Query<&mut UiScrollList, With<SkillsWidget>>,
-    mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
-) {
-    fn edge(
-        e: Entity,
-        inter: &Interaction,
-        prev: &mut std::collections::HashMap<Entity, Interaction>,
-    ) -> bool {
-        let was = prev.insert(e, *inter);
-        *inter == Interaction::Pressed && was != Some(Interaction::Pressed)
-    }
-    let open = mgr.is_open(DialogKind::Skills);
-    for mut vis in &mut widgets {
-        *vis = if open {
-            Visibility::Visible
-        } else {
-            Visibility::Hidden
-        };
-    }
-    if !open {
-        return;
-    }
-    for (e, inter) in &close {
-        if edge(e, inter, &mut prev_inter) {
-            mgr.close(DialogKind::Skills);
-        }
-    }
-    {
-        let mut sl = scroll.single_mut();
-        if let Ok(sl) = sl.as_mut() {
-            sl.set_total(magics.magics.len());
-        }
-    }
-    let off = scroll.single().map(|s| s.offset).unwrap_or(0);
-    for (mut text, line) in &mut lines {
-        text.0 = match magics.magics.get(off + line.0) {
-            Some(m) => {
-                // 键名后缀（C# KeyLabel：0=无、1..8="F*"、9..16="Ctrl F*"、17..24="Shift F*"）
-                let key = match skill_key_name(m.key) {
-                    k if k.is_empty() => k,
-                    k => format!(" [{}]", k),
-                };
-                // #242：开关技能显示当前状态
-                let toggle = if is_toggle_spell(m.spell) {
-                    let on = magics.toggle_state(m.spell);
-                    if on {
-                        "【开】"
-                    } else {
-                        "【关】"
-                    }
-                } else {
-                    ""
-                };
-                format!("{} Lv.{}{}{}", m.name, m.level, key, toggle)
-            }
-            None => String::new(),
-        };
     }
 }
 

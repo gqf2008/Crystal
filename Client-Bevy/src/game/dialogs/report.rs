@@ -22,6 +22,19 @@ use crate::ui::theme::{
     spawn_panel, UiDropDown,
 };
 
+/// C# `ReportDialog`（`Client/MirScenes/Dialogs/ReportDialog.cs:15-16`）：`Index = 1633; Library = Libraries.Prguse`
+pub const PANEL: (LibraryName, usize) = (LibraryName::Prguse, 1633);
+/// C# 无显式 `Size` → 用 art 尺寸；本端在数据包缺 `Prguse[1633]` 时按同尺寸深色兜底
+pub const PANEL_SIZE: (f32, f32) = (360.0, 244.0);
+/// 关闭键 `Prguse2[360..362]` @(336,3)（`ReportDialog.cs:21-30`，无 `Size` → art 24x21）
+pub const CLOSE_REL: (f32, f32) = (336.0, 3.0);
+/// 类型下拉 `ReportType` @(12,35) 170x14（`:33-41`）
+pub const TYPE_DROP: (f32, f32, f32, f32) = (12.0, 35.0, 170.0, 14.0);
+/// 描述框 `MessageArea` @(12,57) 330x150（`:46-54`，`MultiLine()`）
+pub const MESSAGE_AREA: (f32, f32, f32, f32) = (12.0, 57.0, 330.0, 150.0);
+/// 提交 `SendButton` `Title[607/608/609]` @(260,219)（`:56-65`，无 `Size` → art）
+pub const SUBMIT_REL: (f32, f32) = (260.0, 219.0);
+
 /// 举报状态
 #[derive(Resource, Default)]
 pub struct ReportState {
@@ -77,14 +90,11 @@ fn spawn_report(
 
     // C# ReportDialog: Prguse[1633]，Location = Center。当前数据包缺少 1633 时使用
     // 同尺寸深色兜底面板；控件仍按 C# 坐标保留，避免继续错用 Prguse[170]。
-    const REPORT_W: f32 = 360.0;
-    const REPORT_H: f32 = 244.0;
-    let (px, py) = crate::game::dialogs::center_origin(REPORT_W, REPORT_H);
-    let bg =
-        load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 1633).unwrap_or_else(|| {
-            images.add(crate::map_renderer::make_image(vec![22, 23, 30, 255], 1, 1))
-        });
-    let panel = spawn_panel(&mut commands, bg, px, py, REPORT_W, REPORT_H, 30);
+    let (px, py) = crate::game::dialogs::center_origin(PANEL_SIZE.0, PANEL_SIZE.1);
+    let bg = load_lib_image(&mut libs, &mut images, PANEL.0, PANEL.1).unwrap_or_else(|| {
+        images.add(crate::map_renderer::make_image(vec![22, 23, 30, 255], 1, 1))
+    });
+    let panel = spawn_panel(&mut commands, bg, px, py, PANEL_SIZE.0, PANEL_SIZE.1, 30);
     commands
         .entity(panel)
         .insert((DialogRoot(DialogKind::Report), ReportWidget));
@@ -109,7 +119,9 @@ fn spawn_report(
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 361),
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 362),
         ) {
-            spawn_icon_button(p, n, h, pr, 336.0, 3.0, 20.0, 20.0, 10).insert(ReportClose);
+            // C# 无 `Size` → art 24x21（此前 20x20 是自造尺寸）
+            spawn_icon_button(p, n, h, pr, CLOSE_REL.0, CLOSE_REL.1, 24.0, 21.0, 10)
+                .insert(ReportClose);
         }
         // 类型下拉（C# ReportType @(12,35)，170x14）
         spawn_dropdown_ui(

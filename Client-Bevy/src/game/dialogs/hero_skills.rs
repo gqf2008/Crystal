@@ -17,11 +17,24 @@ use crate::ui::theme::{
     load_lib_image, spawn_container, spawn_icon_button, spawn_image, spawn_label, spawn_panel,
 };
 
-const DIALOG_X: f32 = 1024.0 - 264.0;
-const DIALOG_Y: f32 = 0.0;
-const PAGE_X: f32 = 8.0;
-const PAGE_Y: f32 = 90.0;
-const ROWS: usize = 7;
+/// C# `CharacterDialog(HeroEquipment, hero)`：`Index = 504` @ `(ScreenWidth-264, 0)`（`CharacterDialog.cs:32-34`）
+pub const PANEL: (LibraryName, usize) = (LibraryName::Title, 504);
+pub const PANEL_SIZE: (f32, f32) = (264.0, 380.0);
+pub const DIALOG_X: f32 = 1024.0 - 264.0;
+pub const DIALOG_Y: f32 = 0.0;
+/// 技能页 `SkillPage` = `Title[508]` @(8,90)（`CharacterDialog.cs:136-143`）
+pub const PAGE: (LibraryName, usize) = (LibraryName::Title, 508);
+pub const PAGE_X: f32 = 8.0;
+pub const PAGE_Y: f32 = 90.0;
+/// 关闭键 `Prguse2[360..362]` @(241,3)（`CharacterDialog.cs:190-199`，无 `Size` → art 24x21）
+pub const CLOSE_REL: (f32, f32) = (241.0, 3.0);
+/// 技能行数（C# `Magics` 显示区 7 行）
+pub const ROWS: usize = 7;
+/// 行容器：页内 @(8, 8 + i*33) 231x33
+pub const ROW_X: f32 = 8.0;
+pub const ROW_Y: f32 = 8.0;
+pub const ROW_H: f32 = 33.0;
+pub const ROW_W: f32 = 231.0;
 
 #[derive(Component)]
 pub struct HeroSkillWidget;
@@ -72,18 +85,26 @@ fn spawn_hero_skills(
     let font = ui_font.0.clone();
 
     // 背景 Title[504]（264x380 @ (760,0)）+ 技能页 Title[508]
-    let Some(bg) = load_lib_image(&mut libs, &mut images, LibraryName::Title, 504) else {
+    let Some(bg) = load_lib_image(&mut libs, &mut images, PANEL.0, PANEL.1) else {
         return;
     };
-    let panel = spawn_panel(&mut commands, bg, DIALOG_X, DIALOG_Y, 264.0, 380.0, 30);
+    let panel = spawn_panel(
+        &mut commands,
+        bg,
+        DIALOG_X,
+        DIALOG_Y,
+        PANEL_SIZE.0,
+        PANEL_SIZE.1,
+        30,
+    );
     commands
         .entity(panel)
         .insert((DialogRoot(DialogKind::HeroSkill), HeroSkillWidget));
 
     commands.entity(panel).with_children(|p| {
         // 技能页 Title[508]（C# SkillPage at (8,90)，原生尺寸）
-        if let Some(h) = load_lib_image(&mut libs, &mut images, LibraryName::Title, 508) {
-            let (iw, ih) = match libs.0.get_image(LibraryName::Title, 508) {
+        if let Some(h) = load_lib_image(&mut libs, &mut images, PAGE.0, PAGE.1) {
+            let (iw, ih) = match libs.0.get_image(PAGE.0, PAGE.1) {
                 Some(i) => (i.width.max(0) as f32, i.height.max(0) as f32),
                 None => (190.0, 259.0),
             };
@@ -95,16 +116,18 @@ fn spawn_hero_skills(
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 361),
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 362),
         ) {
-            spawn_icon_button(p, n, h, pr, 241.0, 3.0, 20.0, 20.0, 10).insert(HeroSkillClose);
+            // C# 无 `Size` → art 24x21（此前 20x20 是自造尺寸）
+            spawn_icon_button(p, n, h, pr, CLOSE_REL.0, CLOSE_REL.1, 24.0, 21.0, 10)
+                .insert(HeroSkillClose);
         }
         // 7 行技能：容器（行显隐随容器）+ 图标 + 文本
         for i in 0..ROWS {
             spawn_container(
                 p,
-                PAGE_X + 8.0,
-                PAGE_Y + 8.0 + i as f32 * 33.0,
-                231.0,
-                33.0,
+                PAGE_X + ROW_X,
+                PAGE_Y + ROW_Y + i as f32 * ROW_H,
+                ROW_W,
+                ROW_H,
                 9,
             )
             .insert((Button, HeroSkillRow(i), Visibility::Hidden))
