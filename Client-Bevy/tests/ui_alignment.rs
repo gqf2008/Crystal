@@ -3867,6 +3867,34 @@ fn panel_sprites_batch_b20_match_notice_editor() {
         g::PAGE_LEFT.2,
         g::PAGE_LEFT.3,
     );
+    // #2892：位置条 `Prguse2[206]`（C# `NoticePositionBar` @(337,16)，`Movable`）——
+    // 与上下翻钮同列、落在 NoticePage 内、拖到底（y=298）也不压住下翻钮（y=318）
+    assert_eq!(
+        libs.size(LibraryName::Prguse2, 206),
+        (g::NOTICE_BAR_W, g::NOTICE_BAR_H),
+        "[尺寸] Prguse2[206] 公告位置条"
+    );
+    assert_eq!((g::NOTICE_BAR_X, g::NOTICE_BAR_Y_MIN), (337.0, 16.0));
+    assert_eq!(g::NOTICE_BAR_Y_MAX, 318.0 - 20.0);
+    let (bx, by, bw, bh) = g::guild_notice_bar_rect(g::NOTICE_BAR_Y_MIN, g::GUILD_X, g::GUILD_Y);
+    assert_inside(
+        "公告位置条",
+        bx - g::GUILD_X - g::PAGE_LEFT.0,
+        by - g::GUILD_Y - g::PAGE_LEFT.1,
+        bw,
+        bh,
+        0.0,
+        0.0,
+        g::PAGE_LEFT.2,
+        g::PAGE_LEFT.3,
+    );
+    let (_, by2, _, _) = g::guild_notice_bar_rect(g::NOTICE_BAR_Y_MAX, g::GUILD_X, g::GUILD_Y);
+    assert!(
+        by2 + bh <= g::GUILD_Y + g::PAGE_LEFT.1 + 318.0,
+        "[包含] 公告位置条拖到底（y={by2}）时不得压住下翻钮（页内 y=318）"
+    );
+    assert_in_canvas("公告位置条", bx, by, bw, bh);
+    println!("  ✓ 行会公告页位置条 Prguse2[206] 与上下翻钮同列，落位对齐 C#");
 }
 
 /// #2892：钓鱼窗按 C# 拆成两个窗（`FishingDialog.cs:10-157` 主窗 + `:159-320` 状态窗）。

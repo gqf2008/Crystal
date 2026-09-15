@@ -243,6 +243,90 @@ pub struct GuildNoticeUp;
 #[derive(Component)]
 pub struct GuildNoticeDown;
 
+// ============================================================================
+// #2892：NoticePage 位置条与滚轮（C# `GuildDialog.NoticePositionBar` + `NoticePanel_MouseWheel`）
+//   - `NoticePositionBar` = `Prguse2[206]` @(337,16)、`Movable`（`GuildDialog.cs:301-311`）
+//   - 定位 `UpdateNoticeScrollPosition`（`:1343-1354`）：`y = 16 + index*interval`，
+//     `interval = 289 / (len - 25)`（**整数除**），y 夹在 `[16, NoticeDownButton.Y - 20 = 298]`
+//   - 拖动 `NoticePositionBar_OnMoving`（`:1356-1389`）：`index = floor((y-16)/interval)`，
+//     再夹在 `[0, len-25]`
+//   - 滚轮 `NoticePanel_MouseWheel`（`:1390-1410`）：已到顶且向上滚 / 已到底且向下滚 → 直接返回，
+//     否则 index 减一 / 加一（每个滚轮事件只走一行，与 `e.Delta/120` 的绝对值无关）
+// ============================================================================
+/// 位置条相对 NoticePage 的 x（C# `Location = new Point(337, 16)`）
+pub const NOTICE_BAR_X: f32 = 337.0;
+/// 位置条 y 下限（C# `Location = new Point(337, 16)`）
+pub const NOTICE_BAR_Y_MIN: f32 = 16.0;
+/// y 上限：C# `if (y >= NoticeDownButton.Location.Y - 20) y = NoticeDownButton.Location.Y - 20;`（318-20）
+pub const NOTICE_BAR_Y_MAX: f32 = 298.0;
+/// 位置条精灵 `Prguse2[206]` 尺寸（与筛选树拖动手柄同图，实测 12x18）
+pub const NOTICE_BAR_W: f32 = 12.0;
+pub const NOTICE_BAR_H: f32 = 18.0;
+/// C# 位置条/滚轮的可见行数：最大首行下标 = `len - 25`
+pub const NOTICE_BAR_ROWS: usize = 25;
+/// C# interval 基数：`289 / (len - 25)`
+pub const NOTICE_BAR_TRAVEL: f32 = 289.0;
+
+/// C# `289 / (len - 25)` 是 **int/int 截断除**（`GuildDialog.cs:1345`/`:1366`；
+/// 与 `NoticeDialog` 同款口径）。公告不足一屏（`len <= 25`）时 C# 会除零/负步长，
+/// 本端按「不可滚动」处理（位置条隐藏）。
+fn notice_bar_interval(len: usize) -> f32 {
+    if len <= NOTICE_BAR_ROWS {
+        return 0.0;
+    }
+    (NOTICE_BAR_TRAVEL as i32 / (len - NOTICE_BAR_ROWS) as i32) as f32
+}
+
+/// 首行下标 → 位置条 y（C# `UpdateNoticeScrollPosition`）；`None` = 公告不足一屏，位置条隐藏
+pub fn notice_bar_y(index: usize, len: usize) -> Option<f32> {
+    if len <= NOTICE_BAR_ROWS {
+        return None;
+    }
+    let interval = notice_bar_interval(len);
+    Some((NOTICE_BAR_Y_MIN + index as f32 * interval).clamp(NOTICE_BAR_Y_MIN, NOTICE_BAR_Y_MAX))
+}
+
+/// 位置条 y → 首行下标（C# `NoticePositionBar_OnMoving`）
+pub fn notice_index_from_bar_y(y: f32, len: usize) -> usize {
+    let max = len.saturating_sub(NOTICE_BAR_ROWS);
+    let interval = notice_bar_interval(len);
+    if interval <= 0.0 {
+        return 0;
+    }
+    let y = y.max(NOTICE_BAR_Y_MIN);
+    (((y - NOTICE_BAR_Y_MIN) / interval).floor() as i64).clamp(0, max as i64) as usize
+}
+
+/// 滚轮滚一行（C# `NoticePanel_MouseWheel`）：`count > 0` = 向上滚
+pub fn notice_wheel_scroll(index: usize, count: i32, len: usize) -> usize {
+    if count == 0 {
+        return index;
+    }
+    let max = len.saturating_sub(NOTICE_BAR_ROWS);
+    if count > 0 {
+        index.saturating_sub(1)
+    } else if index >= max {
+        index
+    } else {
+        index + 1
+    }
+}
+
+/// 位置条精灵（C# `NoticePositionBar` = `Prguse2[206]`，`Movable`）
+#[derive(Component)]
+pub struct GuildNoticeBar;
+
+/// 位置条命中的绝对矩形（面板原点 ox/oy + NoticePage 偏移 (0,60) + 位置条相对坐标）。
+/// 与 `guild_member_row_rect` 等同一口径，UI 对齐测试也用它核对落位。
+pub fn guild_notice_bar_rect(bar_y: f32, ox: f32, oy: f32) -> (f32, f32, f32, f32) {
+    (
+        ox + PAGE_LEFT.0 + NOTICE_BAR_X,
+        oy + PAGE_LEFT.1 + bar_y,
+        NOTICE_BAR_W,
+        NOTICE_BAR_H,
+    )
+}
+
 // C# `GuildRankOptions`（`Shared/Enums.cs:1898-1908`）的位值
 pub const GUILD_OPT_CHANGE_RANK: u8 = 1;
 pub const GUILD_OPT_RECRUIT: u8 = 2;
@@ -777,6 +861,20 @@ fn spawn_guild(
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 209),
         ) {
             spawn_icon_button(p, n, h, pr, 337.0, 318.0, 16.0, 14.0, 9).insert(GuildNoticeDown);
+        }
+        // 位置条 `Prguse2[206]` @(337,16)（C# `NoticePositionBar`，`Movable` 可拖动；
+        // 显隐由 `guild_notice_system` 按「Notice 页激活 + 公告超一屏」控制）
+        if let Some(bar) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 206) {
+            spawn_image(
+                p,
+                bar,
+                NOTICE_BAR_X,
+                NOTICE_BAR_Y_MIN,
+                NOTICE_BAR_W,
+                NOTICE_BAR_H,
+                9,
+            )
+            .insert((GuildNoticeBar, Interaction::default(), Visibility::Hidden));
         }
         // C# `NoticeSaveButton` = `Prguse[554/555/556]` @(20,342)（`NoticeEditButton` 560..562 同位置，二选一显示）
         if let (Some(n), Some(h), Some(pr)) = (
@@ -1444,34 +1542,126 @@ fn guild_member_rows_system(
     }
 }
 
-/// #2892 批B 单元11：NoticePage 正文与翻页（C# `Notice` + `NoticeUpButton`/`NoticeDownButton`，
-/// `NoticeScrollIndex` 语义：首行下标，up 到 0 停、down 到 `len-1` 停）。
+/// #2892 批B 单元11（+ 位置条/滚轮）：NoticePage 正文与翻页
+/// （C# `Notice` + `NoticeUpButton`/`NoticeDownButton` + `NoticePositionBar` + `NoticePanel_MouseWheel`，
+/// `NoticeScrollIndex` 语义：首行下标，上下钮按 `0..=len-1`，位置条/滚轮按 `0..=len-25`）。
+#[allow(clippy::type_complexity)]
 fn guild_notice_system(
     mut guild: ResMut<GuildState>,
     // #2892：公告改为多行可编辑框后，翻页 = 平移显示实体（模拟 C# `ScrollToCaret()` 逐行滚动）
-    mut texts: Query<&mut Node, With<GuildNoticeText>>,
+    mut texts: Query<&mut Node, (With<GuildNoticeText>, Without<GuildNoticeBar>)>,
     up: Query<(Entity, &Interaction), With<GuildNoticeUp>>,
     down: Query<(Entity, &Interaction), With<GuildNoticeDown>>,
     mut prev_inter: Local<HashMap<Entity, Interaction>>,
+    // #2892：位置条（C# `NoticePositionBar` = `Prguse2[206]`，`Movable`）
+    mut bar: Query<(&Interaction, &mut Node, &mut Visibility), With<GuildNoticeBar>>,
+    panel_origin: Query<
+        &Node,
+        (
+            With<GuildWidget>,
+            Without<GuildNoticeBar>,
+            Without<GuildNoticeText>,
+        ),
+    >,
+    mut wheels: MessageReader<bevy::input::mouse::MouseWheel>,
+    mouse: Res<ButtonInput<MouseButton>>,
+    windows: Query<&Window>,
+    probe: Res<crate::control::CursorProbe>,
+    mut grab: Local<Option<f32>>,
 ) {
     fn edge(e: Entity, inter: &Interaction, prev: &mut HashMap<Entity, Interaction>) -> bool {
         let was = prev.insert(e, *inter);
         *inter == Interaction::Pressed && was != Some(Interaction::Pressed)
     }
+    let open = guild.page == GuildPage::Notice;
+    let len = guild.notice.len();
     for (e, inter) in &up {
         if edge(e, inter, &mut prev_inter) {
             // C# `NoticeUpButton.Click`：`if (NoticeScrollIndex == 0) return;`
-            guild.notice_scroll = notice_next_scroll(guild.notice_scroll, -1, guild.notice.len());
+            guild.notice_scroll = notice_next_scroll(guild.notice_scroll, -1, len);
         }
     }
     for (e, inter) in &down {
         if edge(e, inter, &mut prev_inter) {
             // C# `NoticeDownButton.Click`：`if (NoticeScrollIndex == Notice.MultiText.Length - 1) return;`
-            guild.notice_scroll = notice_next_scroll(guild.notice_scroll, 1, guild.notice.len());
+            guild.notice_scroll = notice_next_scroll(guild.notice_scroll, 1, len);
         }
     }
     // 滚动位置随公告长度收敛（公告变短时不会停在越界行）
-    guild.notice_scroll = notice_next_scroll(guild.notice_scroll, 0, guild.notice.len());
+    guild.notice_scroll = notice_next_scroll(guild.notice_scroll, 0, len);
+
+    // 面板原点（含窗口拖动偏移）：NoticePage 是面板内 (0,60) 352x372 的子页
+    let (ox, oy) = panel_origin
+        .single()
+        .map(|n| crate::ui::theme::node_origin(n, (GUILD_X, GUILD_Y)))
+        .unwrap_or((GUILD_X, GUILD_Y));
+    let cursor = crate::control::resolve_cursor(
+        probe.pos,
+        windows.single().ok().and_then(|w| w.cursor_position()),
+    );
+
+    // ---- 滚轮（C# `NoticePanel_MouseWheel`，:1390-1410；仅光标在 NoticePage 内生效）----
+    if open {
+        let inside = cursor
+            .map(|c| {
+                let px = ox + PAGE_LEFT.0;
+                let py = oy + PAGE_LEFT.1;
+                c.x >= px && c.x <= px + PAGE_LEFT.2 && c.y >= py && c.y <= py + PAGE_LEFT.3
+            })
+            .unwrap_or(false);
+        if inside {
+            for ev in wheels.read() {
+                // C# `count = e.Delta / MouseWheelScrollDelta`：本端按事件符号取 ±1
+                // （每个事件只走一行，与 C# 一致）
+                let c = match ev.unit {
+                    bevy::input::mouse::MouseScrollUnit::Line => ev.y.signum() as i32,
+                    bevy::input::mouse::MouseScrollUnit::Pixel => ev.y.signum() as i32,
+                };
+                if c != 0 {
+                    guild.notice_scroll = notice_wheel_scroll(guild.notice_scroll, c, len);
+                }
+            }
+        }
+    }
+
+    // ---- 位置条（C# `NoticePositionBar`）：位置随 `notice_scroll`；按住可拖动 ----
+    let target = notice_bar_y(guild.notice_scroll, len);
+    for (inter, mut node, mut vis) in &mut bar {
+        // `NoticePage` 隐藏时位置条必须一起藏（页面用 Visibility::Hidden，显式 Visible 的子节点会漏渲染）
+        let want_vis = if open && target.is_some() {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
+        if *vis != want_vis {
+            *vis = want_vis;
+        }
+        let Some(y) = target else {
+            *grab = None;
+            continue;
+        };
+        let mut dragged = false;
+        if open && *inter == Interaction::Pressed {
+            if let Some(c) = cursor {
+                // 光标 y → 位置条相对页面的 y；抓取点偏移保证拖动不跳变
+                let local = c.y - (oy + PAGE_LEFT.1);
+                let off = *grab.get_or_insert(local - y);
+                let moved = (local - off).clamp(NOTICE_BAR_Y_MIN, NOTICE_BAR_Y_MAX);
+                guild.notice_scroll = notice_index_from_bar_y(moved, len);
+                node.top = Val::Px(moved);
+                dragged = true;
+            }
+        }
+        if !dragged {
+            if !mouse.pressed(MouseButton::Left) {
+                *grab = None;
+            }
+            if node.top != Val::Px(y) {
+                node.top = Val::Px(y);
+            }
+        }
+    }
+
     // 显示实体上移 `scroll * 行高`（框有 `Overflow::clip`，超出部分不可见）
     for mut node in &mut texts {
         let want = Val::Px(2.0 - guild.notice_scroll as f32 * NOTICE_ROW_DY);
@@ -2568,6 +2758,52 @@ fn guild_server_events(
 
 #[cfg(test)]
 mod tests {
+    /// #2892：NoticePage 位置条与滚轮（C# `GuildDialog` `:1343-1410`）——
+    /// `interval = 289/(len-25)`（**整数除**）、`y ∈ [16,298]`、`index ∈ [0,len-25]`、
+    /// 滚轮到顶/到底停住；公告不足一屏（`len <= 25`）时位置条隐藏（C# 那里是除零）。
+    #[test]
+    fn notice_bar_and_wheel_match_csharp() {
+        // 不足一屏 → 无位置条、滚轮无效
+        assert_eq!(notice_bar_y(0, 25), None);
+        assert_eq!(notice_bar_y(3, 10), None);
+        assert_eq!(notice_index_from_bar_y(200.0, 20), 0);
+        assert_eq!(notice_wheel_scroll(0, -1, 20), 0);
+        // len=50 → interval = 289/25 = 11（整数除，非 11.56）
+        assert_eq!(notice_bar_interval(50), 11.0);
+        assert_eq!(notice_bar_y(0, 50), Some(NOTICE_BAR_Y_MIN));
+        assert_eq!(notice_bar_y(25, 50), Some(NOTICE_BAR_Y_MIN + 25.0 * 11.0));
+        // 上限夹到 298（len=39 → interval=289/14=20；index=20 → 16+400 → 夹到 298）
+        assert_eq!(notice_bar_interval(39), 20.0);
+        assert_eq!(notice_bar_y(20, 39), Some(NOTICE_BAR_Y_MAX));
+        // y 反算（C# `NoticePositionBar_OnMoving`）
+        assert_eq!(notice_index_from_bar_y(10.0, 50), 0);
+        assert_eq!(notice_index_from_bar_y(16.0, 50), 0);
+        assert_eq!(notice_index_from_bar_y(27.0, 50), 1);
+        assert_eq!(notice_index_from_bar_y(298.0, 50), 25);
+        assert_eq!(notice_index_from_bar_y(999.0, 50), 25);
+        // 往返自洽
+        for i in 0..=25usize {
+            assert_eq!(
+                notice_index_from_bar_y(notice_bar_y(i, 50).unwrap(), 50),
+                i,
+                "index={i} 的往返应自洽"
+            );
+        }
+        // 滚轮：到顶向上停、到底向下停，其余逐行
+        assert_eq!(notice_wheel_scroll(0, 1, 50), 0);
+        assert_eq!(notice_wheel_scroll(0, -1, 50), 1);
+        assert_eq!(notice_wheel_scroll(25, -1, 50), 25);
+        assert_eq!(notice_wheel_scroll(25, 1, 50), 24);
+        assert_eq!(notice_wheel_scroll(3, 0, 50), 3);
+        // 位置条矩形：面板原点 (217,168) + 页偏移 (0,60) + 条 (337,16)
+        let (bx, by, bw, bh) = guild_notice_bar_rect(NOTICE_BAR_Y_MIN, GUILD_X, GUILD_Y);
+        assert_eq!((bx, by, bw, bh), (554.0, 244.0, 12.0, 18.0));
+        // 条与翻页钮同列（x=337）、在页面内、（拖动下限）不越过下翻钮 (337,318)
+        assert_eq!(NOTICE_BAR_X + NOTICE_BAR_W, 349.0);
+        assert!(NOTICE_BAR_X + NOTICE_BAR_W <= PAGE_LEFT.2);
+        assert!(NOTICE_BAR_Y_MAX + NOTICE_BAR_H <= 318.0);
+    }
+
     /// 成员行命中：初始原点等价于原固定坐标，拖动后跟随面板
     #[test]
     fn member_row_rect_origin_and_drag() {
