@@ -2015,8 +2015,17 @@ pub struct WorldActor {
     pub(crate) global_exp_event_end_tick: u64,
     /// 当前全局事件名称
     pub(crate) global_event_name: Option<String>,
-    /// 隐身中的玩家 session 集合（用于视野管理）
+    /// 对他人不可见的玩家 session 集合 = C# `MapObject.Observer`（`Server/MirObjects/MapObject.cs:94-109`）：
+    /// `Sneaking`（`MoonLight`/`DarkBody` buff）或 GM `@observer` 置位 → 他人收到 `S.ObjectRemove`，
+    /// 且移动/外观不再广播（`session.rs` 视野门控）。
     pub(crate) invisible_sessions: std::collections::HashSet<u64>,
+    /// #2892：C# `MapObject.Hidden`（`Server/MirObjects/MapObject.cs:80-92`）——半透明 + 怪物不选中。
+    /// 来源：`Hiding`/`MoonLight`/`DarkBody` buff 或 ClearRing 头盔宝石（`HumanObject.cs:501-504`）。
+    /// 与 `invisible_sessions`（`Observer`）是**两档**，勿混用。
+    pub(crate) hidden_sessions: std::collections::HashSet<u64>,
+    /// #2892：GM `@observer` 切换的 `Observer` 来源（C# `PlayerObject.cs:2460` `Observer = !Observer`）。
+    /// 它与 buff 无关，所以 buff 过期重算（`sync_player_visibility`）不得把它算掉。
+    pub(crate) gm_observer_sessions: std::collections::HashSet<u64>,
     /// #2573：观战镜像链接（C# Connection.Observers）：目标 session → 观察者 session 列表。
     /// 观察者接收目标自身动作包（Turn/Walk/Run/Attack/RangeAttack/Magic/Harvest）
     pub(crate) observe_links: std::collections::HashMap<u64, Vec<u64>>,
@@ -2630,6 +2639,8 @@ impl WorldActor {
             global_exp_event_end_tick: 0,
             global_event_name: None,
             invisible_sessions: HashSet::new(),
+            hidden_sessions: HashSet::new(),
+            gm_observer_sessions: HashSet::new(),
             observe_links: std::collections::HashMap::new(),
             gm_protected: HashSet::new(),
             last_teleport_time: std::collections::HashMap::new(),
@@ -2774,9 +2785,11 @@ impl WorldActor {
         session_id: u64,
         state: &crate::actors::player::PlayerState,
     ) {
-        // C#：Hidden=false 广播（客户端取消隐身显示）
-        self.broadcast_object_hidden(state.object_id, false, state.map_index)
-            .await;
+        // C# `Observer=false` → `BroadcastInfo()`（`MapObject.cs:105-106`）。
+        // #2892：这里**不能**无条件发 `Hidden=false` —— `Hidden` 是另一档（半透明），
+        // 若 ClearRing 宝石 / `Hiding` buff 仍生效就还得保持半透明。
+        // 该广播放到 `ObjectPlayer` **之后**：客户端按顺序处理，先建对象再设半透明，
+        // 否则 `ObjectPlayer` 会把 alpha 重置回 1.0。
         let weapon = state
             .inventory
             .get_equipment(EquipmentSlot::Weapon)
@@ -2831,6 +2844,10 @@ impl WorldActor {
                 }
             }
         }
+        let still_hidden =
+            crate::combat::buff::has_hidden(&state.buffs, self.session_has_clear_ring(state));
+        self.broadcast_object_hidden(state.object_id, still_hidden, state.map_index)
+            .await;
     }
 
     /// 加载或获取已缓存的地图
@@ -4118,6 +4135,30 @@ impl WorldActor {
         }
     }
 
+    /// C# `MapObject.SneakingActive` setter → `Observer`（`Server/MirObjects/MapObject.cs:112-124`）：
+    /// `Observer = true` → `Broadcast(S.ObjectRemove)`（对他人消失）；
+    /// `Observer = false` → `BroadcastInfo()`（重新出现在他人视野）。
+    async fn apply_observer(
+        &mut self,
+        session_id: u64,
+        active: bool,
+        st: &crate::actors::player::PlayerState,
+    ) {
+        let was_observer = self.invisible_sessions.contains(&session_id);
+        if active && !was_observer {
+            self.invisible_sessions.insert(session_id);
+            self.hide_player_from_others(session_id, st).await;
+        } else if !active && was_observer {
+            // GM `@observer` 是另一个 `Observer` 来源（与 buff 无关）：
+            // buff 过期重算不得把它一起清掉
+            if self.gm_observer_sessions.contains(&session_id) {
+                return;
+            }
+            self.invisible_sessions.remove(&session_id);
+            self.reveal_player_to_others(session_id, st).await;
+        }
+    }
+
     /// 设置/解除潜行（C# MapObject.Sneaking 属性：MoonLight/DarkBody buff 触发；开启时先 active 再半径校正）
     pub(crate) async fn set_sneaking(&mut self, session_id: u64, on: bool) {
         let Some(record) = self.players.get(&session_id).cloned() else {
@@ -4148,6 +4189,7 @@ impl WorldActor {
             self.broadcast_object_sneaking(st.object_id, active, st.map_index)
                 .await;
         }
+        self.apply_observer(session_id, active, &st).await;
     }
 
     /// 潜行半径检测（C# CheckSneakRadius 每 tick）：有玩家靠近 3 格 → 潜行失效并广播
@@ -4176,6 +4218,9 @@ impl WorldActor {
                 self.sneaking_sessions.insert(session_id, active);
                 self.broadcast_object_sneaking(st.object_id, active, st.map_index)
                     .await;
+                // C# `SneakingActive` setter → `Observer`（MapObject.cs:112-124）：
+                // 有玩家进入 3 格 → Observer=false → 重新广播信息
+                self.apply_observer(session_id, active, &st).await;
             }
         }
         // 变身外观同步（覆盖 buff 过期/移除回退；C# TransformUpdate）
@@ -6227,23 +6272,21 @@ impl WorldActor {
                             let is_invis = crate::combat::buff::is_invisible_type(&bt);
                             let buff =
                                 crate::combat::buff::BuffInstance::new(bt, duration, interval);
-                            if let Some(record) = self.players.get(&session_id) {
+                            if let Some(record) = self.players.get(&session_id).cloned() {
                                 let _ = record
                                     .actor_ref
                                     .ask(crate::actors::player::ApplyBuff { buff })
                                     .await;
                                 if is_invis {
-                                    if let Ok(Some(state)) =
-                                        record.actor_ref.ask(GetPlayerState).await
-                                    {
-                                        self.invisible_sessions.insert(session_id);
-                                        self.hide_player_from_others(session_id, &state).await;
-                                        send_system_message(
-                                            &self.gate_ref,
-                                            session_id,
-                                            "你进入了隐身状态",
-                                        );
-                                    }
+                                    // #2892：buff 只是状态来源，可见性按 C#
+                                    // `MapObject.AddBuff`（:654-667）统一重算——
+                                    // `Hiding` 半透明、`MoonLight`/`DarkBody` 另置 `Sneaking`
+                                    self.sync_player_visibility(session_id).await;
+                                    send_system_message(
+                                        &self.gate_ref,
+                                        session_id,
+                                        "你进入了隐身状态",
+                                    );
                                 }
                             }
                         }
@@ -8684,6 +8727,8 @@ impl Actor for WorldActor {
             global_exp_event_end_tick: 0,
             global_event_name: None,
             invisible_sessions: HashSet::new(),
+            hidden_sessions: HashSet::new(),
+            gm_observer_sessions: HashSet::new(),
             observe_links: std::collections::HashMap::new(),
             gm_protected: HashSet::new(),
             last_teleport_time: std::collections::HashMap::new(),
@@ -9553,39 +9598,55 @@ impl WorldActor {
         }
     }
 
-    /// #1540：ClearRing 特殊模式（C# SpecialItemMode.ClearRing 0x0004，头盔宝石）——常驻隐身
-    /// 装备含 ClearRing → invisible_sessions + ObjectHidden(true)；卸下且无 Hiding/MoonLight/DarkBody 隐身 buff → 解除
-    pub(crate) async fn sync_clear_ring_visibility(&mut self, session_id: u64) {
-        let record = match self.players.get(&session_id) {
-            Some(r) => r.clone(),
-            None => return,
-        };
-        let state = match record.actor_ref.ask(GetPlayerState).await {
-            Ok(Some(s)) => s,
-            _ => return,
-        };
-        let has_clear_ring = state.inventory.equipment.iter().flatten().any(|it| {
+    /// #2892：玩家是否装备带 `SpecialItemMode.ClearRing 0x0004` 的装备（C# `PlayerObject.cs:7197` 头盔宝石
+    /// → `HumanObject.cs:501-504` 每秒补 `BuffType.ClearRing`）。
+    fn session_has_clear_ring(&self, state: &crate::actors::player::PlayerState) -> bool {
+        state.inventory.equipment.iter().flatten().any(|it| {
             self.item_infos
                 .get(&it.item_index)
                 .map(|i| (i.special_mode as u16 & 0x0004) != 0)
                 .unwrap_or(false)
-        });
-        let buff_hidden = state
-            .buffs
-            .iter()
-            .any(|b| crate::combat::buff::is_invisible_type(&b.buff_type));
-        let currently_invisible = self.invisible_sessions.contains(&session_id);
-        if has_clear_ring && !currently_invisible {
-            self.invisible_sessions.insert(session_id);
-            self.broadcast_object_hidden(state.object_id, true, state.map_index)
+        })
+    }
+
+    /// #2892：按 C# `MapObject.AddBuff`/`RemoveBuff`（`Server/MirObjects/MapObject.cs:654-667`、`:672-694`）
+    /// 与 `HumanObject.cs:460-478` 重算并同步玩家的**两档**可见性：
+    /// - `Hidden`（半透明 + 怪物不选中）：`Hiding`/`MoonLight`/`DarkBody` buff 或 ClearRing 宝石 → `S.ObjectHidden`；
+    /// - `Sneaking`（`Observer` → 对他人 `S.ObjectRemove`）：仅 `MoonLight`/`DarkBody` → [`Self::set_sneaking`]。
+    pub(crate) async fn sync_player_visibility(&mut self, session_id: u64) {
+        let Some(record) = self.players.get(&session_id).cloned() else {
+            return;
+        };
+        let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await else {
+            return;
+        };
+        let hidden =
+            crate::combat::buff::has_hidden(&state.buffs, self.session_has_clear_ring(&state));
+        let was_hidden = self.hidden_sessions.contains(&session_id);
+        if hidden != was_hidden {
+            if hidden {
+                self.hidden_sessions.insert(session_id);
+            } else {
+                self.hidden_sessions.remove(&session_id);
+            }
+            self.broadcast_object_hidden(state.object_id, hidden, state.map_index)
                 .await;
-            debug!("ClearRing: {} hidden by helmet gem", state.name);
-        } else if !has_clear_ring && currently_invisible && !buff_hidden {
-            self.invisible_sessions.remove(&session_id);
-            self.broadcast_object_hidden(state.object_id, false, state.map_index)
-                .await;
-            debug!("ClearRing: {} revealed (gem removed)", state.name);
+            debug!("Visibility: {} hidden={}", state.name, hidden);
         }
+        let sneaking = crate::combat::buff::has_sneaking(&state.buffs);
+        self.set_sneaking(session_id, sneaking).await;
+    }
+
+    /// #1540：ClearRing 特殊模式（C# `SpecialItemMode.ClearRing 0x0004`，头盔宝石）——常驻**半透明**
+    /// （`MapObject.cs:662-666`：`Hidden = true` + `HideFromTargets()`；**不置** `Sneaking`，
+    /// 所以他人看到 50% 透明的身影、怪物不选中，且移动/外观照常广播）。
+    /// 装备/卸下宝石后重算可见性。
+    ///
+    /// 与 C# 的差异（有意为之）：C# 每秒补一条 `BuffType.ClearRing` buff（`HumanObject.cs:501-504`），
+    /// 但该 buff 的 `BuffInfo.Visible` 为 false（`Server/MirDatabase/BuffInfo.cs:61`），
+    /// 客户端 buff 栏不显示它；本端因此只用 `hidden_sessions` 表达这份状态，不再造 buff。
+    pub(crate) async fn sync_clear_ring_visibility(&mut self, session_id: u64) {
+        self.sync_player_visibility(session_id).await;
     }
 
     /// 重新计算装备属性加成并设置到 PlayerActor

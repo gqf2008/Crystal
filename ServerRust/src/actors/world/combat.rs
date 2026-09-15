@@ -750,18 +750,20 @@ impl Message<WorldAttackRequest> for WorldActor {
         // 攻击时自动下坐骑
         self.dismount_player(msg.session_id).await;
 
-        // 攻击时打破隐身
-        if self.invisible_sessions.remove(&msg.session_id) {
-            if let Some(ref state) = attacker_state {
-                let _ = record
-                    .actor_ref
-                    .ask(crate::actors::player::RemoveBuff {
-                        // C# 破隐：`RemoveBuff` 对三种隐身变体都会一并清除（见 `player.rs` 处理器）
-                        buff_type: crate::combat::buff::BuffType::Hiding,
-                    })
-                    .await;
-                self.reveal_player_to_others(msg.session_id, state).await;
-            }
+        // 攻击时打破隐身（C# `HumanObject.cs:2870-2886` Attack：`RemoveBuff(MoonLight/DarkBody)`）
+        if self.invisible_sessions.contains(&msg.session_id)
+            || self.hidden_sessions.contains(&msg.session_id)
+        {
+            let _ = record
+                .actor_ref
+                .ask(crate::actors::player::RemoveBuff {
+                    // C# 破隐：`RemoveBuff` 对三种隐身变体都会一并清除（见 `player.rs` 处理器）
+                    buff_type: crate::combat::buff::BuffType::Hiding,
+                })
+                .await;
+            // #2892：清完 buff 后按 `Hidden`/`Sneaking` 两档重算并广播——
+            // ClearRing 宝石仍在 → 保持半透明；否则补发 `Hidden=false` + `ObjectPlayer`
+            self.sync_player_visibility(msg.session_id).await;
         }
 
         if let (Some(ref state), Ok(Some(result))) = (
@@ -3347,8 +3349,10 @@ impl Message<MagicRequest> for WorldActor {
         // 施法时自动下坐骑
         self.dismount_player(msg.session_id).await;
 
-        // 施法时打破隐身
-        if self.invisible_sessions.remove(&msg.session_id) {
+        // 施法时打破隐身（C# `HumanObject.cs:3418-3422` MagicAttack：`RemoveBuff(MoonLight/DarkBody)`）
+        if self.invisible_sessions.contains(&msg.session_id)
+            || self.hidden_sessions.contains(&msg.session_id)
+        {
             let _ = record
                 .actor_ref
                 .ask(crate::actors::player::RemoveBuff {
@@ -3356,7 +3360,7 @@ impl Message<MagicRequest> for WorldActor {
                     buff_type: crate::combat::buff::BuffType::Hiding,
                 })
                 .await;
-            self.reveal_player_to_others(msg.session_id, &state).await;
+            self.sync_player_visibility(msg.session_id).await;
         }
 
         // Pre-allocate object ID for persistent spells (before spell_db borrow)
@@ -4103,11 +4107,8 @@ impl Message<MagicRequest> for WorldActor {
                     .actor_ref
                     .ask(crate::actors::player::ApplyBuff { buff })
                     .await;
-                self.invisible_sessions.insert(msg.session_id);
-                if let Ok(Some(st)) = record.actor_ref.ask(GetPlayerState).await {
-                    self.broadcast_object_hidden(st.object_id, true, st.map_index)
-                        .await;
-                }
+                // #2892：C# `AddBuff(Hiding)` 只置 `Hidden`（半透明 + 怪物不选中），**不置** `Sneaking`
+                self.sync_player_visibility(msg.session_id).await;
                 debug!("Magic: {} casts Hiding (invisible)", state.name);
             }
             // MassHiding：组队隐身（目标点 3×3 友方 + C# 时长公式）
@@ -4154,18 +4155,15 @@ impl Message<MagicRequest> for WorldActor {
                         duration_ticks,
                         5,
                     );
-                    let Some(other) = self.players.get(sid) else {
+                    let Some(other) = self.players.get(sid).cloned() else {
                         continue;
                     };
                     let _ = other
                         .actor_ref
                         .ask(crate::actors::player::ApplyBuff { buff })
                         .await;
-                    self.invisible_sessions.insert(*sid);
-                    if let Ok(Some(st)) = other.actor_ref.ask(GetPlayerState).await {
-                        self.broadcast_object_hidden(st.object_id, true, st.map_index)
-                            .await;
-                    }
+                    // #2892：`Hiding` 只置 `Hidden`（半透明），不置 `Sneaking`
+                    self.sync_player_visibility(*sid).await;
                 }
                 debug!(
                     "Magic: {} casts MassHiding on {} targets ({}s)",
@@ -5724,13 +5722,9 @@ impl Message<MagicRequest> for WorldActor {
                     .actor_ref
                     .ask(crate::actors::player::ApplyBuff { buff })
                     .await;
-                self.invisible_sessions.insert(msg.session_id);
-                if let Ok(Some(st)) = record.actor_ref.ask(GetPlayerState).await {
-                    self.broadcast_object_hidden(st.object_id, true, st.map_index)
-                        .await;
-                }
-                // C# AddBuff(BuffType.MoonLight) → Sneaking=true（MapObject.cs:659-661）+ ObjectSneaking 广播
-                self.set_sneaking(msg.session_id, true).await;
+                // #2892：C# `AddBuff(MoonLight)` → `Hidden = true` **且** `Sneaking = true`
+                // （`MapObject.cs:656-661`：后者经 `Observer` → `S.ObjectRemove`，并广播 `ObjectSneaking`）
+                self.sync_player_visibility(msg.session_id).await;
                 debug!(
                     "Magic: {} casts MoonLight (invisible {}s)",
                     state.name,
@@ -5916,6 +5910,25 @@ impl Message<MagicRequest> for WorldActor {
                         );
                     }
                 }
+                // C# `HumanObject.cs:5361-5363`：分身召唤成功后
+                // `duration = (GetAttackPower(MinAC,MaxAC) + (Lv+1)*5) * 500ms` + `AddBuff(BuffType.DarkBody)`
+                // → `MapObject.cs:656-661`：`Hidden = true` **且** `Sneaking = true`
+                let ac_power = crate::combat::attack::get_attack_power(
+                    state.min_ac + state.bonus_min_ac,
+                    state.max_ac + state.bonus_max_ac,
+                    0,
+                );
+                let duration_ticks = ((ac_power + (spell_level as i32 + 1) * 5).max(1) as u32) * 5;
+                let buff = crate::combat::buff::BuffInstance::new(
+                    crate::combat::buff::BuffType::DarkBody,
+                    duration_ticks,
+                    5,
+                );
+                let _ = record
+                    .actor_ref
+                    .ask(crate::actors::player::ApplyBuff { buff })
+                    .await;
+                self.sync_player_visibility(msg.session_id).await;
             }
             // HeavenlySword：直线 3 格 AoE（物理 AC 防御，类似 Thrusting 但更长）
             SPELL_HEAVENLY_SWORD => {
@@ -7388,8 +7401,8 @@ impl Message<MagicRequest> for WorldActor {
             }
             // #345：MoonMist —— 隐身 + 自身周围 5×5 AC 范围伤害（C# HumanObject.cs:4565 + Map.cs:1347）
             SPELL_MOON_MIST => {
-                // C#：已有 MoonLight buff 时不重复施放
-                if self.invisible_sessions.contains(&msg.session_id) {
+                // C# `HumanObject.cs:4565`：已有 MoonLight buff 时不重复施放
+                if crate::combat::buff::has_sneaking(&state.buffs) {
                     debug!(
                         "Magic: {} casts MoonMist but already invisible, skipped",
                         state.name
@@ -7413,11 +7426,8 @@ impl Message<MagicRequest> for WorldActor {
                     .actor_ref
                     .ask(crate::actors::player::ApplyBuff { buff })
                     .await;
-                self.invisible_sessions.insert(msg.session_id);
-                if let Ok(Some(st)) = record.actor_ref.ask(GetPlayerState).await {
-                    self.broadcast_object_hidden(st.object_id, true, st.map_index)
-                        .await;
-                }
+                // #2892：C# `AddBuff(MoonLight)` → `Hidden = true` + `Sneaking = true`
+                self.sync_player_visibility(msg.session_id).await;
                 let raw_damage = (magic_stat + power / 2).max(1);
                 let attacker_stats = state.to_combat_stats();
                 // C# Map.cs:1347：location ±2 = 5×5
