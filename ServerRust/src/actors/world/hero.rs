@@ -115,6 +115,30 @@ impl WorldActor {
             .map(|ai| (ai.max_hp, ai.max_mp))
             .unwrap_or((0, 0));
 
+        // #2892 批57：英雄属性（C# `CharacterDialog` 状态页/状态二页）——
+        // 复用英雄属性计算（基础 + 装备/宝石 + 职业被动）与 C# 的当前负重口径
+        let hero_magics: Vec<(i32, u8)> = state
+            .hero_magics
+            .iter()
+            .map(|m| (m.spell as i32 - 3, m.level))
+            .collect();
+        let hero_stats = super::hero_stats::compute_hero_stats(
+            hero.class,
+            hero.level as i32,
+            &state.hero_inventory.equipment,
+            &self.item_infos,
+            &hero_magics,
+        );
+        let current_bag_weight = super::hero_stats::hero_current_bag_weight(
+            &state.hero_inventory.backpack,
+            &self.item_infos,
+        );
+        let (current_wear_weight, current_hand_weight) =
+            super::hero_stats::hero_current_wear_weights(
+                &state.hero_inventory.equipment,
+                &self.item_infos,
+            );
+
         let packet = mir2_shared::packets::server::hero::HeroInformation {
             object_id: hero_oid,
             name: hero.name.clone(),
@@ -126,9 +150,42 @@ impl WorldActor {
             mp: ai_mp,
             max_hp: ai_max_hp,
             max_mp: ai_max_mp,
-            experience: 0,
+            // #2892 批57：C# 用 `actor.Experience`（状态二页「经验 %」），此前硬编码 0
+            experience: hero.experience as i64,
             // #2418：英雄信息下发用当前 max_experience（替代硬编码 100）
             max_experience: hero.max_experience as i64,
+            min_ac: hero_stats.min_ac,
+            max_ac: hero_stats.max_ac,
+            min_mac: hero_stats.min_mac,
+            max_mac: hero_stats.max_mac,
+            min_dc: hero_stats.min_dc,
+            max_dc: hero_stats.max_dc,
+            min_mc: hero_stats.min_mc,
+            max_mc: hero_stats.max_mc,
+            min_sc: hero_stats.min_sc,
+            max_sc: hero_stats.max_sc,
+            critical_rate: hero_stats.critical_rate,
+            critical_damage: hero_stats.critical_damage,
+            attack_speed: hero_stats.attack_speed,
+            accuracy: hero_stats.accuracy,
+            agility: hero_stats.agility,
+            luck: hero_stats.luck,
+            magic_resist: hero_stats.magic_resist,
+            poison_resist: hero_stats.poison_resist,
+            health_recovery: hero_stats.health_recovery,
+            spell_recovery: hero_stats.spell_recovery,
+            // C# `Stat.PoisonRecovery`：本端装备聚合未产出该属性（玩家侧由 DB 持久列提供），英雄恒 0
+            poison_recovery: 0,
+            holy: hero_stats.holy,
+            freezing: hero_stats.freezing,
+            poison_attack: hero_stats.poison_attack,
+            current_bag_weight,
+            current_wear_weight,
+            current_hand_weight,
+            // 上限（C# `Stats[Stat.BagWeight/WearWeight/HandWeight]`，状态二页 `"{当前}/{上限}"`）
+            max_bag_weight: hero_stats.bag_weight,
+            max_wear_weight: hero_stats.wear_weight,
+            max_hand_weight: hero_stats.hand_weight,
             inventory: Some(inventory),
             equipment: Some(equipment),
             // #218：英雄魔法（DB C# 编号 → 客户端 +3）

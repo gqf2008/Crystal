@@ -12,7 +12,7 @@ use crate::game::sets::GameSet;
 use crate::map_renderer::GameLibraries;
 use crate::resources::libraries::LibraryName;
 use crate::ui::scroll_list::{spawn_scroll_bar, ScrollList};
-use crate::ui::sprite_ui::{shared_cjk_font, UiCjkFont, UiEntity, UiFont};
+use crate::ui::sprite_ui::{UiCjkFont, UiEntity, UiFont};
 use crate::ui::theme::{
     load_lib_image, spawn_icon_button, spawn_label, spawn_panel, spawn_scroll_bar_ui, UiScrollList,
 };

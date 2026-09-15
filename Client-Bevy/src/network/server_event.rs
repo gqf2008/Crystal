@@ -11,6 +11,43 @@ use mir2_shared::packets::server::{
     chat, combat, drops, experience, item_operations, npc_interaction,
 };
 
+/// #2892 批57：英雄属性快照（C# `HeroInformation : UserInformation` 的 `Stats` 子集——
+/// 覆盖 `CharacterDialog` 状态页/状态二页用到的字段，`CharacterDialog.cs:94-133`）。
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct HeroStatsInfo {
+    /// AC/MAC/DC/MC/SC 五组最小-最大（状态页）
+    pub min_ac: i32,
+    pub max_ac: i32,
+    pub min_mac: i32,
+    pub max_mac: i32,
+    pub min_dc: i32,
+    pub max_dc: i32,
+    pub min_mc: i32,
+    pub max_mc: i32,
+    pub min_sc: i32,
+    pub max_sc: i32,
+    pub critical_rate: i32,
+    pub critical_damage: i32,
+    pub attack_speed: i32,
+    pub accuracy: i32,
+    pub agility: i32,
+    pub luck: i32,
+    pub magic_resist: i32,
+    pub poison_resist: i32,
+    pub health_recovery: i32,
+    pub spell_recovery: i32,
+    pub poison_recovery: i32,
+    pub holy: i32,
+    pub freezing: i32,
+    pub poison_attack: i32,
+    pub current_bag_weight: i32,
+    pub current_wear_weight: i32,
+    pub current_hand_weight: i32,
+    pub max_bag_weight: i32,
+    pub max_wear_weight: i32,
+    pub max_hand_weight: i32,
+}
+
 /// 服务端事件（按包类型组织；字段为消费方需要的最终值）
 /// Bevy 0.19：Message（替代旧 EventReader/EventWriter）
 #[derive(Message, Debug, Clone)]
@@ -945,6 +982,8 @@ pub enum ServerEvent {
         auto_mp_percent: u8,
         hp_item_index: i32,
         mp_item_index: i32,
+        /// #2892 批57：英雄属性（状态页/状态二页）
+        stats: HeroStatsInfo,
     },
 }
 

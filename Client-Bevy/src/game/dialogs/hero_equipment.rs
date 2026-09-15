@@ -50,11 +50,18 @@ pub struct HeroEquipmentPlugin;
 
 impl Plugin for HeroEquipmentPlugin {
     fn build(&self, app: &mut App) {
+        // #2892 批57：英雄对话框四页签 + 状态页/状态二页（`hero_pages.rs`）
+        app.init_resource::<crate::game::dialogs::hero_pages::HeroPageState>();
         app.add_systems(OnEnter(AppState::Game), spawn_hero_equipment);
         app.add_systems(OnExit(AppState::Game), cleanup_hero_equipment);
         app.add_systems(
             Update,
-            hero_equip_ui_system.run_if(in_state(AppState::Game)),
+            (
+                hero_equip_ui_system,
+                crate::game::dialogs::hero_pages::hero_pages_system,
+            )
+                .chain()
+                .run_if(in_state(AppState::Game)),
         );
     }
 }
@@ -97,13 +104,44 @@ fn spawn_hero_equipment(
         .insert((DialogRoot(DialogKind::HeroEquipment), HeroEquipWidget));
 
     commands.entity(panel).with_children(|p| {
-        // 角色页 Prguse[340]（C# CharacterPage at (8,90)，原生尺寸）
-        if let Some(h) = load_lib_image(&mut libs, &mut images, PAGE.0, PAGE.1) {
-            let (iw, ih) = match libs.0.get_image(PAGE.0, PAGE.1) {
-                Some(i) => (i.width.max(0) as f32, i.height.max(0) as f32),
-                None => (190.0, 259.0),
+        // 装备页容器（#2892 批57：页根显隐；子节点 = 角色页图 Prguse[340] + 14 装备槽）
+        crate::ui::theme::spawn_container(p, 0.0, 0.0, PANEL_SIZE.0, PANEL_SIZE.1, 8)
+            .insert(crate::game::dialogs::hero_pages::HeroPageRoot(
+                crate::game::dialogs::hero_pages::HeroPage::Equipment,
+            ))
+            .with_children(|c| {
+                // 角色页 Prguse[340]（C# CharacterPage at (8,90)，原生尺寸）
+                if let Some(h) = load_lib_image(&mut libs, &mut images, PAGE.0, PAGE.1) {
+                    let (iw, ih) = match libs.0.get_image(PAGE.0, PAGE.1) {
+                        Some(i) => (i.width.max(0) as f32, i.height.max(0) as f32),
+                        None => (190.0, 259.0),
+                    };
+                    crate::ui::theme::spawn_image(c, h, PAGE_X, PAGE_Y, iw, ih, 8);
+                }
+                // 14 个装备槽（C# `Grid`；数据渲染交给 item_cell_ui_system，#90）
+                for (pos, (rx, ry)) in EQUIP_SLOTS.iter().enumerate() {
+                    spawn_item_cell_ui(
+                        c,
+                        &mut images,
+                        &font,
+                        PAGE_X + rx,
+                        PAGE_Y + ry,
+                        SLOT_W,
+                        SLOT_H,
+                        9,
+                        pos,
+                    )
+                    .insert(HeroEquipSlot(pos));
+                }
+            });
+        // #2892 批57：C# 英雄对话框的四页签 + 状态页/状态二页（同 dialog 的另三页）
+        {
+            use crate::game::dialogs::hero_pages::{
+                spawn_hero_state_page, spawn_hero_status_page, spawn_hero_tabs,
             };
-            crate::ui::theme::spawn_image(p, h, PAGE_X, PAGE_Y, iw, ih, 8);
+            spawn_hero_tabs(p, &mut libs, &mut images);
+            spawn_hero_status_page(p, &mut libs, &mut images, &font);
+            spawn_hero_state_page(p, &mut libs, &mut images, &font);
         }
         // 关闭（C# CharacterDialog CloseButton at (241,3)）
         if let (Some(n), Some(h), Some(pr)) = (
@@ -114,21 +152,6 @@ fn spawn_hero_equipment(
             // C# 无 `Size` → art 24x21（此前 20x20 是自造尺寸）
             spawn_icon_button(p, n, h, pr, CLOSE_REL.0, CLOSE_REL.1, 24.0, 21.0, 10)
                 .insert(HeroEquipClose);
-        }
-        // 14 个装备槽（通用 UiItemCell；数据渲染交给 item_cell_ui_system，#90）
-        for (pos, (rx, ry)) in EQUIP_SLOTS.iter().enumerate() {
-            spawn_item_cell_ui(
-                p,
-                &mut images,
-                &font,
-                PAGE_X + rx,
-                PAGE_Y + ry,
-                SLOT_W,
-                SLOT_H,
-                9,
-                pos,
-            )
-            .insert(HeroEquipSlot(pos));
         }
     });
 }

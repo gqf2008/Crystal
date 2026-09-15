@@ -45,6 +45,8 @@ pub struct HeroState {
     /// 创建面板选中的职业/性别
     pub create_class: mir2_shared::enums::MirClass,
     pub create_gender: mir2_shared::enums::MirGender,
+    /// #2892 批57：英雄属性快照（状态页/状态二页；`S.HeroInformation` 下发）
+    pub stats: crate::network::server_event::HeroStatsInfo,
     /// 英雄行为（C# HeroBehaviour：0=攻击 1=反击 2=跟随 3=自定义）
     pub behaviour: mir2_shared::enums::HeroBehaviour,
     /// #2892 批C：C# `HeroSpawnState`（`S.UpdateHeroSpawnState`）——
@@ -91,6 +93,7 @@ impl Default for HeroState {
             spawn_state: mir2_shared::enums::HeroSpawnState::Unsummoned,
             auto_pot_hp: 0,
             auto_pot_mp: 0,
+            stats: crate::network::server_event::HeroStatsInfo::default(),
             inventory: Vec::new(),
             equipment: Vec::new(),
             magics: Vec::new(),
@@ -768,6 +771,7 @@ fn hero_server_events(
                 auto_mp_percent,
                 hp_item_index,
                 mp_item_index,
+                stats,
                 ..
             } => {
                 hero.inventory = inventory.clone();
@@ -790,6 +794,7 @@ fn hero_server_events(
                 }
                 hero.hp_item_index = *hp_item_index;
                 hero.mp_item_index = *mp_item_index;
+                hero.stats = stats.clone();
                 hero.message = "英雄信息已同步".to_string();
                 tracing::info!(
                     "🦸 英雄信息: 背包 {} 格 装备 {} 格 HP={} MP={}",
