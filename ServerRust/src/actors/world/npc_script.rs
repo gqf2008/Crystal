@@ -2504,13 +2504,10 @@ async fn exec_action(
                         },
                     )
                     .await;
-                    // C# AddBuff(BuffType.MoonLight/DarkBody) → Sneaking=true（MapObject.cs:659-661）
-                    if matches!(
-                        bt,
-                        crate::combat::buff::BuffType::MoonLight
-                            | crate::combat::buff::BuffType::DarkBody
-                    ) {
-                        world.set_sneaking(session_id, true).await;
+                    // #2892：buff 只是状态来源，可见性按 C# `MapObject.AddBuff`（:654-667）统一重算——
+                    // `Hiding` 半透明、`MoonLight`/`DarkBody` 另置 `Sneaking`
+                    if crate::combat::buff::is_invisible_type(&bt) {
+                        world.sync_player_visibility(session_id).await;
                     }
                     debug!("NPC GIVEBUFF: '{}' {}s -> {} ticks", buff_name, secs, ticks);
                 }

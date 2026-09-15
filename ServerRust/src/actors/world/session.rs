@@ -845,6 +845,8 @@ impl Message<StartGameRequest> for WorldActor {
             loaded_state.level_effects,
             loaded_state.guild_name.as_deref().unwrap_or(""),
             crate::actors::world::guild_rank_name(loaded_state.guild_rank),
+            // #2892：自己的 ObjectPlayer 也带 `Hidden`（C# `PlayerObject.cs:4799`）
+            crate::actors::world::player_hidden(&loaded_state),
         );
         let _ = self
             .gate_ref
@@ -2030,6 +2032,8 @@ impl WorldActor {
             target.level_effects,
             target.guild_name.as_deref().unwrap_or(""),
             crate::actors::world::guild_rank_name(target.guild_rank),
+            // #2892：`Hidden` 随进视野包下发（C# `PlayerObject.cs:4799`）
+            crate::actors::world::player_hidden(target),
         )
     }
 
@@ -2050,10 +2054,13 @@ impl WorldActor {
             if ep_state.map_index != map_index {
                 continue;
             }
-            let is_invisible = ep_state
-                .buffs
-                .iter()
-                .any(|b| crate::combat::buff::is_sneaking_type(&b.buff_type));
+            // #2892：Observer 集（`Sneaking` 或 GM `@observer`）里的玩家不进他人视野；
+            // GM 观战没有隐身 buff，只按 buff 判会漏
+            let is_invisible = self.invisible_sessions.contains(sid)
+                || ep_state
+                    .buffs
+                    .iter()
+                    .any(|b| crate::combat::buff::is_sneaking_type(&b.buff_type));
             if is_invisible {
                 continue;
             }
@@ -2077,10 +2084,11 @@ impl WorldActor {
         mover_state: &crate::actors::player::PlayerState,
         map_index: u16,
     ) {
-        if mover_state
-            .buffs
-            .iter()
-            .any(|b| crate::combat::buff::is_sneaking_type(&b.buff_type))
+        if self.invisible_sessions.contains(&mover_session)
+            || mover_state
+                .buffs
+                .iter()
+                .any(|b| crate::combat::buff::is_sneaking_type(&b.buff_type))
         {
             return;
         }

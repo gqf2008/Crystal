@@ -5896,6 +5896,27 @@ impl Message<MagicRequest> for WorldActor {
                                 "Magic: {} casts DarkBody -> clone #{} at ({},{})",
                                 state.name, new_oid, state.x, state.y
                             );
+                            // C# `HumanObject.cs:5361-5363`：**分身召唤成功后**才
+                            // `AddBuff(BuffType.DarkBody, (GetAttackPower(MinAC,MaxAC)+(Lv+1)*5)*500ms)`
+                            // → `MapObject.cs:656-661`：`Hidden = true` **且** `Sneaking = true`
+                            // （C# `:5343-5344` 在怪物信息缺失时直接 return，不上 buff）
+                            let ac_power = crate::combat::attack::get_attack_power(
+                                state.min_ac + state.bonus_min_ac,
+                                state.max_ac + state.bonus_max_ac,
+                                0,
+                            );
+                            let duration_ticks =
+                                ((ac_power + (spell_level as i32 + 1) * 5).max(1) as u32) * 5;
+                            let buff = crate::combat::buff::BuffInstance::new(
+                                crate::combat::buff::BuffType::DarkBody,
+                                duration_ticks,
+                                5,
+                            );
+                            let _ = record
+                                .actor_ref
+                                .ask(crate::actors::player::ApplyBuff { buff })
+                                .await;
+                            self.sync_player_visibility(msg.session_id).await;
                         } else {
                             warn!(
                                 "DarkBody '{}' found index {} but no MonsterInfo",
@@ -5910,25 +5931,6 @@ impl Message<MagicRequest> for WorldActor {
                         );
                     }
                 }
-                // C# `HumanObject.cs:5361-5363`：分身召唤成功后
-                // `duration = (GetAttackPower(MinAC,MaxAC) + (Lv+1)*5) * 500ms` + `AddBuff(BuffType.DarkBody)`
-                // → `MapObject.cs:656-661`：`Hidden = true` **且** `Sneaking = true`
-                let ac_power = crate::combat::attack::get_attack_power(
-                    state.min_ac + state.bonus_min_ac,
-                    state.max_ac + state.bonus_max_ac,
-                    0,
-                );
-                let duration_ticks = ((ac_power + (spell_level as i32 + 1) * 5).max(1) as u32) * 5;
-                let buff = crate::combat::buff::BuffInstance::new(
-                    crate::combat::buff::BuffType::DarkBody,
-                    duration_ticks,
-                    5,
-                );
-                let _ = record
-                    .actor_ref
-                    .ask(crate::actors::player::ApplyBuff { buff })
-                    .await;
-                self.sync_player_visibility(msg.session_id).await;
             }
             // HeavenlySword：直线 3 格 AoE（物理 AC 防御，类似 Thrusting 但更长）
             SPELL_HEAVENLY_SWORD => {
@@ -7401,8 +7403,13 @@ impl Message<MagicRequest> for WorldActor {
             }
             // #345：MoonMist —— 隐身 + 自身周围 5×5 AC 范围伤害（C# HumanObject.cs:4565 + Map.cs:1347）
             SPELL_MOON_MIST => {
-                // C# `HumanObject.cs:4565`：已有 MoonLight buff 时不重复施放
-                if crate::combat::buff::has_sneaking(&state.buffs) {
+                // C# `HumanObject.cs:4567-4568`：已有 `MoonLight` buff 时不重复施放
+                // （只判 MoonLight，`DarkBody` 不阻止 MoonMist）
+                if state
+                    .buffs
+                    .iter()
+                    .any(|b| matches!(b.buff_type, crate::combat::buff::BuffType::MoonLight))
+                {
                     debug!(
                         "Magic: {} casts MoonMist but already invisible, skipped",
                         state.name

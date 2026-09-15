@@ -2781,7 +2781,7 @@ impl WorldActor {
 
     /// 发送 ObjectPlayer 给同地图其他玩家，使该玩家重新出现在他人视野中
     pub(crate) async fn reveal_player_to_others(
-        &self,
+        &mut self,
         session_id: u64,
         state: &crate::actors::player::PlayerState,
     ) {
@@ -2827,6 +2827,7 @@ impl WorldActor {
             state.level_effects,
             state.guild_name.as_deref().unwrap_or(""),
             guild_rank_name(state.guild_rank),
+            player_hidden(state),
         );
         for (sid, record) in &self.players {
             if *sid == session_id {
@@ -2844,8 +2845,14 @@ impl WorldActor {
                 }
             }
         }
-        let still_hidden =
-            crate::combat::buff::has_hidden(&state.buffs, self.session_has_clear_ring(state));
+        // 回写缓存，避免 `hidden_sessions` 与刚从 actor 读到的状态漂移
+        //（否则下一次 `sync_player_visibility` 会以为「没变化」而不补发包）
+        let still_hidden = player_hidden(state);
+        if still_hidden {
+            self.hidden_sessions.insert(session_id);
+        } else {
+            self.hidden_sessions.remove(&session_id);
+        }
         self.broadcast_object_hidden(state.object_id, still_hidden, state.map_index)
             .await;
     }
@@ -3901,6 +3908,7 @@ impl WorldActor {
             state.level_effects,
             state.guild_name.as_deref().unwrap_or(""),
             guild_rank_name(state.guild_rank),
+            player_hidden(state),
         );
         let player_map_index = state.map_index;
         for (sid, other_record) in &self.players {
@@ -9598,17 +9606,6 @@ impl WorldActor {
         }
     }
 
-    /// #2892：玩家是否装备带 `SpecialItemMode.ClearRing 0x0004` 的装备（C# `PlayerObject.cs:7197` 头盔宝石
-    /// → `HumanObject.cs:501-504` 每秒补 `BuffType.ClearRing`）。
-    fn session_has_clear_ring(&self, state: &crate::actors::player::PlayerState) -> bool {
-        state.inventory.equipment.iter().flatten().any(|it| {
-            self.item_infos
-                .get(&it.item_index)
-                .map(|i| (i.special_mode as u16 & 0x0004) != 0)
-                .unwrap_or(false)
-        })
-    }
-
     /// #2892：按 C# `MapObject.AddBuff`/`RemoveBuff`（`Server/MirObjects/MapObject.cs:654-667`、`:672-694`）
     /// 与 `HumanObject.cs:460-478` 重算并同步玩家的**两档**可见性：
     /// - `Hidden`（半透明 + 怪物不选中）：`Hiding`/`MoonLight`/`DarkBody` buff 或 ClearRing 宝石 → `S.ObjectHidden`；
@@ -9620,8 +9617,7 @@ impl WorldActor {
         let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await else {
             return;
         };
-        let hidden =
-            crate::combat::buff::has_hidden(&state.buffs, self.session_has_clear_ring(&state));
+        let hidden = player_hidden(&state);
         let was_hidden = self.hidden_sessions.contains(&session_id);
         if hidden != was_hidden {
             if hidden {
@@ -12557,6 +12553,16 @@ fn build_user_information_packet(
     build_packet_bytes(ServerPacketIds::UserInformation as i16, &body)
 }
 
+/// #2892：玩家是否处于 C# `MapObject.Hidden`（半透明 + 怪物不选中）——
+/// `Hiding`/`MoonLight`/`DarkBody` buff 或 ClearRing 特殊模式（含槽位宝石，破损装备跳过）。
+/// 与 C# 一致：`PlayerObject.cs:4799` 把 `Hidden` 放进 `ObjectPlayer` 包。
+pub(crate) fn player_hidden(state: &crate::actors::player::PlayerState) -> bool {
+    crate::combat::buff::has_hidden(
+        &state.buffs,
+        has_special_equipped(state, mir2_shared::enums::SpecialItemMode::CLEAR_RING),
+    )
+}
+
 /// 构建 ObjectPlayer 数据包（其他玩家进入视野）
 /// #1410：构建 S.ObjectName body（[ObjectID u32][Name dotnet]，C# ServerPackets ObjectName）
 fn object_name_body(object_id: u32, name: &str) -> Vec<u8> {
@@ -12586,6 +12592,8 @@ pub(crate) fn build_object_player_packet(
     // #1374：行会名/职位名（C# ObjectPlayer GuildName/GuildRankName）
     guild_name: &str,
     guild_rank_name: &str,
+    // #2892：C# `PlayerObject.cs:4799` `Hidden = Hidden`（半透明档随进视野包下发）
+    hidden: bool,
 ) -> Vec<u8> {
     use mir2_shared::enums::ServerPacketIds;
     let mut body = Vec::new();
@@ -12608,8 +12616,8 @@ pub(crate) fn build_object_player_packet(
     body.extend_from_slice(&armor.to_le_bytes()); // armour
     body.extend_from_slice(&0u16.to_le_bytes()); // poison=None (client reads u16)
     body.push(0u8); // dead=false
-    body.push(0u8); // hidden=false
-                    // SharedRust SpellEffect::None=3（C# 从 0 开始），写 0 会让客户端 try_from 失败
+    body.push(u8::from(hidden)); // hidden（#2892：C# `Hidden`）
+                                 // SharedRust SpellEffect::None=3（C# 从 0 开始），写 0 会让客户端 try_from 失败
     body.push(mir2_shared::enums::SpellEffect::None as u8); // effect=None
     body.push(0u8); // wing_effect
     body.push(0u8); // extra=false
