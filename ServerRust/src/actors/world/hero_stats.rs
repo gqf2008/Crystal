@@ -29,6 +29,18 @@ pub struct HeroStats {
     pub max_sc: i32,
     pub accuracy: i32,
     pub agility: i32,
+    // ===== #2892 批57：C# `CharacterDialog` 状态页/状态二页所需属性 =====
+    // （`Client/MirScenes/Dialogs/CharacterDialog.cs:94-133`；装备来源见 `EquipmentBonuses`）
+    pub luck: i32,
+    pub critical_rate: i32,
+    pub critical_damage: i32,
+    pub magic_resist: i32,
+    pub freezing: i32,
+    pub health_recovery: i32,
+    pub spell_recovery: i32,
+    pub attack_speed: i32,
+    pub poison_resist: i32,
+    pub holy: i32,
     pub bag_weight: i32,
     pub wear_weight: i32,
     pub hand_weight: i32,
@@ -177,6 +189,16 @@ pub fn hero_base_stats(class: MirClass, level: i32) -> HeroStats {
         max_mac: calc_stat(0, max_mac_g, level),
         accuracy: acc_b,
         agility: agi_b,
+        luck: 0,
+        critical_rate: 0,
+        critical_damage: 0,
+        magic_resist: 0,
+        freezing: 0,
+        health_recovery: 0,
+        spell_recovery: 0,
+        attack_speed: 0,
+        poison_resist: 0,
+        holy: 0,
     }
 }
 
@@ -205,6 +227,16 @@ pub fn compute_hero_stats(
     s.max_sc += b.max_sc;
     s.accuracy += b.accuracy;
     s.agility += b.agility;
+    s.luck += b.luck;
+    s.critical_rate += b.critical_rate;
+    s.critical_damage += b.critical_damage;
+    s.magic_resist += b.magic_resist;
+    s.freezing += b.freezing;
+    s.health_recovery += b.health_recovery;
+    s.spell_recovery += b.spell_recovery;
+    s.attack_speed += b.attack_speed;
+    s.poison_resist += b.poison_resist;
+    s.holy += b.holy;
     s.bag_weight += b.bag_weight;
     s.wear_weight += b.wear_weight;
     s.hand_weight += b.hand_weight;
@@ -233,6 +265,52 @@ pub fn compute_hero_stats(
         }
     }
     s
+}
+
+/// C# `HumanObject.RefreshBagWeight`（`HumanObject.cs:1782-1794`）：
+/// `CurrentBagWeight = Σ item.Weight`（`UserItem.Weight = Info.Weight * Count`）。
+pub fn hero_current_bag_weight(
+    backpack: &[Option<crate::actors::inventory::InventorySlot>],
+    item_infos: &std::collections::HashMap<i32, crate::db::ItemInfo>,
+) -> i32 {
+    backpack
+        .iter()
+        .flatten()
+        .map(|slot| item_weight(&slot.item, item_infos))
+        .sum()
+}
+
+/// C# `HumanObject.RefreshEquipmentStats`（`HumanObject.cs:1831-1834`）：
+/// 武器/火把计入 `CurrentHandWeight`，其余装备计入 `CurrentWearWeight`。
+pub fn hero_current_wear_weights(
+    equipment: &[Option<mir2_shared::data::item::UserItem>],
+    item_infos: &std::collections::HashMap<i32, crate::db::ItemInfo>,
+) -> (i32, i32) {
+    let mut hand = 0;
+    let mut wear = 0;
+    for item in equipment.iter().flatten() {
+        let Some(info) = item_infos.get(&item.item_index) else {
+            continue;
+        };
+        // C# `ItemType.Weapon = 1` / `Torch = 2`
+        if info.item_type == 1 || info.item_type == 2 {
+            hand += item_weight(item, item_infos);
+        } else {
+            wear += item_weight(item, item_infos);
+        }
+    }
+    (wear, hand)
+}
+
+/// C# `UserItem.Weight => Info.Weight * Count`
+fn item_weight(
+    item: &mir2_shared::data::item::UserItem,
+    item_infos: &std::collections::HashMap<i32, crate::db::ItemInfo>,
+) -> i32 {
+    item_infos
+        .get(&item.item_index)
+        .map(|info| info.weight.saturating_mul(item.count.max(1) as i32))
+        .unwrap_or(0)
 }
 
 #[cfg(test)]

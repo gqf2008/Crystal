@@ -4286,7 +4286,70 @@ fn hero_equipment_dialog_aligned() {
         "[记录] C# 英雄装备关闭键右缘 265 比面板宽 264 多 1px（原版即如此）"
     );
 
-    println!("  ✓ 英雄装备窗 Title[504]@(760,0) + Prguse[340]@(8,90) + 14 槽对齐 C#");
+    // #2892 批57：C# 英雄对话框的四页签 `Title[500..503]` 64x20 @(8/70/132/194, 70)
+    // （`CharacterDialog.cs:146-200`）——同属该 dialog 的状态页/状态二页 `Title[506]/[507]` @(8,90)
+    use client_bevy::game::dialogs::hero_pages as hp;
+    for idx in [500usize, 501, 502, 503] {
+        let (tw, th) = libs.size(LibraryName::Title, idx);
+        assert_eq!(
+            (tw, th),
+            hp::HERO_TAB_SIZE,
+            "[尺寸] 英雄页签 Title[{idx}] 应为 64x20"
+        );
+    }
+    for (page, _, _, x) in hp::HERO_TABS {
+        assert_inside(
+            &format!("英雄页签{page:?}"),
+            x,
+            hp::HERO_TAB_Y,
+            hp::HERO_TAB_SIZE.0,
+            hp::HERO_TAB_SIZE.1,
+            0.0,
+            0.0,
+            he::PANEL_SIZE.0,
+            he::PANEL_SIZE.1,
+        );
+    }
+    // 状态页/状态二页底图（数据包缺图时本端只画标签，故有图才校验尺寸）
+    for idx in [506usize, 507] {
+        if libs.0.get_image(LibraryName::Title, idx).is_some() {
+            let (w, hgt) = libs.size(LibraryName::Title, idx);
+            assert_inside(
+                &format!("英雄状态页 Title[{idx}]"),
+                hp::HERO_PAGE_X,
+                hp::HERO_PAGE_Y,
+                w,
+                hgt,
+                0.0,
+                0.0,
+                he::PANEL_SIZE.0,
+                he::PANEL_SIZE.1,
+            );
+        } else {
+            println!("  · 数据包缺 Title[{idx}]：英雄状态页只画标签（C# 原版此时也不画页图）");
+        }
+    }
+    // 两页共 25 个标签：x=126、y=20+18i，全部落在面板内
+    for (page, count) in [("状态页", 13usize), ("状态二页", 12)] {
+        for i in 0..count {
+            let y = hp::HERO_LABEL_Y0 + i as f32 * hp::HERO_LABEL_DY;
+            assert_inside(
+                &format!("英雄{page}标签{i}"),
+                hp::HERO_LABEL_X,
+                hp::HERO_PAGE_Y + y,
+                40.0,
+                12.0,
+                0.0,
+                0.0,
+                he::PANEL_SIZE.0,
+                he::PANEL_SIZE.1,
+            );
+        }
+    }
+
+    println!(
+        "  ✓ 英雄装备窗 Title[504]@(760,0) + Prguse[340]@(8,90) + 14 槽 + 四页签/状态页对齐 C#"
+    );
 }
 
 /// 英雄技能窗（C# `CharacterDialog` 的 `SkillPage`，`CharacterDialog.cs:136-143`）：

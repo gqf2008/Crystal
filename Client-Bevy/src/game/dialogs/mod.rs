@@ -26,6 +26,7 @@ pub mod hero;
 pub mod hero_belt;
 pub mod hero_equipment;
 pub mod hero_inventory;
+pub mod hero_pages;
 pub mod hero_skills;
 /// #2892 批C：C# `MirInputBox`（服务端发起式取名提示框）
 pub mod input_box;

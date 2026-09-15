@@ -102,14 +102,44 @@ fn spawn_hero_skills(
         .insert((DialogRoot(DialogKind::HeroSkill), HeroSkillWidget));
 
     commands.entity(panel).with_children(|p| {
-        // 技能页 Title[508]（C# SkillPage at (8,90)，原生尺寸）
-        if let Some(h) = load_lib_image(&mut libs, &mut images, PAGE.0, PAGE.1) {
-            let (iw, ih) = match libs.0.get_image(PAGE.0, PAGE.1) {
-                Some(i) => (i.width.max(0) as f32, i.height.max(0) as f32),
-                None => (190.0, 259.0),
-            };
-            spawn_image(p, h, PAGE_X, PAGE_Y, iw, ih, 8);
-        }
+        // 技能页容器（#2892 批57：页根显隐；子节点 = 技能页图 Title[508] + 7 行）
+        crate::ui::theme::spawn_container(p, 0.0, 0.0, PANEL_SIZE.0, PANEL_SIZE.1, 8)
+            .insert(crate::game::dialogs::hero_pages::HeroPageRoot(
+                crate::game::dialogs::hero_pages::HeroPage::Skill,
+            ))
+            .with_children(|c| {
+                // 技能页 Title[508]（C# SkillPage at (8,90)，原生尺寸）
+                if let Some(h) = load_lib_image(&mut libs, &mut images, PAGE.0, PAGE.1) {
+                    let (iw, ih) = match libs.0.get_image(PAGE.0, PAGE.1) {
+                        Some(i) => (i.width.max(0) as f32, i.height.max(0) as f32),
+                        None => (190.0, 259.0),
+                    };
+                    spawn_image(c, h, PAGE_X, PAGE_Y, iw, ih, 8);
+                }
+                for i in 0..ROWS {
+                    spawn_container(
+                        c,
+                        PAGE_X + ROW_X,
+                        PAGE_Y + ROW_Y + i as f32 * ROW_H,
+                        ROW_W,
+                        ROW_H,
+                        9,
+                    )
+                    .insert((Button, HeroSkillRow(i), Visibility::Hidden))
+                    .with_children(|cc| {
+                        let white = images.add(crate::map_renderer::make_image(
+                            vec![255, 255, 255, 255],
+                            1,
+                            1,
+                        ));
+                        spawn_image(cc, white, 36.0, 0.0, 36.0, 36.0, 10).insert(HeroSkillIcon(i));
+                        spawn_label(cc, &font, "", 78.0, 6.0, 12.0, Color::WHITE, 10)
+                            .insert(HeroSkillText(i));
+                    });
+                }
+            });
+        // #2892 批57：四页签（点装备/状态页会切到 HeroEquipment 窗的对应页）
+        crate::game::dialogs::hero_pages::spawn_hero_tabs(p, &mut libs, &mut images);
         // 关闭（C# CharacterDialog CloseButton at (241,3)）
         if let (Some(n), Some(h), Some(pr)) = (
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 360),
@@ -119,28 +149,6 @@ fn spawn_hero_skills(
             // C# 无 `Size` → art 24x21（此前 20x20 是自造尺寸）
             spawn_icon_button(p, n, h, pr, CLOSE_REL.0, CLOSE_REL.1, 24.0, 21.0, 10)
                 .insert(HeroSkillClose);
-        }
-        // 7 行技能：容器（行显隐随容器）+ 图标 + 文本
-        for i in 0..ROWS {
-            spawn_container(
-                p,
-                PAGE_X + ROW_X,
-                PAGE_Y + ROW_Y + i as f32 * ROW_H,
-                ROW_W,
-                ROW_H,
-                9,
-            )
-            .insert((Button, HeroSkillRow(i), Visibility::Hidden))
-            .with_children(|c| {
-                let white = images.add(crate::map_renderer::make_image(
-                    vec![255, 255, 255, 255],
-                    1,
-                    1,
-                ));
-                spawn_image(c, white, 36.0, 0.0, 36.0, 36.0, 10).insert(HeroSkillIcon(i));
-                spawn_label(c, &font, "", 78.0, 6.0, 12.0, Color::WHITE, 10)
-                    .insert(HeroSkillText(i));
-            });
         }
     });
 }

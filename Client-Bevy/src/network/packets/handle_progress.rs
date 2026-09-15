@@ -1053,6 +1053,38 @@ pub(crate) fn handle_progress(
                     auto_mp_percent: p.auto_mp_percent,
                     hp_item_index: p.hp_item_index,
                     mp_item_index: p.mp_item_index,
+                    stats: crate::network::server_event::HeroStatsInfo {
+                        min_ac: p.min_ac,
+                        max_ac: p.max_ac,
+                        min_mac: p.min_mac,
+                        max_mac: p.max_mac,
+                        min_dc: p.min_dc,
+                        max_dc: p.max_dc,
+                        min_mc: p.min_mc,
+                        max_mc: p.max_mc,
+                        min_sc: p.min_sc,
+                        max_sc: p.max_sc,
+                        critical_rate: p.critical_rate,
+                        critical_damage: p.critical_damage,
+                        attack_speed: p.attack_speed,
+                        accuracy: p.accuracy,
+                        agility: p.agility,
+                        luck: p.luck,
+                        magic_resist: p.magic_resist,
+                        poison_resist: p.poison_resist,
+                        health_recovery: p.health_recovery,
+                        spell_recovery: p.spell_recovery,
+                        poison_recovery: p.poison_recovery,
+                        holy: p.holy,
+                        freezing: p.freezing,
+                        poison_attack: p.poison_attack,
+                        current_bag_weight: p.current_bag_weight,
+                        current_wear_weight: p.current_wear_weight,
+                        current_hand_weight: p.current_hand_weight,
+                        max_bag_weight: p.max_bag_weight,
+                        max_wear_weight: p.max_wear_weight,
+                        max_hand_weight: p.max_hand_weight,
+                    },
                 });
                 tracing::info!(
                     "🦸 HeroInformation: {} Lv.{} 背包 {} 格 装备 {} 格",
@@ -1497,6 +1529,37 @@ mod tests {
             auto_mp_percent: 30,
             hp_item_index: 5,
             mp_item_index: 6,
+            // #2892 批57：英雄属性块（状态页/状态二页）——wire 契约由本测试逐字段钉住
+            min_ac: 11,
+            max_ac: 22,
+            min_mac: 33,
+            max_mac: 44,
+            min_dc: 55,
+            max_dc: 66,
+            min_mc: 77,
+            max_mc: 88,
+            min_sc: 99,
+            max_sc: 111,
+            critical_rate: 12,
+            critical_damage: 150,
+            attack_speed: 700,
+            accuracy: 13,
+            agility: 14,
+            luck: 15,
+            magic_resist: 16,
+            poison_resist: 17,
+            health_recovery: 18,
+            spell_recovery: 19,
+            poison_recovery: 20,
+            holy: 21,
+            freezing: 22,
+            poison_attack: 23,
+            current_bag_weight: 120,
+            current_wear_weight: 80,
+            current_hand_weight: 30,
+            max_bag_weight: 400,
+            max_wear_weight: 200,
+            max_hand_weight: 100,
         };
         let mut body = Vec::new();
         pkt.write_body(&mut body).unwrap();
@@ -1585,6 +1648,7 @@ mod tests {
                 mp_item_index,
                 max_hp,
                 max_mp,
+                stats,
                 ..
             } => {
                 assert_eq!(name, "HeroX");
@@ -1598,6 +1662,13 @@ mod tests {
                 assert_eq!(*hp_item_index, 5);
                 assert_eq!(*mp_item_index, 6);
                 assert_eq!((*max_hp, *max_mp), (600, 300), "最大 HP/MP 应随包解出");
+                // #2892 批57：英雄属性块逐字段解码（首/尾 + 两个中段）
+                assert_eq!(stats.min_ac, 11);
+                assert_eq!(stats.max_sc, 111);
+                assert_eq!(stats.critical_damage, 150);
+                assert_eq!(stats.poison_attack, 23);
+                assert_eq!(stats.current_bag_weight, 120);
+                assert_eq!(stats.max_hand_weight, 100);
             }
             other => panic!("unexpected event: {:?}", other),
         }
