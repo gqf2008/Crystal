@@ -166,6 +166,8 @@ pub(crate) fn handle_world(
                         wing_effect: p.wing_effect,
                         mount_type: p.mount_type,
                         is_mounted: p.riding_mount,
+                        // #2892：C# `PlayerObject.cs:4799` 直接把 `Hidden` 放进 ObjectPlayer
+                        hidden: p.hidden,
                     });
                 }
                 Err(e) => {
