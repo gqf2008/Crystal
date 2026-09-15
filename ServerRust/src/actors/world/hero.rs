@@ -120,7 +120,7 @@ impl WorldActor {
         let hero_magics: Vec<(i32, u8)> = state
             .hero_magics
             .iter()
-            .map(|m| (m.spell as i32 - 3, m.level))
+            .map(|m| (m.spell - 3, m.level))
             .collect();
         let hero_stats = super::hero_stats::compute_hero_stats(
             hero.class,
