@@ -2686,27 +2686,26 @@ impl WorldActor {
                     );
                 }
             }
-            // 隐身过期检查：从 invisible_sessions 中移除已过期玩家并广播现身
-            let mut to_reveal: Vec<(u64, crate::actors::player::PlayerState)> = Vec::new();
-            for session_id in &self.invisible_sessions {
-                if let Some(record) = self.players.get(session_id) {
-                    if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
-                        let still_invisible = state
-                            .buffs
-                            .iter()
-                            .any(|b| crate::combat::buff::is_sneaking_type(&b.buff_type));
-                        if !still_invisible {
-                            to_reveal.push((*session_id, state));
-                        }
-                    }
+            // #2892：可见性过期检查——`Hidden`（`Hiding`/ClearRing → 半透明）与
+            // `Sneaking`（`MoonLight`/`DarkBody` → 对他人移除）两档都按 C# `HumanObject.cs:460-478`
+            // 的 buff 过期规则重算（`ClearRing` 宝石仍在时保持 `Hidden`）。
+            // GM `@observer` 是独立来源（`gm_observer_sessions`），不参与 buff 重算。
+            let mut candidates: Vec<u64> = self.hidden_sessions.iter().copied().collect();
+            candidates.extend(
+                self.invisible_sessions
+                    .iter()
+                    .copied()
+                    .filter(|sid| !self.gm_observer_sessions.contains(sid)),
+            );
+            candidates.sort_unstable();
+            candidates.dedup();
+            for session_id in candidates {
+                let was_observer = self.invisible_sessions.contains(&session_id);
+                self.sync_player_visibility(session_id).await;
+                if was_observer && !self.invisible_sessions.contains(&session_id) {
+                    // C#：MoonLight/DarkBody buff 移除后 `Sneaking=false`（`HumanObject.cs:474-478`）
+                    send_system_message(&self.gate_ref, session_id, "隐身效果已结束");
                 }
-            }
-            for (session_id, state) in to_reveal {
-                self.invisible_sessions.remove(&session_id);
-                self.reveal_player_to_others(session_id, &state).await;
-                // C#：MoonLight/DarkBody buff 移除后 Sneaking=false（HumanObject.cs:474-478）
-                self.set_sneaking(session_id, false).await;
-                send_system_message(&self.gate_ref, session_id, "隐身效果已结束");
             }
         }
     }
@@ -8408,12 +8407,15 @@ impl Message<Tick> for WorldActor {
                 for (session_id, record) in &self.players {
                     if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
                         if !state.is_dead {
-                            // 隐身玩家不会被怪物检测到
-                            let is_invisible = state
-                                .buffs
-                                .iter()
-                                .any(|b| crate::combat::buff::is_invisible_type(&b.buff_type));
-                            if is_invisible {
+                            // 隐身玩家不会被怪物检测到（C# `HideFromTargets()`，`MapObject.cs:660/665`）：
+                            // `Hiding`/`MoonLight`/`DarkBody` buff 或 ClearRing 宝石（#2892，
+                            // 宝石没有 buff，所以按 `hidden_sessions` 判定）
+                            let hidden = self.hidden_sessions.contains(session_id)
+                                || state
+                                    .buffs
+                                    .iter()
+                                    .any(|b| crate::combat::buff::is_invisible_type(&b.buff_type));
+                            if hidden {
                                 continue;
                             }
                             let in_safe = self

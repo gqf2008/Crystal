@@ -4273,6 +4273,8 @@ impl WorldActor {
             0, // 英雄无等级特效
             state.guild_name.as_deref().unwrap_or(""),
             crate::actors::world::guild_rank_name(state.guild_rank),
+            // #2892：C# 英雄（`HeroObject`）没有 Hidden/Sneaking 档，恒 false
+            false,
         );
         // #1381：英雄生成只广播主人所在地图（C# CurrentMap.Broadcast）
         let owner_map = state.map_index;

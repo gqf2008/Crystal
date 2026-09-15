@@ -362,6 +362,20 @@ pub fn is_sneaking_type(t: &BuffType) -> bool {
     matches!(t, BuffType::MoonLight | BuffType::DarkBody)
 }
 
+/// C# `MapObject.Hidden`（`Server/MirObjects/MapObject.cs:80-92` 属性 + `:654-667` `AddBuff`）：
+/// `Hiding`/`MoonLight`/`DarkBody` 任一 buff，或头盔宝石 `SpecialItemMode.ClearRing 0x0004`
+/// （`:501-504` 每秒补 `BuffType.ClearRing`）都会置 `Hidden = true` —— 半透明 + `HideFromTargets()`。
+/// 与「对他人移除」的 [`is_sneaking_type`] **不是**同一档，勿混用。
+pub fn has_hidden(buffs: &[BuffInstance], has_clear_ring: bool) -> bool {
+    has_clear_ring || buffs.iter().any(|b| is_invisible_type(&b.buff_type))
+}
+
+/// C# `MapObject.Sneaking`（`MapObject.cs:126-131` → `SneakingActive` → `Observer` → `S.ObjectRemove`）：
+/// 只有 `MoonLight`/`DarkBody` 置位（`Hiding`/`ClearRing` 不置，见 [`is_sneaking_type`]）。
+pub fn has_sneaking(buffs: &[BuffInstance]) -> bool {
+    buffs.iter().any(|b| is_sneaking_type(&b.buff_type))
+}
+
 /// 检查是否隐身
 pub fn is_invisible(buffs: &[BuffInstance]) -> bool {
     buffs.iter().any(|b| is_invisible_type(&b.buff_type))
@@ -635,5 +649,37 @@ mod tests {
         }
         assert!(!is_sneaking_type(&BuffType::Stun));
         assert!(!is_sneaking_type(&BuffType::AttackBoost { bonus: 0 }));
+    }
+
+    /// #2892：`Hidden` 与 `Sneaking` 是**两档**（C# `Server/MirObjects/MapObject.cs:654-667`）——
+    /// `Hiding` 只置 `Hidden`；`ClearRing`（无 buff，来自装备宝石）也只置 `Hidden`；
+    /// `MoonLight`/`DarkBody` 两档都置。
+    ///
+    /// 阳性对照（2026-09-15 实测）：
+    /// ① 把 `has_hidden` 改成只看 `has_clear_ring`（忽略 buff）→ `has_hidden(&[hiding], false)` 断言 FAILED；
+    /// ② 把 `has_sneaking` 改成 `is_invisible_type` → `!has_sneaking(&[hiding])` 断言 FAILED。
+    #[test]
+    fn hidden_and_sneaking_are_separate_tiers() {
+        let mk = |t: BuffType| BuffInstance::new(t, 10, 1);
+        let hiding = mk(BuffType::Hiding);
+        let moon = mk(BuffType::MoonLight);
+        let dark = mk(BuffType::DarkBody);
+
+        assert!(
+            has_hidden(std::slice::from_ref(&hiding), false),
+            "Hiding 置 Hidden（半透明）"
+        );
+        assert!(
+            !has_sneaking(std::slice::from_ref(&hiding)),
+            "Hiding 不置 Sneaking（不 ObjectRemove）"
+        );
+        assert!(has_hidden(&[], true), "ClearRing 宝石置 Hidden");
+        assert!(!has_sneaking(&[]), "ClearRing 不置 Sneaking");
+        for b in [moon, dark] {
+            assert!(has_hidden(std::slice::from_ref(&b), false));
+            assert!(has_sneaking(std::slice::from_ref(&b)));
+        }
+        assert!(!has_hidden(&[], false), "无 buff 无宝石 → 不 Hidden");
+        assert!(!has_sneaking(&[]), "无 buff → 不 Sneaking");
     }
 }

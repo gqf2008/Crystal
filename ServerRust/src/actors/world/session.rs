@@ -845,6 +845,8 @@ impl Message<StartGameRequest> for WorldActor {
             loaded_state.level_effects,
             loaded_state.guild_name.as_deref().unwrap_or(""),
             crate::actors::world::guild_rank_name(loaded_state.guild_rank),
+            // #2892：自己的 ObjectPlayer 也带 `Hidden`（C# `PlayerObject.cs:4799`）
+            crate::actors::world::player_hidden(&loaded_state),
         );
         let _ = self
             .gate_ref
@@ -859,15 +861,13 @@ impl Message<StartGameRequest> for WorldActor {
             .await;
 
         // 向已有玩家发送新玩家的 ObjectPlayer（隐身新玩家不发送，#1651/#1653）
-        if loaded_state
-            .buffs
-            .iter()
-            .any(|b| crate::combat::buff::is_sneaking_type(&b.buff_type))
-        {
-            self.invisible_sessions.insert(msg.session_id);
-        }
         self.send_player_to_map(msg.session_id, &loaded_state, loaded_state.map_index)
             .await;
+        // #2892：登录后按 C# `MapObject.Hidden`/`Sneaking` 两档重算并广播——
+        // `Hiding`/ClearRing 宝石 → `S.ObjectHidden(true)`（他人看到 50% 透明）；
+        // `MoonLight`/`DarkBody` → `Observer` → `S.ObjectRemove`。
+        // 顺序放在 `ObjectPlayer` 之后，避免 `ObjectHidden` 先于对象创建到达（客户端会丢弃）。
+        self.sync_player_visibility(msg.session_id).await;
 
         // 发送游戏进入序列（使用真实状态数据）
         send_game_entry_sequence(
@@ -2032,6 +2032,8 @@ impl WorldActor {
             target.level_effects,
             target.guild_name.as_deref().unwrap_or(""),
             crate::actors::world::guild_rank_name(target.guild_rank),
+            // #2892：`Hidden` 随进视野包下发（C# `PlayerObject.cs:4799`）
+            crate::actors::world::player_hidden(target),
         )
     }
 
@@ -2052,10 +2054,13 @@ impl WorldActor {
             if ep_state.map_index != map_index {
                 continue;
             }
-            let is_invisible = ep_state
-                .buffs
-                .iter()
-                .any(|b| crate::combat::buff::is_sneaking_type(&b.buff_type));
+            // #2892：Observer 集（`Sneaking` 或 GM `@observer`）里的玩家不进他人视野；
+            // GM 观战没有隐身 buff，只按 buff 判会漏
+            let is_invisible = self.invisible_sessions.contains(sid)
+                || ep_state
+                    .buffs
+                    .iter()
+                    .any(|b| crate::combat::buff::is_sneaking_type(&b.buff_type));
             if is_invisible {
                 continue;
             }
@@ -2079,10 +2084,11 @@ impl WorldActor {
         mover_state: &crate::actors::player::PlayerState,
         map_index: u16,
     ) {
-        if mover_state
-            .buffs
-            .iter()
-            .any(|b| crate::combat::buff::is_sneaking_type(&b.buff_type))
+        if self.invisible_sessions.contains(&mover_session)
+            || mover_state
+                .buffs
+                .iter()
+                .any(|b| crate::combat::buff::is_sneaking_type(&b.buff_type))
         {
             return;
         }
@@ -2268,6 +2274,9 @@ impl Message<PlayerDisconnected> for WorldActor {
             None => return,
         };
         self.invisible_sessions.remove(&msg.session_id);
+        self.hidden_sessions.remove(&msg.session_id);
+        self.gm_observer_sessions.remove(&msg.session_id);
+        self.sneaking_sessions.remove(&msg.session_id);
         // #2573：离线清理观战链接（该会话作为观察者或目标的任一角色）
         self.remove_observe_links(msg.session_id);
         self.session_npc_page.remove(&msg.session_id);
@@ -2393,6 +2402,9 @@ impl Message<PlayerLogOut> for WorldActor {
             }
         };
         self.invisible_sessions.remove(&msg.session_id);
+        self.hidden_sessions.remove(&msg.session_id);
+        self.gm_observer_sessions.remove(&msg.session_id);
+        self.sneaking_sessions.remove(&msg.session_id);
         // #2573：离线清理观战链接（该会话作为观察者或目标的任一角色）
         self.remove_observe_links(msg.session_id);
         self.session_npc_page.remove(&msg.session_id);
@@ -4731,11 +4743,13 @@ impl Message<ChatRequest> for WorldActor {
                             );
                         }
 
-                        // @observer（C# case "OBSERVER"：GM 观战隐身）
+                        // @observer（C# `PlayerObject.cs:2460` case "OBSERVER"：`Observer = !Observer`
+                        // → `MapObject.cs:95-109`：`Observer=true` 发 `S.ObjectRemove`）
                         "OBSERVER" => {
                             if let Ok(Some(st)) = record.actor_ref.ask(GetPlayerState).await {
-                                let hidden = !self.invisible_sessions.contains(&msg.session_id);
+                                let hidden = !self.gm_observer_sessions.contains(&msg.session_id);
                                 if hidden {
+                                    self.gm_observer_sessions.insert(msg.session_id);
                                     self.invisible_sessions.insert(msg.session_id);
                                     self.hide_player_from_others(msg.session_id, &st).await;
                                     send_system_message(
@@ -4744,6 +4758,7 @@ impl Message<ChatRequest> for WorldActor {
                                         "已进入观战模式（对他人隐身）",
                                     );
                                 } else {
+                                    self.gm_observer_sessions.remove(&msg.session_id);
                                     self.invisible_sessions.remove(&msg.session_id);
                                     self.reveal_player_to_others(msg.session_id, &st).await;
                                     send_system_message(

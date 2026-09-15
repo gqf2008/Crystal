@@ -6662,6 +6662,8 @@ impl SocialActor {
             state.level_effects,
             state.guild_name.as_deref().unwrap_or(""),
             crate::actors::world::guild_rank_name(state.guild_rank),
+            // #2892：`Hidden` 随进视野包下发（C# `PlayerObject.cs:4799`）
+            crate::actors::world::player_hidden(&state),
         );
         let _ = self
             .gate_ref
