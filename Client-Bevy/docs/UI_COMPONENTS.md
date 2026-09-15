@@ -455,8 +455,11 @@
   （tag 31/10/32 ↔ C# `BuffDialog.cs:435-460` 的图标 17/65/70，文案取 `Chinese.json` 的 `BuffType_*` +
   `InvisibleToManyMonsters*`/`InvisibleToPlayersAndMonstersAtDistance`）；脚本 `GIVEBUFF` 关键字
   （`HIDING`/`INVISIBILITY`/`MOONLIGHT`/`DARKBODY`）与法术（`SPELL_HIDING`/MassHiding→`Hiding`、
-  `SPELL_MOON_LIGHT`/MoonMist→`MoonLight`）各自映射；破隐（攻击/施法）与「是否隐身」判定统一走
-  `combat::buff::is_invisible_type`，`RemoveBuff` 对三种一并清除。
+  `SPELL_MOON_LIGHT`/MoonMist→`MoonLight`）各自映射；「是否隐身」判定走 `combat::buff::is_invisible_type`。
+  **破隐粒度已在 #2934 对齐 C#**（`Server/MirObjects/HumanObject.cs`）：攻击 `:2869-2886` / 施法
+  `:3418-3422` 只破 `MoonLight`/`DarkBody`（`Hiding` 与 ClearRing 宝石保留）、走 `:2460-2463` 只破
+  `Hiding`、跑 `:2540-2545` 在 `Hidden && !Sneaking` 时破三档；`RemoveBuff` 回到「一次只清一个变体」
+  （单一真源 `world::ATTACK_BREAK_BUFFS` / `world::move_break_buffs`）。
   **批41 已把 `Impact`/`Rage` 拆开**（见下条）；**仍未拆**：毒类（`Poison/Slow/Frozen/Stun`）取 `PoisonType`
   的图标与名称；展开态面板宽度按 art 宽度布局
   （C# `Size.Width` 展开时被改写成 `count*23`，比 art 窄 ~21px）；渐隐动画（C# `Opacity 0→1`，0.2/55ms）
@@ -466,8 +469,12 @@
   → `S.ObjectHidden` 半透明 + 怪物不选中）与 `Sneaking`（`MoonLight`/`DarkBody` → `Observer` → `S.ObjectRemove`
   → 对他人完全消失）分别维护（`hidden_sessions` / `invisible_sessions` / `gm_observer_sessions`）；
   `SPELL_DARK_BODY` 已补 `AddBuff(DarkBody)`（`:5361-5363`，且只在分身真的召唤成功后）。
-  **仍存差异**：C# `Walk`（`HumanObject.cs:2460-2463`）只破 `Hiding`、`Run`（`:2540-2545`）破三档，
-  本端走/跑不破隐，且 `RemoveBuff(Hiding)` 一次清三档（批D 单元② 的既有决定）→ 待单独一批按 C# 分档。
+  客户端侧（PR #2929）：`HiddenObject` 是半透明的唯一真源，`apply_hidden_alpha` 只改本对象图层
+  （修掉旧实现「遍历全部 `SpriteLayer` 把**全场**变半透明」），`S.ObjectHidden(147)` 进事件总线、
+  `ObjectPlayer.hidden` 进视野即带上；三档过期/装卸/登录全部走 `sync_player_visibility` 增量发包。
+  **破隐粒度（攻击/施法/走/跑）已在 #2934 对齐**：见上条 `ATTACK_BREAK_BUFFS` / `move_break_buffs`，
+  C# `Walk`（`HumanObject.cs:2460-2463`）只破 `Hiding`、`Run`（`:2540-2545`）在 `Hidden && !Sneaking`
+  时破三档 —— 原文「本端走/跑不破隐，且 `RemoveBuff(Hiding)` 一次清三档」已不成立。
 
 - Buff 攻击加成拆档（批41 / #2892 批D 单元②续，已对齐）：
   C# 把「Buff 药水的攻击加成」与「战士怒气」分成两个 BuffType —— `Impact`（图标 249，
@@ -509,13 +516,13 @@
     各自根面板挂 `NotDraggable`（`dialogs/mod.rs:146` + `dialog_drag_system` 的 `Without<NotDraggable>`），
     且**该 kind 的每一个根**都要挂：拖动系统按 kind 聚合包围盒、起拖后平移全部可见根（`mod.rs:699-771`）。
     `HeroManageDialog`（`HeroDialogs.cs:804`）显式 `Movable = true` → `DialogKind::HeroManage` 保持可拖。
-  - **结构性差异（C# 可拖、本端不拖，按设计记录）**：药水腰带（`BeltDialog`，`InventoryDialog.cs:610`）、
-    聊天窗（`ChatDialog`，`MainDialogs.cs:697`）、英雄腰带（`HeroBeltDialog`，`HeroDialogs.cs:258`）、
-    好友备注（`MemoDialog`，`FriendDialog.cs:492`）、钓鱼状态（`FishingStatusDialog`，`FishingDialog.cs:176`）、
-    下拉框（`MirDropDownBox.cs:196`）——本端这些分别是「跟随 HUD/背包档位的锚定面板」「HUD 常驻 sprite 层」
-    「并入同窗的状态行」「模态输入框」「UI 弹层」，都没有独立的可拖窗口与位置状态；补齐需先引入
-    「窗口拖动偏移 + 持久化」模型（`hero_belt.rs` 头部已单独记录同样理由）。技能栏（`SkillBarDialog`，
-    `MainDialogs.cs:1535`）**已对齐**：本端技能栏有自己的拖动 + 位置持久化（#1235）。
+  - **结构性差异（C# 可拖、本端不拖）——#2892 批D ① 已全部收口**：药水腰带（`BeltDialog`，
+    `InventoryDialog.cs:610`）、英雄腰带（`HeroBeltDialog`，`HeroDialogs.cs:258`）批42；聊天窗
+    （`ChatDialog`，`MainDialogs.cs:697`）批43；下拉框（`MirDropDownBox.cs:196`）批44；钓鱼状态
+    （`FishingStatusDialog`，`FishingDialog.cs:176`）批44 核对后为**天然满足**；好友备注（`MemoDialog`，
+    `FriendDialog.cs:492`）批45 **按 C# 拆窗**后挂 `DialogRoot` 吃通用拖动。
+    技能栏（`SkillBarDialog`，`MainDialogs.cs:1535`）本就**已对齐**：本端技能栏有自己的拖动 +
+    位置持久化（#1235）。
 
 - 窗口可拖动性（批42 / #2892 批D 单元① 起）：上一条列的「结构性差异」开始收口。
   C# 这 6 个控件都是 `Movable = true`，拖动是 `MirControl.OnMouseMove` 直接把 `Location` 加上鼠标位移，
@@ -524,10 +531,9 @@
   本端新增 `dialogs/window_drag.rs`：`WindowDragState`（每窗口的基准矩形 + 拖动偏移 + 抓取点）
   + `window_drag_system`（按下命中 → 跟随光标 → 松开结束；位置钳在 1024x768 画布内，与技能栏同一套
   `viewport_to_world_2d` 光标换算），命中优先级 `DropDown > Memo > Chat > FishingStatus > PotionBelt > HeroBelt`。
-  **已接**：药水腰带 `BeltDialog`（`InventoryDialog.cs:610`）、英雄腰带 `HeroBeltDialog`（`HeroDialogs.cs:258`）——
-  面板与子控件（格/数字/旋转/关闭）按同一偏移整体平移，命中测试同步带上偏移。
-  **已接**：聊天窗 `ChatDialog`（批43 落地，见下条）；**未接**（后续单元）：好友备注 `MemoDialog`、
-  钓鱼状态 `FishingStatusDialog`、下拉框 `MirDropDownBox`。
+  **已接（6/6）**：药水腰带 + 英雄腰带（批42：面板与子控件「格/数字/旋转/关闭」按同一偏移整体平移，
+  命中测试同步带上偏移）、聊天窗（批43）、下拉框（批44：弹出面板位置 = 基准 + 偏移，命中/滚轮/点外
+  关闭都跟随）、钓鱼状态（批44 核对为天然满足）、好友备注（批45 拆窗后吃通用拖动）。
 
 - 聊天窗拖动（批43 / #2892 批D 单元①续 已对齐）：C# `ChatDialog` 是一个容器
   （面板 + 消息行 + 滚动钮 + 滚动条 + `ChatTextBox` 输入框，`MainDialogs.cs:585-601`）→ 整体随拖动移动；
@@ -660,8 +666,12 @@
   等价 C# 的逐行滚动；保存仍是 `Prguse[554..555..556]` @(20,342) → `C.EditGuildNotice`。
   行高 16px × 20 行 = 320 ≤ 330（C# 用 8F 字体、约 24 行可见；本端字号不同故行数不同，已断言不越框）。
   **记录**：C# 翻页钮控件宽 16 @x=337 → 右缘 353 比页宽 352 多 1px（原版页面不裁剪，只有对话框整体裁剪）。
-  **批53 已补**：位置条 `Prguse2[206]` @(337,16)（`Movable` 拖动）+ 滚轮滚动（C# `GuildDialog.cs:1343-1410`
-  的 `interval = 289/(len-25)` 整数除、`y ∈ [16,298]`、`index ∈ [0,len-25]`、光标在页内才生效）。
+  **批53 已补**：位置条 `NoticePositionBar` = `Prguse2[206]` @(337,16)（`GuildDialog.cs:68/301-311`，
+  `Movable`，实测 12x18）拖动 + 滚轮滚动——拖动 `NoticePositionBar_OnMoving`（`:1356-1389`）按
+  `index = floor((y-16)/interval)` 反算首行、定位 `UpdateNoticeScrollPosition`（`:1343-1354`）
+  `interval = 289/(len-25)`（**int/int 截断除**，y 夹 `[16, NoticeDownButton.Y-20 = 298]`）、滚轮
+  `NoticePanel_MouseWheel`（`:1390-1410`）仅光标在页内生效且到顶/到底停住；公告不足一屏（`len <= 25`，
+  C# 该分支会除零）时位置条隐藏。
   **差异**：C# 保存/编辑键是同位置二选一显示（`NoticeEditButton` 560..562），本端只挂保存键。
 
 - 行会 NoticePage（批38 / #2892 批B 单元11 正文渲染，批47 已并入多行编辑）：
