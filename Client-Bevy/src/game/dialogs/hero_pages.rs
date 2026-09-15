@@ -10,9 +10,9 @@
 //   - `StatePage`  = `Title[507]` @(8,90)：经验 %、背包/穿戴/手持重量、魔法躲避、毒躲避、
 //     体力/魔法/毒恢复、神圣、冰冻、毒攻击（标签同上，`:121-133`）
 //
-// 本端英雄侧是**两个独立窗**（`HeroEquipment` / `HeroSkill`，见 UI_COMPONENTS §7），
-// 因此两窗各自挂同一组四页签；页签点击改共享的 [`HeroPageState`]，
-// 装备/状态/状态二页落在 `HeroEquipment` 窗内就地切换，技能页切到 `HeroSkill` 窗。
+// 本端与 C# 同构：**一个**英雄对话框窗（`DialogKind::HeroEquipment`）承载四页，
+// 页签点击改 [`HeroPageState`] → `hero_pages_system` 就地切页（页容器显隐）。
+// `HeroInventoryDialog` 在 C# 里本就是独立窗，故 `HeroInventory` 保持独立 kind。
 // ============================================================================
 
 use bevy::prelude::*;
@@ -296,19 +296,13 @@ pub fn hero_pages_system(
             continue;
         }
         pages.page = tab.0;
-        // C# 四页同属一个 dialog；本端装备/状态/状态二页在 `HeroEquipment` 窗、
-        // 技能页在 `HeroSkill` 窗 → 按页路由窗口，其余窗口关闭
-        if tab.0 == HeroPage::Skill {
-            mgr.open(DialogKind::HeroSkill);
-            mgr.close(DialogKind::HeroEquipment);
-        } else {
-            mgr.open(DialogKind::HeroEquipment);
-            mgr.close(DialogKind::HeroSkill);
-        }
+        // #2892 批58：四页同属**一个**英雄对话框窗（C# `CharacterDialog`）→ 就地切页，
+        // 只保证窗口处于打开状态
+        mgr.open(DialogKind::HeroEquipment);
         tracing::info!("🦸 英雄窗切页 → {:?}", tab.0);
     }
 
-    // 页根显隐：装备页只在 HeroEquipment 窗、技能页只在 HeroSkill 窗，状态两页随当前页
+    // 页根显隐：#2892 批58 起四页同属一个英雄窗 → 只显示 `HeroPageState.page` 对应的页
     let page = pages.page;
     for (root, mut vis) in &mut roots {
         let want = if root.0 == page {

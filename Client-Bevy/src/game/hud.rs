@@ -387,6 +387,8 @@ fn hero_menu_system(
     state: Res<HeroMenuOpen>,
     hero: Res<crate::game::dialogs::hero::HeroState>,
     mut mgr: ResMut<DialogManager>,
+    // #2892 批58：英雄四页同属一个窗 → 菜单按页切换（`HeroPageState`）
+    mut hero_pages: ResMut<crate::game::dialogs::hero_pages::HeroPageState>,
     menu_btns: Query<(&UiButton, &HeroMenuBtn)>,
     mut vis: Query<&mut Visibility, Or<(With<HeroMenuPanel>, With<HeroMenuBtn>)>>,
 ) {
@@ -413,14 +415,17 @@ fn hero_menu_system(
         }
         // 三钮动作与 C# 同义（`HeroDialogs.cs:396-455`）：
         // 技能 → `HeroDialog.ShowSkillPage()`；背包 → `HeroInventoryDialog.Visible` 取反；
-        // 角色 → `HeroDialog.ShowCharacterPage()`；本端装备/技能是两个独立窗 → 打开目标页时关另一页
+        // 角色 → `HeroDialog.ShowCharacterPage()`。
+        // #2892 批58：装备/状态/状态二/技能**同属一个**英雄对话框窗 → 只切页（`HeroPageState`）
         match kind.0 {
             0 => {
-                if mgr.is_open(DialogKind::HeroSkill) {
-                    mgr.close(DialogKind::HeroSkill);
-                } else {
+                if mgr.is_open(DialogKind::HeroEquipment)
+                    && hero_pages.page == crate::game::dialogs::hero_pages::HeroPage::Skill
+                {
                     mgr.close(DialogKind::HeroEquipment);
-                    mgr.open(DialogKind::HeroSkill);
+                } else {
+                    hero_pages.page = crate::game::dialogs::hero_pages::HeroPage::Skill;
+                    mgr.open(DialogKind::HeroEquipment);
                 }
                 tracing::info!("🦸 英雄菜单：技能页");
             }
@@ -429,10 +434,12 @@ fn hero_menu_system(
                 tracing::info!("🦸 英雄菜单：背包");
             }
             _ => {
-                if mgr.is_open(DialogKind::HeroEquipment) {
+                if mgr.is_open(DialogKind::HeroEquipment)
+                    && hero_pages.page == crate::game::dialogs::hero_pages::HeroPage::Equipment
+                {
                     mgr.close(DialogKind::HeroEquipment);
                 } else {
-                    mgr.close(DialogKind::HeroSkill);
+                    hero_pages.page = crate::game::dialogs::hero_pages::HeroPage::Equipment;
                     mgr.open(DialogKind::HeroEquipment);
                 }
                 tracing::info!("🦸 英雄菜单：角色页");
@@ -2049,6 +2056,8 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
         app.init_resource::<DialogManager>();
+        // #2892 批58：英雄菜单按页切换 → 需 `HeroPageState`
+        app.init_resource::<crate::game::dialogs::hero_pages::HeroPageState>();
         app.insert_resource(NetConnection::default());
         app.insert_resource(HeroMenuOpen(true));
         let mut hero = HeroState::default();
@@ -2115,7 +2124,7 @@ mod tests {
             "State > None → 召唤钮可见"
         );
 
-        // 点「技能」→ 开 HeroSkill
+        // 点「技能」→ 开英雄对话框并切到技能页（#2892 批58：四页共窗）
         let click = |app: &mut App, e: Entity| {
             app.world_mut().entity_mut(e).insert(UiButton {
                 rect: (0.0, 0.0, 16.0, 16.0),
@@ -2124,17 +2133,29 @@ mod tests {
             app.update();
         };
         click(&mut app, btns[0]);
+        {
+            let mgr = app.world().resource::<DialogManager>();
+            assert!(mgr.is_open(DialogKind::HeroEquipment));
+            assert_eq!(
+                app.world()
+                    .resource::<crate::game::dialogs::hero_pages::HeroPageState>()
+                    .page,
+                crate::game::dialogs::hero_pages::HeroPage::Skill,
+                "英雄菜单「技能」→ 英雄对话框技能页"
+            );
+        }
+        // 点「角色」→ 同一个窗切回装备页
+        click(&mut app, btns[2]);
         assert!(app
             .world()
             .resource::<DialogManager>()
-            .is_open(DialogKind::HeroSkill));
-        // 点「角色」→ 开 HeroEquipment 并关掉技能页
-        click(&mut app, btns[2]);
-        let mgr = app.world().resource::<DialogManager>();
-        assert!(mgr.is_open(DialogKind::HeroEquipment));
-        assert!(
-            !mgr.is_open(DialogKind::HeroSkill),
-            "两页互斥（C# 同属一窗）"
+            .is_open(DialogKind::HeroEquipment));
+        assert_eq!(
+            app.world()
+                .resource::<crate::game::dialogs::hero_pages::HeroPageState>()
+                .page,
+            crate::game::dialogs::hero_pages::HeroPage::Equipment,
+            "英雄菜单「角色」→ 英雄对话框装备页"
         );
         // 点「背包」→ 开关 HeroInventory
         click(&mut app, btns[1]);

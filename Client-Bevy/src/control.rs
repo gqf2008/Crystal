@@ -592,7 +592,9 @@ fn parse_dialog_kind(s: &str) -> Option<DialogKind> {
         "report" => D::Report,
         "hero_inventory" => D::HeroInventory,
         "hero_equipment" => D::HeroEquipment,
-        "hero_skill" => D::HeroSkill,
+        // #2892 批58：C# 无独立英雄技能窗（`HeroDialog.SkillPage`）——`hero_skill` 保留为
+        // **别名**（→ `HeroEquipment`，与 `npc_drop`/`trust_merchant` 同类），仅用于实机取证的窗口开关
+        "hero_skill" => D::HeroEquipment,
         "creature" => D::Creature,
         // #2599 历史别名：真实现见 market.rs / sell_panel.rs
         "trust_merchant" => D::Market,
@@ -659,7 +661,6 @@ fn has_rpc_mapping(kind: DialogKind) -> bool {
         | D::Report
         | D::HeroInventory
         | D::HeroEquipment
-        | D::HeroSkill
         | D::Creature
         | D::ItemRental
         | D::GuildTerritory
@@ -1101,8 +1102,8 @@ mod tests {
         ];
         // #2599：trust_merchant/npc_drop 是历史别名（→ Market/Npc，真实现移壳后保留工具兼容），
         // 与 market/npc 重复映射——互异断言计数时先去掉这 2 个别名。
-        // 名单与 witness 一致：每个可解析名都有 RPC 映射；DialogKind 共 47 个变体，
-        // GuestTrade 刻意排除——枚举级穷尽由 has_rpc_mapping 的无通配 match 编译期保证）
+        // 名单与 witness 一致：每个可解析名都有 RPC 映射；DialogKind 共 48 个变体（#2892 批58 删 HeroSkill），
+        // GuestTrade/Memo/FishingStatus 刻意排除——枚举级穷尽由 has_rpc_mapping 的无通配 match 编译期保证）
         let parsed: Vec<DialogKind> = all.iter().map(|s| parse_dialog_kind(s).unwrap()).collect();
         let uniq: Vec<&DialogKind> = {
             let mut seen: Vec<&DialogKind> = parsed.iter().collect();
@@ -1113,8 +1114,8 @@ mod tests {
         assert_eq!(all.len(), 48);
         assert_eq!(
             uniq.len(),
-            46,
-            "48 个名字（含 trust_merchant/npc_drop 两个别名）应映射到 46 个不同变体"
+            45,
+            "48 个名字（含 trust_merchant/npc_drop/hero_skill 三个别名）应映射到 45 个不同变体"
         );
         // 名单与 witness 一致：每个可解析名都有 RPC 映射
         assert!(

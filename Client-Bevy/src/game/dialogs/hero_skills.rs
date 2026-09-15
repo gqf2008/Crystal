@@ -1,21 +1,19 @@
 // ============================================================================
-// 英雄技能对话框（#218）
-// 参考：C# HeroDialog SkillPage = CharacterDialog(MirGridType.HeroEquipment)
-//   - 背景 Title[504]，角色页 Title[508] at (8,90)，7 行技能（MagIcon2 图标 + 名称/等级/经验）
+// 英雄技能**页**内容（#218 → #2892 批58 合并回 C# 的单窗结构）
+// 参考：C# `HeroDialog.SkillPage` = 同一个 `CharacterDialog(MirGridType.HeroEquipment, hero)`
+//   - 页图 Title[508] at (8,90)，7 行技能（MagIcon2 图标 + 名称/等级/经验）
+//   - 页签/页容器与窗口由 `hero_equipment.rs`（英雄对话框）持有；本模块只提供
+//     「技能页容器 + 7 行」的生成与行内容刷新
 // ============================================================================
 
 use bevy::prelude::*;
 
 use crate::game::dialogs::assign_key::AssignKeyState;
 use crate::game::dialogs::hero::HeroState;
-use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
 use crate::map_renderer::GameLibraries;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
-use crate::ui::sprite_ui::UiFont;
-use crate::ui::theme::{
-    load_lib_image, spawn_container, spawn_icon_button, spawn_image, spawn_label, spawn_panel,
-};
+use crate::ui::theme::{load_lib_image, spawn_container, spawn_image, spawn_label};
 
 /// C# `CharacterDialog(HeroEquipment, hero)`：`Index = 504` @ `(ScreenWidth-264, 0)`（`CharacterDialog.cs:32-34`）
 pub const PANEL: (LibraryName, usize) = (LibraryName::Title, 504);
@@ -36,12 +34,7 @@ pub const ROW_Y: f32 = 8.0;
 pub const ROW_H: f32 = 33.0;
 pub const ROW_W: f32 = 231.0;
 
-#[derive(Component)]
-pub struct HeroSkillWidget;
-
-#[derive(Component)]
-pub struct HeroSkillClose;
-
+/// 技能行容器（页图 + 7 行由 [`spawn_hero_skill_page`] 生成）
 #[derive(Component)]
 pub struct HeroSkillRow(pub usize);
 
@@ -55,114 +48,68 @@ pub struct HeroSkillPlugin;
 
 impl Plugin for HeroSkillPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(OnEnter(AppState::Game), spawn_hero_skills);
-        app.add_systems(OnExit(AppState::Game), cleanup_hero_skills);
+        // 窗口（含页签/关闭键）由 `HeroEquipmentPlugin`（英雄对话框）持有；
+        // 本插件只负责技能页**行内容**刷新与行点击（Shift+F1..F8 分配）
         app.add_systems(
             Update,
-            hero_skill_ui_system.run_if(in_state(AppState::Game)),
+            hero_skill_rows_system.run_if(in_state(AppState::Game)),
         );
     }
 }
 
-fn cleanup_hero_skills(mut commands: Commands, roots: Query<Entity, With<DialogRoot>>) {
-    for e in roots.iter() {
-        commands.entity(e).despawn();
-    }
-}
-
-#[allow(clippy::too_many_arguments)]
-fn spawn_hero_skills(
-    mut commands: Commands,
-    mut libs: ResMut<GameLibraries>,
-    mut images: ResMut<Assets<Image>>,
-    mut fonts: ResMut<Assets<Font>>,
-    mut ui_font: ResMut<UiFont>,
+/// 生成「技能页」（`Title[508]` @(8,90) + 7 行）到英雄对话框窗口内。
+/// 由 `hero_equipment.rs`（英雄对话框）调用；页显隐由 `hero_pages_system` 统一控制。
+pub fn spawn_hero_skill_page(
+    parent: &mut ChildSpawnerCommands,
+    libs: &mut GameLibraries,
+    images: &mut Assets<Image>,
+    font: &Handle<Font>,
 ) {
-    libs.0.ensure_initialized();
-    if !ui_font.0.is_strong() {
-        ui_font.0 = crate::ui::sprite_ui::load_ui_font(&mut fonts);
-    }
-    let font = ui_font.0.clone();
-
-    // 背景 Title[504]（264x380 @ (760,0)）+ 技能页 Title[508]
-    let Some(bg) = load_lib_image(&mut libs, &mut images, PANEL.0, PANEL.1) else {
-        return;
-    };
-    let panel = spawn_panel(
-        &mut commands,
-        bg,
-        DIALOG_X,
-        DIALOG_Y,
-        PANEL_SIZE.0,
-        PANEL_SIZE.1,
-        30,
-    );
-    commands
-        .entity(panel)
-        .insert((DialogRoot(DialogKind::HeroSkill), HeroSkillWidget));
-
-    commands.entity(panel).with_children(|p| {
-        // 技能页容器（#2892 批57：页根显隐；子节点 = 技能页图 Title[508] + 7 行）
-        crate::ui::theme::spawn_container(p, 0.0, 0.0, PANEL_SIZE.0, PANEL_SIZE.1, 8)
-            .insert(crate::game::dialogs::hero_pages::HeroPageRoot(
-                crate::game::dialogs::hero_pages::HeroPage::Skill,
-            ))
-            .with_children(|c| {
-                // 技能页 Title[508]（C# SkillPage at (8,90)，原生尺寸）
-                if let Some(h) = load_lib_image(&mut libs, &mut images, PAGE.0, PAGE.1) {
-                    let (iw, ih) = match libs.0.get_image(PAGE.0, PAGE.1) {
-                        Some(i) => (i.width.max(0) as f32, i.height.max(0) as f32),
-                        None => (190.0, 259.0),
-                    };
-                    spawn_image(c, h, PAGE_X, PAGE_Y, iw, ih, 8);
-                }
-                for i in 0..ROWS {
-                    spawn_container(
-                        c,
-                        PAGE_X + ROW_X,
-                        PAGE_Y + ROW_Y + i as f32 * ROW_H,
-                        ROW_W,
-                        ROW_H,
-                        9,
-                    )
-                    .insert((Button, HeroSkillRow(i), Visibility::Hidden))
-                    .with_children(|cc| {
-                        let white = images.add(crate::map_renderer::make_image(
-                            vec![255, 255, 255, 255],
-                            1,
-                            1,
-                        ));
-                        spawn_image(cc, white, 36.0, 0.0, 36.0, 36.0, 10).insert(HeroSkillIcon(i));
-                        spawn_label(cc, &font, "", 78.0, 6.0, 12.0, Color::WHITE, 10)
-                            .insert(HeroSkillText(i));
-                    });
-                }
-            });
-        // #2892 批57：四页签（点装备/状态页会切到 HeroEquipment 窗的对应页）
-        crate::game::dialogs::hero_pages::spawn_hero_tabs(p, &mut libs, &mut images);
-        // 关闭（C# CharacterDialog CloseButton at (241,3)）
-        if let (Some(n), Some(h), Some(pr)) = (
-            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 360),
-            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 361),
-            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 362),
-        ) {
-            // C# 无 `Size` → art 24x21（此前 20x20 是自造尺寸）
-            spawn_icon_button(p, n, h, pr, CLOSE_REL.0, CLOSE_REL.1, 24.0, 21.0, 10)
-                .insert(HeroSkillClose);
-        }
-    });
+    crate::ui::theme::spawn_container(parent, 0.0, 0.0, PANEL_SIZE.0, PANEL_SIZE.1, 8)
+        .insert(crate::game::dialogs::hero_pages::HeroPageRoot(
+            crate::game::dialogs::hero_pages::HeroPage::Skill,
+        ))
+        .with_children(|c| {
+            // 技能页 Title[508]（C# SkillPage at (8,90)，原生尺寸）
+            if let Some(h) = load_lib_image(libs, images, PAGE.0, PAGE.1) {
+                let (iw, ih) = match libs.0.get_image(PAGE.0, PAGE.1) {
+                    Some(i) => (i.width.max(0) as f32, i.height.max(0) as f32),
+                    None => (190.0, 259.0),
+                };
+                spawn_image(c, h, PAGE_X, PAGE_Y, iw, ih, 8);
+            }
+            for i in 0..ROWS {
+                spawn_container(
+                    c,
+                    PAGE_X + ROW_X,
+                    PAGE_Y + ROW_Y + i as f32 * ROW_H,
+                    ROW_W,
+                    ROW_H,
+                    9,
+                )
+                .insert((Button, HeroSkillRow(i), Visibility::Hidden))
+                .with_children(|cc| {
+                    let white = images.add(crate::map_renderer::make_image(
+                        vec![255, 255, 255, 255],
+                        1,
+                        1,
+                    ));
+                    spawn_image(cc, white, 36.0, 0.0, 36.0, 36.0, 10).insert(HeroSkillIcon(i));
+                    spawn_label(cc, font, "", 78.0, 6.0, 12.0, Color::WHITE, 10)
+                        .insert(HeroSkillText(i));
+                });
+            }
+        });
 }
 
+/// 技能页**行内容**刷新 + 行点击（Shift+F1..F8 分配）
 /// 显隐 + 英雄魔法列表渲染
 #[allow(clippy::too_many_arguments)]
-fn hero_skill_ui_system(
-    mut mgr: ResMut<DialogManager>,
+fn hero_skill_rows_system(
     hero: Res<HeroState>,
     mut assign_key: ResMut<AssignKeyState>,
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
-    close: Query<(Entity, &Interaction), With<HeroSkillClose>>,
-    mut widgets: Query<&mut Visibility, (With<HeroSkillWidget>, Without<HeroSkillRow>)>,
     mut rows: Query<(Entity, &mut Visibility, &HeroSkillRow, &Interaction)>,
     mut icons: Query<(&mut ImageNode, &HeroSkillIcon)>,
     mut texts: Query<(&mut Text, &HeroSkillText)>,
@@ -176,23 +123,8 @@ fn hero_skill_ui_system(
         let was = prev.insert(e, *inter);
         *inter == Interaction::Pressed && was != Some(Interaction::Pressed)
     }
-    let open = mgr.is_open(DialogKind::HeroSkill);
-    for mut vis in &mut widgets {
-        *vis = if open {
-            Visibility::Visible
-        } else {
-            Visibility::Hidden
-        };
-    }
-    if !open {
-        return;
-    }
-    for (e, inter) in &close {
-        if edge(e, inter, &mut prev_inter) {
-            mgr.close(DialogKind::HeroSkill);
-        }
-    }
-    // 行显隐随容器（子节点自动跟随）；点击技能行进入 Shift+F1..F8 分配。
+    // 行的整页显隐由 `hero_pages_system` 管（页容器）；这里只管「该行有没有技能」
+    // 与行点击进入 Shift+F1..F8 分配
     for (e, mut vis, row, inter) in &mut rows {
         let magic = hero.magics.get(row.0);
         *vis = if magic.is_some() {

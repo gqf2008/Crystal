@@ -823,6 +823,8 @@ fn dialog_hotkey_system(
     mut potion_belt_visible: ResMut<crate::game::dialogs::potion_belt::PotionBeltVisible>,
     // #2836 单元②：英雄三键的 `Hero == null` 守卫（C# `GameScene.cs:581-606`）
     hero: Res<crate::game::dialogs::hero::HeroState>,
+    // #2892 批58：英雄对话框四页共窗 → 装备/技能键按页切换
+    mut hero_pages: ResMut<crate::game::dialogs::hero_pages::HeroPageState>,
     windows: Query<&Window>,
 ) {
     use crate::game::input_gate::forwarded_while_typing;
@@ -950,22 +952,30 @@ fn dialog_hotkey_system(
                 }
             }
         }
-        for (action, target, other) in [
-            ("英雄装备", DialogKind::HeroEquipment, DialogKind::HeroSkill),
-            ("英雄技能", DialogKind::HeroSkill, DialogKind::HeroEquipment),
+        // #2892 批58：C# 英雄装备/技能键作用于**同一个** `HeroDialog` 的两页
+        // （`GameScene.cs:581-606`：`!HeroDialog.Visible || !CharacterPage.Visible → Show()+ShowCharacterPage()`）
+        for (action, page) in [
+            (
+                "英雄装备",
+                crate::game::dialogs::hero_pages::HeroPage::Equipment,
+            ),
+            (
+                "英雄技能",
+                crate::game::dialogs::hero_pages::HeroPage::Skill,
+            ),
         ] {
             if let Some(b) = kb.bindings.iter().find(|b| b.action == action) {
                 if blocked(b) {
                     continue;
                 }
                 if b.matches(&keys) {
-                    if mgr.is_open(target) {
-                        mgr.close(target);
+                    if mgr.is_open(DialogKind::HeroEquipment) && hero_pages.page == page {
+                        mgr.close(DialogKind::HeroEquipment);
                     } else {
-                        mgr.close(other);
-                        mgr.open(target);
+                        hero_pages.page = page;
+                        mgr.open(DialogKind::HeroEquipment);
                     }
-                    tracing::info!("🎯 英雄页快捷键（{}）→ {target:?}", action);
+                    tracing::info!("🎯 英雄页快捷键（{}）→ {page:?}", action);
                 }
             }
         }
@@ -1218,6 +1228,8 @@ mod tests {
         app.init_resource::<crate::game::dialogs::potion_belt::PotionBeltVisible>();
         // #2836 单元②：`dialog_hotkey_system` 新增 `Res<HeroState>`（英雄三键守卫）
         app.init_resource::<crate::game::dialogs::hero::HeroState>();
+        // #2892 批58：英雄装备/技能键按页切换 → 需 `HeroPageState`
+        app.init_resource::<crate::game::dialogs::hero_pages::HeroPageState>();
         // #2771：`dialog_hotkey_system` 新增 `Res<NetConnection>`（交易快捷键发 C.TradeRequest）
         app.insert_resource(crate::network::NetConnection::default());
         app.insert_resource(crate::game::input_gate::TextInputGate(gate_on));
@@ -1345,19 +1357,34 @@ mod tests {
             "有英雄时英雄背包键应开窗"
         );
 
+        // #2892 批58：英雄装备/技能同属一个窗（C# `HeroDialog` 的两页）→ 按键 = 开窗 + 切页
         press_ctrl(&mut app, KeyCode::KeyS);
-        assert!(
-            app.world()
-                .resource::<DialogManager>()
-                .is_open(DialogKind::HeroSkill),
-            "英雄技能键应开技能页"
-        );
+        {
+            let mgr = app.world().resource::<DialogManager>();
+            assert!(
+                mgr.is_open(DialogKind::HeroEquipment),
+                "英雄技能键应开英雄对话框"
+            );
+            assert_eq!(
+                app.world()
+                    .resource::<crate::game::dialogs::hero_pages::HeroPageState>()
+                    .page,
+                crate::game::dialogs::hero_pages::HeroPage::Skill,
+                "英雄技能键应把英雄对话框切到技能页"
+            );
+        }
         press_ctrl(&mut app, KeyCode::KeyC);
-        let mgr = app.world().resource::<DialogManager>();
-        assert!(
-            mgr.is_open(DialogKind::HeroEquipment) && !mgr.is_open(DialogKind::HeroSkill),
-            "在英雄技能页按装备键应「切到装备页」而不是两个窗并存"
-        );
+        {
+            let mgr = app.world().resource::<DialogManager>();
+            assert!(mgr.is_open(DialogKind::HeroEquipment));
+            assert_eq!(
+                app.world()
+                    .resource::<crate::game::dialogs::hero_pages::HeroPageState>()
+                    .page,
+                crate::game::dialogs::hero_pages::HeroPage::Equipment,
+                "在英雄技能页按装备键应「切到装备页」"
+            );
+        }
 
         // ③ 已在装备页再按 → 关窗（C# else Hide()）
         press_ctrl(&mut app, KeyCode::KeyC);
