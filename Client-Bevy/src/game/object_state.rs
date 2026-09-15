@@ -84,18 +84,16 @@ fn apply_object_state_events(
     for ev in pending {
         match ev {
             ServerEvent::ObjectHidden { object_id } => {
-                // #1552：本地玩家潜行/隐身 → 半透明（C# ApplyDrawColour 半隐身），
-                // 远程对象 → 完全隐藏（B0001：query 冲突用本地 id 判断）
+                // #2892：对齐 C# `MapObject.cs:5006` —— `Hidden` 对象**一律半透明绘制**
+                // （`if (Hidden && !DXManager.Blending) DXManager.SetOpacity(0.5F);`），
+                // 本地与远程一致；「对他人完全消失」是服务器 `S.ObjectRemove`（`Sneaking`/`Observer`）的职责，
+                // 不是这里的 `Hidden` 标志。
                 let is_local = local_id == Some(object_id);
                 for (id, mut v) in &mut vis {
                     if id.0 == object_id {
-                        if is_local {
-                            *v = Visibility::Visible;
-                            for mut layer in &mut layers {
-                                layer.alpha = 0.35;
-                            }
-                        } else {
-                            *v = Visibility::Hidden;
+                        *v = Visibility::Visible;
+                        for mut layer in &mut layers {
+                            layer.alpha = 0.5;
                         }
                         break;
                     }
@@ -111,11 +109,9 @@ fn apply_object_state_events(
                 for (id, mut v) in &mut vis {
                     if id.0 == object_id {
                         *v = Visibility::Visible;
-                        // #1552：本地玩家恢复不透明
-                        if local_id == Some(object_id) {
-                            for mut layer in &mut layers {
-                                layer.alpha = 1.0;
-                            }
+                        // 取消隐藏 → 恢复不透明（C# `Hidden = false` 后不再 `SetOpacity(0.5F)`）
+                        for mut layer in &mut layers {
+                            layer.alpha = 1.0;
                         }
                         break;
                     }

@@ -2694,7 +2694,7 @@ impl WorldActor {
                         let still_invisible = state
                             .buffs
                             .iter()
-                            .any(|b| crate::combat::buff::is_invisible_type(&b.buff_type));
+                            .any(|b| crate::combat::buff::is_sneaking_type(&b.buff_type));
                         if !still_invisible {
                             to_reveal.push((*session_id, state));
                         }

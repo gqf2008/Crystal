@@ -343,13 +343,23 @@ pub fn is_incacapacitated(buffs: &[BuffInstance]) -> bool {
         .any(|b| matches!(b.buff_type, BuffType::Stun | BuffType::Frozen))
 }
 
-/// C# 的三种隐身 BuffType（Hiding / MoonLight / DarkBody）——本端保留各自的图标/文案，
-/// 但**可见性规则暂未分档**（C# 三者各不相同，见 `docs/UI_COMPONENTS.md` §7）。
+/// C# 的三种隐身 BuffType（Hiding / MoonLight / DarkBody）——三者可见性规则**不同**
+/// （`MapObject.AddBuff`，`MapObject.cs:654-667`）：
+/// - `Hiding`/`ClearRing` → 只置 `Hidden`（`S.ObjectHidden`）→ 他人看到 **50% 透明**
+///   （C# 客户端 `MapObject.cs:5006` `SetOpacity(0.5F)`），且怪物不选中它；
+/// - `MoonLight`/`DarkBody` → 额外置 `Sneaking`（→ `Observer` → `S.ObjectRemove`）→ 对他人**完全消失**。
+/// 所以「对他人移除」用 [`is_sneaking_type`]，「半透明 / 怪物忽略」用本函数。
 pub fn is_invisible_type(t: &BuffType) -> bool {
     matches!(
         t,
         BuffType::Hiding | BuffType::MoonLight | BuffType::DarkBody
     )
+}
+
+/// C# `Sneaking`（`MapObject.cs:112-131`：`Observer = true` → `S.ObjectRemove`）对应的隐身类型：
+/// 只有 `MoonLight` 与 `DarkBody`（`Hiding`/`ClearRing` 仅半透明 + 不被怪物选中）。
+pub fn is_sneaking_type(t: &BuffType) -> bool {
+    matches!(t, BuffType::MoonLight | BuffType::DarkBody)
 }
 
 /// 检查是否隐身
@@ -603,5 +613,27 @@ mod tests {
         assert_eq!(results2.len(), 1);
         assert_eq!(results2[0].hp_change, 5);
         assert_eq!(buffs[0].remaining_ticks, 2);
+    }
+
+    /// #2892：三种隐身的**可见性分档**（C# `MapObject.AddBuff`，`MapObject.cs:654-667`）——
+    /// `Hiding`/`ClearRing` 只置 `Hidden`（半透明 + 怪物忽略）；`MoonLight`/`DarkBody` 额外置
+    /// `Sneaking`（`Observer` → `S.ObjectRemove`，对他人完全消失）。
+    ///
+    /// 阳性对照：把 `is_sneaking_type` 改成与 `is_invisible_type` 相同（三者都算 sneaking，
+    /// 即修正前本端的合并行为）→ 本测试的 `!is_sneaking_type(Hiding)` 断言 FAILED。
+    #[test]
+    fn invisibility_levels_match_csharp() {
+        use crate::combat::buff::BuffType;
+        assert!(is_invisible_type(&BuffType::Hiding));
+        assert!(
+            !is_sneaking_type(&BuffType::Hiding),
+            "C# `Hiding` 只置 Hidden（半透明），不置 Sneaking"
+        );
+        for t in [BuffType::MoonLight, BuffType::DarkBody] {
+            assert!(is_invisible_type(&t), "{t:?} 也应算隐身");
+            assert!(is_sneaking_type(&t), "{t:?} 应置 Sneaking（对他人移除）");
+        }
+        assert!(!is_sneaking_type(&BuffType::Stun));
+        assert!(!is_sneaking_type(&BuffType::AttackBoost { bonus: 0 }));
     }
 }
