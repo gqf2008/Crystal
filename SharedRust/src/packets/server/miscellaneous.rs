@@ -160,10 +160,24 @@ impl Packet for MountUpdate {
 }
 
 /// FishingUpdate - 钓鱼更新 (198)
-#[derive(Debug, Clone)]
+///
+/// #2892：按 C# `S.FishingUpdate`（服务端 `PlayerObject.GetFishInfo`，`PlayerObject.cs:11232-11245`）对齐字段：
+/// `ObjectID + Fishing + ProgressPercent + ChancePercent + FoundFish`。
+/// 客户端据此：状态窗显隐（`GameScene.cs:3056-3059`）、机会条 `Prguse[1342]` 与进度条 `Prguse[1349]`
+/// 的裁绘宽度（`FishingDialog.cs:347-374`：`width = (int)(2.16 * percent)`，钳 0..216）、
+/// 抛竿按钮显隐（`PlayerObject.cs:2591-2597`：`FishButton.Visible = FoundFish`）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FishingUpdate {
-    pub fishing_progress: i32, // 钓鱼进度
-    pub fishing_success: bool, // 是否成功
+    /// C# `ObjectID`（本端仅对本会话生效，保留字段供观战/多端扩展）
+    pub object_id: u32,
+    /// C# `Fishing`：是否在钓鱼（客户端状态窗显隐）
+    pub fishing: bool,
+    /// C# `ProgressPercent`：本轮进度百分比（`_fishCounter / FishingProgressMax * 100`）
+    pub progress_percent: i32,
+    /// C# `ChancePercent`：本轮成功率百分比
+    pub chance_percent: i32,
+    /// C# `FoundFish`：是否已咬钩（客户端抛竿按钮显隐）
+    pub found_fish: bool,
 }
 
 impl Packet for FishingUpdate {
@@ -171,17 +185,26 @@ impl Packet for FishingUpdate {
 
     fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
         use byteorder::WriteBytesExt;
-        writer.write_i32::<LittleEndian>(self.fishing_progress)?;
-        writer.write_u8(if self.fishing_success { 1 } else { 0 })?;
+        writer.write_u32::<LittleEndian>(self.object_id)?;
+        writer.write_u8(if self.fishing { 1 } else { 0 })?;
+        writer.write_i32::<LittleEndian>(self.progress_percent)?;
+        writer.write_i32::<LittleEndian>(self.chance_percent)?;
+        writer.write_u8(if self.found_fish { 1 } else { 0 })?;
         Ok(())
     }
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
-        let fishing_progress = reader.read_i32::<LittleEndian>()?;
-        let fishing_success = reader.read_u8()? != 0;
+        let object_id = reader.read_u32::<LittleEndian>()?;
+        let fishing = reader.read_u8()? != 0;
+        let progress_percent = reader.read_i32::<LittleEndian>()?;
+        let chance_percent = reader.read_i32::<LittleEndian>()?;
+        let found_fish = reader.read_u8()? != 0;
         Ok(Self {
-            fishing_progress,
-            fishing_success,
+            object_id,
+            fishing,
+            progress_percent,
+            chance_percent,
+            found_fish,
         })
     }
 }

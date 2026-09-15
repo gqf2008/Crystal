@@ -87,12 +87,20 @@ pub(crate) fn handle_social(
     match opcode {
         // ---- M39: 钓鱼 ----
         x if x == ServerPacketIds::FishingUpdate as i16 => {
-            // [progress i32][success u8]
+            // #2892：C# `S.FishingUpdate`（ObjectID + Fishing + ProgressPercent + ChancePercent + FoundFish）
             let body = &payload[PacketHeader::HEADER_SIZE..];
-            if body.len() >= 5 {
-                let progress = i32::from_le_bytes(body[0..4].try_into().unwrap_or([0; 4]));
-                let success = body[4] != 0;
-                server_events.write(ServerEvent::FishingUpdate { progress, success });
+            let mut cur = std::io::Cursor::new(body);
+            match mir2_shared::packets::server::miscellaneous::FishingUpdate::read_body(&mut cur) {
+                Ok(p) => {
+                    server_events.write(ServerEvent::FishingUpdate {
+                        object_id: p.object_id,
+                        fishing: p.fishing,
+                        progress_percent: p.progress_percent,
+                        chance_percent: p.chance_percent,
+                        found_fish: p.found_fish,
+                    });
+                }
+                Err(e) => tracing::warn!("⚠️ FishingUpdate 解析失败: {e}"),
             }
         }
         x if x == ServerPacketIds::MentorRequest as i16 => {

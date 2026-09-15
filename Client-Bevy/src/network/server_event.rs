@@ -688,10 +688,14 @@ pub enum ServerEvent {
     },
     /// TradeCancel：交易关闭/取消
     TradeCancelled,
-    /// FishingUpdate：钓鱼进度
+    /// FishingUpdate：钓鱼状态（#2892 对齐 C# `S.FishingUpdate`：
+    /// `ObjectID + Fishing + ProgressPercent + ChancePercent + FoundFish`）
     FishingUpdate {
-        progress: i32,
-        success: bool,
+        object_id: u32,
+        fishing: bool,
+        progress_percent: i32,
+        chance_percent: i32,
+        found_fish: bool,
     },
     /// ReceiveMail：邮件（列表条目 + 可选详情）
     MailReceived {

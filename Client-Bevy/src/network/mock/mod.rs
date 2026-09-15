@@ -876,8 +876,11 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                     send(
                                         &to_client,
                                         &server::miscellaneous::FishingUpdate {
-                                            fishing_progress: 1,
-                                            fishing_success: false,
+                                            object_id: 0,
+                                            fishing: true,
+                                            progress_percent: 0,
+                                            chance_percent: 0,
+                                            found_fish: false,
                                         },
                                     );
                                     mock_fishing = Some(std::time::Instant::now());
