@@ -2843,18 +2843,12 @@ impl Message<RemoveBuff> for PlayerActor {
         msg: RemoveBuff,
         _ctx: &mut Context<Self, Self::Reply>,
     ) -> Self::Reply {
-        // #2892 批D 单元②：C# 三种隐身（Hiding/MoonLight/DarkBody）语义等价于「破隐」，
-        // 攻击/施法破隐时按哪一个变体下发都要把三种一起清掉（否则会残留另一种隐身 buff）
-        let targets: Vec<crate::combat::buff::BuffType> =
-            if crate::combat::buff::is_invisible_type(&msg.buff_type) {
-                vec![
-                    crate::combat::buff::BuffType::Hiding,
-                    crate::combat::buff::BuffType::MoonLight,
-                    crate::combat::buff::BuffType::DarkBody,
-                ]
-            } else {
-                vec![msg.buff_type]
-            };
+        // #2892：只移除**指定**类型（C# `MapObject.RemoveBuff(type)` 一次只清一个变体）。
+        // 破隐粒度由调用方给全：攻击/施法破 `MoonLight`/`DarkBody`（`HumanObject.cs:2884-2885`
+        // / `:3420-3421`）、走破 `Hiding`（`:2462`）、跑在 `Hidden && !Sneaking` 时破三档
+        // （`:2542-2544`）——见 `world::ATTACK_BREAK_BUFFS` / `world::move_break_buffs`。
+        // 旧实现在这里把任意隐身变体展开成「三档一起清」，会让走一步就掉 MoonLight/DarkBody。
+        let targets = [msg.buff_type];
         for t in &targets {
             crate::combat::buff::remove_buff_by_type(&mut self.state.buffs, t);
         }

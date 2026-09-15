@@ -750,17 +750,17 @@ impl Message<WorldAttackRequest> for WorldActor {
         // 攻击时自动下坐骑
         self.dismount_player(msg.session_id).await;
 
-        // 攻击时打破隐身（C# `HumanObject.cs:2870-2886` Attack：`RemoveBuff(MoonLight/DarkBody)`）
+        // 攻击时打破隐身（C# `HumanObject.cs:2869-2886` Attack：只 `RemoveBuff(MoonLight/DarkBody)`；
+        // `Hiding` 与 ClearRing 宝石不受影响）
         if self.invisible_sessions.contains(&msg.session_id)
             || self.hidden_sessions.contains(&msg.session_id)
         {
-            let _ = record
-                .actor_ref
-                .ask(crate::actors::player::RemoveBuff {
-                    // C# 破隐：`RemoveBuff` 对三种隐身变体都会一并清除（见 `player.rs` 处理器）
-                    buff_type: crate::combat::buff::BuffType::Hiding,
-                })
-                .await;
+            for buff_type in crate::actors::world::ATTACK_BREAK_BUFFS {
+                let _ = record
+                    .actor_ref
+                    .ask(crate::actors::player::RemoveBuff { buff_type })
+                    .await;
+            }
             // #2892：清完 buff 后按 `Hidden`/`Sneaking` 两档重算并广播——
             // ClearRing 宝石仍在 → 保持半透明；否则补发 `Hidden=false` + `ObjectPlayer`
             self.sync_player_visibility(msg.session_id).await;
@@ -3349,17 +3349,16 @@ impl Message<MagicRequest> for WorldActor {
         // 施法时自动下坐骑
         self.dismount_player(msg.session_id).await;
 
-        // 施法时打破隐身（C# `HumanObject.cs:3418-3422` MagicAttack：`RemoveBuff(MoonLight/DarkBody)`）
+        // 施法时打破隐身（C# `HumanObject.cs:3418-3422` MagicAttack：只 `RemoveBuff(MoonLight/DarkBody)`）
         if self.invisible_sessions.contains(&msg.session_id)
             || self.hidden_sessions.contains(&msg.session_id)
         {
-            let _ = record
-                .actor_ref
-                .ask(crate::actors::player::RemoveBuff {
-                    // C# 破隐：`RemoveBuff` 对三种隐身变体都会一并清除（见 `player.rs` 处理器）
-                    buff_type: crate::combat::buff::BuffType::Hiding,
-                })
-                .await;
+            for buff_type in crate::actors::world::ATTACK_BREAK_BUFFS {
+                let _ = record
+                    .actor_ref
+                    .ask(crate::actors::player::RemoveBuff { buff_type })
+                    .await;
+            }
             self.sync_player_visibility(msg.session_id).await;
         }
 
