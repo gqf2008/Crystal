@@ -12563,6 +12563,73 @@ pub(crate) fn player_hidden(state: &crate::actors::player::PlayerState) -> bool 
     )
 }
 
+/// #2892：C# 破隐**粒度**（`Server/MirObjects/HumanObject.cs`）——攻击/施法只破
+/// `MoonLight`/`DarkBody`（`:2869-2886` Attack / `:3418-3422` MagicAttack；`Hiding` 与
+/// ClearRing 宝石不受影响），走只破 `Hiding`（`:2460-2463`），跑在 `Hidden && !Sneaking`
+/// 时破三档（`:2540-2545`，Sneaking 期间奔跑**不**破隐）。
+pub(crate) const ATTACK_BREAK_BUFFS: [crate::combat::buff::BuffType; 2] = [
+    crate::combat::buff::BuffType::MoonLight,
+    crate::combat::buff::BuffType::DarkBody,
+];
+
+/// 走/跑破隐集合（C# 依据见 [`ATTACK_BREAK_BUFFS`]）；空切片 = 本次移动不破隐。
+pub(crate) fn move_break_buffs(
+    run: bool,
+    hidden: bool,
+    sneaking: bool,
+) -> &'static [crate::combat::buff::BuffType] {
+    use crate::combat::buff::BuffType;
+
+    if !hidden {
+        return &[];
+    }
+    if run {
+        // C# `HumanObject.cs:2540` `if (Hidden && !Sneaking)`：Sneaking 中奔跑保持隐身
+        if sneaking {
+            return &[];
+        }
+        &[BuffType::Hiding, BuffType::MoonLight, BuffType::DarkBody]
+    } else {
+        // C# `HumanObject.cs:2460-2463` `Walk`：只破 `Hiding`
+        &[BuffType::Hiding]
+    }
+}
+
+#[cfg(test)]
+mod move_break_buffs_tests {
+    use super::*;
+    use crate::combat::buff::BuffType;
+
+    /// C# 依据：`HumanObject.cs:2460-2463`（Walk 只破 `Hiding`）、`:2540-2545`
+    /// （Run 在 `Hidden && !Sneaking` 时破三档）。
+    /// 阳性对照：删掉 `sneaking` 分支（奔跑无条件破三档）→ 末条断言 FAILED。
+    #[test]
+    fn move_break_matches_csharp_walk_run() {
+        // 不在隐身态 → 怎么移动都不破
+        assert!(move_break_buffs(false, false, false).is_empty());
+        assert!(move_break_buffs(true, false, false).is_empty());
+        // 走：只破 Hiding（ClearRing 宝石 / MoonLight / DarkBody 不受影响）
+        assert_eq!(move_break_buffs(false, true, false), &[BuffType::Hiding]);
+        // 跑：Hidden && !Sneaking → 三档一起破
+        assert_eq!(
+            move_break_buffs(true, true, false),
+            &[BuffType::Hiding, BuffType::MoonLight, BuffType::DarkBody]
+        );
+        // 跑 + Sneaking（MoonLight/DarkBody 生效中）→ C# `!Sneaking` 短路，不破隐
+        assert!(move_break_buffs(true, true, true).is_empty());
+    }
+
+    /// 攻击/施法只破 `MoonLight`/`DarkBody`（C# `:2884-2885` / `:3420-3421`），不含 `Hiding`。
+    #[test]
+    fn attack_break_excludes_hiding() {
+        assert_eq!(
+            ATTACK_BREAK_BUFFS,
+            [BuffType::MoonLight, BuffType::DarkBody]
+        );
+        assert!(!ATTACK_BREAK_BUFFS.contains(&BuffType::Hiding));
+    }
+}
+
 /// 构建 ObjectPlayer 数据包（其他玩家进入视野）
 /// #1410：构建 S.ObjectName body（[ObjectID u32][Name dotnet]，C# ServerPackets ObjectName）
 fn object_name_body(object_id: u32, name: &str) -> Vec<u8> {

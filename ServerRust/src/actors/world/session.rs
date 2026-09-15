@@ -1463,6 +1463,34 @@ impl Message<WorldMoveRequest> for WorldActor {
             return;
         }
 
+        // #2892：C# `HumanObject.Walk/Run` 破隐粒度——走只破 `Hiding`（`:2460-2463`）、
+        // 跑在 `Hidden && !Sneaking` 时破三档（`:2540-2545`，Sneaking 中奔跑**保持**隐身）。
+        // 旧实现没有破隐分支，且 `RemoveBuff` 会把三档一起清掉，表现为「边走边隐身」/一步掉两档。
+        // 先在本地缓存上短路（与 attack/cast 两处同一口径），避免每走一步都多一次 actor 往返
+        if self.hidden_sessions.contains(&msg.session_id)
+            || self.invisible_sessions.contains(&msg.session_id)
+        {
+            if let Ok(Some(st)) = record.actor_ref.ask(GetPlayerState).await {
+                let breaks = crate::actors::world::move_break_buffs(
+                    run,
+                    crate::actors::world::player_hidden(&st),
+                    crate::combat::buff::has_sneaking(&st.buffs),
+                );
+                if !breaks.is_empty() {
+                    for buff_type in breaks {
+                        let _ = record
+                            .actor_ref
+                            .ask(crate::actors::player::RemoveBuff {
+                                buff_type: *buff_type,
+                            })
+                            .await;
+                    }
+                    debug!("Move: {} 破隐 (run={}): {:?}", st.name, run, breaks);
+                    self.sync_player_visibility(msg.session_id).await;
+                }
+            }
+        }
+
         // #1757：C# Walk/Run——移动取消交易（双方收 S.TradeCancel）
         let _ = self
             .social_ref
