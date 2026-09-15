@@ -142,6 +142,13 @@ fn spawn_hero_equipment(
             spawn_hero_tabs(p, &mut libs, &mut images);
             spawn_hero_status_page(p, &mut libs, &mut images, &font);
             spawn_hero_state_page(p, &mut libs, &mut images, &font);
+            // #2892 批58：技能页（`Title[508]` + 7 行）也在这个窗口里（C# 是同一个 dialog 的页）
+            crate::game::dialogs::hero_skills::spawn_hero_skill_page(
+                p,
+                &mut libs,
+                &mut images,
+                &font,
+            );
         }
         // 关闭（C# CharacterDialog CloseButton at (241,3)）
         if let (Some(n), Some(h), Some(pr)) = (

@@ -4006,7 +4006,7 @@ fn panel_sprites_batch_b23_match_fishing_split() {
 // ============================================================================
 // #2892 批B 收口（2026-09-15）：补齐此前无对齐断言的 4 个窗口 + 全覆盖守卫
 //   背景：批B 验收口径是「每个窗口至少 1 条（居中 / 包含 / 不出界 / 精灵存在）」，
-//   而 `Settings`/`Report`/`HeroEquipment`/`HeroSkill` 此前只有 smoke 的插件注册、
+//   而 `Settings`/`Report`/`HeroEquipment`（含技能页，批58 前是独立的 `HeroSkill` 窗）此前只有 smoke 的插件注册、
 //   没有任何对齐断言；`Skills` 则是 C# 里**不存在**的自造窗（技能页是 `CharacterDialog.SkillPage`），
 //   已按 C# 结构删除。
 // ============================================================================
@@ -4347,69 +4347,40 @@ fn hero_equipment_dialog_aligned() {
         }
     }
 
-    println!(
-        "  ✓ 英雄装备窗 Title[504]@(760,0) + Prguse[340]@(8,90) + 14 槽 + 四页签/状态页对齐 C#"
-    );
-}
-
-/// 英雄技能窗（C# `CharacterDialog` 的 `SkillPage`，`CharacterDialog.cs:136-143`）：
-/// 面板 `Title[504]` 264x380 @(760,0)；技能页 `Title[508]` @(8,90)；
-/// 7 行技能（页内 @(8, 8+i*33) 231x33）在面板内；关闭 `Prguse2[360..362]` @(241,3) 24x21。
-#[test]
-fn hero_skills_dialog_aligned() {
-    use client_bevy::game::dialogs::hero_skills as hs;
-    require_assets!("hero_skills_dialog_aligned");
-    let mut libs = Libs::new();
-
-    assert_eq!(
-        libs.size(hs::PANEL.0, hs::PANEL.1),
-        hs::PANEL_SIZE,
-        "[尺寸] 英雄技能面板 = Title[504] 264x380"
-    );
-    assert_eq!((hs::DIALOG_X, hs::DIALOG_Y), (SW - 264.0, 0.0));
-    assert_in_canvas(
-        "英雄技能窗",
-        hs::DIALOG_X,
-        hs::DIALOG_Y,
-        hs::PANEL_SIZE.0,
-        hs::PANEL_SIZE.1,
-    );
-
-    let (page_w, page_h) = libs.size(hs::PAGE.0, hs::PAGE.1);
-    assert_inside(
-        "英雄技能页",
-        hs::PAGE_X,
-        hs::PAGE_Y,
-        page_w,
-        page_h,
-        0.0,
-        0.0,
-        hs::PANEL_SIZE.0,
-        hs::PANEL_SIZE.1,
-    );
-
-    for i in 0..hs::ROWS {
-        let y = hs::PAGE_Y + hs::ROW_Y + i as f32 * hs::ROW_H;
+    // #2892 批58：技能页也在这个窗里（C# 同一个 `CharacterDialog` 的 `SkillPage`）
+    {
+        use client_bevy::game::dialogs::hero_skills as hs;
+        let (sw, sh) = libs.size(hs::PAGE.0, hs::PAGE.1);
         assert_inside(
-            &format!("英雄技能行{i}"),
-            hs::PAGE_X + hs::ROW_X,
-            y,
-            hs::ROW_W,
-            hs::ROW_H,
+            "英雄技能页 Title[508]",
+            hs::PAGE_X,
+            hs::PAGE_Y,
+            sw,
+            sh,
             0.0,
             0.0,
-            hs::PANEL_SIZE.0,
-            hs::PANEL_SIZE.1,
+            he::PANEL_SIZE.0,
+            he::PANEL_SIZE.1,
         );
+        for i in 0..hs::ROWS {
+            let y = hs::PAGE_Y + hs::ROW_Y + i as f32 * hs::ROW_H;
+            assert_inside(
+                &format!("英雄技能行{i}"),
+                hs::PAGE_X + hs::ROW_X,
+                y,
+                hs::ROW_W,
+                hs::ROW_H,
+                0.0,
+                0.0,
+                he::PANEL_SIZE.0,
+                he::PANEL_SIZE.1,
+            );
+        }
     }
-    // C# 关闭键 @(241,3) 且 art 24 宽 → 右缘 265 比面板宽 264 多 1px（原版即如此，不当作越界）
-    assert_eq!((hs::CLOSE_REL.0, hs::CLOSE_REL.1), (241.0, 3.0));
-    assert!(
-        hs::CLOSE_REL.0 + 24.0 > hs::PANEL_SIZE.0,
-        "[记录] C# 英雄技能关闭键右缘 265 比面板宽 264 多 1px（原版即如此）"
-    );
 
-    println!("  ✓ 英雄技能窗 Title[504]@(760,0) + Title[508]@(8,90) + 7 行对齐 C#");
+    println!(
+        "  ✓ 英雄对话框窗 Title[504]@(760,0)：装备页 Prguse[340]+14 槽、状态页/状态二页、技能页 Title[508]+7 行、四页签对齐 C#"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -4418,7 +4389,7 @@ fn hero_skills_dialog_aligned() {
 
 /// 枚举变体总数（`DialogKind` 无字段、判别值默认 0..N-1 连续）。
 /// 新增变体会让 [`kind_alignment_tests`] 的非穷尽 match **编译失败**，强制回到本文件登记。
-const DIALOG_KIND_COUNT: usize = 49;
+const DIALOG_KIND_COUNT: usize = 48;
 
 /// 全窗口列表（判别值顺序；守卫断言 `ALL[i] as usize == i`）。
 const ALL_DIALOG_KINDS: [client_bevy::game::dialogs::DialogKind; DIALOG_KIND_COUNT] = [
@@ -4445,7 +4416,6 @@ const ALL_DIALOG_KINDS: [client_bevy::game::dialogs::DialogKind; DIALOG_KIND_COU
     client_bevy::game::dialogs::DialogKind::Report,
     client_bevy::game::dialogs::DialogKind::HeroInventory,
     client_bevy::game::dialogs::DialogKind::HeroEquipment,
-    client_bevy::game::dialogs::DialogKind::HeroSkill,
     client_bevy::game::dialogs::DialogKind::Creature,
     client_bevy::game::dialogs::DialogKind::ItemRental,
     client_bevy::game::dialogs::DialogKind::GuildTerritory,
@@ -4512,7 +4482,6 @@ fn kind_alignment_tests(kind: client_bevy::game::dialogs::DialogKind) -> &'stati
             "hero_inventory_autopot_aligned",
         ],
         K::HeroEquipment => &["hero_equipment_dialog_aligned"],
-        K::HeroSkill => &["hero_skills_dialog_aligned"],
         K::ItemRental => &["item_rental_guest_windows_aligned"],
         K::GuildTerritory => &["guild_territory_dialog_aligned"],
         K::Fishing | K::FishingStatus => &["panel_sprites_batch_b23_match_fishing_split"],
@@ -4567,5 +4536,5 @@ fn every_dialog_kind_has_alignment_coverage() {
             );
         }
     }
-    println!("  ✓ 49 个 DialogKind 全部有对齐断言登记（且登记名在源码中真实存在）");
+    println!("  ✓ 48 个 DialogKind 全部有对齐断言登记（且登记名在源码中真实存在）");
 }
