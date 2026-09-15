@@ -4003,3 +4003,506 @@ fn panel_sprites_batch_b23_match_fishing_split() {
         assert_inside("钓具格", x, y, 34.0, 30.0, 0.0, 0.0, w1, h1);
     }
 }
+// ============================================================================
+// #2892 批B 收口（2026-09-15）：补齐此前无对齐断言的 4 个窗口 + 全覆盖守卫
+//   背景：批B 验收口径是「每个窗口至少 1 条（居中 / 包含 / 不出界 / 精灵存在）」，
+//   而 `Settings`/`Report`/`HeroEquipment`/`HeroSkill` 此前只有 smoke 的插件注册、
+//   没有任何对齐断言；`Skills` 则是 C# 里**不存在**的自造窗（技能页是 `CharacterDialog.SkillPage`），
+//   已按 C# 结构删除。
+// ============================================================================
+
+/// 设置窗（C# `OptionDialog`，`Client/MirScenes/Dialogs/MainDialogs.cs:2527-2790`）：
+/// 面板 `Title[411]` 259x354 `Location = Center`；关闭键 `Prguse2[360..362]` @(`Size.Width-26`, 5)；
+/// 8 组开关 `On @(159,y)`/`Off @(201,y)` 36x17（y = 68/93/118/143/168/193/271/296）；
+/// 音量条 `Prguse2[468]` @(159,225)/(159,251) + 滑块 `Prguse[20]` @(155,218)/(155,244)。
+#[test]
+fn settings_dialog_aligned() {
+    use client_bevy::game::dialogs::option as o;
+    require_assets!("settings_dialog_aligned");
+    let mut libs = Libs::new();
+
+    assert_eq!(
+        libs.size(o::PANEL.0, o::PANEL.1),
+        o::PANEL_SIZE,
+        "[尺寸] 设置面板 = Title[411] 259x354"
+    );
+    assert_eq!(
+        o::OPTION_ORIGIN,
+        client_bevy::game::dialogs::center_origin(o::PANEL_SIZE.0, o::PANEL_SIZE.1),
+        "[居中] 设置窗原点应 = ((1024-W)/2, (768-H)/2)"
+    );
+    let (pw, ph) = o::PANEL_SIZE;
+    assert_in_canvas("设置窗", o::OPTION_ORIGIN.0, o::OPTION_ORIGIN.1, pw, ph);
+
+    for idx in [360usize, 361, 362] {
+        assert_eq!(
+            libs.size(LibraryName::Prguse2, idx),
+            (24.0, 21.0),
+            "[尺寸] 设置窗关闭键 Prguse2[{idx}]"
+        );
+    }
+    assert_inside(
+        "设置窗关闭键",
+        o::CLOSE_REL.0,
+        o::CLOSE_REL.1,
+        24.0,
+        21.0,
+        0.0,
+        0.0,
+        pw,
+        ph,
+    );
+
+    // 8 组开关：On/Off 同 y、36x17 在面板内，三态帧精灵都存在
+    for (kind, lib, y, on_frames, off_frames) in o::TOGGLE_ROWS {
+        for (label, x, frames) in [
+            ("On", o::TOGGLE_ON_X, on_frames),
+            ("Off", o::TOGGLE_OFF_X, off_frames),
+        ] {
+            assert_inside(
+                &format!("设置开关{kind:?}({label})"),
+                x,
+                y,
+                o::TOGGLE_SIZE.0,
+                o::TOGGLE_SIZE.1,
+                0.0,
+                0.0,
+                pw,
+                ph,
+            );
+            for idx in frames {
+                let (fw, fh) = libs.size(lib, idx);
+                assert!(fw > 0.0 && fh > 0.0, "[精灵] {lib:?}[{idx}] 缺失");
+            }
+        }
+    }
+
+    let (bw, bh) = libs.size(LibraryName::Prguse2, 468);
+    assert_inside(
+        "音量条",
+        o::VOLUME_BAR_X,
+        o::VOLUME_BAR_Y.0,
+        bw,
+        bh,
+        0.0,
+        0.0,
+        pw,
+        ph,
+    );
+    assert_inside(
+        "音乐音量条",
+        o::VOLUME_BAR_X,
+        o::VOLUME_BAR_Y.1,
+        bw,
+        bh,
+        0.0,
+        0.0,
+        pw,
+        ph,
+    );
+    let (kw, kh) = libs.size(LibraryName::Prguse, 20);
+    assert_inside(
+        "音量滑块",
+        o::VOLUME_KNOB_X,
+        218.0,
+        kw,
+        kh,
+        0.0,
+        0.0,
+        pw,
+        ph,
+    );
+    assert_inside(
+        "音乐音量滑块",
+        o::VOLUME_KNOB_X,
+        244.0,
+        kw,
+        kh,
+        0.0,
+        0.0,
+        pw,
+        ph,
+    );
+
+    println!("  ✓ 设置窗 Title[411] 259x354 居中 + 8 组开关 + 音量条对齐 C#");
+}
+
+/// 举报窗（C# `ReportDialog`，`Client/MirScenes/Dialogs/ReportDialog.cs:13-67`）：
+/// 面板 `Prguse[1633]` `Location = Center`；关闭 `Prguse2[360..362]` @(336,3)（无 `Size` → art 24x21）；
+/// 类型下拉 `ReportType` @(12,35) 170x14；描述框 `MessageArea` @(12,57) 330x150；
+/// 提交 `SendButton` `Title[607/608/609]` @(260,219)。
+#[test]
+fn report_dialog_aligned() {
+    use client_bevy::game::dialogs::report as r;
+    require_assets!("report_dialog_aligned");
+    let mut libs = Libs::new();
+
+    if libs.0.get_image(r::PANEL.0, r::PANEL.1).is_some() {
+        assert_eq!(
+            libs.size(r::PANEL.0, r::PANEL.1),
+            r::PANEL_SIZE,
+            "[尺寸] 举报面板 = Prguse[1633] 360x244"
+        );
+    } else {
+        println!("  · 数据包缺 Prguse[1633]：走同尺寸兜底面板（C# 原版此时不画面板）");
+    }
+    let (px, py) = client_bevy::game::dialogs::center_origin(r::PANEL_SIZE.0, r::PANEL_SIZE.1);
+    assert_in_canvas("举报窗", px, py, r::PANEL_SIZE.0, r::PANEL_SIZE.1);
+    let (pw, ph) = r::PANEL_SIZE;
+
+    for idx in [360usize, 361, 362] {
+        assert_eq!(
+            libs.size(LibraryName::Prguse2, idx),
+            (24.0, 21.0),
+            "[尺寸] 举报窗关闭键 Prguse2[{idx}]"
+        );
+    }
+    assert_inside(
+        "举报窗关闭键",
+        r::CLOSE_REL.0,
+        r::CLOSE_REL.1,
+        24.0,
+        21.0,
+        0.0,
+        0.0,
+        pw,
+        ph,
+    );
+    assert_inside(
+        "举报类型下拉",
+        r::TYPE_DROP.0,
+        r::TYPE_DROP.1,
+        r::TYPE_DROP.2,
+        r::TYPE_DROP.3,
+        0.0,
+        0.0,
+        pw,
+        ph,
+    );
+    assert_inside(
+        "举报描述框",
+        r::MESSAGE_AREA.0,
+        r::MESSAGE_AREA.1,
+        r::MESSAGE_AREA.2,
+        r::MESSAGE_AREA.3,
+        0.0,
+        0.0,
+        pw,
+        ph,
+    );
+
+    let (sw, sh) = libs.size(LibraryName::Title, 607);
+    for idx in [607usize, 608, 609] {
+        assert_eq!(
+            libs.size(LibraryName::Title, idx),
+            (sw, sh),
+            "[尺寸] 举报提交键 Title[{idx}] 应与 607 同尺寸"
+        );
+    }
+    assert_inside(
+        "举报提交键",
+        r::SUBMIT_REL.0,
+        r::SUBMIT_REL.1,
+        sw,
+        sh,
+        0.0,
+        0.0,
+        pw,
+        ph,
+    );
+
+    println!("  ✓ 举报窗 Prguse[1633] 居中 + 关闭 24x21 + 下拉/描述/提交对齐 C#");
+}
+
+/// 英雄装备窗（C# `CharacterDialog(HeroEquipment, hero)`，`CharacterDialog.cs:27-46/190-199`）：
+/// 面板 `Title[504]` 264x380 @(`ScreenWidth-264`, 0)；角色页 `Prguse[340]` @(8,90)；
+/// 14 个装备槽（`EQUIP_SLOTS`，36x32）在面板内互不重叠；关闭 `Prguse2[360..362]` @(241,3) 24x21。
+#[test]
+fn hero_equipment_dialog_aligned() {
+    use client_bevy::game::dialogs::character as c;
+    use client_bevy::game::dialogs::hero_equipment as he;
+    require_assets!("hero_equipment_dialog_aligned");
+    let mut libs = Libs::new();
+
+    assert_eq!(
+        libs.size(he::PANEL.0, he::PANEL.1),
+        he::PANEL_SIZE,
+        "[尺寸] 英雄装备面板 = Title[504] 264x380"
+    );
+    assert_eq!(
+        (he::DIALOG_X, he::DIALOG_Y),
+        (SW - 264.0, 0.0),
+        "[原点] C# `Location = (ScreenWidth - 264, 0)`"
+    );
+    assert_in_canvas(
+        "英雄装备窗",
+        he::DIALOG_X,
+        he::DIALOG_Y,
+        he::PANEL_SIZE.0,
+        he::PANEL_SIZE.1,
+    );
+
+    let (page_w, page_h) = libs.size(he::PAGE.0, he::PAGE.1);
+    assert_inside(
+        "英雄角色页",
+        he::PAGE_X,
+        he::PAGE_Y,
+        page_w,
+        page_h,
+        0.0,
+        0.0,
+        he::PANEL_SIZE.0,
+        he::PANEL_SIZE.1,
+    );
+
+    let mut rects: Vec<(f32, f32)> = Vec::new();
+    for (i, (rx, ry)) in c::EQUIP_SLOTS.iter().enumerate() {
+        let (x, y) = (he::PAGE_X + rx, he::PAGE_Y + ry);
+        assert_inside(
+            &format!("英雄装备槽{i}"),
+            x,
+            y,
+            c::SLOT_W,
+            c::SLOT_H,
+            0.0,
+            0.0,
+            he::PANEL_SIZE.0,
+            he::PANEL_SIZE.1,
+        );
+        assert!(
+            !rects.contains(&(x, y)),
+            "[重叠] 英雄装备槽{i} 与前一槽同坐标 ({x},{y})"
+        );
+        rects.push((x, y));
+    }
+
+    for idx in [360usize, 361, 362] {
+        assert_eq!(libs.size(LibraryName::Prguse2, idx), (24.0, 21.0));
+    }
+    // C# 关闭键 @(241,3) 且 art 24 宽 → 右缘 265 比面板宽 264 多 1px（原版即如此，不当作越界）
+    assert_eq!((he::CLOSE_REL.0, he::CLOSE_REL.1), (241.0, 3.0));
+    assert!(
+        he::CLOSE_REL.0 + 24.0 > he::PANEL_SIZE.0,
+        "[记录] C# 英雄装备关闭键右缘 265 比面板宽 264 多 1px（原版即如此）"
+    );
+
+    println!("  ✓ 英雄装备窗 Title[504]@(760,0) + Prguse[340]@(8,90) + 14 槽对齐 C#");
+}
+
+/// 英雄技能窗（C# `CharacterDialog` 的 `SkillPage`，`CharacterDialog.cs:136-143`）：
+/// 面板 `Title[504]` 264x380 @(760,0)；技能页 `Title[508]` @(8,90)；
+/// 7 行技能（页内 @(8, 8+i*33) 231x33）在面板内；关闭 `Prguse2[360..362]` @(241,3) 24x21。
+#[test]
+fn hero_skills_dialog_aligned() {
+    use client_bevy::game::dialogs::hero_skills as hs;
+    require_assets!("hero_skills_dialog_aligned");
+    let mut libs = Libs::new();
+
+    assert_eq!(
+        libs.size(hs::PANEL.0, hs::PANEL.1),
+        hs::PANEL_SIZE,
+        "[尺寸] 英雄技能面板 = Title[504] 264x380"
+    );
+    assert_eq!((hs::DIALOG_X, hs::DIALOG_Y), (SW - 264.0, 0.0));
+    assert_in_canvas(
+        "英雄技能窗",
+        hs::DIALOG_X,
+        hs::DIALOG_Y,
+        hs::PANEL_SIZE.0,
+        hs::PANEL_SIZE.1,
+    );
+
+    let (page_w, page_h) = libs.size(hs::PAGE.0, hs::PAGE.1);
+    assert_inside(
+        "英雄技能页",
+        hs::PAGE_X,
+        hs::PAGE_Y,
+        page_w,
+        page_h,
+        0.0,
+        0.0,
+        hs::PANEL_SIZE.0,
+        hs::PANEL_SIZE.1,
+    );
+
+    for i in 0..hs::ROWS {
+        let y = hs::PAGE_Y + hs::ROW_Y + i as f32 * hs::ROW_H;
+        assert_inside(
+            &format!("英雄技能行{i}"),
+            hs::PAGE_X + hs::ROW_X,
+            y,
+            hs::ROW_W,
+            hs::ROW_H,
+            0.0,
+            0.0,
+            hs::PANEL_SIZE.0,
+            hs::PANEL_SIZE.1,
+        );
+    }
+    // C# 关闭键 @(241,3) 且 art 24 宽 → 右缘 265 比面板宽 264 多 1px（原版即如此，不当作越界）
+    assert_eq!((hs::CLOSE_REL.0, hs::CLOSE_REL.1), (241.0, 3.0));
+    assert!(
+        hs::CLOSE_REL.0 + 24.0 > hs::PANEL_SIZE.0,
+        "[记录] C# 英雄技能关闭键右缘 265 比面板宽 264 多 1px（原版即如此）"
+    );
+
+    println!("  ✓ 英雄技能窗 Title[504]@(760,0) + Title[508]@(8,90) + 7 行对齐 C#");
+}
+
+// ---------------------------------------------------------------------------
+// #2892 批B 验收守卫：**每个** `DialogKind` 至少一条对齐断言
+// ---------------------------------------------------------------------------
+
+/// 枚举变体总数（`DialogKind` 无字段、判别值默认 0..N-1 连续）。
+/// 新增变体会让 [`kind_alignment_tests`] 的非穷尽 match **编译失败**，强制回到本文件登记。
+const DIALOG_KIND_COUNT: usize = 49;
+
+/// 全窗口列表（判别值顺序；守卫断言 `ALL[i] as usize == i`）。
+const ALL_DIALOG_KINDS: [client_bevy::game::dialogs::DialogKind; DIALOG_KIND_COUNT] = [
+    client_bevy::game::dialogs::DialogKind::Inventory,
+    client_bevy::game::dialogs::DialogKind::Character,
+    client_bevy::game::dialogs::DialogKind::QuestLog,
+    client_bevy::game::dialogs::DialogKind::Settings,
+    client_bevy::game::dialogs::DialogKind::Menu,
+    client_bevy::game::dialogs::DialogKind::GameShop,
+    client_bevy::game::dialogs::DialogKind::Minimap,
+    client_bevy::game::dialogs::DialogKind::Npc,
+    client_bevy::game::dialogs::DialogKind::Group,
+    client_bevy::game::dialogs::DialogKind::Friend,
+    client_bevy::game::dialogs::DialogKind::Trade,
+    client_bevy::game::dialogs::DialogKind::GuestTrade,
+    client_bevy::game::dialogs::DialogKind::Inspect,
+    client_bevy::game::dialogs::DialogKind::NpcGoods,
+    client_bevy::game::dialogs::DialogKind::Guild,
+    client_bevy::game::dialogs::DialogKind::Mail,
+    client_bevy::game::dialogs::DialogKind::Ranking,
+    client_bevy::game::dialogs::DialogKind::Mentor,
+    client_bevy::game::dialogs::DialogKind::Relationship,
+    client_bevy::game::dialogs::DialogKind::Mount,
+    client_bevy::game::dialogs::DialogKind::Report,
+    client_bevy::game::dialogs::DialogKind::HeroInventory,
+    client_bevy::game::dialogs::DialogKind::HeroEquipment,
+    client_bevy::game::dialogs::DialogKind::HeroSkill,
+    client_bevy::game::dialogs::DialogKind::Creature,
+    client_bevy::game::dialogs::DialogKind::ItemRental,
+    client_bevy::game::dialogs::DialogKind::GuildTerritory,
+    client_bevy::game::dialogs::DialogKind::Help,
+    client_bevy::game::dialogs::DialogKind::Notice,
+    client_bevy::game::dialogs::DialogKind::Buff,
+    client_bevy::game::dialogs::DialogKind::Fishing,
+    client_bevy::game::dialogs::DialogKind::Socket,
+    client_bevy::game::dialogs::DialogKind::Refine,
+    client_bevy::game::dialogs::DialogKind::Craft,
+    client_bevy::game::dialogs::DialogKind::DuraStatus,
+    client_bevy::game::dialogs::DialogKind::Roll,
+    client_bevy::game::dialogs::DialogKind::NpcAwake,
+    client_bevy::game::dialogs::DialogKind::Timer,
+    client_bevy::game::dialogs::DialogKind::KeyboardLayout,
+    client_bevy::game::dialogs::DialogKind::BigMap,
+    client_bevy::game::dialogs::DialogKind::ChatNotice,
+    client_bevy::game::dialogs::DialogKind::Market,
+    client_bevy::game::dialogs::DialogKind::Storage,
+    client_bevy::game::dialogs::DialogKind::ItemRentalBrowse,
+    client_bevy::game::dialogs::DialogKind::HeroManage,
+    client_bevy::game::dialogs::DialogKind::QuestDetail,
+    client_bevy::game::dialogs::DialogKind::InputBox,
+    client_bevy::game::dialogs::DialogKind::Memo,
+    client_bevy::game::dialogs::DialogKind::FishingStatus,
+];
+
+/// 每个窗口登记覆盖它的对齐测试名。
+///
+/// **无通配臂的穷尽 match**：新增 `DialogKind` 变体而漏登记会编译失败
+/// （与 `control.rs::has_rpc_mapping` 同一手法）。
+fn kind_alignment_tests(kind: client_bevy::game::dialogs::DialogKind) -> &'static [&'static str] {
+    use client_bevy::game::dialogs::DialogKind as K;
+    match kind {
+        K::Inventory | K::BigMap => &["inventory_bigmap_aligned"],
+        K::Character => &["character_dialog_aligned"],
+        K::QuestLog | K::QuestDetail => &["panel_sprites_batch_b3_match_csharp"],
+        K::Settings => &["settings_dialog_aligned"],
+        K::Menu => &["menu_dura_aligned"],
+        K::GameShop
+        | K::Mount
+        | K::Inspect
+        | K::NpcGoods
+        | K::Socket
+        | K::Trade
+        | K::GuestTrade
+        | K::KeyboardLayout
+        | K::NpcAwake
+        | K::HeroManage => &["panel_sprites_batch_b2_match_csharp"],
+        K::Minimap | K::Npc | K::ChatNotice | K::Buff => &["panel_sprites_batch_b3_match_csharp"],
+        K::Group | K::Mentor | K::Relationship | K::Help | K::Notice | K::Creature => {
+            &["panel_sprites_batch_b1_match_csharp"]
+        }
+        K::Friend => &["panel_sprites_batch_b1_match_csharp"],
+        K::Mail => &[
+            "panel_sprites_batch_b1_match_csharp",
+            "trust_merchant_price_filter_and_mail_aligned",
+        ],
+        K::Guild => &["panel_sprites_batch_b7_match_csharp"],
+        K::Ranking => &["ranking_dialog_aligned", "ranking_children_aligned"],
+        K::Report => &["report_dialog_aligned"],
+        K::HeroInventory => &[
+            "hero_inventory_origin_aligned",
+            "hero_inventory_autopot_aligned",
+        ],
+        K::HeroEquipment => &["hero_equipment_dialog_aligned"],
+        K::HeroSkill => &["hero_skills_dialog_aligned"],
+        K::ItemRental => &["item_rental_guest_windows_aligned"],
+        K::GuildTerritory => &["guild_territory_dialog_aligned"],
+        K::Fishing | K::FishingStatus => &["panel_sprites_batch_b23_match_fishing_split"],
+        K::Refine | K::Craft => &["craft_refine_sprites_aligned"],
+        K::DuraStatus => &["panel_sprites_batch_b4_match_csharp"],
+        K::Roll | K::ItemRentalBrowse => &["panel_sprites_batch_b5_match_csharp"],
+        K::Timer => &["timer_dialog_aligned"],
+        K::Market => &["trust_merchant_rows_aligned"],
+        K::Storage => &["panel_sprites_batch_b6_match_csharp"],
+        K::InputBox => &["input_box_aligned"],
+        K::Memo => &["panel_sprites_batch_b18_match_memo_dialog"],
+    }
+}
+
+/// #2892 批B 验收：每个窗口至少一条对齐断言，且登记的测试名必须在本文件真实存在
+/// （测试改名/删除后不同步 → 红）。
+///
+/// 阳性对照（2026-09-15 实测）：① 把 `K::Report` 的登记改成 `&[]` → 非空断言 FAILED；
+/// ② 把登记名改成 `report_dialog_aligned_typo` → 源码存在性断言 FAILED；③ 从
+/// `ALL_DIALOG_KINDS` 删一项 → 判别值缺口断言 FAILED。
+#[test]
+fn every_dialog_kind_has_alignment_coverage() {
+    // 1) 列表完备：判别值必须恰好是 0..DIALOG_KIND_COUNT 的一个排列
+    let mut seen = [false; DIALOG_KIND_COUNT];
+    for kind in ALL_DIALOG_KINDS {
+        let i = kind as usize;
+        assert!(
+            i < DIALOG_KIND_COUNT,
+            "[覆盖] {kind:?} 判别值 {i} 越界：枚举新增变体后需同步 ALL_DIALOG_KINDS/DIALOG_KIND_COUNT"
+        );
+        assert!(!seen[i], "[覆盖] {kind:?} 在 ALL_DIALOG_KINDS 里重复");
+        seen[i] = true;
+    }
+    assert!(
+        seen.iter().all(|&s| s),
+        "[覆盖] ALL_DIALOG_KINDS 有缺口（判别值未全覆盖 → 漏了窗口）"
+    );
+
+    // 2) 每窗至少一条测试名，且测试名在本文件真实存在
+    let src = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/ui_alignment.rs"
+    ))
+    .expect("读取 ui_alignment.rs 源码用于核对登记名");
+    for kind in ALL_DIALOG_KINDS {
+        let tests = kind_alignment_tests(kind);
+        assert!(!tests.is_empty(), "[覆盖] {kind:?} 没有登记任何对齐断言");
+        for name in tests {
+            assert!(
+                src.contains(&format!("fn {name}(")),
+                "[覆盖] {kind:?} 登记的 `{name}` 在本文件不存在（改名/删除后需同步本表）"
+            );
+        }
+    }
+    println!("  ✓ 49 个 DialogKind 全部有对齐断言登记（且登记名在源码中真实存在）");
+}

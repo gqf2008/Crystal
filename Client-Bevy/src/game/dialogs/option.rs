@@ -211,7 +211,101 @@ fn volume_hint_text(vol: f32) -> String {
 }
 
 /// 面板初始原点兜底（Title[411] 259x354 居中：与 setup 的 fallback 尺寸一致）
-const OPTION_ORIGIN: (f32, f32) = ((1024.0 - 259.0) / 2.0, (768.0 - 354.0) / 2.0);
+/// C# `OptionDialog`（`MainDialogs.cs:2545-2546`）：`Index = 411; Library = Libraries.Title`
+pub const PANEL: (LibraryName, usize) = (LibraryName::Title, 411);
+/// 面板 art 实测尺寸（C# 用 art 尺寸做 `Location = Center`，`:2550`）
+pub const PANEL_SIZE: (f32, f32) = (259.0, 354.0);
+/// 关闭键相对面板：C# `Location = new Point(Size.Width - 26, 5)`（`:2559`，无 `Size` → art 24x21）
+pub const CLOSE_REL: (f32, f32) = (233.0, 5.0);
+/// 8 组开/关按钮：`On @(159,y)`、`Off @(201,y)`、`Size 36x17`（`MainDialogs.cs:2566-2780`）
+pub const TOGGLE_ON_X: f32 = 159.0;
+pub const TOGGLE_OFF_X: f32 = 201.0;
+pub const TOGGLE_SIZE: (f32, f32) = (36.0, 17.0);
+/// 行 y：技能模式/技能栏/特效/掉落/名称/血条 `68+25i`，观察 `271`、新移动 `296`（`:2570/2599/2621/2643/2665/2687/2789/2759`）
+pub const TOGGLE_ROWS_Y: [(OptionToggleKind, f32); 8] = [
+    (OptionToggleKind::SkillMode, 68.0),
+    (OptionToggleKind::SkillBar, 93.0),
+    (OptionToggleKind::Effect, 118.0),
+    (OptionToggleKind::DropView, 143.0),
+    (OptionToggleKind::NameView, 168.0),
+    (OptionToggleKind::HpView, 193.0),
+    (OptionToggleKind::Observe, 271.0),
+    (OptionToggleKind::NewMove, 296.0),
+];
+/// 音量条 `SoundBar Prguse2[468]` @(159,225)/`MusicSoundBar` @(159,251)（`:2714-2751`）
+pub const VOLUME_BAR_X: f32 = 159.0;
+pub const VOLUME_BAR_Y: (f32, f32) = (225.0, 251.0);
+/// 音量滑块 `Prguse[20]` @(155, 218/244)（`:2726-2751`）
+pub const VOLUME_KNOB_X: f32 = 155.0;
+
+/// 8 组开关：`(kind, 帧库, y, On 帧[normal,hover,pressed], Off 帧)`。
+/// C# 依据（`MainDialogs.cs`）：`SkillMode 159/201@68`（`:2567-2589`）、`SkillBar @93`（`:2596-2614`）、
+/// `Effect @118`（`:2618-2636`）、`DropView @143`（`:2640-2658`）、`NameView @168`（`:2662-2680`）、
+/// `HPView @193`（`:2684-2706`，帧 `Prguse2[464/462/463]`）、`Observe @271`（`:2786+`）、
+/// `NewMove @296`（`:2756-2778`，帧 `Title[853/851/853]`/`[848/850/850]`）
+pub const TOGGLE_ROWS: [(OptionToggleKind, LibraryName, f32, [usize; 3], [usize; 3]); 8] = [
+    (
+        OptionToggleKind::SkillMode,
+        LibraryName::Prguse2,
+        68.0,
+        [452, 450, 451],
+        [453, 455, 454],
+    ),
+    (
+        OptionToggleKind::SkillBar,
+        LibraryName::Prguse2,
+        93.0,
+        [458, 456, 457],
+        [459, 461, 460],
+    ),
+    (
+        OptionToggleKind::Effect,
+        LibraryName::Prguse2,
+        118.0,
+        [458, 456, 457],
+        [459, 461, 460],
+    ),
+    (
+        OptionToggleKind::DropView,
+        LibraryName::Prguse2,
+        143.0,
+        [458, 456, 457],
+        [459, 461, 460],
+    ),
+    (
+        OptionToggleKind::NameView,
+        LibraryName::Prguse2,
+        168.0,
+        [458, 456, 457],
+        [459, 461, 460],
+    ),
+    (
+        OptionToggleKind::HpView,
+        LibraryName::Prguse2,
+        193.0,
+        [464, 462, 463],
+        [465, 467, 466],
+    ),
+    (
+        OptionToggleKind::Observe,
+        LibraryName::Prguse2,
+        271.0,
+        [458, 456, 457],
+        [459, 461, 460],
+    ),
+    (
+        OptionToggleKind::NewMove,
+        LibraryName::Title,
+        296.0,
+        [853, 851, 853],
+        [848, 850, 850],
+    ),
+];
+
+/// C# `Location = new Point((Settings.ScreenWidth - Size.Width) / 2, (ScreenHeight - Size.Height) / 2)`
+/// （`MainDialogs.cs:2550`，**整除**）：`((1024-259)/2, (768-354)/2) = (382, 207)`。
+/// 与 `center_origin(PANEL_SIZE)`（floor）同值，由 `ui_alignment::settings_dialog_aligned` 钉住。
+pub const OPTION_ORIGIN: (f32, f32) = (382.0, 207.0);
 
 /// 音量填充条（Prguse2[468] 部分裁剪）
 #[derive(Component)]
@@ -361,14 +455,14 @@ fn spawn_option(
     let font = ui_font.0.clone();
 
     // 面板 Title[411]（259x354），居中
-    let (pw, ph) = match libs.0.get_image(LibraryName::Title, 411) {
+    let (pw, ph) = match libs.0.get_image(PANEL.0, PANEL.1) {
         Some(i) => (i.width.max(0) as f32, i.height.max(0) as f32),
-        None => (250.0, 330.0),
+        None => PANEL_SIZE,
     };
-    let px = (1024.0 - pw) / 2.0;
-    let py = (768.0 - ph) / 2.0;
+    // C# 用整除居中（`(ScreenWidth - Size.Width) / 2`），与 `center_origin` 同口径
+    let (px, py) = super::center_origin(pw, ph);
 
-    let Some(bg) = load_lib_image(&mut libs, &mut images, LibraryName::Title, 411) else {
+    let Some(bg) = load_lib_image(&mut libs, &mut images, PANEL.0, PANEL.1) else {
         return;
     };
     let panel = spawn_panel(&mut commands, bg, px, py, pw, ph, 30);
@@ -383,68 +477,11 @@ fn spawn_option(
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 361),
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 362),
         ) {
-            spawn_icon_button(p, n, h, pr, pw - 26.0, 5.0, 24.0, 21.0, 10).insert(OptionClose);
+            spawn_icon_button(p, n, h, pr, CLOSE_REL.0, CLOSE_REL.1, 24.0, 21.0, 10)
+                .insert(OptionClose);
         }
         // 8 组开/关按钮（On at (159,y)，Off at (201,y)，36x17）
-        let rows: [(OptionToggleKind, LibraryName, f32, [usize; 3], [usize; 3]); 8] = [
-            (
-                OptionToggleKind::SkillMode,
-                LibraryName::Prguse2,
-                68.0,
-                [452, 450, 451],
-                [453, 455, 454],
-            ),
-            (
-                OptionToggleKind::SkillBar,
-                LibraryName::Prguse2,
-                93.0,
-                [458, 456, 457],
-                [459, 461, 460],
-            ),
-            (
-                OptionToggleKind::Effect,
-                LibraryName::Prguse2,
-                118.0,
-                [458, 456, 457],
-                [459, 461, 460],
-            ),
-            (
-                OptionToggleKind::DropView,
-                LibraryName::Prguse2,
-                143.0,
-                [458, 456, 457],
-                [459, 461, 460],
-            ),
-            (
-                OptionToggleKind::NameView,
-                LibraryName::Prguse2,
-                168.0,
-                [458, 456, 457],
-                [459, 461, 460],
-            ),
-            (
-                OptionToggleKind::HpView,
-                LibraryName::Prguse2,
-                193.0,
-                [464, 462, 463],
-                [465, 467, 466],
-            ),
-            (
-                OptionToggleKind::Observe,
-                LibraryName::Prguse2,
-                271.0,
-                [458, 456, 457],
-                [459, 461, 460],
-            ),
-            (
-                OptionToggleKind::NewMove,
-                LibraryName::Title,
-                296.0,
-                [853, 851, 853],
-                [848, 850, 850],
-            ),
-        ];
-        for (kind, lib, y, on_btn, off_btn) in rows {
+        for (kind, lib, y, on_btn, off_btn) in TOGGLE_ROWS {
             let (on, off) = load_frames(&mut libs, &mut images, lib, on_btn, off_btn);
             if let (Some(on), Some(off)) = (on, off) {
                 spawn_icon_button(

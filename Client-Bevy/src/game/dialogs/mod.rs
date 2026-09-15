@@ -121,7 +121,6 @@ pub enum DialogKind {
     ChatNotice,
     Market,
     Storage,
-    Skills,
     /// #2720：C# `ItemRentalDialog`（浏览已租出物品列表；与出租流程 `ItemRental` 分开）
     ItemRentalBrowse,
     /// #2791：C# `HeroManageDialog`（`Prguse[1688]` 独立窗、独立拖动；随 `S.ManageHeroes`

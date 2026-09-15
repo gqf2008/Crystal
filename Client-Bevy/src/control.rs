@@ -558,8 +558,9 @@ fn handle_conn(mut stream: std::net::TcpStream, tx: Sender<ControlCommand>) {
 
 /// snake_case 对话框名 → DialogKind（#2586）。
 ///
-/// 覆盖除 `GuestTrade` 外的全部 47 个变体（`DialogKind` 共 48 个）——
-/// `GuestTrade` 由网络 trade 会话与 Trade 成对驱动（dialogs/trade.rs），无独立开关语义，
+/// 覆盖除 `GuestTrade`/`Memo`/`FishingStatus` 外的全部 46 个变体（`DialogKind` 共 49 个）——
+/// 三者都没有独立开关语义：`GuestTrade` 由网络 trade 会话与 Trade 成对驱动（dialogs/trade.rs）、
+/// `Memo` 由好友窗「备注」动作打开、`FishingStatus` 随钓鱼流程 `S.FishingUpdate.Fishing` 显隐，
 /// 故不做 RPC 映射（调用会回 unknown dialog kind）。
 /// 另有 2 个历史别名（#2599 移除 M9 占位空壳后保留工具兼容）：
 /// `trust_merchant` → Market（C# TrustMerchantDialog 的真身是 market.rs）、
@@ -614,7 +615,6 @@ fn parse_dialog_kind(s: &str) -> Option<DialogKind> {
         "chat_notice" => D::ChatNotice,
         "market" => D::Market,
         "storage" => D::Storage,
-        "skills" => D::Skills,
         // #2720：C# `ItemRentalDialog`（浏览已租出物品）
         "item_rental_browse" => D::ItemRentalBrowse,
         // #2791：C# `HeroManageDialog`（`S.ManageHeroes` 弹出的英雄管理窗；RPC 直接切
@@ -680,7 +680,6 @@ fn has_rpc_mapping(kind: DialogKind) -> bool {
         | D::Market
         | D::ItemRentalBrowse
         | D::Storage
-        | D::Skills
         | D::HeroManage
         | D::QuestDetail
         | D::InputBox => true,
@@ -1095,7 +1094,6 @@ mod tests {
             "chat_notice",
             "market",
             "storage",
-            "skills",
             "item_rental_browse",
             "hero_manage",
             "quest_detail",
@@ -1103,7 +1101,7 @@ mod tests {
         ];
         // #2599：trust_merchant/npc_drop 是历史别名（→ Market/Npc，真实现移壳后保留工具兼容），
         // 与 market/npc 重复映射——互异断言计数时先去掉这 2 个别名。
-        // 名单与 witness 一致：每个可解析名都有 RPC 映射；DialogKind 共 48 个变体，
+        // 名单与 witness 一致：每个可解析名都有 RPC 映射；DialogKind 共 47 个变体，
         // GuestTrade 刻意排除——枚举级穷尽由 has_rpc_mapping 的无通配 match 编译期保证）
         let parsed: Vec<DialogKind> = all.iter().map(|s| parse_dialog_kind(s).unwrap()).collect();
         let uniq: Vec<&DialogKind> = {
@@ -1112,11 +1110,11 @@ mod tests {
             seen.dedup_by_key(|k| format!("{k:?}"));
             seen
         };
-        assert_eq!(all.len(), 49);
+        assert_eq!(all.len(), 48);
         assert_eq!(
             uniq.len(),
-            47,
-            "49 个名字（含 trust_merchant/npc_drop 两个别名）应映射到 47 个不同变体"
+            46,
+            "48 个名字（含 trust_merchant/npc_drop 两个别名）应映射到 46 个不同变体"
         );
         // 名单与 witness 一致：每个可解析名都有 RPC 映射
         assert!(
