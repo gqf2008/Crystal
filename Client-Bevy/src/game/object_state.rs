@@ -19,6 +19,56 @@ use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
 use crate::ui::sprite_ui::{ui_image, UiImageCache};
 
+/// #2892：`MapObject.Hidden` 标记（半透明档）——来源：`ObjectPlayer.hidden`（进视野）与
+/// `S.ObjectHidden/ObjectShown`（状态变化）。透明度由 `apply_hidden_alpha` 落地。
+#[derive(Component, Clone, Copy, PartialEq, Eq, Debug)]
+pub struct HiddenObject {
+    pub hidden: bool,
+}
+
+/// C# `MapObject.cs:5006` `DXManager.SetOpacity(0.5F)` / 恢复 1.0
+pub fn hidden_alpha(hidden: bool) -> f32 {
+    if hidden {
+        0.5
+    } else {
+        1.0
+    }
+}
+
+/// 把 `object_id` 对应的实体标记为隐藏/显形（找不到实体则跳过：进视野那份走 ObjectPlayer.hidden）
+fn set_hidden_flag(
+    commands: &mut Commands,
+    ids: &Query<(Entity, &NetObjectId)>,
+    object_id: u32,
+    hidden: bool,
+) {
+    if let Some((e, _)) = ids.iter().find(|(_, id)| id.0 == object_id) {
+        commands.entity(e).insert(HiddenObject { hidden });
+    }
+}
+
+/// #2892：按 `HiddenObject` 设置**该对象自己**的 sprite 层透明度
+/// （C# `MapObject.cs:5006`；含生成/事件两条来源，顺序无关）。
+fn apply_hidden_alpha(
+    mut objects: Query<(&HiddenObject, &Children, &mut Visibility), Changed<HiddenObject>>,
+    mut layers: Query<&mut SpriteLayer>,
+) {
+    for (h, children, mut vis) in &mut objects {
+        // `Hidden` 对象仍然可见（半透明）；「对他人完全消失」是 S.ObjectRemove 的职责
+        if *vis != Visibility::Visible {
+            *vis = Visibility::Visible;
+        }
+        let alpha = hidden_alpha(h.hidden);
+        for child in children.iter() {
+            if let Ok(mut layer) = layers.get_mut(child) {
+                if layer.alpha != alpha {
+                    layer.alpha = alpha;
+                }
+            }
+        }
+    }
+}
+
 pub struct ObjectStatePlugin;
 
 /// #279：服务端怪物/NPC 信息缓存（NewMonsterInfo / NewNPCInfo）
@@ -39,6 +89,8 @@ impl Plugin for ObjectStatePlugin {
                 apply_info_cache_events,
                 apply_level_up_fx_events,
                 advance_level_up_fx,
+                // #2892：半透明档落地（排在事件系统之后，`Commands` 已应用）
+                apply_hidden_alpha,
             )
                 .after(crate::network::network_system)
                 .run_if(in_state(AppState::Game)),
@@ -55,6 +107,8 @@ fn apply_object_state_events(
     // 实体缺失视同非本地（原 hud.player_object_id=None 默认）
     local_q: Query<&NetObjectId, With<LocalPlayer>>,
     mut vis: Query<(&NetObjectId, &mut Visibility)>,
+    // #2892：事件 → `HiddenObject` 标记（只读 id 查询；与 `vis` 只共享 `NetObjectId` 读访问）
+    ids: Query<(Entity, &NetObjectId)>,
     mut anim: Query<(Entity, &NetObjectId, &mut ActorAnim)>,
     mut transforms: Query<(&NetObjectId, &mut Transform)>,
     mounts: Query<(Entity, &NetObjectId, Option<&MountState>)>,
@@ -85,19 +139,12 @@ fn apply_object_state_events(
         match ev {
             ServerEvent::ObjectHidden { object_id } => {
                 // #2892：对齐 C# `MapObject.cs:5006` —— `Hidden` 对象**一律半透明绘制**
-                // （`if (Hidden && !DXManager.Blending) DXManager.SetOpacity(0.5F);`），
-                // 本地与远程一致；「对他人完全消失」是服务器 `S.ObjectRemove`（`Sneaking`/`Observer`）的职责，
-                // 不是这里的 `Hidden` 标志。
+                //（`if (Hidden && !DXManager.Blending) DXManager.SetOpacity(0.5F);`）。
+                // 只改本对象的 `HiddenObject` 标记，透明度由 `apply_hidden_alpha` 落到该对象的层上：
+                // 旧实现遍历**全部** `SpriteLayer`，会把场上所有对象一起变半透明；
+                // 且事件早于对象创建时会丢失（进视野那份由 `ObjectPlayer.hidden` 携带）。
                 let is_local = local_id == Some(object_id);
-                for (id, mut v) in &mut vis {
-                    if id.0 == object_id {
-                        *v = Visibility::Visible;
-                        for mut layer in &mut layers {
-                            layer.alpha = 0.5;
-                        }
-                        break;
-                    }
-                }
+                set_hidden_flag(&mut commands, &ids, object_id, true);
                 tracing::debug!(
                     "[OBJSTATE] 隐藏 id={} local={} found={}",
                     object_id,
@@ -106,16 +153,8 @@ fn apply_object_state_events(
                 );
             }
             ServerEvent::ObjectShown { object_id } => {
-                for (id, mut v) in &mut vis {
-                    if id.0 == object_id {
-                        *v = Visibility::Visible;
-                        // 取消隐藏 → 恢复不透明（C# `Hidden = false` 后不再 `SetOpacity(0.5F)`）
-                        for mut layer in &mut layers {
-                            layer.alpha = 1.0;
-                        }
-                        break;
-                    }
-                }
+                // 取消隐藏 → 恢复不透明（C# `Hidden = false` 后不再 `SetOpacity(0.5F)`）
+                set_hidden_flag(&mut commands, &ids, object_id, false);
             }
             ServerEvent::ObjectSitDown {
                 object_id,
@@ -491,5 +530,83 @@ fn advance_level_up_fx(
         ) {
             sprite.image = h;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::actor::SpriteLayer;
+    use crate::resources::libraries::ArrayLibType;
+
+    fn spawn_actor(app: &mut App, object_id: u32, layer_alphas: &[f32]) -> (Entity, Vec<Entity>) {
+        let mut layers = Vec::new();
+        let mut obj = app
+            .world_mut()
+            .spawn((NetObjectId(object_id), Visibility::Visible))
+            .id();
+        app.world_mut().entity_mut(obj).with_children(|parent| {
+            for alpha in layer_alphas {
+                layers.push(
+                    parent
+                        .spawn(SpriteLayer {
+                            lib: ArrayLibType::CArmours,
+                            slot: 0,
+                            frame: 0,
+                            is_effect: false,
+                            is_mount: false,
+                            alpha: *alpha,
+                        })
+                        .id(),
+                );
+            }
+        });
+        obj = app.world().entity(obj).id();
+        (obj, layers)
+    }
+
+    fn alpha_of(app: &App, e: Entity) -> f32 {
+        app.world().entity(e).get::<SpriteLayer>().unwrap().alpha
+    }
+
+    /// #2892：`Hidden` 只把**该对象自己**的图层设成 50% 透明。
+    ///
+    /// C# 基准：`MapObject.cs:5006` `if (Hidden && !DXManager.Blending) DXManager.SetOpacity(0.5F);`
+    /// （绘制前设一次全局 opacity，逐对象绘制）。
+    /// 阳性对照：把 `apply_hidden_alpha` 改回旧写法（遍历全部 `SpriteLayer` 设 alpha）→
+    /// 本测试对 bystander 的断言 FAILED（旁观者也会被设成 0.5）。
+    #[test]
+    fn hidden_alpha_only_affects_target_object() {
+        let mut app = App::new();
+        app.add_systems(Update, apply_hidden_alpha);
+        let (target, target_layers) = spawn_actor(&mut app, 7, &[1.0, 1.0]);
+        let (_bystander, bystander_layers) = spawn_actor(&mut app, 8, &[1.0]);
+
+        app.world_mut()
+            .entity_mut(target)
+            .insert(HiddenObject { hidden: true });
+        app.update();
+
+        for e in &target_layers {
+            assert_eq!(
+                alpha_of(&app, *e),
+                0.5,
+                "目标对象应半透明（C# SetOpacity(0.5F)）"
+            );
+        }
+        for e in &bystander_layers {
+            assert_eq!(alpha_of(&app, *e), 1.0, "旁观对象不得被一起变半透明");
+        }
+
+        // 显形 → 恢复不透明
+        app.world_mut()
+            .entity_mut(target)
+            .insert(HiddenObject { hidden: false });
+        app.update();
+        for e in &target_layers {
+            assert_eq!(alpha_of(&app, *e), 1.0, "取消隐藏后应恢复不透明");
+        }
+        assert_eq!(hidden_alpha(true), 0.5);
+        assert_eq!(hidden_alpha(false), 1.0);
     }
 }

@@ -1347,10 +1347,24 @@ pub(crate) fn handle_progress(
                 tracing::info!("📦 ObjectHero 解码");
             }
         }
-        // #291：C# 服务端包面收尾（ObjectHidden）
+        // #2892：#291 只解码未接线 → 147 现在接进事件总线
+        //（C# `MapObject.cs:90` `S.ObjectHidden { ObjectID, Hidden }` → 客户端 50% 透明 / 恢复）
         x if x == ServerPacketIds::ObjectHidden as i16 => {
-            if object::ObjectHidden::read_body(&mut cur).is_ok() {
-                tracing::info!("📦 ObjectHidden 解码");
+            match object::ObjectHidden::read_body(&mut cur) {
+                Ok(p) => {
+                    let ev = if p.hidden {
+                        ServerEvent::ObjectHidden {
+                            object_id: p.object_id,
+                        }
+                    } else {
+                        ServerEvent::ObjectShown {
+                            object_id: p.object_id,
+                        }
+                    };
+                    server_events.write(ev);
+                    tracing::debug!("📦 ObjectHidden id={} hidden={}", p.object_id, p.hidden);
+                }
+                Err(e) => tracing::warn!("⚠️ ObjectHidden 解析失败: {e}"),
             }
         }
         // #291：C# 服务端包面收尾（UserSlotsRefresh）
@@ -1497,6 +1511,56 @@ mod tests {
     fn decode_system(mut events: MessageWriter<ServerEvent>, mut payload: Local<Option<Vec<u8>>>) {
         let payload = payload.get_or_insert_with(build_hero_info_payload);
         let _ = handle_progress(&mut events, payload);
+    }
+
+    /// #2892：`S.ObjectHidden`（147）此前只 `read_body` + 打日志（#291 包面收尾），
+    /// 半透明档到不了客户端 → 现在必须进事件总线。
+    /// C# 基准：`MapObject.cs:90` `CurrentMap.Broadcast(new S.ObjectHidden{ObjectID, Hidden})`。
+    fn object_hidden_payload(object_id: u32, hidden: bool) -> Vec<u8> {
+        use mir2_shared::packets::server::object::ObjectHidden;
+        let pkt = ObjectHidden { object_id, hidden };
+        let mut body = Vec::new();
+        pkt.write_body(&mut body).unwrap();
+        let mut payload = Vec::new();
+        PacketHeader::new((4 + body.len()) as u16, ObjectHidden::OPCODE)
+            .write_to(&mut payload)
+            .unwrap();
+        payload.extend_from_slice(&body);
+        payload
+    }
+
+    #[test]
+    fn object_hidden_opcode_reaches_event_bus() {
+        fn hook(mut ev: MessageWriter<ServerEvent>, mut payloads: Local<Vec<Vec<u8>>>) {
+            if payloads.is_empty() {
+                payloads.push(object_hidden_payload(0x2000_0007, true));
+                payloads.push(object_hidden_payload(0x2000_0007, false));
+            }
+            for payload in payloads.iter() {
+                assert!(
+                    handle_progress(&mut ev, payload),
+                    "147 应被判为已处理（HANDLED 列表）"
+                );
+            }
+        }
+        let mut app = App::new();
+        app.init_resource::<Messages<ServerEvent>>();
+        app.add_systems(Update, hook);
+        app.update();
+
+        let mut messages = app.world_mut().resource_mut::<Messages<ServerEvent>>();
+        let drained: Vec<ServerEvent> = messages.drain().collect();
+        assert_eq!(drained.len(), 2, "147 应产出两条事件");
+        match (&drained[0], &drained[1]) {
+            (
+                ServerEvent::ObjectHidden { object_id },
+                ServerEvent::ObjectShown { object_id: shown },
+            ) => {
+                assert_eq!(*object_id, 0x2000_0007, "隐藏事件的对象 id 应随包解出");
+                assert_eq!(*shown, 0x2000_0007, "显形事件的对象 id 应随包解出");
+            }
+            other => panic!("unexpected events: {other:?}"),
+        }
     }
 
     #[test]

@@ -268,6 +268,9 @@ pub enum NetObject {
         /// M60 坐骑
         mount_type: i16,
         is_mounted: bool,
+        /// #2892：`ObjectPlayer.Hidden`（C# `PlayerObject.cs:4799` `Hidden = Hidden`）——
+        /// 进视野时就把半透明档带上，避免 `S.ObjectHidden` 先于对象创建到达而丢失
+        hidden: bool,
     },
     Monster {
         object_id: u32,

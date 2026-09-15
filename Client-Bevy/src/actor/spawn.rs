@@ -98,6 +98,7 @@ pub(crate) fn spawn_net_objects_when_ready(
                 weapon_effect,
                 armour,
                 wing_effect,
+                hidden,
                 ..
             } => {
                 // M60：已存在的玩家（骑乘/下马重发 ObjectPlayer）→ 只更新坐骑层，不重复生成
@@ -158,6 +159,10 @@ pub(crate) fn spawn_net_objects_when_ready(
                         weapon_effect: *weapon_effect,
                         wing_effect: *wing_effect,
                     });
+                    // #2892：重发 ObjectPlayer（C# `RefreshHidden` 路径）也要刷新半透明档
+                    commands
+                        .entity(ent)
+                        .insert(crate::game::object_state::HiddenObject { hidden: *hidden });
                     continue;
                 }
                 spawn_net_object_entity(
@@ -225,6 +230,7 @@ fn spawn_net_object_entity(
             wing_effect,
             mount_type,
             is_mounted,
+            hidden,
         } => {
             tracing::debug!(
                 "🧍 NetObject::Player id={} name={} loc=({},{}) local={}",
@@ -280,6 +286,11 @@ fn spawn_net_object_entity(
                     .entity(e)
                     .insert(PlayerGuildName(guild_name.clone()));
             }
+            // #2892：`Hidden`（半透明档）随进视野包落地；`Changed` 由
+            // `object_state::apply_hidden_alpha` 消费（与生成顺序无关）
+            commands
+                .entity(e)
+                .insert(crate::game::object_state::HiddenObject { hidden: *hidden });
         }
         NetObject::GroundGold { .. } => {}
         NetObject::Monster {
