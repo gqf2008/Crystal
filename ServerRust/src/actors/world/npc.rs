@@ -3313,25 +3313,10 @@ impl Message<FishingCastRequest> for WorldActor {
             })
             .await;
 
-        // Send FishingUpdate: progress=1 (waiting), success=false
-        use mir2_shared::packets::server::miscellaneous::FishingUpdate;
-        let packet = FishingUpdate {
-            fishing_progress: 1,
-            fishing_success: false,
-        };
-        let mut body = Vec::new();
-        if let Ok(()) = mir2_shared::packets::Packet::write_body(&packet, &mut body) {
-            let _ = self
-                .gate_ref
-                .tell(SendToClient {
-                    session_id: msg.session_id,
-                    data: build_packet_bytes(
-                        mir2_shared::enums::ServerPacketIds::FishingUpdate as i16,
-                        &body,
-                    ),
-                })
-                .await;
-        }
+        // #2892：C# `FishingCast` → `Enqueue(GetFishInfo())`：`Fishing=true`、进度 0、
+        // `ChancePercent` = 本轮成功率、未咬钩（客户端据此显示状态窗与机会条）
+        self.send_fishing_update(msg.session_id, state.object_id, true, 0, chance, false)
+            .await;
 
         debug!(
             "FishingCast: {} type={} at ({},{}) attr={} chance={} flexibility={}",
@@ -3369,25 +3354,9 @@ impl Message<FishingChangeAutocastRequest> for WorldActor {
             })
             .await;
 
-        // Send FishingUpdate: progress=5 (autocast toggle), success=enabled
-        use mir2_shared::packets::server::miscellaneous::FishingUpdate;
-        let packet = FishingUpdate {
-            fishing_progress: 5,
-            fishing_success: msg.enabled,
-        };
-        let mut body = Vec::new();
-        if let Ok(()) = mir2_shared::packets::Packet::write_body(&packet, &mut body) {
-            let _ = self
-                .gate_ref
-                .tell(SendToClient {
-                    session_id: msg.session_id,
-                    data: build_packet_bytes(
-                        mir2_shared::enums::ServerPacketIds::FishingUpdate as i16,
-                        &body,
-                    ),
-                })
-                .await;
-        }
+        // #2892：不再借 `FishingUpdate` 传自动钓鱼开关——C# 客户端点按钮即本地切
+        // `AutoCastBox.Index = _autoCast ? 1344 : 1343`（`FishingDialog.cs:260-271`），
+        // 服务端只记状态（`SetFishing.autocast`）。
 
         debug!(
             "FishingChangeAutocast: {} enabled={}",

@@ -44,6 +44,9 @@ pub fn esc_close_dialogs_system(
     mut input: ResMut<crate::game::dialogs::text_input::TextInputState>,
     // #2836 单元③：C# `HeroManageDialog?.Hide()`（`GameScene.cs:707`）——本端该窗状态驱动
     mut hero: ResMut<crate::game::dialogs::hero::HeroState>,
+    // #2892：C# `GameScene.cs:698` —— ESC 只在「ESC 退出」勾选时取消钓鱼
+    fishing: Res<crate::game::dialogs::fishing::FishingState>,
+    net: Res<crate::network::NetConnection>,
 ) {
     if !keys.just_pressed(KeyCode::Escape) {
         return;
@@ -64,6 +67,13 @@ pub fn esc_close_dialogs_system(
     // #2836 单元③：按 C# `KeybindOptions.Closeall` 的**集合**关闭（`GameScene.cs:668-711`），
     // 不再 blanket `open.clear()` —— 原版 ESC **不关** 交易窗/计时器/Buff/小地图/耐久面板/
     // 镶嵌窗/聊天公告/租赁双方窗（见 `dialogs::CLOSEALL_DIRECT` 注释）。
+    // #2892：C# `GameScene.cs:698` —— `if (FishingStatusDialog.bEscExit) FishingStatusDialog.Cancel();`
+    // （钓鱼**状态窗不在** Closeall 集合里：主窗由下面的 Closeall 关，
+    //  状态窗只在勾选「ESC 退出」时取消钓鱼 → 服务端回 `Fishing=false` 才消失）
+    if fishing.esc_exit && mgr.is_open(crate::game::dialogs::DialogKind::FishingStatus) {
+        crate::game::dialogs::fishing::cancel_fishing(&net, &mut mgr);
+        tracing::info!("⌨️ ESC 取消钓鱼（ESC 退出已勾选）");
+    }
     let (mut managing, mut confirm_slot) = (hero.managing, hero.confirm_slot);
     if crate::game::dialogs::closeall(&mut mgr, &mut managing, &mut confirm_slot) {
         hero.managing = managing;
@@ -246,6 +256,45 @@ mod tests {
         esc_app_ext(chat_open, text_active, false, false)
     }
 
+    /// #2892：C# `GameScene.cs:698` —— ESC 只在「ESC 退出」（`FishingStatusDialog.bEscExit`）
+    /// 勾选时取消钓鱼（`Cancel()`：发 `C.FishingCast{CastOut=false}` + 关状态窗）；
+    /// 未勾选时状态窗不在 Closeall 集合里，ESC 不动它。
+    ///
+    /// 阳性对照：把键盘处理里的 `fishing.esc_exit &&` 条件去掉（= 无条件取消）→
+    /// 本测试第一条断言（未勾选时状态窗应保持打开）FAILED。
+    #[test]
+    fn esc_cancels_fishing_only_when_esc_exit_checked() {
+        use crate::game::dialogs::fishing::FishingState;
+        use crate::game::dialogs::DialogKind;
+        // 未勾选：状态窗保持打开
+        let mut app = esc_app_ext(false, None, false, false);
+        app.world_mut()
+            .resource_mut::<DialogManager>()
+            .open
+            .push(DialogKind::FishingStatus);
+        app.update();
+        assert!(
+            app.world()
+                .resource::<DialogManager>()
+                .is_open(DialogKind::FishingStatus),
+            "未勾选 ESC 退出时 ESC 不应取消钓鱼"
+        );
+        // 勾选后：状态窗被取消关闭
+        let mut app = esc_app_ext(false, None, false, false);
+        app.world_mut()
+            .resource_mut::<DialogManager>()
+            .open
+            .push(DialogKind::FishingStatus);
+        app.world_mut().resource_mut::<FishingState>().esc_exit = true;
+        app.update();
+        assert!(
+            !app.world()
+                .resource::<DialogManager>()
+                .is_open(DialogKind::FishingStatus),
+            "勾选 ESC 退出后 ESC 应取消钓鱼并关闭状态窗"
+        );
+    }
+
     /// #2604：扩展 Esc 层级测试——amount/player_menu 开关
     fn esc_app_ext(
         chat_open: bool,
@@ -266,6 +315,9 @@ mod tests {
         app.init_resource::<crate::game::player_menu::PlayerMenuState>();
         // #2836 单元③：ESC 现按 C# Closeall 集合关窗，系统新增 `ResMut<HeroState>`
         app.init_resource::<crate::game::dialogs::hero::HeroState>();
+        // #2892：ESC 还读钓鱼「ESC 退出」勾选（C# `GameScene.cs:698`）→ 需钓鱼状态与网络连接
+        app.init_resource::<crate::game::dialogs::fishing::FishingState>();
+        app.init_resource::<crate::network::NetConnection>();
         app.add_systems(Update, esc_close_dialogs_system);
         app.world_mut()
             .resource_mut::<ButtonInput<KeyCode>>()

@@ -36,14 +36,20 @@ pub(crate) fn auto_fishing_test(
         1 => {
             if *t >= 6.0 {
                 tracing::warn!(
-                    "[FISHTEST] ❌ 未收到 FishingUpdate（progress={}）",
-                    fishing.progress
+                    "[FISHTEST] ❌ 未收到 FishingUpdate（fishing={} progress={}%）",
+                    fishing.fishing,
+                    fishing.progress_percent
                 );
                 *stage = 9;
                 return;
             }
-            if fishing.progress == 1 {
-                tracing::info!("[FISHTEST] ✅ 抛竿成功（等待中）");
+            // #2892：`Fishing=true` 即服务端确认在钓（C# `S.FishingUpdate.Fishing`）
+            if fishing.fishing {
+                tracing::info!(
+                    "[FISHTEST] ✅ 抛竿成功（等待中，progress={}% chance={}%）",
+                    fishing.progress_percent,
+                    fishing.chance_percent
+                );
                 *stage = 2;
                 *t = 0.0;
             }

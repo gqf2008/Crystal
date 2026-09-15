@@ -589,9 +589,9 @@ fn apply_status_event(
     death_ui: &mut crate::game::hud::DeathDialogState,
 ) -> bool {
     match ev {
-        ServerEvent::FishingUpdate { progress, .. } => {
-            // #1544：钓鱼中不可使用物品
-            flags.fishing = *progress != 0;
+        ServerEvent::FishingUpdate { fishing, .. } => {
+            // #1544：钓鱼中不可使用物品（C# `User.Fishing`）
+            flags.fishing = *fishing;
             true
         }
         ServerEvent::TrapRockChanged { in_trap } => {

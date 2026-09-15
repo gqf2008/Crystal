@@ -1235,6 +1235,16 @@ pub(crate) enum FishingPhase {
     Timeout,
 }
 
+/// #2892：C# `PlayerObject.cs:11234` ——
+/// `FishingProgress = _fishCounter > 0 ? (int)((_fishCounter / (decimal)FishingProgressMax) * 100) : 0`
+/// （decimal 除法后截断；`FishingProgressMax` = `Settings.FishingAttempts`）
+pub(crate) fn fishing_progress_percent(counter: u32, max: u32) -> i32 {
+    if counter == 0 || max == 0 {
+        return 0;
+    }
+    ((counter as f64 / max as f64) * 100.0) as i32
+}
+
 /// #2386：钓鱼相位推进（C# UpdateFish：PlayerObject.cs:11199-11236）
 /// - 等待：每 tick 进度 +1，按 nibble_chance 咬钩 roll；进度超 attempts（≈百分比 100）无鱼收竿
 /// - 已咬钩：auto_reel_chance roll 通过 或 found_tick+30（3 秒）窗口到期 → 收竿
@@ -3716,7 +3726,9 @@ impl WorldActor {
         let attempts = self.fishing_cfg.attempts.max(1);
         let now_tick = self.tick_count;
         let mut sessions_update: Vec<(u64, FishingSession)> = Vec::new();
-        let mut bites = Vec::new(); // session_id（咬钩后需发 bite 包）
+        // #2892：(session, object_id, progress_percent, chance) —— 等待期进度与咬钩状态
+        let mut waits: Vec<(u64, u32, i32, i32)> = Vec::new();
+        let mut bites = Vec::new();
         let mut reels: Vec<(u64, bool)> = Vec::new(); // (session_id, fish_found)
         let mut stopped = Vec::new(); // session_id
 
@@ -3740,6 +3752,10 @@ impl WorldActor {
                     auto_reel_roll,
                 ) {
                     FishingPhase::Wait => {
+                        // C# `UpdateFish` 每轮 `Enqueue(GetFishInfo())`：进度条按百分比推进
+                        let pct = fishing_progress_percent(session.progress, attempts);
+                        let chance = session.chance;
+                        waits.push((*session_id, state.object_id, pct, chance));
                         sessions_update.push((*session_id, session));
                     }
                     FishingPhase::Bite => {
@@ -3748,8 +3764,10 @@ impl WorldActor {
                             .actor_ref
                             .ask(crate::actors::player::FishingGearDamageMsg { slot: 2, amount: 1 })
                             .await;
+                        let pct = fishing_progress_percent(session.progress, attempts);
+                        let chance = session.chance;
                         sessions_update.push((*session_id, session));
-                        bites.push(*session_id);
+                        bites.push((*session_id, state.object_id, pct, chance));
                     }
                     FishingPhase::Reel => {
                         reels.push((*session_id, true));
@@ -3763,25 +3781,15 @@ impl WorldActor {
         for (sid, session) in sessions_update {
             self.fishing_sessions.insert(sid, session);
         }
-        for session_id in bites {
-            // C# GetFishInfo FoundFish=true → 客户端显示上钩
-            let bite_packet = mir2_shared::packets::server::miscellaneous::FishingUpdate {
-                fishing_progress: 2,
-                fishing_success: true,
-            };
-            let mut body = Vec::new();
-            if let Ok(()) = mir2_shared::packets::Packet::write_body(&bite_packet, &mut body) {
-                let _ = self
-                    .gate_ref
-                    .tell(SendToClient {
-                        session_id,
-                        data: build_packet_bytes(
-                            mir2_shared::enums::ServerPacketIds::FishingUpdate as i16,
-                            &body,
-                        ),
-                    })
-                    .await;
-            }
+        // #2892：等待期进度（C# `GetFishInfo` → `Fishing=true, FoundFish=false`）
+        for (session_id, object_id, pct, chance) in waits {
+            self.send_fishing_update(session_id, object_id, true, pct, chance, false)
+                .await;
+        }
+        // #2892：咬钩（C# `GetFishInfo` FoundFish=true → 客户端抛竿按钮显示）
+        for (session_id, object_id, pct, chance) in bites {
+            self.send_fishing_update(session_id, object_id, true, pct, chance, true)
+                .await;
         }
         for (sid, fish_found) in reels {
             self.reel_fishing(sid, fish_found).await;
@@ -3797,24 +3805,47 @@ impl WorldActor {
                     })
                     .await;
             }
-            // Send idle state
-            let idle_packet = mir2_shared::packets::server::miscellaneous::FishingUpdate {
-                fishing_progress: 0,
-                fishing_success: false,
-            };
-            let mut body = Vec::new();
-            if let Ok(()) = mir2_shared::packets::Packet::write_body(&idle_packet, &mut body) {
-                let _ = self
-                    .gate_ref
-                    .tell(SendToClient {
-                        session_id,
-                        data: build_packet_bytes(
-                            mir2_shared::enums::ServerPacketIds::FishingUpdate as i16,
-                            &body,
-                        ),
-                    })
-                    .await;
+            // #2892：`Fishing=false` → 客户端隐藏状态窗（C# `GameScene.cs:3056-3059`）
+            let object_id = match self.players.get(&session_id) {
+                Some(r) => r.actor_ref.ask(GetPlayerState).await.ok().flatten(),
+                None => None,
             }
+            .map(|st| st.object_id)
+            .unwrap_or(0);
+            self.send_fishing_update(session_id, object_id, false, 0, 0, false)
+                .await;
+        }
+    }
+
+    /// #2892：发送 C# `S.FishingUpdate`（`PlayerObject.GetFishInfo`，`PlayerObject.cs:11232-11245`）
+    pub(crate) async fn send_fishing_update(
+        &self,
+        session_id: u64,
+        object_id: u32,
+        fishing: bool,
+        progress_percent: i32,
+        chance_percent: i32,
+        found_fish: bool,
+    ) {
+        let packet = mir2_shared::packets::server::miscellaneous::FishingUpdate {
+            object_id,
+            fishing,
+            progress_percent,
+            chance_percent,
+            found_fish,
+        };
+        let mut body = Vec::new();
+        if mir2_shared::packets::Packet::write_body(&packet, &mut body).is_ok() {
+            let _ = self
+                .gate_ref
+                .tell(SendToClient {
+                    session_id,
+                    data: build_packet_bytes(
+                        mir2_shared::enums::ServerPacketIds::FishingUpdate as i16,
+                        &body,
+                    ),
+                })
+                .await;
         }
     }
 
@@ -3912,41 +3943,9 @@ impl WorldActor {
                     progress: 0,
                 },
             );
-            // Send bite state then auto-recast waiting state
-            let bite_packet = mir2_shared::packets::server::miscellaneous::FishingUpdate {
-                fishing_progress: 2,
-                fishing_success: true,
-            };
-            let mut body = Vec::new();
-            if let Ok(()) = mir2_shared::packets::Packet::write_body(&bite_packet, &mut body) {
-                let _ = self
-                    .gate_ref
-                    .tell(SendToClient {
-                        session_id,
-                        data: build_packet_bytes(
-                            mir2_shared::enums::ServerPacketIds::FishingUpdate as i16,
-                            &body,
-                        ),
-                    })
-                    .await;
-            }
-            let wait_packet = mir2_shared::packets::server::miscellaneous::FishingUpdate {
-                fishing_progress: 1,
-                fishing_success: false,
-            };
-            let mut body2 = Vec::new();
-            if let Ok(()) = mir2_shared::packets::Packet::write_body(&wait_packet, &mut body2) {
-                let _ = self
-                    .gate_ref
-                    .tell(SendToClient {
-                        session_id,
-                        data: build_packet_bytes(
-                            mir2_shared::enums::ServerPacketIds::FishingUpdate as i16,
-                            &body2,
-                        ),
-                    })
-                    .await;
-            }
+            // #2892：自动续抛 → 回到等待（C# `GetFishInfo`：`Fishing=true`、进度 0、未咬钩）
+            self.send_fishing_update(session_id, state.object_id, true, 0, session.chance, false)
+                .await;
         } else {
             if let Some(record) = self.players.get(&session_id) {
                 let _ = record
@@ -3957,23 +3956,8 @@ impl WorldActor {
                     })
                     .await;
             }
-            let idle_packet = mir2_shared::packets::server::miscellaneous::FishingUpdate {
-                fishing_progress: 0,
-                fishing_success: false,
-            };
-            let mut body = Vec::new();
-            if let Ok(()) = mir2_shared::packets::Packet::write_body(&idle_packet, &mut body) {
-                let _ = self
-                    .gate_ref
-                    .tell(SendToClient {
-                        session_id,
-                        data: build_packet_bytes(
-                            mir2_shared::enums::ServerPacketIds::FishingUpdate as i16,
-                            &body,
-                        ),
-                    })
-                    .await;
-            }
+            self.send_fishing_update(session_id, state.object_id, false, 0, 0, false)
+                .await;
         }
     }
 
@@ -12098,6 +12082,24 @@ mod tests {
         assert_eq!(pet_speed_interval_ticks(18, "Angel", 99, false), 4);
         // 未识别名即使 is_attack 也原样
         assert_eq!(pet_speed_interval_ticks(25, "Oma", 3, true), 25);
+    }
+
+    /// #2892：C# `PlayerObject.cs:11234` —— `FishingProgress = _fishCounter > 0
+    /// ? (int)((_fishCounter / (decimal)FishingProgressMax) * 100) : 0`（截断，不钳上限）
+    ///
+    /// 阳性对照：把实现里的 `as i32`（截断）换成 `.round() as i32` → `(2, 30)` 得 7 ≠ 6，断言 FAILED。
+    #[test]
+    fn fishing_progress_percent_matches_csharp() {
+        use super::fishing_progress_percent;
+        assert_eq!(fishing_progress_percent(0, 30), 0, "未抛竿 → 0");
+        assert_eq!(fishing_progress_percent(30, 30), 100);
+        assert_eq!(fishing_progress_percent(15, 30), 50);
+        // C# decimal 除法后强转 int 截断：1/30*100 = 3.33 → 3；2/30*100 = 6.67 → 6
+        assert_eq!(fishing_progress_percent(1, 30), 3);
+        assert_eq!(fishing_progress_percent(2, 30), 6, "截断而非四舍五入");
+        // 同 C# 不钳上限（`FishingProgress > 100` 时服务端自行收竿）
+        assert_eq!(fishing_progress_percent(33, 30), 110);
+        assert_eq!(fishing_progress_percent(5, 0), 0, "max=0 不得除零");
     }
 
     #[test]
