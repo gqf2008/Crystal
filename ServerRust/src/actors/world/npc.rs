@@ -402,7 +402,9 @@ impl Message<NPCCallRequest> for WorldActor {
                     .actor_ref
                     .ask(crate::actors::player::AddItemToInventory { item: item.clone() })
                     .await
-                    .unwrap_or(false);
+                    .ok()
+                    .flatten()
+                    .is_some();
                 if !ok {
                     let _ = log.deposit_item(item);
                     let _ = record

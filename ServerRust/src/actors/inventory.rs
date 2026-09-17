@@ -685,6 +685,11 @@ impl PlayerInventory {
         self.backpack.iter().any(|s| s.is_none())
     }
 
+    /// 能否获得金币（C# CanGainGold：gold + amount 不超 u32::MAX 上限；会截顶即 false）
+    pub fn can_gain_gold(&self, amount: u64) -> bool {
+        self.gold.saturating_add(amount) <= u32::MAX as u64
+    }
+
     /// 检查能否获得物品（对应 C# CanGainItems）
     pub fn can_gain_items(&self) -> bool {
         self.has_space()
@@ -1293,6 +1298,61 @@ mod tests {
         inv2.add_item(make_item(1, 1));
         inv2.add_item(make_item(1, 1));
         assert_eq!(inv2.item_count(), 2);
+    }
+
+    /// 交易回滚前提（阻断：execute_trade 按托管 uid 收物恒落空 → 复制）：
+    /// add_item 返回的是【实际入包 uid】——空格放置重发 uid（≠ 放入前的 uid），
+    /// 堆叠合并返回被并入的目标栈 uid（入栈 uid 被丢弃）。
+    /// 收回已交付物品只能用返回值，用放入前的 uid 必落空。
+    #[test]
+    fn test_add_item_returns_actual_bag_uid() {
+        // 空格放置：重发 uid，与放入前的"托管 uid"不同
+        // （托管 uid 取 u64::MAX 附近值，避免与全局原子计数器 NEXT_UID(从1递增) 碰撞）
+        let mut inv = PlayerInventory::new();
+        let mut escrowed = make_item(42, 1);
+        escrowed.unique_id = u64::MAX - 1001; // 托管时的 uid（交易会话里登记的）
+        let (_grid, real_uid) = inv.add_item(escrowed).unwrap();
+        assert_ne!(real_uid, u64::MAX - 1001, "空格放置必须重发 uid");
+        assert!(inv.get_item(real_uid).is_some(), "按真实 uid 能找到");
+        assert!(
+            inv.get_item(u64::MAX - 1001).is_none(),
+            "按托管 uid 必然落空（bug 根因）"
+        );
+
+        // 堆叠合并：返回被并入的目标栈 uid，入栈 uid 被丢弃
+        let mut inv2 = PlayerInventory::new();
+        let mut potion = make_item(666, 15);
+        potion.info = Some(mir2_shared::data::item::ItemInfo {
+            index: 666,
+            stack_size: 20,
+            ..Default::default()
+        });
+        let (_g0, stack_uid) = inv2.add_item(potion.clone()).unwrap();
+        let mut incoming = potion.clone();
+        incoming.count = 3;
+        incoming.unique_id = u64::MAX - 1002; // 托管 uid
+        let (_g1, merged_uid) = inv2.add_item(incoming).unwrap();
+        assert_eq!(merged_uid, stack_uid, "合并必须返回目标栈 uid");
+        assert!(inv2.get_item(u64::MAX - 1002).is_none(), "入栈 uid 已被丢弃");
+        assert_eq!(
+            inv2.get_item(stack_uid).unwrap().count,
+            18,
+            "数量并入目标栈"
+        );
+    }
+
+    /// C# CanGainGold：gold + amount 超 u32::MAX 上限即不可获得（出售预检用）
+    #[test]
+    fn test_can_gain_gold_cap() {
+        let mut inv = PlayerInventory::new();
+        inv.gold = u32::MAX as u64 - 100;
+        assert!(inv.can_gain_gold(100), "恰好到顶应允许");
+        assert!(!inv.can_gain_gold(101), "超顶 1 金也应拒绝");
+        inv.gold = u32::MAX as u64;
+        assert!(!inv.can_gain_gold(1), "已封顶再加任何数量都拒绝");
+        assert!(inv.can_gain_gold(0), "加 0 恒允许");
+        inv.gold = 0;
+        assert!(inv.can_gain_gold(u32::MAX as u64), "空包加满额允许");
     }
 
     #[test]

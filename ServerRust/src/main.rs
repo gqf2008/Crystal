@@ -369,6 +369,13 @@ async fn async_main() -> anyhow::Result<()> {
             social_ref: social_ref.clone(),
         })
         .await;
+    // SocialActor 侧反向链接：召回/组队传送经 world 统一入口（TeleportPlayerWithResync）
+    // 跨图重发新图对象；不接则 social 召回降级旧路径（跨图落图空图）
+    let _ = social_ref
+        .ask(crystal_server::actors::social::SetWorldRef {
+            world_ref: world_ref.clone(),
+        })
+        .await;
 
     // 启动 TCP 监听
     info!("Starting gate listener on {}...", cfg.network.listen_addr);
@@ -417,12 +424,21 @@ async fn async_main() -> anyhow::Result<()> {
     info!("Shutdown signal received, initiating graceful shutdown...");
 
     // Phase 2.2: 优雅关机 — ShutdownAll 已主动逐会话触发 PlayerDisconnected 落库
-    // + 账号下线（#22 不再依赖客户端 Disconnect 回包）
-    if let Ok(count) = gate_ref.ask(ShutdownAll).await {
-        info!(
+    // + 账号下线（#22 不再依赖客户端 Disconnect 回包）。
+    // 整体超时兜底：gate 邮箱有界（#23），即使 gate 侧已 fire-and-forget，
+    // 也不让 ShutdownAll 的 ask 本身把优雅关机拖死
+    match tokio::time::timeout(
+        tokio::time::Duration::from_secs(15),
+        gate_ref.ask(ShutdownAll),
+    )
+    .await
+    {
+        Ok(Ok(count)) => info!(
             "ShutdownAll: {} sessions disconnected and saved, settling 5s...",
             count
-        );
+        ),
+        Ok(Err(e)) => warn!("ShutdownAll ask failed: {} (background cleanup continues)", e),
+        Err(_) => warn!("ShutdownAll timed out after 15s (background cleanup continues)"),
     }
     // 给 actor 5 秒处理断连 + 保存
     tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;

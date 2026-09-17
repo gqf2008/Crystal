@@ -1,4 +1,5 @@
 use super::*;
+use tracing::error;
 
 // ============================================================
 // 市场/寄售系统
@@ -154,7 +155,7 @@ impl Message<MarketSearchRequest> for WorldActor {
             warn!("Failed to serialize NPCMarket: {}", e);
             return;
         }
-        let _ = self
+        if let Err(e) = self
             .gate_ref
             .tell(SendToClient {
                 session_id: msg.session_id,
@@ -163,7 +164,15 @@ impl Message<MarketSearchRequest> for WorldActor {
                     &body,
                 ),
             })
-            .await;
+            .try_send()
+        {
+            warn!(
+                "gate mailbox full: SendToClient dropped (session={} opcode={:?} err={})",
+                msg.session_id,
+                super::dropped_send_opcode(&e),
+                e
+            );
+        }
 
         // Send first page（空结果也发空列表，客户端据此清空旧数据）
         let end = 10.min(results.len());
@@ -199,7 +208,7 @@ impl Message<MarketSearchRequest> for WorldActor {
                 warn!("Failed to serialize NPCMarketPage: {}", e);
                 return;
             }
-            let _ = self
+            if let Err(e) = self
                 .gate_ref
                 .tell(SendToClient {
                     session_id: msg.session_id,
@@ -208,7 +217,15 @@ impl Message<MarketSearchRequest> for WorldActor {
                         &body,
                     ),
                 })
-                .await;
+                .try_send()
+            {
+                warn!(
+                    "gate mailbox full: SendToClient dropped (session={} opcode={:?} err={})",
+                    msg.session_id,
+                    super::dropped_send_opcode(&e),
+                    e
+                );
+            }
         }
     }
 }
@@ -256,7 +273,7 @@ impl Message<MarketRefreshRequest> for WorldActor {
             warn!("Failed to serialize NPCMarket: {}", e);
             return;
         }
-        let _ = self
+        if let Err(e) = self
             .gate_ref
             .tell(SendToClient {
                 session_id: msg.session_id,
@@ -265,7 +282,15 @@ impl Message<MarketRefreshRequest> for WorldActor {
                     &body,
                 ),
             })
-            .await;
+            .try_send()
+        {
+            warn!(
+                "gate mailbox full: SendToClient dropped (session={} opcode={:?} err={})",
+                msg.session_id,
+                super::dropped_send_opcode(&e),
+                e
+            );
+        }
 
         // Send first page（空结果也发空列表，客户端据此清空旧数据）
         let end = 10.min(results.len());
@@ -302,7 +327,7 @@ impl Message<MarketRefreshRequest> for WorldActor {
                 warn!("Failed to serialize NPCMarketPage: {}", e);
                 return;
             }
-            let _ = self
+            if let Err(e) = self
                 .gate_ref
                 .tell(SendToClient {
                     session_id: msg.session_id,
@@ -311,7 +336,15 @@ impl Message<MarketRefreshRequest> for WorldActor {
                         &body,
                     ),
                 })
-                .await;
+                .try_send()
+            {
+                warn!(
+                    "gate mailbox full: SendToClient dropped (session={} opcode={:?} err={})",
+                    msg.session_id,
+                    super::dropped_send_opcode(&e),
+                    e
+                );
+            }
         }
     }
 }
@@ -350,7 +383,7 @@ impl Message<MarketPageRequest> for WorldActor {
                     warn!("Failed to serialize NPCMarketPage: {}", e);
                     return;
                 }
-                let _ = self
+                if let Err(e) = self
                     .gate_ref
                     .tell(SendToClient {
                         session_id: msg.session_id,
@@ -359,7 +392,15 @@ impl Message<MarketPageRequest> for WorldActor {
                             &body,
                         ),
                     })
-                    .await;
+                    .try_send()
+                {
+                    warn!(
+                        "gate mailbox full: SendToClient dropped (session={} opcode={:?} err={})",
+                        msg.session_id,
+                        super::dropped_send_opcode(&e),
+                        e
+                    );
+                }
                 return;
             }
         };
@@ -400,7 +441,7 @@ impl Message<MarketPageRequest> for WorldActor {
             warn!("Failed to serialize NPCMarketPage: {}", e);
             return;
         }
-        let _ = self
+        if let Err(e) = self
             .gate_ref
             .tell(SendToClient {
                 session_id: msg.session_id,
@@ -409,7 +450,15 @@ impl Message<MarketPageRequest> for WorldActor {
                     &body,
                 ),
             })
-            .await;
+            .try_send()
+        {
+            warn!(
+                "gate mailbox full: SendToClient dropped (session={} opcode={:?} err={})",
+                msg.session_id,
+                super::dropped_send_opcode(&e),
+                e
+            );
+        }
     }
 }
 
@@ -511,7 +560,16 @@ impl Message<MarketBuyRequest> for WorldActor {
                     "Failed to persist auction bid (auction={}), rolling back",
                     msg.listing_id
                 );
-                let _ = record.actor_ref.ask(AddGold { amount: bid }).await;
+                // 退款必须全额：TryAddGold 原子语义（截顶=托管金蒸发），
+                // 近封顶失败经系统邮件全额兜底 + error! 审计
+                self.refund_gold_atomic(
+                    &record.actor_ref,
+                    &buyer_state.name,
+                    bid,
+                    "竞拍出价退回",
+                    format!("出价失败（数据库错误），出价 {} 金币已退回", bid),
+                )
+                .await;
                 send_system_message(
                     &self.gate_ref,
                     msg.session_id,
@@ -542,12 +600,9 @@ impl Message<MarketBuyRequest> for WorldActor {
                     gold: current_bid,
                     items: Vec::new(),
                 };
-                if !self.deliver_system_mail(mail).await {
-                    warn!(
-                        "Outbid refund mail undelivered: auction={} prev={} gold={}",
-                        msg.listing_id, prev_buyer, current_bid
-                    );
-                }
+                // 托管金退款：新出价已落库，此邮件丢失=旧出价托管金蒸发——
+                // critical 变体失败 error! + 重试一次（不只 warn）
+                let _ = self.deliver_system_mail_critical(mail).await;
             }
             send_system_message(
                 &self.gate_ref,
@@ -559,7 +614,7 @@ impl Message<MarketBuyRequest> for WorldActor {
             };
             let mut body = Vec::new();
             if packet.write_body(&mut body).is_ok() {
-                let _ = self
+                if let Err(e) = self
                     .gate_ref
                     .tell(SendToClient {
                         session_id: msg.session_id,
@@ -568,17 +623,33 @@ impl Message<MarketBuyRequest> for WorldActor {
                             &body,
                         ),
                     })
-                    .await;
+                    .try_send()
+                {
+                    warn!(
+                        "gate mailbox full: SendToClient dropped (session={} opcode={:?} err={})",
+                        msg.session_id,
+                        super::dropped_send_opcode(&e),
+                        e
+                    );
+                }
             }
             if let Ok(Some(new_state)) = record.actor_ref.ask(GetPlayerState).await {
                 let packet = super::build_user_information_packet(&new_state, &self.item_infos);
-                let _ = self
+                if let Err(e) = self
                     .gate_ref
                     .tell(SendToClient {
                         session_id: msg.session_id,
                         data: packet,
                     })
-                    .await;
+                    .try_send()
+                {
+                    warn!(
+                        "gate mailbox full: SendToClient dropped (session={} opcode={:?} err={})",
+                        msg.session_id,
+                        super::dropped_send_opcode(&e),
+                        e
+                    );
+                }
             }
             return;
         }
@@ -609,63 +680,114 @@ impl Message<MarketBuyRequest> for WorldActor {
         }
 
         // Try to add item to inventory first — if full, refund gold
-        let added = record
+        // 交付入包会重发 unique_id（inventory.add_item）：记录真实 uid，回滚按它收回
+        let delivered_uid = record
             .actor_ref
             .ask(AddItemToInventory { item: item.clone() })
             .await
-            .unwrap_or(false);
-        if !added {
-            let _ = record.actor_ref.ask(AddGold { amount: price }).await;
+            .ok()
+            .delivered_item_uid(item.unique_id);
+        let Some(delivered_uid) = delivered_uid else {
+            // 退款必须全额：买家刚被 DeductGold 扣款，退款窗口内任何并发入账都会让
+            // 截顶语义 AddGold 静默吞掉差额——TryAddGold 原子语义，近封顶失败经系统邮件
+            // 全额兜底 + error! 审计
+            self.refund_gold_atomic(
+                &record.actor_ref,
+                &buyer_state.name,
+                price,
+                "市场购买退款",
+                format!("背包已满购买失败，{} 金币已退回", price),
+            )
+            .await;
             send_system_message(
                 &self.gate_ref,
                 msg.session_id,
                 "背包已满，购买失败，金币已退回",
             );
             return;
-        }
+        };
 
         // Item delivered successfully — now persist the sale
         let sold_persist =
             db::mark_auction_sold(&self.db_pool, msg.listing_id as i64, &buyer_state.name).await;
         if !db_write_ok(sold_persist) {
-            // 写库失败必须回滚内存态：收回已交付物品并退款，寄售记录保持未售
+            // 写库失败优先回滚内存态：按交付时的真实 uid 收回已交付物品并退款，寄售记录保持未售
             // （否则重启后该单在 DB 仍未售，可被重复购买 → 物品复制）
             warn!(
                 "Failed to mark auction {} sold in DB, rolling back",
                 msg.listing_id
             );
-            let clawed = record
-                .actor_ref
-                .ask(crate::actors::player::RemoveItemFromInventory {
-                    unique_id: item.unique_id,
-                })
-                .await
-                .ok()
-                .flatten();
-            if clawed.is_none() {
-                warn!(
-                    "Consign buy rollback: failed to claw back item {} from {}",
-                    item.unique_id, buyer_state.name
+            // 回收按【真实 uid + 交付数量】：交付可能堆叠合并进买家自有栈，
+            // 整堆收回会连买家自有同类物品一起没收；部分收回不得当作全额回收（超退=复制）
+            let (clawed, clawback) =
+                clawback_delivered_item(&record.actor_ref, delivered_uid, item.count).await;
+            if clawback == ClawbackOutcome::Full {
+                // 交付物已全额收回，退款必须全额：截顶语义 AddGold 会让买家物财两失且
+                // 无日志——TryAddGold 原子语义，近封顶失败经系统邮件全额兜底 + error! 审计
+                self.refund_gold_atomic(
+                    &record.actor_ref,
+                    &buyer_state.name,
+                    price,
+                    "市场购买退款",
+                    format!("购买失败（数据库错误），物品已收回，{} 金币已退回", price),
+                )
+                .await;
+                send_system_message(
+                    &self.gate_ref,
+                    msg.session_id,
+                    "购买失败：数据库错误，物品与金币已退回",
+                );
+                // 背包/金币回刷
+                if let Ok(Some(new_state)) = record.actor_ref.ask(GetPlayerState).await {
+                    let packet =
+                        super::build_user_information_packet(&new_state, &self.item_infos);
+                    if let Err(e) = self
+                        .gate_ref
+                        .tell(SendToClient {
+                            session_id: msg.session_id,
+                            data: packet,
+                        })
+                        .try_send()
+                    {
+                        warn!(
+                            "gate mailbox full: SendToClient dropped (session={} opcode={:?} err={})",
+                            msg.session_id,
+                            super::dropped_send_opcode(&e),
+                            e
+                        );
+                    }
+                }
+                return;
+            }
+            // 未全额收回：【不得退款】（买家仍持有全部/部分物品，退款=白送金币）、
+            // 【不得保持未售】（重启后可二次售卖 → 物品复制）。
+            // 部分收回时已收回部分必须归还买家（回滚全有或全无，吞掉=无故没收），
+            // 未收回数量计入未回收告警；随后重试落库 sold 标记，仍失败 error! 待人工核查，
+            // 落成功路径：内存标 sold、不退款
+            if let ClawbackOutcome::Shortfall { removed, missing } = clawback {
+                if let Some(back) = clawed {
+                    self.return_clawed_item(&record.actor_ref, &buyer_state.name, back)
+                        .await;
+                }
+                error!(
+                    "Consign buy rollback shortfall: auction={} buyer={} delivered_uid={} removed={} missing={} — partial recall returned to buyer, unrecovered count logged; no refund issued",
+                    msg.listing_id, buyer_state.name, delivered_uid, removed, missing
+                );
+            } else {
+                error!(
+                    "Consign buy rollback failed: auction={} buyer={} delivered_uid={} — buyer keeps item, no refund issued",
+                    msg.listing_id, buyer_state.name, delivered_uid
                 );
             }
-            let _ = record.actor_ref.ask(AddGold { amount: price }).await;
-            send_system_message(
-                &self.gate_ref,
-                msg.session_id,
-                "购买失败：数据库错误，物品与金币已退回",
-            );
-            // 背包/金币回刷
-            if let Ok(Some(new_state)) = record.actor_ref.ask(GetPlayerState).await {
-                let packet = super::build_user_information_packet(&new_state, &self.item_infos);
-                let _ = self
-                    .gate_ref
-                    .tell(SendToClient {
-                        session_id: msg.session_id,
-                        data: packet,
-                    })
+            let retry =
+                db::mark_auction_sold(&self.db_pool, msg.listing_id as i64, &buyer_state.name)
                     .await;
+            if !db_write_ok(retry) {
+                error!(
+                    "Consign buy sold persist retry failed: auction={} buyer={} — DB still unsold, restart may duplicate the item; manual reconciliation required",
+                    msg.listing_id, buyer_state.name
+                );
             }
-            return;
         }
 
         if let Some(a) = self.auctions.get_mut(auction_idx) {
@@ -687,13 +809,21 @@ impl Message<MarketBuyRequest> for WorldActor {
         // 完整 UserInformation 刷新（背包 + 金币）
         if let Ok(Some(new_state)) = record.actor_ref.ask(GetPlayerState).await {
             let packet = super::build_user_information_packet(&new_state, &self.item_infos);
-            let _ = self
+            if let Err(e) = self
                 .gate_ref
                 .tell(SendToClient {
                     session_id: msg.session_id,
                     data: packet,
                 })
-                .await;
+                .try_send()
+            {
+                warn!(
+                    "gate mailbox full: SendToClient dropped (session={} opcode={:?} err={})",
+                    msg.session_id,
+                    super::dropped_send_opcode(&e),
+                    e
+                );
+            }
         }
 
         let packet = mir2_shared::packets::server::market_system::MarketSuccess {
@@ -704,7 +834,7 @@ impl Message<MarketBuyRequest> for WorldActor {
             warn!("Failed to serialize MarketSuccess: {}", e);
             return;
         }
-        let _ = self
+        if let Err(e) = self
             .gate_ref
             .tell(SendToClient {
                 session_id: msg.session_id,
@@ -713,7 +843,15 @@ impl Message<MarketBuyRequest> for WorldActor {
                     &body,
                 ),
             })
-            .await;
+            .try_send()
+        {
+            warn!(
+                "gate mailbox full: SendToClient dropped (session={} opcode={:?} err={})",
+                msg.session_id,
+                super::dropped_send_opcode(&e),
+                e
+            );
+        }
     }
 }
 
@@ -768,17 +906,19 @@ impl Message<MarketGetBackRequest> for WorldActor {
         // Any(0)/Expired(2)：取回物品（未售出或已到期）
         if (msg.mode == 0 || msg.mode == 2) && (!auction.sold || auction.expired) {
             // 取回物品（C# CanGainItem 失败 → Fail 5）
-            let added = record
+            // 交付入包会重发 unique_id：写库失败回滚必须按返回的真实 uid 收回
+            let delivered_uid = record
                 .actor_ref
                 .ask(AddItemToInventory {
                     item: auction.item.clone(),
                 })
                 .await
-                .unwrap_or(false);
-            if !added {
+                .ok()
+                .delivered_item_uid(auction.item.unique_id);
+            let Some(delivered_uid) = delivered_uid else {
                 self.send_market_fail(msg.session_id, 5);
                 return;
-            }
+            };
             // 先落库删除再退款：写库失败时收回物品、寄售记录原样保留
             // （否则重启后记录复现 → 物品复制；且出价人若先被退款会双重退款 → 刷金）
             let deleted = db::delete_auction(&self.db_pool, msg.auction_id as i64).await;
@@ -787,12 +927,34 @@ impl Message<MarketGetBackRequest> for WorldActor {
                     "Failed to delete auction {} on take-back, rolling back",
                     msg.auction_id
                 );
-                let _ = record
-                    .actor_ref
-                    .ask(crate::actors::player::RemoveItemFromInventory {
-                        unique_id: auction.item.unique_id,
-                    })
-                    .await;
+                // 回收按【真实 uid + 交付数量】：交付可能堆叠合并进卖家自有栈，
+                // 整堆收回会连卖家自有同类物品一起没收；部分收回不得当作全额回收
+                let (clawed, clawback) =
+                    clawback_delivered_item(&record.actor_ref, delivered_uid, auction.item.count)
+                        .await;
+                match clawback {
+                    ClawbackOutcome::Full => {}
+                    ClawbackOutcome::Shortfall { removed, missing } => {
+                        // 部分收回：已收回部分归还卖家（回滚全有或全无，吞掉=无故没收），
+                        // 未收回数量计入未回收告警；物品部分留存且 DB 记录仍在 → 待人工核查
+                        if let Some(back) = clawed {
+                            self.return_clawed_item(&record.actor_ref, &state.name, back)
+                                .await;
+                        }
+                        error!(
+                            "MarketGetBack rollback shortfall: auction={} seller={} delivered_uid={} removed={} missing={} — partial recall returned to seller while record persists; manual reconciliation required",
+                            msg.auction_id, state.name, delivered_uid, removed, missing
+                        );
+                    }
+                    ClawbackOutcome::Nothing => {
+                        // 收不回（物品已流转）：卖家已持物品且 DB 记录仍在——
+                        // 重复取回/重启复现都会复制，error! 告警待人工核查（不得静默放过）
+                        error!(
+                            "MarketGetBack rollback failed: auction={} seller={} delivered_uid={} — item kept while record persists; manual reconciliation required",
+                            msg.auction_id, state.name, delivered_uid
+                        );
+                    }
+                }
                 send_system_message(
                     &self.gate_ref,
                     msg.session_id,
@@ -823,12 +985,8 @@ impl Message<MarketGetBackRequest> for WorldActor {
                         gold: bid,
                         items: Vec::new(),
                     };
-                    if !self.deliver_system_mail(mail).await {
-                        warn!(
-                            "Auction expired refund mail undelivered: auction={} buyer={} gold={}",
-                            msg.auction_id, buyer, bid
-                        );
-                    }
+                    // 托管金退款邮件丢失=出价人托管金蒸发——critical 变体 error! + 重试一次
+                    let _ = self.deliver_system_mail_critical(mail).await;
                 }
             }
             self.send_market_success(msg.session_id, "取回寄售物品成功".to_string());
@@ -870,10 +1028,25 @@ impl Message<MarketGetBackRequest> for WorldActor {
                 self.send_market_fail(msg.session_id, 0);
                 return;
             }
-            let _ = record.actor_ref.ask(AddGold { amount: gold }).await;
+            // DB 记录已删：付款必须全额——TryAddGold 原子语义（CanGainGold 预检之后、
+            // 付款之前的并发入账仍可能截顶，差额=蒸发），近封顶失败全额经系统邮件
+            // 兜底 + error! 审计；无论直付/邮件兜底，售卖均已终结，内存记录同步移除
+            let paid = self
+                .refund_gold_atomic(
+                    &record.actor_ref,
+                    &state.name,
+                    gold,
+                    "市场售出金币",
+                    format!("你的商品已售出，成交款 {} 金币（已扣 5% 佣金）", gold),
+                )
+                .await;
             self.auctions.remove(auction_idx);
             let commission = cost - gold;
-            let text = format!("售出金币 {}（含佣金 {}）已领取", gold, commission);
+            let text = if paid {
+                format!("售出金币 {}（含佣金 {}）已领取", gold, commission)
+            } else {
+                format!("售出金币 {} 发放失败，已记录待人工核查", gold)
+            };
             send_system_message(&self.gate_ref, msg.session_id, &text);
             self.send_market_success(msg.session_id, text);
             return;
@@ -902,6 +1075,142 @@ pub(crate) fn system_mail_route(online_session: Option<u64>) -> SystemMailRoute 
 /// 调用方必须回滚内存态（auction 不建立/状态还原），不得 warn 后继续（否则重启后双卖/重复领取）
 pub(crate) fn db_write_ok(res: anyhow::Result<bool>) -> bool {
     matches!(res, Ok(true))
+}
+
+/// AddItemToInventory 应答归一化：交付入包时背包会【重发 unique_id】（inventory.add_item
+/// 空位插入走 next_unique_id；合并堆叠则返回既有堆 uid），回滚/收回必须按交付返回的真实 uid，
+/// 用寄售记录上的旧 uid 收回恒落空（收不回又不退款=物品复制、退款=白送）。
+/// player 侧 Reply 为 Option<u64>（Some=交付后真实 uid，None=入包失败）。
+pub(crate) trait DeliveredItemUid {
+    fn delivered_item_uid(self, fallback_uid: u64) -> Option<u64>;
+}
+
+/// `ask(...).await.ok()` → Option<Option<u64>>，内层即交付后的真实 uid（None=入包失败）
+impl DeliveredItemUid for Option<Option<u64>> {
+    fn delivered_item_uid(self, _fallback_uid: u64) -> Option<u64> {
+        self.flatten()
+    }
+}
+
+/// 寄售/拍卖回收（clawback）结果：收回数量必须 == 交付量才算全额回收成功。
+/// 交付可能堆叠合并进买家自有栈，买家又可能已消耗/转移部分——按数量收回会被堆叠
+/// min 截断，收回数量可能 < 交付量；部分收回【不得】当作全额回收
+/// （全额退款=超退复制、直接没收=吞买家物品），不足部分计入未回收，走告警/邮件兜底。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ClawbackOutcome {
+    /// 收回数量 == 交付量：可安全全额回滚（退金币/退物品）
+    Full,
+    /// 只收回一部分：removed=实际收回数量，missing=未收回数量（已消耗/转移）
+    Shortfall { removed: u16, missing: u16 },
+    /// 一无所获（物品已整体流转/玩家状态异常）
+    Nothing,
+}
+
+/// 回收数量校验：不得把部分收回当作全额回收成功
+pub(crate) fn clawback_outcome(
+    removed_count: Option<u16>,
+    delivered_count: u16,
+) -> ClawbackOutcome {
+    match removed_count {
+        Some(n) if n >= delivered_count => ClawbackOutcome::Full,
+        Some(n) if n > 0 => ClawbackOutcome::Shortfall {
+            removed: n,
+            missing: delivered_count - n,
+        },
+        _ => ClawbackOutcome::Nothing,
+    }
+}
+
+/// 寄售/拍卖回收统一入口：按【交付时 AddItemToInventory 返回的真实 uid + 交付数量】收回。
+/// 交付入包可能堆叠合并（入参 uid 被丢弃、并入目标堆），整堆 RemoveItemFromInventory
+/// 会把持有人自有同类物品一起没收；RemoveItemFromInventoryCount 只拿走交付量，
+/// 不动持有人自有部分。返回被移除部分与回收结果——部分收回时调用方必须把已收回部分
+/// 归还持有人（回滚全有或全无），并把未收回数量计入未回收告警。
+pub(crate) async fn clawback_delivered_item(
+    actor_ref: &ActorRef<crate::actors::player::PlayerActor>,
+    delivered_uid: u64,
+    delivered_count: u16,
+) -> (Option<mir2_shared::data::item::UserItem>, ClawbackOutcome) {
+    let removed = actor_ref
+        .ask(crate::actors::player::RemoveItemFromInventoryCount {
+            unique_id: delivered_uid,
+            count: delivered_count,
+        })
+        .await
+        .ok()
+        .flatten();
+    let outcome = clawback_outcome(removed.as_ref().map(|i| i.count), delivered_count);
+    (removed, outcome)
+}
+
+/// 到期结算门槛：sold 标记【先落库】成功才允许本轮交付买家。
+/// 交付后落库失败 → 内存标 sold 但 DB 未售 → 重启重新结算 → 二次交付复制；
+/// 落库失败本轮跳过（内存未标 sold，下个结算 tick 自然重试，重启后按 DB sold 状态去重）。
+pub(crate) fn expired_delivery_allowed(sold_persist: &anyhow::Result<bool>) -> bool {
+    matches!(sold_persist, Ok(true))
+}
+
+/// 市场托管金退款/付款的原子入账：TryAddGold——会截顶则整体失败、不加不减。
+/// 绝不用截顶语义的 AddGold：买家/卖家近封顶（u32::MAX）时，退款窗口内任何并发入账
+/// 都会让退款差额被静默截顶（退款方物财两失且无日志）。返回 false 时调用方必须
+/// 经在线感知系统邮件全额兜底 + error! 审计（见 WorldActor::refund_gold_atomic）。
+pub(crate) async fn try_add_gold_atomic(
+    actor_ref: &ActorRef<crate::actors::player::PlayerActor>,
+    amount: u64,
+) -> bool {
+    if amount == 0 {
+        return true;
+    }
+    actor_ref.ask(TryAddGold { amount }).await.unwrap_or(false)
+}
+
+/// 退款/付款兜底邮件（内含全额托管金）：统一字段，便于测试断言金额不被截顶
+pub(crate) fn gold_refund_mail(
+    holder_name: &str,
+    amount: u64,
+    subject: &str,
+    body: String,
+) -> MailMessage {
+    MailMessage {
+        mail_id: generate_mail_id(),
+        sender_name: "市场交易".to_string(),
+        receiver_name: holder_name.to_string(),
+        subject: subject.to_string(),
+        body,
+        timestamp: std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs() as i64)
+            .unwrap_or(0),
+        read: false,
+        collected: false,
+        locked: false,
+        gold: amount,
+        items: Vec::new(),
+    }
+}
+
+/// 租赁取消物主退物的归还邮件（物主背包满兜底）：寄存物品必须随邮件完整归还物主，
+/// 字段对齐 gold_refund_mail / session.rs 租赁归还邮件
+pub(crate) fn rental_cancel_return_mail(
+    owner_name: &str,
+    item: mir2_shared::data::item::UserItem,
+) -> MailMessage {
+    MailMessage {
+        mail_id: generate_mail_id(),
+        sender_name: "物品租赁".to_string(),
+        receiver_name: owner_name.to_string(),
+        subject: "租赁归还".to_string(),
+        body: "租赁取消退回的物品无法放入背包（背包已满或角色状态异常），改经邮件返还".to_string(),
+        timestamp: std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs() as i64)
+            .unwrap_or(0),
+        read: false,
+        collected: false,
+        locked: false,
+        gold: 0,
+        items: vec![item],
+    }
 }
 
 impl WorldActor {
@@ -938,6 +1247,94 @@ impl WorldActor {
                 false
             }
         }
+    }
+
+    /// 关键系统邮件（退款/成交交付，内含托管金或物品）投递：失败不只 warn——
+    /// error! + 重试一次；仍失败返回 false（托管金/物品蒸发，日志告警待人工核查）。
+    /// 被超价退款等场景存在「新出价已落库、旧出价退款邮件丢失」窗口：退款邮件持久化
+    /// 成功前崩溃即蒸发，故必须尽一切努力投递并留下 error! 痕迹。
+    pub(crate) async fn deliver_system_mail_critical(&self, mail: MailMessage) -> bool {
+        if self.deliver_system_mail(mail.clone()).await {
+            return true;
+        }
+        error!(
+            "System mail delivery failed, retrying once: receiver={} subject={} gold={} items={}",
+            mail.receiver_name,
+            mail.subject,
+            mail.gold,
+            mail.items.len()
+        );
+        let ok = self.deliver_system_mail(mail.clone()).await;
+        if !ok {
+            error!(
+                "System mail delivery failed after retry: receiver={} subject={} gold={} items={} — escrow lost, manual reconciliation required",
+                mail.receiver_name,
+                mail.subject,
+                mail.gold,
+                mail.items.len()
+            );
+        }
+        ok
+    }
+
+    /// 市场托管金退款/付款统一入口：try_add_gold_atomic 原子入账（截顶即整体失败），
+    /// 失败（收款方近封顶 + 退款窗口内并发入账）时全额经在线感知系统邮件兜底
+    /// （deliver_system_mail_critical：失败 error! + 重试一次）并 error! 审计。
+    /// 返回是否已全额归还（入账或邮件投递成功）；false=蒸发（已 error! 待人工核查）。
+    pub(crate) async fn refund_gold_atomic(
+        &self,
+        actor_ref: &ActorRef<crate::actors::player::PlayerActor>,
+        holder_name: &str,
+        amount: u64,
+        subject: &str,
+        body: String,
+    ) -> bool {
+        if try_add_gold_atomic(actor_ref, amount).await {
+            return true;
+        }
+        error!(
+            "Market gold refund TryAddGold failed (holder near cap + concurrent gain), falling back to system mail: holder={} amount={} subject={}",
+            holder_name, amount, subject
+        );
+        self.deliver_system_mail_critical(gold_refund_mail(holder_name, amount, subject, body))
+            .await
+    }
+
+    /// 回收（clawback）部分收回的反向归还：回滚必须全有或全无——已收回部分吞掉=无故没收，
+    /// 必须原样还给持有人；入包失败走在线感知系统邮件兜底（丢失=物品蒸发 → critical 变体）
+    async fn return_clawed_item(
+        &self,
+        actor_ref: &ActorRef<crate::actors::player::PlayerActor>,
+        holder_name: &str,
+        item: mir2_shared::data::item::UserItem,
+    ) {
+        let readded = actor_ref
+            .ask(AddItemToInventory { item: item.clone() })
+            .await
+            .ok()
+            .delivered_item_uid(item.unique_id)
+            .is_some();
+        if readded {
+            return;
+        }
+        let mail = MailMessage {
+            mail_id: generate_mail_id(),
+            sender_name: "市场交易".to_string(),
+            receiver_name: holder_name.to_string(),
+            subject: "市场回滚归还".to_string(),
+            body: "市场回滚过程中部分物品已被收回，现予归还".to_string(),
+            timestamp: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs() as i64)
+                .unwrap_or(0),
+            read: false,
+            collected: false,
+            locked: false,
+            gold: 0,
+            items: vec![item],
+        };
+        // 归还邮件丢失=物品蒸发——critical 变体 error! + 重试一次
+        let _ = self.deliver_system_mail_critical(mail).await;
     }
 
     fn send_market_success(&self, session_id: u64, message: String) {
@@ -1139,6 +1536,21 @@ pub(crate) async fn resolve_expired_auctions(world: &mut WorldActor) {
     for (id, sold, winner, bid, seller, item_name) in resolved {
         if sold {
             let Some(winner) = winner else { continue };
+            // 交付前先把 sold 标记落库：交付后落库失败 → 内存标 sold 但 DB 未售 →
+            // 重启重新结算 → 二次交付复制。落库失败本轮不交付（内存未标 sold，
+            // 下个结算 tick 自然重试；重启后按 DB sold 状态去重，不会重复结算）。
+            let sold_persist = db::mark_auction_sold(&world.db_pool, id as i64, &winner).await;
+            if !expired_delivery_allowed(&sold_persist) {
+                error!(
+                    "Failed to persist sold for expired auction {} (winner={}), skipping delivery this round",
+                    id, winner
+                );
+                continue;
+            }
+            if let Some(a) = world.auctions.iter_mut().find(|a| a.auction_id == id) {
+                a.sold = true;
+                a.buyer_name = Some(winner.clone());
+            }
             // 物品给买家（在线直接给，离线邮件）
             let item = world
                 .auctions
@@ -1155,7 +1567,9 @@ pub(crate) async fn resolve_expired_auctions(world: &mut WorldActor) {
                                 .actor_ref
                                 .ask(AddItemToInventory { item: item.clone() })
                                 .await
-                                .unwrap_or(false);
+                                .ok()
+                                .delivered_item_uid(item.unique_id)
+                                .is_some();
                             if added {
                                 send_system_message(
                                     &world.gate_ref,
@@ -1183,12 +1597,8 @@ pub(crate) async fn resolve_expired_auctions(world: &mut WorldActor) {
                         gold: 0,
                         items: vec![item],
                     };
-                    if !world.deliver_system_mail(mail).await {
-                        warn!(
-                            "Auction won item mail undelivered: auction={} winner={} item={}",
-                            id, winner, item_name
-                        );
-                    }
+                    // 成交物品邮件丢失=物品蒸发（卖家已可领取金币）——critical 变体 error! + 重试一次
+                    let _ = world.deliver_system_mail_critical(mail).await;
                 }
             }
             // C#：拍卖成交金币托管在寄售记录上，卖家经 MarketGetBack(Sold/Any) 领取（含 5% 佣金；不直接支付）
@@ -1198,18 +1608,6 @@ pub(crate) async fn resolve_expired_auctions(world: &mut WorldActor) {
                     r.session_id,
                     &format!("你的 {} 以 {} 金币成交，可在市场领取金币", item_name, bid),
                 );
-            }
-            let sold_persist = db::mark_auction_sold(&world.db_pool, id as i64, &winner).await;
-            if !db_write_ok(sold_persist) {
-                // 物品已交付买家：此处无法无损回滚，只能告警（重启后该单会重新结算，需人工核查）
-                warn!(
-                    "Failed to mark expired auction {} sold in DB after delivery",
-                    id
-                );
-            }
-            if let Some(a) = world.auctions.iter_mut().find(|a| a.auction_id == id) {
-                a.sold = true;
-                a.buyer_name = Some(winner);
             }
         } else {
             if let Some(a) = world.auctions.iter_mut().find(|a| a.auction_id == id) {
@@ -1325,7 +1723,9 @@ impl Message<MarketSellNowRequest> for WorldActor {
                             item: auction.item.clone(),
                         })
                         .await
-                        .unwrap_or(false);
+                        .ok()
+                        .delivered_item_uid(auction.item.unique_id)
+                        .is_some();
                     if added {
                         send_system_message(
                             &self.gate_ref,
@@ -1356,28 +1756,36 @@ impl Message<MarketSellNowRequest> for WorldActor {
                 gold: 0,
                 items: vec![auction.item.clone()],
             };
-            if !self.deliver_system_mail(mail).await {
-                warn!(
-                    "SellNow delivery mail undelivered: auction={} buyer={} item={}",
-                    msg.auction_id, buyer_name, item_name
-                );
-            }
+            // 成交物品邮件丢失=物品蒸发（记录已删、卖家已付款）——critical 变体 error! + 重试一次
+            let _ = self.deliver_system_mail_critical(mail).await;
         }
 
         // 成交：内存移除记录，卖家得托管出价 − 5% 佣金（佣金回收）
         self.auctions.remove(auction_idx);
 
-        let _ = record
-            .actor_ref
-            .ask(AddGold {
-                amount: seller_gold,
-            })
+        // 付款必须全额（记录已删、买家已收物，截顶差额=蒸发）：TryAddGold 原子语义
+        // （CanGainGold 预检之后仍可能并发入账截顶），近封顶失败经系统邮件全额兜底 + error! 审计
+        let paid = self
+            .refund_gold_atomic(
+                &record.actor_ref,
+                &state.name,
+                seller_gold,
+                "拍卖成交款",
+                format!("你的拍卖已立即售出，成交款 {} 金币（已扣 5% 佣金）", seller_gold),
+            )
             .await;
         let commission = cost - seller_gold;
-        let text = format!(
-            "立即售出成功，扣除手续费 {} 金币，获得 {} 金币",
-            commission, seller_gold
-        );
+        let text = if paid {
+            format!(
+                "立即售出成功，扣除手续费 {} 金币，获得 {} 金币",
+                commission, seller_gold
+            )
+        } else {
+            format!(
+                "立即售出成功，成交款 {} 金币发放失败，已记录待人工核查",
+                seller_gold
+            )
+        };
         send_system_message(&self.gate_ref, msg.session_id, &text);
         self.send_market_success(msg.session_id, text);
     }
@@ -1524,13 +1932,15 @@ impl Message<ConsignItemRequest> for WorldActor {
             .ok()
             .flatten();
         if removed.is_none() {
-            // 退回收寄费
-            let _ = record
-                .actor_ref
-                .ask(crate::actors::player::AddGold {
-                    amount: CONSIGN_FEE,
-                })
-                .await;
+            // 退回收寄费：TryAddGold 原子语义，近封顶失败经系统邮件全额兜底 + error! 审计
+            self.refund_gold_atomic(
+                &record.actor_ref,
+                &state.name,
+                fee,
+                "寄售费退回",
+                format!("寄售失败（移除物品失败），寄售费 {} 金币已退回", fee),
+            )
+            .await;
             send_system_message(&self.gate_ref, msg.session_id, "移除物品失败，寄售费已退回");
             return;
         }
@@ -1561,7 +1971,9 @@ impl Message<ConsignItemRequest> for WorldActor {
                 .actor_ref
                 .ask(AddItemToInventory { item: item.clone() })
                 .await
-                .unwrap_or(false);
+                .ok()
+                .delivered_item_uid(item.unique_id)
+                .is_some();
             if !returned {
                 let mail = MailMessage {
                     mail_id: generate_mail_id(),
@@ -1576,14 +1988,19 @@ impl Message<ConsignItemRequest> for WorldActor {
                     gold: 0,
                     items: vec![item.clone()],
                 };
-                if !self.deliver_system_mail(mail).await {
-                    warn!(
-                        "Consign rollback mail undelivered: {} item={}",
-                        state.name, item.unique_id
-                    );
-                }
+                // 物品退回邮件丢失=物品蒸发——critical 变体 error! + 重试一次
+                let _ = self.deliver_system_mail_critical(mail).await;
             }
-            let _ = record.actor_ref.ask(AddGold { amount: fee }).await;
+            // 退费：TryAddGold 原子语义（截顶=托管费蒸发），
+            // 近封顶失败经系统邮件全额兜底 + error! 审计
+            self.refund_gold_atomic(
+                &record.actor_ref,
+                &state.name,
+                fee,
+                "寄售费退回",
+                format!("寄售失败（数据库错误），寄售费 {} 金币已退回", fee),
+            )
+            .await;
             send_system_message(
                 &self.gate_ref,
                 msg.session_id,
@@ -1628,13 +2045,21 @@ impl Message<ConsignItemRequest> for WorldActor {
         // 完整 UserInformation 刷新（背包移除 + 寄售费扣除，客户端本地背包同步）
         if let Ok(Some(new_state)) = record.actor_ref.ask(GetPlayerState).await {
             let packet = super::build_user_information_packet(&new_state, &self.item_infos);
-            let _ = self
+            if let Err(e) = self
                 .gate_ref
                 .tell(SendToClient {
                     session_id: msg.session_id,
                     data: packet,
                 })
-                .await;
+                .try_send()
+            {
+                warn!(
+                    "gate mailbox full: SendToClient dropped (session={} opcode={:?} err={})",
+                    msg.session_id,
+                    super::dropped_send_opcode(&e),
+                    e
+                );
+            }
         }
 
         let packet = mir2_shared::packets::server::market_system::ConsignItem {
@@ -1646,7 +2071,7 @@ impl Message<ConsignItemRequest> for WorldActor {
             warn!("Failed to serialize ConsignItem response: {}", e);
             return;
         }
-        let _ = self
+        if let Err(e) = self
             .gate_ref
             .tell(SendToClient {
                 session_id: msg.session_id,
@@ -1655,7 +2080,15 @@ impl Message<ConsignItemRequest> for WorldActor {
                     &body,
                 ),
             })
-            .await;
+            .try_send()
+        {
+            warn!(
+                "gate mailbox full: SendToClient dropped (session={} opcode={:?} err={})",
+                msg.session_id,
+                super::dropped_send_opcode(&e),
+                e
+            );
+        }
 
         send_system_message(
             &self.gate_ref,
@@ -1997,7 +2430,9 @@ impl Message<RetrieveRentalItemRequest> for WorldActor {
                     .actor_ref
                     .ask(AddItemToInventory { item: item.clone() })
                     .await
-                    .unwrap_or(false);
+                    .ok()
+                    .delivered_item_uid(item.unique_id)
+                    .is_some();
             }
             self.send_rental_packet(
                 msg.session_id,
@@ -2068,10 +2503,35 @@ impl Message<CancelItemRentalRequest> for WorldActor {
 
         let session = self.rental_sessions.remove(&initiator);
         if let Some(s) = session {
-            // Return item to owner if deposited
+            // 存入物品退回物主：会话键 initiator 恒为物主（存物方），partner_session 是租客——
+            // 误退 partner 会把寄存物白送租客；入包失败（None=背包满 / ask Err=actor 异常）
+            // 不得静默吞物——error! 审计后走在线感知系统归还邮件兜底（critical：失败重试一次）
             if let Some(item) = s.owner_item {
-                if let Some(record) = self.players.get(&s.partner_session) {
-                    let _ = record.actor_ref.ask(AddItemToInventory { item }).await;
+                match self.players.get(&initiator) {
+                    Some(record) => {
+                        let record = record.clone();
+                        let readded = record
+                            .actor_ref
+                            .ask(AddItemToInventory { item: item.clone() })
+                            .await
+                            .ok()
+                            .delivered_item_uid(item.unique_id)
+                            .is_some();
+                        if !readded {
+                            error!(
+                                "CancelItemRental: return to owner bag failed (owner={} uid={} item_index={}), falling back to system mail",
+                                record.name, item.unique_id, item.item_index
+                            );
+                            let mail = rental_cancel_return_mail(&record.name, item);
+                            let _ = self.deliver_system_mail_critical(mail).await;
+                        }
+                    }
+                    None => {
+                        error!(
+                            "CancelItemRental: owner offline, deposited item has no return path (owner_session={} uid={} item_index={}) — manual reconciliation required",
+                            initiator, item.unique_id, item.item_index
+                        );
+                    }
                 }
             }
             self.send_rental_packet(
@@ -2427,9 +2887,6 @@ impl Message<ConfirmItemRentalMsg> for WorldActor {
             return;
         }
 
-        // Give gold to owner
-        let _ = owner_record.actor_ref.ask(AddGold { amount: fee }).await;
-
         // C# ConfirmItemRental（:14416）：移交前给物品写 RentalInformation（OwnerName/BindingFlags/ExpiryDate）
         let period_hours = session.period_hours.max(1);
         let mut rented_item = item.clone();
@@ -2441,18 +2898,28 @@ impl Message<ConfirmItemRentalMsg> for WorldActor {
             rental_locked: false,
         });
 
-        // Give item to renter
+        // Give item to renter（先交付后付款：交付失败只需退租客，无需向物主追回租金——
+        // 旧序"先付物主、交付失败再 DeductGold 物主"在物主已花掉租金时追回失败 → 刷金）
         let added = renter_record
             .actor_ref
             .ask(AddItemToInventory {
                 item: rented_item.clone(),
             })
             .await
-            .unwrap_or(false);
+            .ok()
+            .delivered_item_uid(rented_item.unique_id)
+            .is_some();
         if !added {
-            // Give gold back and return item to owner
-            let _ = renter_record.actor_ref.ask(AddGold { amount: fee }).await;
-            let _ = owner_record.actor_ref.ask(DeductGold { amount: fee }).await;
+            // 退租客租金（TryAddGold 原子语义，近封顶失败经系统邮件全额兜底 + error! 审计），
+            // 物品归还物主
+            self.refund_gold_atomic(
+                &renter_record.actor_ref,
+                &renter_record.name,
+                fee,
+                "租赁退款",
+                format!("背包已满租赁失败，租金 {} 金币已退回", fee),
+            )
+            .await;
             let _ = owner_record
                 .actor_ref
                 .ask(AddItemToInventory { item })
@@ -2472,6 +2939,17 @@ impl Message<ConfirmItemRentalMsg> for WorldActor {
             );
             return;
         }
+
+        // 物品已交付租客：向物主支付租金——TryAddGold 原子语义（截顶=租金蒸发），
+        // 物主近封顶失败全额经系统邮件兜底 + error! 审计
+        self.refund_gold_atomic(
+            &owner_record.actor_ref,
+            &owner_record.name,
+            fee,
+            "租赁租金",
+            format!("你的物品已租出，租金 {} 金币", fee),
+        )
+        .await;
 
         send_system_message(
             &self.gate_ref,
@@ -2833,5 +3311,406 @@ mod tests {
             !db_write_ok(Err(anyhow::anyhow!("db down"))),
             "写库错误必须视为失败并回滚"
         );
+    }
+
+    /// 严重（回滚 uid）回归：交付入包会重发 unique_id，回滚必须按 AddItemToInventory
+    /// 返回的【真实 uid】收回，而非寄售记录上的旧 uid（旧 uid 收回恒落空）。
+    /// 新签名 Option<u64>：Some(uid)=真实 uid；None=入包失败。
+    /// 旧 bool 签名兼容期：true 退回记录 uid 尽力收回、false=入包失败。
+    #[test]
+    fn clawback_uses_delivered_uid_not_auction_record_uid() {
+        let auction_record_uid = 123u64;
+        let reissued_uid = 900u64;
+        // 交付重发 uid → 回滚必须拿到重发后的 uid
+        assert_eq!(
+            Some(Some(reissued_uid)).delivered_item_uid(auction_record_uid),
+            Some(reissued_uid),
+            "回滚必须用交付时重发的真实 uid，而非记录旧 uid"
+        );
+        // 入包失败 → None（上层退款中止）
+        assert_eq!(Some(None).delivered_item_uid(auction_record_uid), None);
+        assert_eq!(None::<Option<u64>>.delivered_item_uid(auction_record_uid), None);
+    }
+
+    /// 严重（租赁取消）回归：物主背包满时取消租赁，寄存物品不得蒸发——
+    /// 必须走系统归还邮件把物品完整退回物主（receiver=物主名、附件含原 uid）
+    #[test]
+    fn rental_cancel_full_bag_falls_back_to_return_mail() {
+        let item = mir2_shared::data::item::UserItem {
+            unique_id: 42,
+            item_index: 7,
+            ..Default::default()
+        };
+        let mail = rental_cancel_return_mail("物主甲", item);
+        assert_eq!(mail.receiver_name, "物主甲", "归还邮件必须发给物主");
+        assert_eq!(mail.sender_name, "物品租赁");
+        assert_eq!(mail.subject, "租赁归还");
+        assert_eq!(mail.gold, 0);
+        assert_eq!(mail.items.len(), 1, "寄存物品必须随邮件附件归还");
+        assert_eq!(mail.items[0].unique_id, 42, "归还的必须是原寄存物品");
+        assert_eq!(mail.items[0].item_index, 7);
+        assert!(!mail.read && !mail.collected && !mail.locked);
+    }
+
+    /// 严重（到期结算）回归：sold 标记先落库——落库失败（Err 或 0 行受影响）本轮不得交付
+    /// （交付后落库失败 → 内存 sold 但 DB 未售 → 重启重新结算 → 二次交付复制）
+    #[test]
+    fn expired_auction_no_delivery_when_sold_persist_fails() {
+        assert!(expired_delivery_allowed(&Ok(true)), "落库成功才允许交付");
+        assert!(
+            !expired_delivery_allowed(&Ok(false)),
+            "0 行受影响（并发已售/已删）不得交付"
+        );
+        assert!(
+            !expired_delivery_allowed(&Err(anyhow::anyhow!("db down"))),
+            "落库错误不得交付，留下轮 tick 重试"
+        );
+    }
+
+    /// 严重（到期结算）回归：mark_auction_sold 带 `AND sold = 0` 去重——
+    /// 重启后按 DB sold 状态去重，重复结算的第二次落库必失败 → 不二次交付
+    #[tokio::test]
+    async fn mark_auction_sold_dedupes_resettlement_after_restart() {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        // 与 init_db_pool 同 schema（ auctions 表最小列集）
+        sqlx::query(
+            r#"CREATE TABLE auctions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                auction_id INTEGER NOT NULL UNIQUE,
+                seller_name TEXT NOT NULL,
+                item_json TEXT NOT NULL,
+                price INTEGER NOT NULL DEFAULT 0,
+                consignment_date INTEGER NOT NULL DEFAULT 0,
+                sold INTEGER NOT NULL DEFAULT 0,
+                buyer_name TEXT,
+                item_type INTEGER NOT NULL DEFAULT 0,
+                current_bid INTEGER,
+                current_buyer TEXT
+            )"#,
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        db::save_auction(&pool, 1, "卖家", "{}", 1000, 0, 1)
+            .await
+            .unwrap();
+        // 首次结算：落库成功 → 允许交付
+        let first = db::mark_auction_sold(&pool, 1, "买家").await;
+        assert!(
+            expired_delivery_allowed(&first),
+            "首次 sold 落库成功必须允许交付"
+        );
+        // 重启后重复结算同一单：落库必须失败（0 行受影响）→ 不得二次交付
+        let second = db::mark_auction_sold(&pool, 1, "买家").await;
+        assert!(
+            !expired_delivery_allowed(&second),
+            "重复结算必须被 DB sold 状态去重，禁止二次交付"
+        );
+    }
+
+    // ============================================================
+    // 寄售/拍卖回收（clawback）数量正确性 回归测试
+    // ============================================================
+
+    /// 市场测试栈：PlayerActor 的 spawn 依赖 world_ref，需拉起最小
+    /// WorldActor（内存库、空目录）；SocialActor::spawn 仅为满足 WorldActorArgs
+    async fn spawn_market_test_stack() -> (
+        crate::db::DbPool,
+        kameo::actor::ActorRef<crate::gate::actor::GateActor>,
+        kameo::actor::ActorRef<crate::actors::world::WorldActor>,
+    ) {
+        use kameo::actor::Spawn;
+        let db_pool = crate::db::init_db_pool("sqlite::memory:")
+            .await
+            .expect("init_db");
+        let gate_ref = crate::gate::actor::GateActor::spawn(());
+        let social_ref = crate::actors::social::SocialActor::spawn(
+            crate::actors::social::SocialActorArgs {
+                gate_ref: gate_ref.clone(),
+                db_pool: db_pool.clone(),
+                config: crate::actors::social::SocialActorConfig::default(),
+            },
+        );
+        let world_ref =
+            crate::actors::world::WorldActor::spawn(crate::actors::world::WorldActorArgs {
+                tick_interval_ms: 1000,
+                gate_ref: gate_ref.clone(),
+                map_dir: std::path::PathBuf::from("."),
+                spawn_dir: None,
+                quest_dir: std::path::PathBuf::from("."),
+                npc_script_dir: std::path::PathBuf::from("."),
+                db_pool: db_pool.clone(),
+                social_ref,
+                conquest_cfg: crate::util::config::ConquestConfig::default(),
+                rested_cfg: crate::util::config::RestedConfig::default(),
+                pvp_cfg: crate::util::config::PvpConfig::default(),
+                health_regen_weight: 10,
+                mana_regen_weight: 10,
+                goods_hide_added_stats: true,
+                goods_on: true,
+                goods_max_stored: 15,
+                goods_buy_back_time_minutes: 60,
+                goods_buy_back_max_stored: 20,
+                safe_zone_healing: false,
+                archive_inactive_after_months: 12,
+                monster_recall_enabled: true,
+                monster_recall_range: 12,
+                monster_recall_cooldown_ms: 5000,
+                exp_mob_level_difference: true,
+                refine_cfg: crate::util::config::RefineConfig::default(),
+                replace_wedring_cost: 125,
+                lover_exp_bonus: 5,
+                mentor_exp_boost: 10,
+                mentor_damage_boost: 10,
+                mentor_skill_boost: true,
+                mentee_exp_bank: 1,
+                orbs_exp_list: Vec::new(),
+                orbs_dmg_list: Vec::new(),
+                orbs_def_list: Vec::new(),
+                awakening_cfg: Default::default(),
+                gem_cfg: Default::default(),
+                hero_exp_list: Vec::new(),
+                setup_cfg: Default::default(),
+                drop_rate: 1.0,
+                exp_rate: 1.0,
+                experience_list: Vec::new(),
+                item_timeout_ticks: 300,
+                max_drop_gold: 2000,
+                drop_gold: true,
+                rarity_cfg: crate::util::config::RarityConfig::default(),
+                notice_path: "Notice.txt".to_string(),
+                death_exp_penalty_percent: 0,
+                movement_pacing_ms: 0,
+                fishing_cfg: crate::util::ini::FishingConfig::default(),
+                random_item_stats: Vec::new(),
+                guild_buff_infos: Vec::new(),
+            });
+        (db_pool, gate_ref, world_ref)
+    }
+
+    fn mk_market_stack_item(
+        uid: u64,
+        item_index: i32,
+        count: u16,
+    ) -> mir2_shared::data::item::UserItem {
+        let mut it = mir2_shared::data::item::UserItem::default();
+        it.unique_id = uid;
+        it.item_index = item_index;
+        it.count = count;
+        it.info = Some(mir2_shared::data::item::ItemInfo {
+            index: item_index,
+            stack_size: 20,
+            ..Default::default()
+        });
+        it
+    }
+
+    async fn market_bag_count(
+        actor_ref: &ActorRef<crate::actors::player::PlayerActor>,
+        uid: u64,
+    ) -> u16 {
+        actor_ref
+            .ask(crate::actors::player::GetPlayerState)
+            .await
+            .unwrap()
+            .unwrap()
+            .inventory
+            .get_item(uid)
+            .map(|i| i.count)
+            .unwrap_or(0)
+    }
+
+    /// 严重（回收整堆没收）回归：寄售/拍卖回收必须按【真实 uid + 交付数量】收回。
+    /// 交付堆叠合并进买家自有栈后，整堆收回会把买家自有同类物品一起没收；
+    /// 按数量收回只拿走交付量，买家自有堆原样保留。
+    /// 红检：clawback_delivered_item 退回整堆 RemoveItemFromInventory 语义时，
+    /// 本测试在「bag==15」断言处必红（实际整堆 18 被没收）。
+    #[tokio::test]
+    async fn market_clawback_count_based_preserves_buyers_own_stack() {
+        use kameo::actor::Spawn;
+        let (_db_pool, gate_ref, world_ref) = spawn_market_test_stack().await;
+        let buyer = crate::actors::player::PlayerActor::spawn((
+            1u32,
+            "Buyer".to_string(),
+            1u64,
+            1u16,
+            gate_ref.clone(),
+            world_ref.clone(),
+            0u8,
+            0u8,
+            false,
+        ));
+
+        // 买家自有栈：item 666 x15（stack_size 20）
+        let own_uid = buyer
+            .ask(crate::actors::player::AddItemToInventory {
+                item: mk_market_stack_item(u64::MAX - 900, 666, 15),
+            })
+            .await
+            .unwrap()
+            .unwrap();
+
+        // 交付：寄售物品 666 x3 → 堆叠合并进买家自有栈（入参 uid 被丢弃，返回既有栈 uid）
+        let delivered_uid = buyer
+            .ask(crate::actors::player::AddItemToInventory {
+                item: mk_market_stack_item(u64::MAX - 901, 666, 3),
+            })
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(delivered_uid, own_uid, "堆叠合并：交付并入买家自有栈");
+        assert_eq!(market_bag_count(&buyer, own_uid).await, 18, "合并后 15+3=18");
+
+        // 回收：只拿走交付量 3，买家自有 15 原样保留
+        let (removed, outcome) = clawback_delivered_item(&buyer, delivered_uid, 3).await;
+        assert_eq!(outcome, ClawbackOutcome::Full);
+        assert_eq!(removed.map(|i| i.count), Some(3), "收回数量必须 == 交付量");
+        assert_eq!(
+            market_bag_count(&buyer, own_uid).await,
+            15,
+            "回收只拿走交付量，不得动买家自有堆"
+        );
+    }
+
+    /// 严重（回收数量校验）回归：交付后买家部分消耗/转移，收回数量 < 交付量时
+    /// 必须判定为 Shortfall（不足部分计入未回收），不得当作全额回收成功。
+    #[tokio::test]
+    async fn market_clawback_shortfall_when_buyer_consumed_part() {
+        use kameo::actor::Spawn;
+        let (_db_pool, gate_ref, world_ref) = spawn_market_test_stack().await;
+        let buyer = crate::actors::player::PlayerActor::spawn((
+            1u32,
+            "Buyer".to_string(),
+            1u64,
+            1u16,
+            gate_ref.clone(),
+            world_ref.clone(),
+            0u8,
+            0u8,
+            false,
+        ));
+
+        // 买家自有栈 666 x1；交付 x3 合并 → 4
+        let own_uid = buyer
+            .ask(crate::actors::player::AddItemToInventory {
+                item: mk_market_stack_item(u64::MAX - 910, 666, 1),
+            })
+            .await
+            .unwrap()
+            .unwrap();
+        let delivered_uid = buyer
+            .ask(crate::actors::player::AddItemToInventory {
+                item: mk_market_stack_item(u64::MAX - 911, 666, 3),
+            })
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(delivered_uid, own_uid);
+        assert_eq!(market_bag_count(&buyer, own_uid).await, 4);
+
+        // 买家消耗/转移 2 件 → 栈剩 2（< 交付量 3）
+        let consumed = buyer
+            .ask(crate::actors::player::RemoveItemFromInventoryCount {
+                unique_id: own_uid,
+                count: 2,
+            })
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(consumed.count, 2);
+
+        // 回收：按堆叠 min 截断只收回 2，差额 1 必须判 Shortfall 计入未回收
+        let (removed, outcome) = clawback_delivered_item(&buyer, delivered_uid, 3).await;
+        assert_eq!(
+            outcome,
+            ClawbackOutcome::Shortfall {
+                removed: 2,
+                missing: 1
+            },
+            "收回不足交付量必须判 Shortfall，不得当作全额回收成功"
+        );
+        assert_eq!(removed.map(|i| i.count), Some(2));
+        assert_eq!(market_bag_count(&buyer, own_uid).await, 0);
+
+        // 判定函数对照：全额 / 一无所获
+        assert_eq!(clawback_outcome(Some(3), 3), ClawbackOutcome::Full);
+        assert_eq!(clawback_outcome(None, 3), ClawbackOutcome::Nothing);
+    }
+
+    // ============================================================
+    // 严重（退款截顶蒸发）回归：市场退款/付款必须 TryAddGold 原子语义，
+    // 近封顶失败由 refund_gold_atomic 经系统邮件全额兜底
+    // ============================================================
+
+    async fn market_player_gold(actor_ref: &ActorRef<crate::actors::player::PlayerActor>) -> u64 {
+        actor_ref
+            .ask(crate::actors::player::GetPlayerState)
+            .await
+            .unwrap()
+            .unwrap()
+            .inventory
+            .gold
+    }
+
+    /// 严重（:618 背包满退款 / :642 全收回回滚退款共用 refund_gold_atomic → try_add_gold_atomic）
+    /// 回归：买家近封顶 + 退款窗口内并发入账（离顶额度 < 退款额）时，退款不得被静默截顶——
+    /// 必须整体失败（false）、不加不减，由 refund_gold_atomic 落系统邮件全额兜底。
+    /// 红检：把 try_add_gold_atomic 内 TryAddGold 换回截顶语义 AddGold（恒 true、超顶只加
+    /// 剩余额度），本测试在「!ok」「金币不变」断言处必红（截顶照加且谎报成功 → 差额蒸发）。
+    #[tokio::test]
+    async fn market_refund_try_add_gold_atomic_never_truncates() {
+        use kameo::actor::Spawn;
+        let (_db_pool, gate_ref, world_ref) = spawn_market_test_stack().await;
+        let buyer = crate::actors::player::PlayerActor::spawn((
+            1u32,
+            "NearCapBuyer".to_string(),
+            1u64,
+            1u16,
+            gate_ref.clone(),
+            world_ref.clone(),
+            0u8,
+            0u8,
+            false,
+        ));
+
+        // 近封顶：退款窗口内并发入账后离顶只剩 100
+        buyer
+            .ask(crate::actors::player::AddGold {
+                amount: u32::MAX as u64 - 100,
+            })
+            .await
+            .unwrap();
+
+        // 退款 1000 > 剩余额度 100：必须整体失败且金币不变（截顶=买家物财两失）
+        let ok = try_add_gold_atomic(&buyer, 1000).await;
+        assert!(!ok, "会截顶必须整体失败，由 refund_gold_atomic 走邮件全额兜底");
+        assert_eq!(
+            market_player_gold(&buyer).await,
+            u32::MAX as u64 - 100,
+            "截顶失败必须不加不减，不得静默截顶"
+        );
+
+        // 恰好放得下：全额到账返回 true
+        assert!(try_add_gold_atomic(&buyer, 100).await);
+        assert_eq!(market_player_gold(&buyer).await, u32::MAX as u64);
+
+        // 0 退款恒成功（无操作）
+        assert!(try_add_gold_atomic(&buyer, 0).await);
+    }
+
+    /// 严重（:618/:642 邮件兜底金额）回归：TryAddGold 失败后的兜底邮件必须携带【全额】
+    /// 退款金币（在线进内存邮箱 / 离线落库均按 MailMessage.gold 兑现），不得带截顶差额。
+    #[test]
+    fn market_refund_fallback_mail_carries_full_amount() {
+        let mail = gold_refund_mail("买家", 1_234_567, "市场购买退款", "购买失败退款".into());
+        assert_eq!(mail.receiver_name, "买家");
+        assert_eq!(mail.subject, "市场购买退款");
+        assert_eq!(mail.gold, 1_234_567, "兜底邮件必须携带全额退款");
+        assert!(mail.items.is_empty());
+        assert!(!mail.read && !mail.collected && !mail.locked);
     }
 }

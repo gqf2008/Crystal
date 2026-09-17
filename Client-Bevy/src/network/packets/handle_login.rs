@@ -76,7 +76,7 @@ pub(crate) fn handle_login(
             auth.login_error = Some(msg);
             net.auto_reconnect = false;
             net.disconnected = Some(format!("server-disconnect:{}", reason));
-            next.set(AppState::Login);
+            next.set_if_neq(AppState::Login);
             tracing::warn!("🚪 服务端断开: reason={}", reason);
         }
         x if x == ServerPacketIds::ClientVersion as i16 => {
@@ -218,7 +218,7 @@ pub(crate) fn handle_login(
             // C# S.LogOutSuccess：登出成功，返回选角界面
             if let Ok(_p) = player::LogOutSuccess::read_body(&mut cur) {
                 server_events.write(ServerEvent::LogOutSuccess);
-                next.set(AppState::Select);
+                next.set_if_neq(AppState::Select);
                 tracing::info!("🚪 登出成功，返回选角");
             }
         }
@@ -261,7 +261,7 @@ pub(crate) fn handle_login(
         x if x == ServerPacketIds::ReturnToLogin as i16 => {
             if let Ok(_p) = login::ReturnToLogin::read_body(&mut cur) {
                 server_events.write(ServerEvent::ReturnToLogin);
-                next.set(AppState::Login);
+                next.set_if_neq(AppState::Login);
                 tracing::info!("🚪 服务端要求返回登录界面");
             }
         }

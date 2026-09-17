@@ -3893,7 +3893,9 @@ impl WorldActor {
                         .actor_ref
                         .ask(crate::actors::player::AddItemToInventory { item })
                         .await
-                        .unwrap_or(false);
+                        .ok()
+                        .flatten()
+                        .is_some();
                     if added {
                         send_system_message(&self.gate_ref, session_id, "钓到了物品！");
                     } else {
@@ -4645,18 +4647,10 @@ impl WorldActor {
                         }
                     }
                 }
-                if let Some(record) = self.players.get(&sid) {
-                    let _ = record
-                        .actor_ref
-                        .ask(SetPlayerPosition {
-                            x: bx,
-                            y: by,
-                            direction: dir,
-                            map_index: Some(bind_map),
-                            is_mounted: None,
-                        })
-                        .await;
-                }
+                // 统一传送入口：此前只 SetPlayerPosition、零下行包——服务端认为已在新图，
+                // 客户端仍渲染旧图，双向失同步；teleport_core 跨图补 MapChanged/
+                // MapInformation/UserLocation + resync 全量重发新图对象
+                map_sync::teleport_core(self, sid, bind_map, bx, by, dir).await;
             }
         }
     }
@@ -4968,7 +4962,9 @@ impl WorldActor {
                                     item: auction.item.clone(),
                                 })
                                 .await
-                                .unwrap_or(false);
+                                .ok()
+                                .flatten()
+                                .is_some();
                             if added {
                                 send_system_message(
                                     &self.gate_ref,
@@ -5147,7 +5143,9 @@ impl WorldActor {
                             .actor_ref
                             .ask(AddItemToInventory { item: item.clone() })
                             .await
-                            .unwrap_or(false);
+                            .ok()
+                            .flatten()
+                            .is_some();
                         if added {
                             send_system_message(
                                 &self.gate_ref,

@@ -373,7 +373,8 @@ FodyWeavers.xsd
 /ServerRust/target
 # 根目录误跑 cargo 产生的构建产物（workspace 外直接构建落在这里）
 /target/
-/ServerRust/tests
+# /ServerRust/tests 不再整体忽略：集成测试（gate_hardening/no_blocking_send_to_client 等上线门禁）须入库
+
 
 # 开发调试产物（截图/辅助脚本）
 /tools/

@@ -2502,7 +2502,15 @@ async fn main() -> anyhow::Result<()> {
         .open(&abs_path)
         .map_err(|e| anyhow::anyhow!("Failed to create DB file {}: {}", abs_path, e))?;
 
-    let pool = sqlx::SqlitePool::connect(&db_url)
+    // FK 必须连接选项池级禁用：PRAGMA foreign_keys 是【每连接】设置，sqlx 默认每条新连接
+    // FK ON——INSERT OR REPLACE INTO characters 在 FK ON 连接上会触发子表级联删除+重插
+    // 导致 FK constraint failed（与 db::init_db_pool 同理；数据完整性由应用层事务保证）。
+    let options = db_url
+        .parse::<sqlx::sqlite::SqliteConnectOptions>()
+        .map_err(|e| anyhow::anyhow!("Failed to parse DB URL {}: {}", db_url, e))?
+        .foreign_keys(false)
+        .busy_timeout(std::time::Duration::from_secs(5));
+    let pool = sqlx::SqlitePool::connect_with(options)
         .await
         .map_err(|e| anyhow::anyhow!("Failed to connect to {}: {}", sqlite_path, e))?;
 
