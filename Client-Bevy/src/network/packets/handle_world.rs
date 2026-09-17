@@ -96,6 +96,9 @@ pub(crate) fn handle_world(
                 game_data.player_spawn =
                     Some((p.location_x as f32, p.location_y as f32, p.direction));
                 server_events.write(ServerEvent::WeatherChanged { code: p.weather });
+                // 游戏内收到时 set(Game) 是同态 no-op（OnEnter 不会重跑）：
+                // 换图重建由 map_renderer::map_rebuild_system 侦测 desired_map
+                // 与已加载地图名不一致后清旧世界重建（B1）
                 next.set(AppState::Game);
             }
         }

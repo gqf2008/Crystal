@@ -1493,6 +1493,40 @@ mod tests {
         );
     }
 
+    /// 2026-09-17（上线审查 S3 收尾）：远端玩家/地面物品/地面金币只带 NetObjectId、
+    /// 不挂 DemoBehavior，此前 OnExit(Game) 无人清理——断线切登录再重进 Game 时服务端
+    /// 全量重发，旧实体成幽灵。修复前本测试红（NetObjectId 不在清理过滤器内）。
+    #[test]
+    fn net_objects_despawned_on_exit_game() {
+        let mut app = test_app();
+        // 远端玩家/地面物品形态：仅 NetObjectId（无 LocalPlayer/DemoBehavior）
+        app.world_mut().spawn(crate::actor::NetObjectId(1001));
+        app.world_mut().spawn(crate::actor::NetObjectId(1002));
+        enter_game(&mut app);
+        assert_eq!(
+            app.world_mut()
+                .query_filtered::<Entity, With<crate::actor::NetObjectId>>()
+                .iter(app.world())
+                .count(),
+            2,
+            "进入游戏应存在网络对象实体"
+        );
+
+        app.world_mut()
+            .resource_mut::<NextState<AppState>>()
+            .set(AppState::Login);
+        app.update();
+
+        assert_eq!(
+            app.world_mut()
+                .query_filtered::<Entity, With<crate::actor::NetObjectId>>()
+                .iter(app.world())
+                .count(),
+            0,
+            "退出游戏后远端玩家/地面物品（NetObjectId）应一并清除"
+        );
+    }
+
     /// 评审 finding 7：同帧 UserInformation 快照（全量覆盖 quest_inventory）必须先于
     /// QuestItemGained 增量应用——否则先增量后快照会抹掉本帧新任务物品。排序边：
     /// inventory_events.before(quest_inventory_events)（生产在 inventory.rs）。

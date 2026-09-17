@@ -33,8 +33,8 @@ mod chunks_build;
 
 use camera::{camera_control, camera_follow_system, map_layer_toggle_system, spawn_camera};
 use chunks::{chunk_stream_system, spawn_front_chunk};
-use chunks_build::setup_world;
 pub use chunks_build::{build_chunk_rgba, make_image};
+use chunks_build::{cleanup_map_world, map_rebuild_system, setup_world};
 
 /// 瓦片尺寸（与 macroquad 版一致）
 pub const TILE_WIDTH: f32 = 48.0;
@@ -162,6 +162,11 @@ pub fn make_light_texture(assets: &mut Assets<Image>, size: u32) -> Handle<Image
 #[derive(Component)]
 pub struct ChunkKey(pub i32, pub i32, pub Layer);
 
+/// Middle 大图对象（大树/建筑，setup_world 对象层）标记：
+/// 对象无 chunk 归属（跨块底边对齐单独画），靠本标记供 OnExit/换图统一清理（S2/B1）
+#[derive(Component)]
+pub struct MapMiddleObject;
+
 /// Front 层精灵所属 chunk（流式加载/卸载用，#31 性能）
 #[derive(Component)]
 pub struct FrontChunkKey(pub i32, pub i32);
@@ -262,6 +267,15 @@ impl Plugin for MapRenderPlugin {
         app.init_resource::<TileImageCache>();
         register_blend_material(app);
         app.add_systems(OnEnter(crate::scenes::AppState::Game), setup_world);
+        // S2：离开 Game（登出/断线回登录）统一清掉地图实体并重置流式游标——
+        // 此前只有流式卸载，OnExit 无清理，重进游戏时旧块/灯光/大图全部残留叠加
+        app.add_systems(OnExit(crate::scenes::AppState::Game), cleanup_map_world);
+        // B1：游戏内收到 MapChanged 时 desired_map 变更 → 清旧世界并原地重建
+        // （同态 next.set(Game) 是 no-op，OnEnter 不会重跑，必须靠本系统消费 desired_map）
+        app.add_systems(
+            Update,
+            map_rebuild_system.run_if(in_state(crate::scenes::AppState::Game)),
+        );
         app.add_systems(
             Update,
             map_layer_toggle_system.run_if(in_state(crate::scenes::AppState::Game)),
