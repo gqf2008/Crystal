@@ -1129,12 +1129,6 @@ mod tests {
         });
     }
 
-    /// 同图位移只发 UserLocation，不得发 MapChanged（客户端无换图重建，
-    /// MapChanged 会触发多余的全图重建）。
-    ///
-    /// 红检：teleport_core 若退化为无条件发 MapChanged（teleport_player 旧行为）
-    /// → 同图传送后 2s 内收到 MapChanged，断言 FAILED。
-    #[test]
     /// @move 聊天指令（session.rs MOVE 分支）同图传送也必须走 teleport_core
     /// 下发 UserLocation——否则服务端坐标已改、客户端不知情，位置脱同步且
     /// 断线存档会把传送后坐标落库（2026-09-17 实机冒烟：GM @move 100 100 后
@@ -1201,20 +1195,29 @@ mod tests {
                 })
                 .await;
 
-            assert!(
-                wait_opcode_body(
-                    &mut rx,
-                    mir2_shared::enums::ServerPacketIds::UserLocation as i16,
-                    5
-                )
-                .await
-                .is_some(),
-                "@move 同图传送必须发 UserLocation（否则客户端坐标脱同步）"
-            );
+            let loc = wait_opcode_body(
+                &mut rx,
+                mir2_shared::enums::ServerPacketIds::UserLocation as i16,
+                5,
+            )
+            .await
+            .expect("@move 同图传送必须发 UserLocation（否则客户端坐标脱同步）");
+            // 包体坐标必须是传送目标 (18,18)——堵"发了包但坐标错"的口子
+            //（UserLocation body：x i32 LE + y i32 LE + dir u8）
+            assert!(loc.len() >= 8, "UserLocation 包体过短: {}", loc.len());
+            let lx = i32::from_le_bytes([loc[0], loc[1], loc[2], loc[3]]);
+            let ly = i32::from_le_bytes([loc[4], loc[5], loc[6], loc[7]]);
+            assert_eq!((lx, ly), (18, 18), "UserLocation 坐标须为传送目标");
             let _ = world_ref;
         });
     }
 
+    /// 同图位移只发 UserLocation，不得发 MapChanged（客户端无换图重建，
+    /// MapChanged 会触发多余的全图重建）。
+    ///
+    /// 红检：teleport_core 若退化为无条件发 MapChanged（teleport_player 旧行为）
+    /// → 同图传送后 2s 内收到 MapChanged，断言 FAILED。
+    #[test]
     fn e2e_teleport_message_same_map_sends_only_user_location() {
         let rt = tokio::runtime::Builder::new_multi_thread()
             .thread_stack_size(8 * 1024 * 1024)
