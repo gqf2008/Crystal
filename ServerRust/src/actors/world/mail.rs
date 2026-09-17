@@ -368,7 +368,8 @@ impl Message<SendMailRequest> for WorldActor {
             .ask(crate::actors::social::NpcGetMailSettings)
             .await
             .unwrap_or((100, 5, true, 100, false, false));
-        // #2538：C# PlayerObject.SendMail（11758-11792）——贴票消耗一张邮票（Nothings/Shape==1）
+        // #2538：C# PlayerObject.SendMail（11756-11786）——先定位邮票（暂不消耗）；
+        // C# 顺序：先验金（Account.Gold < totalGold → 拒绝），验金通过后才消耗邮票
         let stamp_uid: Option<u64> = if msg.stamped {
             sender_state
                 .inventory
@@ -385,16 +386,6 @@ impl Message<SendMailRequest> for WorldActor {
             None
         };
         let has_stamp = stamp_uid.is_some();
-        if let Some(uid) = stamp_uid {
-            let _ = record
-                .actor_ref
-                .ask(crate::actors::player::RemoveItemFromInventoryCount {
-                    unique_id: uid,
-                    count: 1,
-                })
-                .await;
-            send_system_message(&self.gate_ref, msg.session_id, "消耗一张邮票");
-        }
         // #2538：C# hasStamp ? 5 : 1——未贴票仅寄第 1 格附件
         let item_uids: Vec<u64> = if has_stamp {
             msg.item_uids.clone()
@@ -413,13 +404,30 @@ impl Message<SendMailRequest> for WorldActor {
             mail_free_with_stamp,
         );
 
-        // 检查金币是否足够（附件金币 + 寄送费用）
+        // 检查金币是否足够（附件金币 + 寄送费用）——必须先于任何消耗（C# :11762-11768）
         let total_gold = msg.gold as u64;
         if sender_state.inventory.gold < total_gold + mail_cost {
             send_mail_sent_result(&self.gate_ref, msg.session_id, -1);
             send_system_message(&self.gate_ref, msg.session_id, "金币不足（含寄送费用）");
             return;
         }
+
+        // 验金通过：消耗一张邮票（保留被移除部分，投递失败时回滚）
+        let removed_stamp = if let Some(uid) = stamp_uid {
+            let removed = record
+                .actor_ref
+                .ask(crate::actors::player::RemoveItemFromInventoryCount {
+                    unique_id: uid,
+                    count: 1,
+                })
+                .await
+                .ok()
+                .flatten();
+            send_system_message(&self.gate_ref, msg.session_id, "消耗一张邮票");
+            removed
+        } else {
+            None
+        };
 
         // 从发送者扣除物品（#2538：按贴票门控后的槽位）
         let mut items: Vec<mir2_shared::data::item::UserItem> = Vec::new();
@@ -482,35 +490,81 @@ impl Message<SendMailRequest> for WorldActor {
             }
         }
 
+        // 投递：在线 AddMail ask 失败回退离线落库；落库也失败则回滚已扣款/物/邮票（防邮件蒸发）
+        let mut delivered = false;
         if let Some(target) = target_session {
             if let Some(target_record) = self.players.get(&target) {
-                let _ = target_record
+                match target_record
                     .actor_ref
                     .ask(crate::actors::player::AddMail { mail: mail.clone() })
+                    .await
+                {
+                    Ok(_) => {
+                        send_mail_received_packet(&self.gate_ref, target, &mail);
+                        // C# PlayerObject.Process（:499-504）：收到新邮件 → 系统消息提示
+                        send_system_message(&self.gate_ref, target, "你收到了一封新邮件");
+                        debug!(
+                            "Mail delivered online: {} -> {}",
+                            sender_state.name, msg.receiver_name
+                        );
+                        delivered = true;
+                    }
+                    Err(e) => {
+                        warn!(
+                            "Online mail delivery failed ({} -> {}): {}; falling back to offline save",
+                            sender_state.name, msg.receiver_name, e
+                        );
+                    }
+                }
+            }
+        }
+        if !delivered {
+            // 收件人不在线或在线投递失败，保存到数据库
+            match db::insert_mail(&self.db_pool, &msg.receiver_name, &mail).await {
+                Ok(_) => {
+                    debug!(
+                        "Mail saved offline: {} -> {}",
+                        sender_state.name, msg.receiver_name
+                    );
+                    delivered = true;
+                }
+                Err(e) => {
+                    warn!(
+                        "Failed to save offline mail for {}: {}",
+                        msg.receiver_name, e
+                    );
+                }
+            }
+        }
+        if !delivered {
+            // 回滚：退回金币（附件 + 邮资）、附件物品、邮票
+            if total_gold + mail_cost > 0 {
+                let _ = record
+                    .actor_ref
+                    .ask(AddGold {
+                        amount: total_gold + mail_cost,
+                    })
                     .await;
-                send_mail_received_packet(&self.gate_ref, target, &mail);
-                // C# PlayerObject.Process（:499-504）：收到新邮件 → 系统消息提示
-                send_system_message(&self.gate_ref, target, "你收到了一封新邮件");
-                debug!(
-                    "Mail delivered online: {} -> {}",
-                    sender_state.name, msg.receiver_name
-                );
             }
-        } else {
-            // 收件人不在线，保存到数据库
-            if let Err(e) = db::insert_mail(&self.db_pool, &msg.receiver_name, &mail).await {
-                warn!(
-                    "Failed to save offline mail for {}: {}",
-                    msg.receiver_name, e
-                );
-                send_mail_sent_result(&self.gate_ref, msg.session_id, -1);
-                send_system_message(&self.gate_ref, msg.session_id, "邮件发送失败，请稍后重试");
-                return;
+            for item in &mail.items {
+                let _ = record
+                    .actor_ref
+                    .ask(AddItemToInventory { item: item.clone() })
+                    .await;
             }
-            debug!(
-                "Mail saved offline: {} -> {}",
-                sender_state.name, msg.receiver_name
+            if let Some(stamp) = removed_stamp {
+                let _ = record
+                    .actor_ref
+                    .ask(AddItemToInventory { item: stamp })
+                    .await;
+            }
+            send_mail_sent_result(&self.gate_ref, msg.session_id, -1);
+            send_system_message(
+                &self.gate_ref,
+                msg.session_id,
+                "邮件发送失败，款项与附件已退回",
             );
+            return;
         }
 
         self.last_mail_time.insert(msg.session_id, now_ms);
@@ -558,6 +612,34 @@ impl Message<CollectParcelRequest> for WorldActor {
             Some(r) => r,
             None => return,
         };
+
+        // C# CollectMail（11868-11877）：先 CanGainItems 预检，背包满仅聊天提示、附件保留
+        // （原实现先清空附件再入包，入包失败即丢件）
+        if let Ok(Some(mail)) = record
+            .actor_ref
+            .ask(crate::actors::player::GetMail {
+                mail_id: msg.mail_id,
+            })
+            .await
+        {
+            if !mail.items.is_empty() {
+                let can_gain = record
+                    .actor_ref
+                    .ask(crate::actors::player::CanGainItemsFor {
+                        items: mail.items.clone(),
+                    })
+                    .await
+                    .unwrap_or(false);
+                if !can_gain {
+                    send_system_message(
+                        &self.gate_ref,
+                        msg.session_id,
+                        "背包已满，无法收取附件",
+                    );
+                    return; // C#：背包满时不发 S.ParcelCollected
+                }
+            }
+        }
 
         let result = match record
             .actor_ref
@@ -619,6 +701,33 @@ impl Message<DeleteMailRequest> for WorldActor {
             Some(r) => r,
             None => return,
         };
+
+        // 严重15-2：删除前检查——带未收取附件的邮件拒绝删除（防丢件；
+        // C# 客户端 MailDialogs.cs:239-248 删除带附件邮件需玩家确认，Locked 直接拒绝），
+        // Mailbox::delete_mail 内同样兜底
+        match record
+            .actor_ref
+            .ask(crate::actors::player::GetMail {
+                mail_id: msg.mail_id,
+            })
+            .await
+        {
+            Ok(Some(mail)) => {
+                if mail.has_uncollected_parcel() {
+                    send_system_message(
+                        &self.gate_ref,
+                        msg.session_id,
+                        "该邮件含有未收取的附件，请先收取后再删除",
+                    );
+                    return;
+                }
+                if mail.locked {
+                    send_system_message(&self.gate_ref, msg.session_id, "邮件已锁定，无法删除");
+                    return;
+                }
+            }
+            _ => return,
+        }
 
         let deleted = match record
             .actor_ref
