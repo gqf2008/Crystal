@@ -2076,8 +2076,6 @@ pub struct WorldActor {
     pub(crate) in_trap_rock: HashSet<u64>,
     /// 变身外观（session -> TransformType；C# HumanObject.TransformType，S.TransformUpdate 广播用）
     pub(crate) transform_appearance: HashMap<u64, u8>,
-    /// @LOGIN GM 密码待验证会话（C# GMLogin；下一条聊天消息作为密码）
-    pub(crate) gm_login_pending: HashSet<u64>,
     /// 持久法术对象（火墙、暴风雪等），按 object_id 索引
     pub(crate) spell_objects: HashMap<u32, spell::SpellObject>,
     /// 弹道法术的延迟结算队列（对齐 C# DelayedAction）
@@ -2666,7 +2664,6 @@ impl WorldActor {
             sneaking_sessions: HashMap::new(),
             in_trap_rock: HashSet::new(),
             transform_appearance: HashMap::new(),
-            gm_login_pending: HashSet::new(),
             spell_objects: HashMap::new(),
             pending_spell_completions: Vec::new(),
             pending_range_completions: Vec::new(),
@@ -4103,6 +4100,31 @@ impl WorldActor {
             .unwrap_or_default();
         if let Err(e) = db::save_player_pets(&self.db_pool, player_name, &alive).await {
             warn!("Failed to save player pets for {}: {}", player_name, e);
+        }
+    }
+
+    /// 下线驱散宠物/召唤物（C# PlayerObject.StopGame：Pets 逐只 RemoveObject+Despawn）。
+    /// 必须在 persist_tamed_pets 之后调用（持久化要读活体 hp/exp）；
+    /// 不驱散会让幽灵宠物留在地图继续打怪，重登时 Info.Pets 重生 → 双倍。
+    pub(crate) async fn despawn_session_pets(&mut self, session_id: u64) {
+        let pet_oids: Vec<u32> = self
+            .monsters
+            .iter()
+            .filter(|(_, m)| m.master_session == Some(session_id) && m.hp > 0)
+            .map(|(id, _)| *id)
+            .collect();
+        for oid in pet_oids {
+            if let Some(monster) = self.monsters.remove(&oid) {
+                let remove_packet = Self::build_object_remove_packet(oid);
+                broadcast_to_map(
+                    &self.gate_ref,
+                    &self.players,
+                    monster.map_index,
+                    &remove_packet,
+                )
+                .await;
+                debug!("Pet '{}' despawned on master exit", monster.name);
+            }
         }
     }
 
@@ -8762,7 +8784,6 @@ impl Actor for WorldActor {
             sneaking_sessions: HashMap::new(),
             in_trap_rock: HashSet::new(),
             transform_appearance: HashMap::new(),
-            gm_login_pending: HashSet::new(),
             spell_objects: HashMap::new(),
             pending_spell_completions: Vec::new(),
             pending_range_completions: Vec::new(),

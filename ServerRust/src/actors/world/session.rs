@@ -316,6 +316,16 @@ impl Message<StartGameRequest> for WorldActor {
             msg.session_id, msg.account_username, msg.character_index
         );
 
+        // C# MirConnection.StartGame：Stage != Select 直接忽略——会话已在游戏内时拒绝重复
+        // StartGame，否则第二个 PlayerActor 顶掉注册表、旧 actor 成孤儿持有同一背包（双开）
+        if self.players.contains_key(&msg.session_id) {
+            warn!(
+                "StartGame rejected: session {} already in game (duplicate StartGame)",
+                msg.session_id
+            );
+            return;
+        }
+
         // 尝试从数据库加载角色
         let mut state: Option<PlayerState> = None;
         match db::list_characters_by_account(&self.db_pool, &msg.account_username).await {
@@ -2314,9 +2324,45 @@ impl Message<PlayerDisconnected> for WorldActor {
         self.slaying_armed.remove(&msg.session_id);
         self.in_trap_rock.remove(&msg.session_id);
         self.transform_appearance.remove(&msg.session_id);
-        self.gm_login_pending.remove(&msg.session_id);
 
         info!("Player removed from world (session={})", msg.session_id);
+
+        // 租赁会话清理（与 PlayerLogOut 对齐；C# StopGame → CancelItemRental）：
+        // 会话键 = 物主（存物方），partner = 租客；存入物品始终退回物主
+        if let Some(session) = self.rental_sessions.remove(&msg.session_id) {
+            // 断线方是物主：物品退回本人（record 仍是其玩家 actor）
+            if let Some(item) = session.owner_item {
+                let _ = record.actor_ref.ask(AddItemToInventory { item }).await;
+            }
+            send_system_message(
+                &self.gate_ref,
+                session.partner_session,
+                "租赁对方已下线，租赁已取消",
+            );
+        }
+        // 断线方是租客：物品退回另一端的物主
+        let owner_session = self
+            .rental_sessions
+            .iter()
+            .find(|(_, s)| s.partner_session == msg.session_id)
+            .map(|(k, _)| *k);
+        if let Some(owner_sid) = owner_session {
+            if let Some(session) = self.rental_sessions.remove(&owner_sid) {
+                if let Some(item) = session.owner_item {
+                    if let Some(owner_record) = self.players.get(&owner_sid) {
+                        let _ = owner_record
+                            .actor_ref
+                            .ask(AddItemToInventory { item })
+                            .await;
+                        send_system_message(
+                            &self.gate_ref,
+                            owner_sid,
+                            "租赁对方已下线，物品已退回",
+                        );
+                    }
+                }
+            }
+        }
 
         // #835：断线即离队——先清 group_id 再保存，避免陈旧组队引用被持久化
         let _ = record
@@ -2328,6 +2374,9 @@ impl Message<PlayerDisconnected> for WorldActor {
         if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
             // #2218：驯服宠物持久化（C# Info.Pets；仅存活且 master 匹配）
             self.persist_tamed_pets(msg.session_id, &state.name).await;
+            // C# PlayerObject.StopGame：Pets 逐只 RemoveObject+Despawn——必须在持久化
+            // （读活体 hp/exp）之后驱散，否则幽灵宠物继续打怪、重登双倍
+            self.despawn_session_pets(msg.session_id).await;
             if let Err(e) =
                 db::save_character(&self.db_pool, &state, &record.account_username).await
             {
@@ -2357,6 +2406,8 @@ impl Message<PlayerDisconnected> for WorldActor {
                     record.name, e
                 );
             }
+            // #198：移除英雄对象（与 PlayerLogOut 对齐；C# StopGame → DespawnHero）
+            self.broadcast_hero_remove(record.object_id).await;
 
             // 行会离线状态由 SocialActor 管理
         }
@@ -2442,7 +2493,6 @@ impl Message<PlayerLogOut> for WorldActor {
         self.slaying_armed.remove(&msg.session_id);
         self.in_trap_rock.remove(&msg.session_id);
         self.transform_appearance.remove(&msg.session_id);
-        self.gm_login_pending.remove(&msg.session_id);
 
         // 租赁会话清理：会话键 = 物主（存物方），partner = 租客；存入物品始终退回物主
         if let Some(session) = self.rental_sessions.remove(&msg.session_id) {
@@ -2487,6 +2537,9 @@ impl Message<PlayerLogOut> for WorldActor {
             );
             // #2218：驯服宠物持久化（必须在清理地图生成前，避免宠物先被移除）
             self.persist_tamed_pets(msg.session_id, &state.name).await;
+            // C# PlayerObject.StopGame：Pets 逐只 RemoveObject+Despawn——必须在持久化
+            // （读活体 hp/exp）之后驱散，否则幽灵宠物继续打怪、重登双倍
+            self.despawn_session_pets(msg.session_id).await;
             // M61：该地图无其他玩家时清理 NPC/怪物
             self.cleanup_map_spawns(state.map_index).await;
             // 通知 SocialActor 玩家下线（组队/好友在线表清理）
@@ -2718,22 +2771,8 @@ impl Message<ChatRequest> for WorldActor {
             return;
         }
 
-        // C# @LOGIN（PlayerObject.cs:1898-1915）：GMLogin 待验证 → 下一条消息作为 GM 密码
-        const GM_PASSWORD: &str = "C#Mir 4.0";
-        if self.gm_login_pending.remove(&msg.session_id) {
-            if message.trim() == GM_PASSWORD {
-                if let Ok(Some(mut st)) = record.actor_ref.ask(GetPlayerState).await {
-                    st.is_gm = true;
-                    let _ = record.actor_ref.ask(SetPlayerState { state: st }).await;
-                }
-                send_system_message(&self.gate_ref, msg.session_id, "你已成为 GM");
-                debug!("GM login ok: {}", record.name);
-            } else {
-                send_system_message(&self.gate_ref, msg.session_id, "GM 密码错误");
-                debug!("GM login failed: {}", record.name);
-            }
-            return;
-        }
+        // GM 提权只认数据库 accounts.admin_account（角色加载时置 is_gm）；
+        // 已删除 C# 默认口令自助提权（GM_PASSWORD="C#Mir 4.0" 公开默认值，任何人可提权）。
 
         // #1659：普通聊天限流（防刷屏广播；喊话另有 10s 冷却）
         let now_ms = std::time::SystemTime::now()
@@ -5489,18 +5528,8 @@ impl Message<ChatRequest> for WorldActor {
             }
         }
 
-        // @LOGIN —— 输入 GM 密码升级为 GM（C# PlayerObject case "LOGIN"：GMLogin=true + EnterGmPassword；无 GM 门槛）
-        if let Some(cmd_rest) = message.strip_prefix('@') {
-            let parts: Vec<&str> = cmd_rest.split_whitespace().collect();
-            if parts
-                .first()
-                .is_some_and(|c| c.eq_ignore_ascii_case("LOGIN"))
-            {
-                self.gm_login_pending.insert(msg.session_id);
-                send_system_message(&self.gate_ref, msg.session_id, "请输入 GM 密码");
-                return;
-            }
-        }
+        // @LOGIN 自助 GM 提权已删除：GM 只认数据库 admin_account（运维授予），
+        // 不再保留口令通道（C# 默认口令 "C#Mir 4.0" 是公开值）。
 
         // #888：@ADDSTORAGE —— 1,000,000 金币购买 10 天仓库扩容（C# PlayerObject case "ADDSTORAGE"，
         // 无 GM 校验；首次 80→160，已扩容则 +10 天续期；下发 LoseGold + ResizeStorage + 系统消息）
@@ -7823,5 +7852,319 @@ mod tests {
         assert!(tile_blocked_by(500, 500, &npcs, &walls, &monsters));
         assert!(!tile_blocked_by(171, 667, &npcs, &walls, &monsters));
         assert!(!tile_blocked_by(100, 100, &[], &[], &[]));
+    }
+}
+
+#[cfg(test)]
+mod auth_regression_tests {
+    //! 认证权限红线回归（阻断7/严重17）：@LOGIN 口令提权已删、重复 StartGame 拒绝。
+    //! 用 GateActor+AccountActor+SocialActor+WorldActor 全链路（与 world/e2e.rs 同款 harness）。
+    use std::time::Duration;
+
+    use kameo::actor::Spawn;
+    use tokio::sync::mpsc;
+
+    use crate::actors::account::AccountActor;
+    use crate::actors::social::{SocialActor, SocialActorArgs, SocialActorConfig};
+    use crate::actors::world::{WorldActor, WorldActorArgs};
+    use crate::db;
+    use crate::gate::actor::{ClientData, GateActor, SessionCreated, SetAccountRef, SetWorldRef};
+    use crate::util::wire::build_packet_bytes;
+    use mir2_shared::packets::Packet;
+
+    type GateActorRef = kameo::actor::ActorRef<GateActor>;
+    type RxChannel = tokio::sync::mpsc::Receiver<Vec<u8>>;
+
+    async fn setup_gate_and_session(session_id: u64) -> (GateActorRef, RxChannel) {
+        let gate_ref = GateActor::spawn(());
+        let (tx, rx) = mpsc::channel::<Vec<u8>>(1024);
+        let _ = gate_ref
+            .ask(SessionCreated {
+                session_id,
+                sender: tx,
+                ip: "127.0.0.1".to_string(),
+            })
+            .await;
+        (gate_ref, rx)
+    }
+
+    /// 等待指定 opcode 的包并返回 body；超时返回 None
+    async fn wait_opcode_body(rx: &mut RxChannel, opcode: i16, secs: u64) -> Option<Vec<u8>> {
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(secs);
+        while tokio::time::Instant::now() < deadline {
+            let remaining = deadline - tokio::time::Instant::now();
+            match tokio::time::timeout(remaining, rx.recv()).await {
+                Ok(Some(data)) if data.len() >= 4 => {
+                    if i16::from_le_bytes([data[2], data[3]]) == opcode {
+                        return Some(data[4..].to_vec());
+                    }
+                }
+                Ok(Some(_)) => continue,
+                _ => return None,
+            }
+        }
+        None
+    }
+
+    /// 把通道排空到安静（连续 quiet_ms 无新包）
+    async fn drain_until_quiet(rx: &mut RxChannel, quiet_ms: u64) {
+        while (tokio::time::timeout(Duration::from_millis(quiet_ms), rx.recv()).await).is_ok() {}
+    }
+
+    /// 登录并进图（testuser/TestChar），返回时 StartGame 已成功
+    async fn login_and_enter_game(gate_ref: &GateActorRef, session_id: u64, rx: &mut RxChannel) {
+        let db_pool = db::init_db_pool("sqlite::memory:").await.expect("init_db");
+        let account_ref = AccountActor::spawn((gate_ref.clone(), db_pool.clone()));
+        let _ = gate_ref.ask(SetAccountRef { account_ref }).await;
+
+        // ClientVersion
+        let mut cv_body = Vec::new();
+        let hash = b"test";
+        cv_body.extend_from_slice(&(hash.len() as i32).to_le_bytes());
+        cv_body.extend_from_slice(hash);
+        let _ = gate_ref
+            .ask(ClientData {
+                session_id,
+                data: build_packet_bytes(
+                    mir2_shared::enums::ClientPacketIds::ClientVersion as i16,
+                    &cv_body,
+                ),
+            })
+            .await;
+
+        // Login（不存在账号自动注册，config/server.toml allow_new_account=true）
+        let mut login_body = Vec::new();
+        let _ = mir2_shared::binary::write_dotnet_string(&mut login_body, "testuser");
+        let _ = mir2_shared::binary::write_dotnet_string(&mut login_body, "testpass");
+        let _ = gate_ref
+            .ask(ClientData {
+                session_id,
+                data: build_packet_bytes(
+                    mir2_shared::enums::ClientPacketIds::Login as i16,
+                    &login_body,
+                ),
+            })
+            .await;
+        let login_success = mir2_shared::enums::ServerPacketIds::LoginSuccess as i16;
+        assert!(
+            wait_opcode_body(rx, login_success, 3).await.is_some(),
+            "LoginSuccess"
+        );
+
+        let social_ref = SocialActor::spawn(SocialActorArgs {
+            gate_ref: gate_ref.clone(),
+            db_pool: db_pool.clone(),
+            config: SocialActorConfig::default(),
+        });
+        let world_ref = WorldActor::spawn(WorldActorArgs {
+            tick_interval_ms: 1000,
+            gate_ref: gate_ref.clone(),
+            map_dir: std::path::PathBuf::from("."),
+            spawn_dir: None,
+            quest_dir: std::path::PathBuf::from("."),
+            npc_script_dir: std::path::PathBuf::from("."),
+            db_pool: db_pool.clone(),
+            social_ref,
+            conquest_cfg: crate::util::config::ConquestConfig::default(),
+            rested_cfg: crate::util::config::RestedConfig::default(),
+            pvp_cfg: crate::util::config::PvpConfig::default(),
+            health_regen_weight: 10,
+            mana_regen_weight: 10,
+            goods_hide_added_stats: true,
+            goods_on: true,
+            goods_max_stored: 15,
+            goods_buy_back_time_minutes: 60,
+            goods_buy_back_max_stored: 20,
+            safe_zone_healing: false,
+            archive_inactive_after_months: 12,
+            monster_recall_enabled: true,
+            monster_recall_range: 12,
+            monster_recall_cooldown_ms: 5000,
+            exp_mob_level_difference: true,
+            refine_cfg: crate::util::config::RefineConfig::default(),
+            replace_wedring_cost: 125,
+            lover_exp_bonus: 5,
+            mentor_exp_boost: 10,
+            mentor_damage_boost: 10,
+            mentor_skill_boost: true,
+            mentee_exp_bank: 1,
+            orbs_exp_list: Vec::new(),
+            orbs_dmg_list: Vec::new(),
+            orbs_def_list: Vec::new(),
+            awakening_cfg: Default::default(),
+            gem_cfg: Default::default(),
+            hero_exp_list: Vec::new(),
+            setup_cfg: Default::default(),
+            drop_rate: 1.0,
+            exp_rate: 1.0,
+            experience_list: Vec::new(),
+            item_timeout_ticks: 300,
+            max_drop_gold: 2000,
+            drop_gold: true,
+            rarity_cfg: crate::util::config::RarityConfig::default(),
+            notice_path: "Notice.txt".to_string(),
+            death_exp_penalty_percent: 0,
+            movement_pacing_ms: 0,
+            fishing_cfg: crate::util::ini::FishingConfig::default(),
+            random_item_stats: Vec::new(),
+            guild_buff_infos: Vec::new(),
+        });
+        let _ = gate_ref.ask(SetWorldRef { world_ref }).await;
+
+        // NewCharacter
+        let mut nc_body = Vec::new();
+        let _ = mir2_shared::binary::write_dotnet_string(&mut nc_body, "TestChar");
+        nc_body.push(0u8);
+        nc_body.push(0u8);
+        let _ = gate_ref
+            .ask(ClientData {
+                session_id,
+                data: build_packet_bytes(
+                    mir2_shared::enums::ClientPacketIds::NewCharacter as i16,
+                    &nc_body,
+                ),
+            })
+            .await;
+        assert!(
+            wait_opcode_body(
+                rx,
+                mir2_shared::enums::ServerPacketIds::NewCharacterSuccess as i16,
+                3
+            )
+            .await
+            .is_some(),
+            "NewCharacterSuccess"
+        );
+
+        // StartGame
+        let _ = gate_ref
+            .ask(ClientData {
+                session_id,
+                data: build_packet_bytes(
+                    mir2_shared::enums::ClientPacketIds::StartGame as i16,
+                    &0i32.to_le_bytes().to_vec(),
+                ),
+            })
+            .await;
+        assert!(
+            wait_opcode_body(rx, mir2_shared::enums::ServerPacketIds::StartGame as i16, 5)
+                .await
+                .is_some(),
+            "StartGame"
+        );
+    }
+
+    fn big_stack_runtime() -> tokio::runtime::Runtime {
+        tokio::runtime::Builder::new_multi_thread()
+            .thread_stack_size(8 * 1024 * 1024)
+            .enable_time()
+            .build()
+            .unwrap()
+    }
+
+    /// 收集 duration 内所有 Chat(opcode) 系统消息的文本
+    async fn collect_system_chats(rx: &mut RxChannel, secs: u64) -> Vec<String> {
+        let chat_opcode = mir2_shared::enums::ServerPacketIds::Chat as i16;
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(secs);
+        let mut texts = Vec::new();
+        while tokio::time::Instant::now() < deadline {
+            let remaining = deadline - tokio::time::Instant::now();
+            match tokio::time::timeout(remaining, rx.recv()).await {
+                Ok(Some(data)) if data.len() >= 4 => {
+                    if i16::from_le_bytes([data[2], data[3]]) == chat_opcode {
+                        texts.push(String::from_utf8_lossy(&data).to_string());
+                    }
+                }
+                Ok(Some(_)) => continue,
+                _ => break,
+            }
+        }
+        texts
+    }
+
+    async fn send_chat(gate_ref: &GateActorRef, session_id: u64, text: &str) {
+        let pkt = mir2_shared::packets::client::Chat {
+            message: text.to_string(),
+            linked_items: Vec::new(),
+        };
+        let mut body = Vec::new();
+        pkt.write_body(&mut body).expect("chat write_body");
+        let _ = gate_ref
+            .ask(ClientData {
+                session_id,
+                data: build_packet_bytes(
+                    mir2_shared::enums::ClientPacketIds::Chat as i16,
+                    &body,
+                ),
+            })
+            .await;
+    }
+
+    /// 红绿回归（严重17）：同会话重复 StartGame 必须被忽略（C# MirConnection.StartGame：
+    /// Stage != Select 直接 return），不得再发一次 S.StartGame 重建 PlayerActor。
+    /// 红检：删掉 handler 开头的 players.contains_key 检查 → 第二次 StartGame 会再收
+    /// 到 result=4 的 S.StartGame → 断言 FAILED。
+    #[test]
+    fn e2e_duplicate_start_game_rejected() {
+        let rt = big_stack_runtime();
+        rt.block_on(async {
+            let session_id = 41u64;
+            let (gate_ref, mut rx) = setup_gate_and_session(session_id).await;
+            login_and_enter_game(&gate_ref, session_id, &mut rx).await;
+
+            // 排空进图后的剩余包，再发重复 StartGame
+            drain_until_quiet(&mut rx, 400).await;
+            let _ = gate_ref
+                .ask(ClientData {
+                    session_id,
+                    data: build_packet_bytes(
+                        mir2_shared::enums::ClientPacketIds::StartGame as i16,
+                        &0i32.to_le_bytes().to_vec(),
+                    ),
+                })
+                .await;
+            assert!(
+                wait_opcode_body(
+                    &mut rx,
+                    mir2_shared::enums::ServerPacketIds::StartGame as i16,
+                    2
+                )
+                .await
+                .is_none(),
+                "重复 StartGame 不得再收到 S.StartGame（已在游戏内必须忽略）"
+            );
+        });
+    }
+
+    /// 红绿回归（阻断7）：@LOGIN 口令自助提权已删除——发送 @LOGIN 不得再出现
+    /// 「请输入 GM 密码」提示，输入旧默认口令也不得再出现「你已成为 GM」。
+    /// GM 只认数据库 accounts.admin_account。
+    /// 红检：恢复 @LOGIN 分支/GM_PASSWORD 分支 → 对应系统消息出现 → 断言 FAILED。
+    #[test]
+    fn e2e_at_login_gm_password_path_removed() {
+        let rt = big_stack_runtime();
+        rt.block_on(async {
+            let session_id = 42u64;
+            let (gate_ref, mut rx) = setup_gate_and_session(session_id).await;
+            login_and_enter_game(&gate_ref, session_id, &mut rx).await;
+
+            drain_until_quiet(&mut rx, 400).await;
+            send_chat(&gate_ref, session_id, "@LOGIN").await;
+            let texts = collect_system_chats(&mut rx, 2).await;
+            assert!(
+                !texts.iter().any(|t| t.contains("请输入 GM 密码")),
+                "@LOGIN 不得再提示输入 GM 密码（口令提权已删除），got: {:?}",
+                texts
+            );
+
+            // 旧默认口令也不得再提权
+            send_chat(&gate_ref, session_id, "C#Mir 4.0").await;
+            let texts = collect_system_chats(&mut rx, 2).await;
+            assert!(
+                !texts.iter().any(|t| t.contains("你已成为 GM")),
+                "旧默认口令不得再提权（GM 只认数据库 admin_account），got: {:?}",
+                texts
+            );
+        });
     }
 }
