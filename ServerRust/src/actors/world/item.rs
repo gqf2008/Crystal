@@ -1,4 +1,5 @@
 use super::*;
+use tracing::error;
 
 /// 拾取地面物品
 pub struct PickUpRequest {
@@ -147,6 +148,69 @@ pub(crate) fn compute_item_price_per_unit(
 /// 不能用客户端声明的 count，否则声明 count > 实际堆叠 时可刷金。
 pub(crate) fn compute_sell_gold(per_unit: u64, actual_count: u64) -> u64 {
     (per_unit / 2).max(1) * actual_count
+}
+
+/// NPC 单次购买数量上限（远小于 u16::MAX；客户端 UI 正常购买个位数~几十）
+const MAX_NPC_BUY_COUNT: u32 = 1000;
+
+/// NPC 购买数量校验（客户端 count 为 u32 可控）：
+/// 历史代码 `msg.count as u16` 截断——count=65536 时全额扣款但 `left = 0` 一件不发
+/// （退款循环也按截断值算，白扣全款）；count=65537 则付 65537 件的钱发 1 件。
+/// 必须【拒绝】而非截断：>0 且 ≤ 单次上限（上限 ≤ u16::MAX，后续 as u16 不再截断）。
+pub(crate) fn npc_buy_count_valid(count: u32) -> bool {
+    count > 0 && count <= MAX_NPC_BUY_COUNT
+}
+
+/// NPC 二手货购买结算失败原因
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum UsedGoodsSettleError {
+    /// 扣款失败（预检 gold<cost 与扣款间的并发窗口金币被抽空，或 player actor 异常）：
+    /// 未交付，交易拒绝，玩家无损失
+    DeductFailed,
+    /// 交付失败（预检 can_gain_item 后背包被并发填满 / actor 异常）：
+    /// 已扣款，调用方必须经 refund_gold_atomic 退费兜底，否则吞金
+    DeliveryFailed,
+}
+
+/// NPC 二手货购买结算：【先扣款、后交付】。
+/// 禁止反向顺序（先 AddItemToInventory 交付、后 `let _ = ask(DeductGold)` 吞结果）——
+/// 预检（gold < cost）与扣款间存在并发窗口（或 player actor 异常），扣款失败而物品
+/// 已交付 = 玩家白拿物品（净铸）。交付失败时已扣款项由调用方经 refund_gold_atomic
+/// 退回（TryAddGold 原子入账，近封顶失败走 deliver_system_mail_critical 邮件全额兜底）。
+pub(crate) async fn settle_used_goods_purchase(
+    actor_ref: &ActorRef<crate::actors::player::PlayerActor>,
+    cost: u64,
+    item: mir2_shared::data::item::UserItem,
+) -> Result<(), UsedGoodsSettleError> {
+    let deducted = actor_ref
+        .ask(DeductGold { amount: cost })
+        .await
+        .unwrap_or(false);
+    if !deducted {
+        return Err(UsedGoodsSettleError::DeductFailed);
+    }
+    let delivered = actor_ref
+        .ask(AddItemToInventory { item })
+        .await
+        .ok()
+        .flatten()
+        .is_some();
+    if !delivered {
+        return Err(UsedGoodsSettleError::DeliveryFailed);
+    }
+    Ok(())
+}
+
+/// BuyItem 部分入包余款退回的原子入账：TryAddGold——会截顶则整体失败、不加不减。
+/// 绝不用截顶语义的 AddGold：刚全额扣款后、余款退回前的窗口内任何并发入账，
+/// 都会让退款差额被静默截顶（玩家物财两失且无日志）。
+/// 返回 false 时调用方必须经 deliver_system_mail_critical 系统邮件全额兜底 + error! 审计
+/// （与 market.rs refund_gold_atomic 同款语义）。
+pub(crate) async fn refund_buy_remainder_atomic(
+    actor_ref: &ActorRef<crate::actors::player::PlayerActor>,
+    amount: u64,
+) -> bool {
+    crate::actors::world::market::try_add_gold_atomic(actor_ref, amount).await
 }
 
 /// 计算修理费（对齐 C# Shared/Data/ItemData.cs RepairPrice()）
@@ -350,6 +414,8 @@ impl Message<PickUpRequest> for WorldActor {
             let mut picked_up = false;
             if ground_item.item.item_index == 0 {
                 // #1688：金币堆完整金额（item.count 为 u16 会截断大额金币，gold_amount 保留完整值）
+                // AddGold 为 C# GainGold 截顶语义（金币近 u32::MAX 只加剩余额度）：
+                // 拾取金币堆沿用 C# 行为，可接受，不改
                 if let Ok(true) = record
                     .actor_ref
                     .ask(crate::actors::player::AddGold {
@@ -368,7 +434,7 @@ impl Message<PickUpRequest> for WorldActor {
                 })
                 .await
             {
-                if success {
+                if success.is_some() {
                     picked_up = true;
                 } else {
                     // 背包已满，放回去
@@ -1537,6 +1603,8 @@ impl Message<UseItemRequest> for WorldActor {
                             match lottery_prize_index(&rolls) {
                                 Some(i) => {
                                     let (msg_text, gold) = prizes[i];
+                                    // AddGold 为 C# GainGold 截顶语义：彩票小额派彩，
+                                    // 近封顶只加剩余额度，对齐 C# 可接受，不改
                                     let _ = record
                                         .actor_ref
                                         .ask(crate::actors::player::AddGold {
@@ -3508,6 +3576,13 @@ impl Message<BuyItemRequest> for WorldActor {
             return;
         }
 
+        // 购买数量校验（客户端 count u32 可控）：超限直接拒绝，
+        // 不得走到 `msg.count as u16` 截断（count=65536 全额扣款发 0 件的不退款漏洞）
+        if !npc_buy_count_valid(msg.count) {
+            send_system_message(&self.gate_ref, msg.session_id, "购买数量无效");
+            return;
+        }
+
         // 查找 NPC 并验证商品是否在销售列表中（客户端 BuyItem 不含 npc_id）
         let (npc_oid, npc_db_index) = match self.session_npc.get(&msg.session_id) {
             Some(npc_oid) => match self.npcs.get(npc_oid) {
@@ -3592,16 +3667,43 @@ impl Message<BuyItemRequest> for WorldActor {
                     send_system_message(&self.gate_ref, msg.session_id, "背包已满");
                     return;
                 }
-                let ok = record
-                    .actor_ref
-                    .ask(AddItemToInventory { item: item.clone() })
-                    .await
-                    .unwrap_or(false);
-                if !ok {
-                    send_system_message(&self.gate_ref, msg.session_id, "背包空间不足");
-                    return;
+                // 先扣款后交付（settle_used_goods_purchase；HEAD 既有顺序相反——先交付、
+                // 后 let _ = ask(DeductGold) 吞结果：预检与扣款间并发窗口或 actor 异常时
+                // 扣款失败即玩家白拿物品=净铸）。扣款失败拒绝交易；交付失败（预检后背包
+                // 被并发填满）已扣款必须退回：refund_gold_atomic = TryAddGold 原子入账
+                //（截顶即整体失败），失败走 deliver_system_mail_critical 邮件全额兜底 + error!
+                match settle_used_goods_purchase(&record.actor_ref, cost, item.clone()).await {
+                    Ok(()) => {}
+                    Err(UsedGoodsSettleError::DeductFailed) => {
+                        send_system_message(&self.gate_ref, msg.session_id, "金币不足");
+                        return;
+                    }
+                    Err(UsedGoodsSettleError::DeliveryFailed) => {
+                        let _ = used_list;
+                        let refunded = self
+                            .refund_gold_atomic(
+                                &record.actor_ref,
+                                &state.name,
+                                cost,
+                                "二手货购买退款",
+                                format!(
+                                    "购买二手货（uid={} x{}）交付失败，系统退回 {} 金币",
+                                    uid, count, cost
+                                ),
+                            )
+                            .await;
+                        send_system_message(
+                            &self.gate_ref,
+                            msg.session_id,
+                            if refunded {
+                                "背包空间不足，已退回花费金币"
+                            } else {
+                                "背包空间不足，退款投递失败请联系管理员"
+                            },
+                        );
+                        return;
+                    }
                 }
-                let _ = record.actor_ref.ask(DeductGold { amount: cost }).await;
                 used_list.remove(used_idx);
                 let _ = used_list;
                 // 完整 UserInformation 刷新（背包 + 金币）
@@ -3724,6 +3826,12 @@ impl Message<BuyItemRequest> for WorldActor {
         if !goods_list[good_idx].infinite_stock {
             goods_list[good_idx].stock -= msg.count as i32;
         }
+        // 提前快照库存调试串：goods_list 借用在此结束（后续余款退回兜底需要 &self）
+        let stock_dbg = if goods_list[good_idx].infinite_stock {
+            "∞".to_string()
+        } else {
+            goods_list[good_idx].stock.to_string()
+        };
 
         // C# BuyItem：按 Info.StackSize 分批创建（堆叠物品合并、非堆叠一格一个；背包满则停止）
         let stack_size = item_db.stack_size.max(1) as u16;
@@ -3742,7 +3850,9 @@ impl Message<BuyItemRequest> for WorldActor {
                 .actor_ref
                 .ask(AddItemToInventory { item })
                 .await
-                .unwrap_or(false);
+                .ok()
+                .flatten()
+                .is_some();
             if !ok {
                 break;
             }
@@ -3766,10 +3876,36 @@ impl Message<BuyItemRequest> for WorldActor {
                         })
                         .await;
                 } else {
-                    let _ = record
-                        .actor_ref
-                        .ask(crate::actors::player::AddGold { amount: refund })
-                        .await;
+                    // 余款退回必须原子（refund_buy_remainder_atomic = TryAddGold：
+                    // 截顶即整体失败、不加不减）——刚全额扣款后、退款窗口内并发入账，
+                    // 截顶语义 AddGold 会静默吞掉退款差额（玩家物财两失且无日志）；
+                    // 失败走 deliver_system_mail_critical 系统邮件全额兜底 + error! 审计
+                    if !refund_buy_remainder_atomic(&record.actor_ref, refund).await {
+                        error!(
+                            "BuyItem remainder refund TryAddGold failed (near cap + concurrent gain), falling back to system mail: player={} refund={}",
+                            state.name, refund
+                        );
+                        let mail = crate::actors::mail::MailMessage {
+                            mail_id: crate::actors::mail::generate_mail_id(),
+                            sender_name: "系统".to_string(),
+                            receiver_name: state.name.clone(),
+                            subject: "商店购买退款".to_string(),
+                            body: format!(
+                                "购买 {} x{} 背包空间不足，未购买部分退回 {} 金币",
+                                item_db.name, msg.count, refund
+                            ),
+                            timestamp: std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .map(|d| d.as_secs() as i64)
+                                .unwrap_or(0),
+                            read: false,
+                            collected: false,
+                            locked: false,
+                            gold: refund,
+                            items: Vec::new(),
+                        };
+                        let _ = self.deliver_system_mail_critical(mail).await;
+                    }
                 }
             }
         }
@@ -3836,11 +3972,7 @@ impl Message<BuyItemRequest> for WorldActor {
             msg.count,
             total_price,
             npc_name,
-            if goods_list[good_idx].infinite_stock {
-                "∞".to_string()
-            } else {
-                goods_list[good_idx].stock.to_string()
-            }
+            stock_dbg
         );
     }
 }
@@ -3905,6 +4037,38 @@ impl Message<SellItemRequest> for WorldActor {
             return;
         }
 
+        // 出售数量校验：msg.count 客户端可控 u32，`as u16` 截断（count=65536 → 0 件）
+        if msg.count == 0 || msg.count > u16::MAX as u32 {
+            send_sell_item_response(&self.gate_ref, msg.session_id, msg.unique_id, msg.count, false);
+            send_system_message(&self.gate_ref, msg.session_id, "出售数量无效");
+            return;
+        }
+
+        // 定价：C# Price() / 2（单价含耐久比例/附加属性；按实际卖出数量计）
+        let per_unit = item_db
+            .as_ref()
+            .map(|info| compute_item_price_per_unit(&item_data, info))
+            .unwrap_or_else(|| item_data.item_index as u64 * 5);
+
+        // 金币封顶预检（C# CanGainGold：amount + 现有金币 > uint.MaxValue 即不可售）：
+        // 估价上界 = 单价 × min(声明 count, 实际堆叠)——上界都入不了账直接拒绝出售（物品不扣）。
+        // 注意：预检只是提前劝退，预检与下方入账之间存在并发窗口（TOCTOU），
+        // 真正的正确性靠入账用 TryAddGold（截顶即整体失败）+ 失败回退物品兜底
+        let est_gold = compute_sell_gold(per_unit, (msg.count as u64).min(item_data.count as u64));
+        let can_gain = est_gold <= u32::MAX as u64
+            && record
+                .actor_ref
+                .ask(crate::actors::player::CanGainGold {
+                    amount: est_gold as u32,
+                })
+                .await
+                .unwrap_or(false);
+        if !can_gain {
+            send_sell_item_response(&self.gate_ref, msg.session_id, msg.unique_id, msg.count, false);
+            send_system_message(&self.gate_ref, msg.session_id, "金币即将达到上限，无法出售");
+            return;
+        }
+
         // 移除物品（C# SellItem：堆叠按 count 拆分，非堆叠整件移除）
         // 注意：RemoveItemFromInventoryCount 会按实际堆叠 min 截断扣物，
         // 返回的 removed.count 才是【实际移除数量】，计价必须用它而非客户端声明的 msg.count
@@ -3923,32 +4087,55 @@ impl Message<SellItemRequest> for WorldActor {
         };
         let actual_count = removed_item.count as u64;
 
-        // 定价：C# Price() / 2（单价含耐久比例/附加属性；按实际卖出数量计）
-        let per_unit = item_db
-            .as_ref()
-            .map(|info| compute_item_price_per_unit(&item_data, info))
-            .unwrap_or_else(|| item_data.item_index as u64 * 5);
+        // 实际移除数量 ≤ 预检上界，正常情况 total_gold 必然可全额入账
         let total_gold = compute_sell_gold(per_unit, actual_count);
 
+        // 金币用 TryAddGold（原子：会截顶则整体失败、不加不减），不用截顶语义的 AddGold——
+        // 预检（CanGainGold）与入账之间存在并发窗口（TOCTOU，同 mail.rs CollectParcel 模式），
+        // 窗口内金币若被并发加满，AddGold 会截顶到账（物品已扣、金币差额蒸发）；
+        // TryAddGold 失败则走下方回滚退还物品
         let success = record
             .actor_ref
-            .ask(AddGold { amount: total_gold })
+            .ask(TryAddGold { amount: total_gold })
             .await
             .unwrap_or(false);
         if !success {
-            // AddGold 失败：回退已扣物品，避免吞物
+            // TryAddGold 失败（金币将溢出）：回退已扣物品，避免吞物
             let restored = record
                 .actor_ref
                 .ask(crate::actors::player::AddItemToInventory {
-                    item: removed_item,
+                    item: removed_item.clone(),
                 })
                 .await
-                .unwrap_or(false);
+                .ok()
+                .flatten()
+                .is_some();
             if !restored {
-                warn!(
-                    "SellItem rollback failed: {} item={} x{} lost after AddGold failure",
+                // 回退再失败（预检后背包被并发填满/玩家 actor 异常）：
+                // 玩家未得金币且物品丢失——只 warn = 物品静默蒸发。
+                // error! 审计 + 在线感知系统邮件兜底归还
+                // （market.rs deliver_system_mail_critical 同款：error! + 重试一次）
+                error!(
+                    "SellItem rollback failed: {} item={} x{} lost after TryAddGold failure — 转系统归还邮件兜底",
                     state.name, item_data.item_index, actual_count
                 );
+                let mail = crate::actors::mail::MailMessage {
+                    mail_id: crate::actors::mail::generate_mail_id(),
+                    sender_name: "系统".to_string(),
+                    receiver_name: state.name.clone(),
+                    subject: "出售失败物品退回".to_string(),
+                    body: "出售时金币入账失败且物品退回背包失败，系统以邮件归还该物品".to_string(),
+                    timestamp: std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| d.as_secs() as i64)
+                        .unwrap_or(0),
+                    read: false,
+                    collected: false,
+                    locked: false,
+                    gold: 0,
+                    items: vec![removed_item],
+                };
+                let _ = self.deliver_system_mail_critical(mail).await;
             }
             send_sell_item_response(&self.gate_ref, msg.session_id, msg.unique_id, msg.count, false);
             send_system_message(&self.gate_ref, msg.session_id, "出售失败：金币入账失败");
@@ -6051,7 +6238,9 @@ impl Message<DisassembleItemRequest> for WorldActor {
             .actor_ref
             .ask(crate::actors::player::AddItemToInventory { item: material })
             .await
-            .unwrap_or(false);
+            .ok()
+            .flatten()
+            .is_some();
         if added {
             send_system_message(
                 &self.gate_ref,
@@ -6124,6 +6313,20 @@ mod tests {
         assert_eq!(compute_sell_gold(1, 3), 3);
         // 实际移除 0 件 → 0 金
         assert_eq!(compute_sell_gold(100, 0), 0);
+    }
+
+    /// 回归：NPC 购买数量校验——客户端 count u32 可控，`as u16` 截断会少发货多扣款
+    ///（count=65536 → left=0 一件不发却按全额扣款，退款循环也按截断值算 = 不退款漏洞）
+    #[test]
+    fn test_npc_buy_count_valid() {
+        assert!(!npc_buy_count_valid(0), "0 件拒绝");
+        assert!(npc_buy_count_valid(1));
+        assert!(npc_buy_count_valid(1000), "单次上限边界允许");
+        assert!(!npc_buy_count_valid(1001), "超单次上限拒绝");
+        assert!(!npc_buy_count_valid(65536), "u16 截断点必须拒绝（历史漏洞）");
+        assert!(!npc_buy_count_valid(u32::MAX), "极端值拒绝");
+        // 上限必须 ≤ u16::MAX，保证后续 `msg.count as u16` 不再截断
+        assert!(super::MAX_NPC_BUY_COUNT <= u16::MAX as u32);
     }
 
     /// #2188：C# ItemType → 装备槽位映射（MirItemCell.cs 双击装备槽位判定）
@@ -6670,5 +6873,679 @@ mod tests {
         };
         // C#：floor(50/2 + 50/2*1 + 101/2) = floor(100.5) = 100
         assert_eq!(compute_item_price_per_unit(&full, &info), 100);
+    }
+}
+
+#[cfg(test)]
+mod sell_gold_cap_e2e {
+    //! SellItem 金币封顶回归（真 gate/world/account 协议链路，线格式与 harness 同
+    //! src/actors/world/e2e.rs 与 mail.rs mail_flow_e2e）：
+    //! 玩家金币接近 u32::MAX 时出售高价物品 → 预检拒绝（SellItem success=0 + 系统提示），
+    //! 物品保留；另设金币正常的对照角色同物同店出售成功，排除「链路本就卖不出去」的假绿。
+    //!
+    //! 红检：删除 SellItem 里的 CanGainGold 预检块 → 旧 AddGold 截顶语义下出售"成功"
+    //!（success=1、物品消失、金币差额蒸发），本用例失败；即便入账已换 TryAddGold，
+    //! 去掉预检后聊天变为「出售失败：金币入账失败」，
+    //! chats_contain("金币即将达到上限，无法出售") 断言同样失败。
+    use std::time::Duration;
+    use tokio::sync::mpsc;
+
+    use kameo::actor::Spawn;
+
+    use crate::actors::account::AccountActor;
+    use crate::actors::social::{SocialActor, SocialActorArgs, SocialActorConfig};
+    use crate::actors::world::mail::GetPlayerItemUid;
+    use crate::actors::world::{WorldActor, WorldActorArgs};
+    use crate::db;
+    use crate::gate::actor::{ClientData, GateActor, SessionCreated, SetAccountRef, SetWorldRef};
+    use crate::util::wire::build_packet_bytes;
+
+    type GateActorRef = kameo::actor::ActorRef<GateActor>;
+    type RxChannel = tokio::sync::mpsc::Receiver<Vec<u8>>;
+
+    const S_CHAT: i16 = mir2_shared::enums::ServerPacketIds::Chat as i16;
+    const S_SELL_ITEM: i16 = mir2_shared::enums::ServerPacketIds::SellItem as i16;
+    const S_OBJECT_NPC: i16 = mir2_shared::enums::ServerPacketIds::ObjectNpc as i16;
+
+    async fn session_created(gate_ref: &GateActorRef, session_id: u64) -> RxChannel {
+        let (tx, rx) = mpsc::channel::<Vec<u8>>(1024);
+        let _ = gate_ref
+            .ask(SessionCreated {
+                session_id,
+                sender: tx,
+                ip: "127.0.0.1".to_string(),
+            })
+            .await;
+        rx
+    }
+
+    /// 收集 secs 内到达的所有包（opcode, body）
+    async fn collect_packets(rx: &mut RxChannel, secs: u64) -> Vec<(i16, Vec<u8>)> {
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(secs);
+        let mut out = Vec::new();
+        loop {
+            let now = tokio::time::Instant::now();
+            if now >= deadline {
+                break;
+            }
+            match tokio::time::timeout(deadline - now, rx.recv()).await {
+                Ok(Some(data)) if data.len() >= 4 => {
+                    out.push((i16::from_le_bytes([data[2], data[3]]), data[4..].to_vec()));
+                }
+                Ok(Some(_)) => continue,
+                _ => break,
+            }
+        }
+        out
+    }
+
+    /// 等到目标 opcode 为止；返回（目标 body, 期间全部包）。超时返回 None
+    async fn recv_until(
+        rx: &mut RxChannel,
+        opcode: i16,
+        secs: u64,
+    ) -> Option<(Vec<u8>, Vec<(i16, Vec<u8>)>)> {
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(secs);
+        let mut seen = Vec::new();
+        while tokio::time::Instant::now() < deadline {
+            let remaining = deadline - tokio::time::Instant::now();
+            match tokio::time::timeout(remaining, rx.recv()).await {
+                Ok(Some(data)) if data.len() >= 4 => {
+                    let op = i16::from_le_bytes([data[2], data[3]]);
+                    let body = data[4..].to_vec();
+                    if op == opcode {
+                        seen.push((op, body.clone()));
+                        return Some((body, seen));
+                    }
+                    seen.push((op, body));
+                }
+                Ok(Some(_)) => continue,
+                _ => return None,
+            }
+        }
+        None
+    }
+
+    fn chats_contain(pkts: &[(i16, Vec<u8>)], needle: &str) -> bool {
+        pkts.iter().any(|(op, body)| {
+            *op == S_CHAT && body.windows(needle.len()).any(|w| w == needle.as_bytes())
+        })
+    }
+
+    async fn login_and_new_char(
+        gate_ref: &GateActorRef,
+        session_id: u64,
+        rx: &mut RxChannel,
+        username: &str,
+        char_name: &str,
+    ) {
+        // ClientVersion
+        let cv_body = {
+            let mut b = Vec::new();
+            let hash = b"test";
+            b.extend_from_slice(&(hash.len() as i32).to_le_bytes());
+            b.extend_from_slice(hash);
+            b
+        };
+        let _ = gate_ref
+            .ask(ClientData {
+                session_id,
+                data: build_packet_bytes(
+                    mir2_shared::enums::ClientPacketIds::ClientVersion as i16,
+                    &cv_body,
+                ),
+            })
+            .await;
+        // Login（账号不存在自动创建）
+        let mut login_body = Vec::new();
+        let _ = mir2_shared::binary::write_dotnet_string(&mut login_body, username);
+        let _ = mir2_shared::binary::write_dotnet_string(&mut login_body, "testpass");
+        let _ = gate_ref
+            .ask(ClientData {
+                session_id,
+                data: build_packet_bytes(
+                    mir2_shared::enums::ClientPacketIds::Login as i16,
+                    &login_body,
+                ),
+            })
+            .await;
+        assert!(
+            recv_until(
+                rx,
+                mir2_shared::enums::ServerPacketIds::LoginSuccess as i16,
+                3
+            )
+            .await
+            .is_some(),
+            "LoginSuccess"
+        );
+        // NewCharacter
+        let mut nc_body = Vec::new();
+        let _ = mir2_shared::binary::write_dotnet_string(&mut nc_body, char_name);
+        nc_body.push(0u8);
+        nc_body.push(0u8);
+        let _ = gate_ref
+            .ask(ClientData {
+                session_id,
+                data: build_packet_bytes(
+                    mir2_shared::enums::ClientPacketIds::NewCharacter as i16,
+                    &nc_body,
+                ),
+            })
+            .await;
+        assert!(
+            recv_until(
+                rx,
+                mir2_shared::enums::ServerPacketIds::NewCharacterSuccess as i16,
+                3
+            )
+            .await
+            .is_some(),
+            "NewCharacterSuccess"
+        );
+    }
+
+    async fn start_game(gate_ref: &GateActorRef, session_id: u64, rx: &mut RxChannel) {
+        let _ = gate_ref
+            .ask(ClientData {
+                session_id,
+                data: build_packet_bytes(
+                    mir2_shared::enums::ClientPacketIds::StartGame as i16,
+                    &0i32.to_le_bytes().to_vec(),
+                ),
+            })
+            .await;
+        assert!(
+            recv_until(rx, mir2_shared::enums::ServerPacketIds::StartGame as i16, 5)
+                .await
+                .is_some(),
+            "StartGame"
+        );
+    }
+
+    async fn spawn_world(
+        gate_ref: &GateActorRef,
+        db_pool: &db::DbPool,
+    ) -> kameo::actor::ActorRef<WorldActor> {
+        let social_ref = SocialActor::spawn(SocialActorArgs {
+            gate_ref: gate_ref.clone(),
+            db_pool: db_pool.clone(),
+            config: SocialActorConfig::default(),
+        });
+        let world_ref = WorldActor::spawn(WorldActorArgs {
+            tick_interval_ms: 1000,
+            gate_ref: gate_ref.clone(),
+            map_dir: std::path::PathBuf::from("."),
+            spawn_dir: None,
+            quest_dir: std::path::PathBuf::from("."),
+            npc_script_dir: std::path::PathBuf::from("."),
+            db_pool: db_pool.clone(),
+            social_ref,
+            conquest_cfg: crate::util::config::ConquestConfig::default(),
+            rested_cfg: crate::util::config::RestedConfig::default(),
+            pvp_cfg: crate::util::config::PvpConfig::default(),
+            health_regen_weight: 10,
+            mana_regen_weight: 10,
+            goods_hide_added_stats: true,
+            goods_on: true,
+            goods_max_stored: 15,
+            goods_buy_back_time_minutes: 60,
+            goods_buy_back_max_stored: 20,
+            safe_zone_healing: false,
+            archive_inactive_after_months: 12,
+            monster_recall_enabled: true,
+            monster_recall_range: 12,
+            monster_recall_cooldown_ms: 5000,
+            exp_mob_level_difference: true,
+            refine_cfg: crate::util::config::RefineConfig::default(),
+            replace_wedring_cost: 125,
+            lover_exp_bonus: 5,
+            mentor_exp_boost: 10,
+            mentor_damage_boost: 10,
+            mentor_skill_boost: true,
+            mentee_exp_bank: 1,
+            orbs_exp_list: Vec::new(),
+            orbs_dmg_list: Vec::new(),
+            orbs_def_list: Vec::new(),
+            awakening_cfg: Default::default(),
+            gem_cfg: Default::default(),
+            hero_exp_list: Vec::new(),
+            setup_cfg: Default::default(),
+            drop_rate: 1.0,
+            exp_rate: 1.0,
+            experience_list: Vec::new(),
+            item_timeout_ticks: 300,
+            max_drop_gold: 2000,
+            drop_gold: true,
+            rarity_cfg: crate::util::config::RarityConfig::default(),
+            notice_path: "Notice.txt".to_string(),
+            death_exp_penalty_percent: 0,
+            movement_pacing_ms: 0,
+            fishing_cfg: crate::util::ini::FishingConfig::default(),
+            random_item_stats: Vec::new(),
+            guild_buff_infos: Vec::new(),
+        });
+        let _ = gate_ref.ask(SetWorldRef {
+            world_ref: world_ref.clone(),
+        })
+        .await;
+        world_ref
+    }
+
+    fn user_item(uid: u64, item_index: i32) -> mir2_shared::data::item::UserItem {
+        mir2_shared::data::item::UserItem {
+            unique_id: uid,
+            item_index,
+            count: 1,
+            current_dura: 1000,
+            max_dura: 1000,
+            ..Default::default()
+        }
+    }
+
+    fn call_npc_packet(npc_oid: u32, key: &str) -> Vec<u8> {
+        let mut body = Vec::new();
+        body.extend_from_slice(&npc_oid.to_le_bytes());
+        let _ = mir2_shared::binary::write_dotnet_string(&mut body, key);
+        build_packet_bytes(mir2_shared::enums::ClientPacketIds::CallNPC as i16, &body)
+    }
+
+    /// SellItem: [uid: u64][count: u16]（C# 协议，同 gate/actor.rs forward_sell_item）
+    fn sell_item_packet(uid: u64, count: u16) -> Vec<u8> {
+        let mut body = Vec::new();
+        body.extend_from_slice(&uid.to_le_bytes());
+        body.extend_from_slice(&count.to_le_bytes());
+        build_packet_bytes(mir2_shared::enums::ClientPacketIds::SellItem as i16, &body)
+    }
+
+    /// 金币封顶拒绝出售（回归）：金币 u32::MAX-500 时出售 5 万金的物品，
+    /// 必须 SellItem success=0 + 聊天提示「金币即将达到上限，无法出售」，且物品保留在背包。
+    /// 旧实现 AddGold 截顶恒 true：物品已扣、金币只到账 500，差额 49500 蒸发。
+    #[test]
+    fn e2e_sell_item_gold_cap_rejected_and_item_kept() {
+        const ITEM_INDEX: i32 = 950; // 单价 100000 → 出售价 50000
+        const CAP_UID: u64 = 8101;
+        const OK_UID: u64 = 8102;
+        const CAP_CHAR: &str = "SellCapChar";
+        const OK_CHAR: &str = "SellOkChar";
+
+        let rt = tokio::runtime::Builder::new_multi_thread()
+            .thread_stack_size(8 * 1024 * 1024)
+            .enable_time()
+            .build()
+            .unwrap();
+        rt.block_on(async {
+            let gate_ref = GateActor::spawn(());
+            let db_pool = db::init_db_pool("sqlite::memory:").await.expect("init_db");
+            let account_ref = AccountActor::spawn((gate_ref.clone(), db_pool.clone()));
+            let _ = gate_ref.ask(SetAccountRef { account_ref }).await;
+
+            // 地图 0 + 商人 NPC + 高价物品（durability=0 → per_unit = price = 100000）
+            sqlx::query("INSERT INTO map_infos (idx, file_name, title) VALUES (0, '0', 'TestMap')")
+                .execute(&db_pool)
+                .await
+                .expect("insert map_infos");
+            sqlx::query(
+                "INSERT INTO npc_infos (idx, map_index, file_name, name, x, y) \
+                 VALUES (1, 0, 'TestMerchant', 'TestMerchant', 10, 10)",
+            )
+            .execute(&db_pool)
+            .await
+            .expect("insert npc_infos");
+            sqlx::query("INSERT INTO item_infos (idx, name, type, price) VALUES (?, ?, ?, ?)")
+                .bind(ITEM_INDEX)
+                .bind("TestGem")
+                .bind(0)
+                .bind(100000)
+                .execute(&db_pool)
+                .await
+                .expect("insert item_infos");
+
+            let world_ref = spawn_world(&gate_ref, &db_pool).await;
+
+            // ===== 封顶角色：金币 MAX-500，出售 50000 必然溢出 =====
+            let s1 = 81u64;
+            let mut rx1 = session_created(&gate_ref, s1).await;
+            login_and_new_char(&gate_ref, s1, &mut rx1, "sellcapchar", CAP_CHAR).await;
+            sqlx::query(
+                "UPDATE characters SET gold = ?, map_index = 0, x = 11, y = 10 WHERE name = ?",
+            )
+            .bind((u32::MAX - 500) as i64)
+            .bind(CAP_CHAR)
+            .execute(&db_pool)
+            .await
+            .expect("cap gold & place near merchant");
+            sqlx::query(
+                "INSERT INTO inventory_backpack (character_name, grid, item_json) VALUES (?, ?, ?)",
+            )
+            .bind(CAP_CHAR)
+            .bind(0i32)
+            .bind(serde_json::to_string(&user_item(CAP_UID, ITEM_INDEX)).unwrap())
+            .execute(&db_pool)
+            .await
+            .expect("seed cap-char inventory");
+            start_game(&gate_ref, s1, &mut rx1).await;
+
+            // StartGame 后抓 ObjectNpc 拿 NPC object_id（CallNPC 需要真实 NPC 对象）
+            let (npc_body, _) = recv_until(&mut rx1, S_OBJECT_NPC, 5)
+                .await
+                .expect("ObjectNpc（商人）未下发——地图/NPC 载入失败");
+            let npc_oid = u32::from_le_bytes(npc_body[0..4].try_into().unwrap());
+
+            // 打开 [@SELL] 引擎页（C# SellKey：注册会话页 key + NPCSell 面板）
+            let _ = gate_ref
+                .ask(ClientData {
+                    session_id: s1,
+                    data: call_npc_packet(npc_oid, "[@SELL]"),
+                })
+                .await;
+            let _ = collect_packets(&mut rx1, 1).await; // 排掉面板包
+
+            // 出售：必须被金币封顶预检拒绝
+            let _ = gate_ref
+                .ask(ClientData {
+                    session_id: s1,
+                    data: sell_item_packet(CAP_UID, 1),
+                })
+                .await;
+            let (body, mut seen) = recv_until(&mut rx1, S_SELL_ITEM, 3)
+                .await
+                .expect("SellItem 响应缺失");
+            assert_eq!(body.len(), 11, "SellItem body = [uid u64][count u16][success u8]");
+            assert_eq!(
+                body[10], 0,
+                "金币将溢出时出售必须失败（success=0；旧 AddGold 截顶=1）"
+            );
+            // send_system_message 是独立 spawn 的 try_send，聊天包可能落在 SellItem 响应之后
+            seen.extend(collect_packets(&mut rx1, 2).await);
+            assert!(
+                chats_contain(&seen, "金币即将达到上限，无法出售"),
+                "封顶拒绝必须系统消息提示（实际包：{:?}）",
+                seen.iter().map(|(op, _)| op).collect::<Vec<_>>()
+            );
+
+            // 物品保留佐证：背包里仍查得到该 uid（被吞则 None）
+            let kept = world_ref
+                .ask(GetPlayerItemUid {
+                    session_id: s1,
+                    item_index: ITEM_INDEX,
+                })
+                .await
+                .expect("GetPlayerItemUid ask");
+            assert_eq!(kept, Some(CAP_UID), "拒绝出售后物品必须保留在背包");
+
+            // ===== 对照角色：金币 0，同物同店出售必须成功（排除链路损坏假绿） =====
+            let s2 = 82u64;
+            let mut rx2 = session_created(&gate_ref, s2).await;
+            login_and_new_char(&gate_ref, s2, &mut rx2, "sellokchar", OK_CHAR).await;
+            sqlx::query("UPDATE characters SET map_index = 0, x = 12, y = 10 WHERE name = ?")
+                .bind(OK_CHAR)
+                .execute(&db_pool)
+                .await
+                .expect("place ok-char near merchant");
+            sqlx::query(
+                "INSERT INTO inventory_backpack (character_name, grid, item_json) VALUES (?, ?, ?)",
+            )
+            .bind(OK_CHAR)
+            .bind(0i32)
+            .bind(serde_json::to_string(&user_item(OK_UID, ITEM_INDEX)).unwrap())
+            .execute(&db_pool)
+            .await
+            .expect("seed ok-char inventory");
+            start_game(&gate_ref, s2, &mut rx2).await;
+
+            let _ = gate_ref
+                .ask(ClientData {
+                    session_id: s2,
+                    data: call_npc_packet(npc_oid, "[@SELL]"),
+                })
+                .await;
+            let _ = collect_packets(&mut rx2, 1).await;
+            let _ = gate_ref
+                .ask(ClientData {
+                    session_id: s2,
+                    data: sell_item_packet(OK_UID, 1),
+                })
+                .await;
+            let (body2, _) = recv_until(&mut rx2, S_SELL_ITEM, 3)
+                .await
+                .expect("对照组 SellItem 响应缺失");
+            assert_eq!(body2[10], 1, "金币正常时同物出售必须成功（success=1）");
+
+            let sold = world_ref
+                .ask(GetPlayerItemUid {
+                    session_id: s2,
+                    item_index: ITEM_INDEX,
+                })
+                .await
+                .expect("GetPlayerItemUid ask");
+            assert_eq!(sold, None, "对照组出售成功后物品应已离包");
+        });
+    }
+}
+
+#[cfg(test)]
+mod buy_settle_atomic {
+    //! 购买侧吞金/净铸回归（真 PlayerActor，栈与 market.rs 测试同款）：
+    //! ① NPC 二手货购买必须【先扣款后交付】——扣款失败不得交付（HEAD 既有顺序相反：
+    //!    先交付、后吞 DeductGold 结果，预检与扣款间并发窗口扣款失败即玩家白拿物品 = 净铸）；
+    //!    交付失败时已扣款必须可全额退回。
+    //! ② BuyItem 部分入包余款退回必须原子（refund_buy_remainder_atomic = TryAddGold）——
+    //!    近封顶 + 退款窗口内并发入账不得被截顶吞差额。
+    use kameo::actor::{ActorRef, Spawn};
+
+    use super::{refund_buy_remainder_atomic, settle_used_goods_purchase, UsedGoodsSettleError};
+    use crate::actors::player::{AddGold, AddItemToInventory, GetPlayerState, PlayerActor};
+
+    async fn spawn_test_stack() -> (
+        crate::db::DbPool,
+        ActorRef<crate::gate::actor::GateActor>,
+        ActorRef<crate::actors::world::WorldActor>,
+    ) {
+        let db_pool = crate::db::init_db_pool("sqlite::memory:")
+            .await
+            .expect("init_db");
+        let gate_ref = crate::gate::actor::GateActor::spawn(());
+        let social_ref =
+            crate::actors::social::SocialActor::spawn(crate::actors::social::SocialActorArgs {
+                gate_ref: gate_ref.clone(),
+                db_pool: db_pool.clone(),
+                config: crate::actors::social::SocialActorConfig::default(),
+            });
+        let world_ref =
+            crate::actors::world::WorldActor::spawn(crate::actors::world::WorldActorArgs {
+                tick_interval_ms: 1000,
+                gate_ref: gate_ref.clone(),
+                map_dir: std::path::PathBuf::from("."),
+                spawn_dir: None,
+                quest_dir: std::path::PathBuf::from("."),
+                npc_script_dir: std::path::PathBuf::from("."),
+                db_pool: db_pool.clone(),
+                social_ref,
+                conquest_cfg: crate::util::config::ConquestConfig::default(),
+                rested_cfg: crate::util::config::RestedConfig::default(),
+                pvp_cfg: crate::util::config::PvpConfig::default(),
+                health_regen_weight: 10,
+                mana_regen_weight: 10,
+                goods_hide_added_stats: true,
+                goods_on: true,
+                goods_max_stored: 15,
+                goods_buy_back_time_minutes: 60,
+                goods_buy_back_max_stored: 20,
+                safe_zone_healing: false,
+                archive_inactive_after_months: 12,
+                monster_recall_enabled: true,
+                monster_recall_range: 12,
+                monster_recall_cooldown_ms: 5000,
+                exp_mob_level_difference: true,
+                refine_cfg: crate::util::config::RefineConfig::default(),
+                replace_wedring_cost: 125,
+                lover_exp_bonus: 5,
+                mentor_exp_boost: 10,
+                mentor_damage_boost: 10,
+                mentor_skill_boost: true,
+                mentee_exp_bank: 1,
+                orbs_exp_list: Vec::new(),
+                orbs_dmg_list: Vec::new(),
+                orbs_def_list: Vec::new(),
+                awakening_cfg: Default::default(),
+                gem_cfg: Default::default(),
+                hero_exp_list: Vec::new(),
+                setup_cfg: Default::default(),
+                drop_rate: 1.0,
+                exp_rate: 1.0,
+                experience_list: Vec::new(),
+                item_timeout_ticks: 300,
+                max_drop_gold: 2000,
+                drop_gold: true,
+                rarity_cfg: crate::util::config::RarityConfig::default(),
+                notice_path: "Notice.txt".to_string(),
+                death_exp_penalty_percent: 0,
+                movement_pacing_ms: 0,
+                fishing_cfg: crate::util::ini::FishingConfig::default(),
+                random_item_stats: Vec::new(),
+                guild_buff_infos: Vec::new(),
+            });
+        (db_pool, gate_ref, world_ref)
+    }
+
+    fn spawn_buyer(
+        name: &str,
+        gate_ref: &ActorRef<crate::gate::actor::GateActor>,
+        world_ref: &ActorRef<crate::actors::world::WorldActor>,
+    ) -> ActorRef<PlayerActor> {
+        PlayerActor::spawn((
+            1u32,
+            name.to_string(),
+            1u64,
+            1u16,
+            gate_ref.clone(),
+            world_ref.clone(),
+            0u8,
+            0u8,
+            false,
+        ))
+    }
+
+    async fn buyer_gold(buyer: &ActorRef<PlayerActor>) -> u64 {
+        buyer
+            .ask(GetPlayerState)
+            .await
+            .unwrap()
+            .unwrap()
+            .inventory
+            .gold
+    }
+
+    async fn buyer_bag_count(buyer: &ActorRef<PlayerActor>) -> usize {
+        buyer
+            .ask(GetPlayerState)
+            .await
+            .unwrap()
+            .unwrap()
+            .inventory
+            .backpack
+            .iter()
+            .filter(|s| s.is_some())
+            .count()
+    }
+
+    fn used_goods_item(
+        uid: u64,
+        item_index: i32,
+        count: u16,
+    ) -> mir2_shared::data::item::UserItem {
+        mir2_shared::data::item::UserItem {
+            unique_id: uid,
+            item_index,
+            count,
+            // Rust 背包约定 max_dura = 堆叠上限；1 = 不可堆叠
+            current_dura: 1,
+            max_dura: 1,
+            ..Default::default()
+        }
+    }
+
+    /// ① 净铸回归：金币不足时结算必须【扣款失败拒绝、物品不交付】。
+    /// 红检：把 settle_used_goods_purchase 回退为「先 AddItemToInventory 交付、
+    /// 后吞 DeductGold 结果」→ 返回 Ok 且物品入包（白拿 = 净铸），
+    /// 本测试在 is_err / 背包为空断言处必红。
+    #[tokio::test]
+    async fn used_goods_deduct_fail_no_delivery() {
+        let (_db, gate_ref, world_ref) = spawn_test_stack().await;
+        let buyer = spawn_buyer("UsedGoodsPoor", &gate_ref, &world_ref);
+        // 金币 0 < cost 1000：扣款必失败
+        let r = settle_used_goods_purchase(&buyer, 1000, used_goods_item(9001, 500, 1)).await;
+        assert_eq!(
+            r,
+            Err(UsedGoodsSettleError::DeductFailed),
+            "扣款失败必须拒绝交易（旧顺序先交付=净铸）"
+        );
+        assert_eq!(buyer_gold(&buyer).await, 0, "扣款失败不得动金币");
+        assert_eq!(buyer_bag_count(&buyer).await, 0, "扣款失败物品不得入包");
+    }
+
+    /// ① 交付失败回归：扣款成功但背包已满（预检后被并发填满）→ 报 DeliveryFailed，
+    /// 且已扣款项可由调用方经 TryAddGold 原子入账全额退回（不截顶）。
+    /// 红检：结算内回退为先交付后吞扣款（旧顺序）→ 扣款结果不再受检、
+    /// DeliveryFailed 永不返回，本测试在 DeliveryFailed 断言处必红；
+    /// 退回若换截顶 AddGold，由 buy_remainder_refund_atomic_never_truncates 兜红。
+    #[tokio::test]
+    async fn used_goods_delivery_fail_after_deduct_then_refundable() {
+        let (_db, gate_ref, world_ref) = spawn_test_stack().await;
+        let buyer = spawn_buyer("UsedGoodsFull", &gate_ref, &world_ref);
+        buyer.ask(AddGold { amount: 1000 }).await.unwrap();
+        // 填满 46 格背包（互不相同 item_index + 不可堆叠）
+        for i in 0..crate::actors::inventory::BACKPACK_SIZE {
+            let uid = buyer
+                .ask(AddItemToInventory {
+                    item: used_goods_item(9100 + i as u64, 600 + i as i32, 1),
+                })
+                .await
+                .unwrap();
+            assert!(uid.is_some(), "填包第 {} 格必须成功", i);
+        }
+        let r = settle_used_goods_purchase(&buyer, 400, used_goods_item(9200, 999, 1)).await;
+        assert_eq!(
+            r,
+            Err(UsedGoodsSettleError::DeliveryFailed),
+            "背包满交付失败必须报 DeliveryFailed（已扣款待退）"
+        );
+        assert_eq!(
+            buyer_gold(&buyer).await,
+            600,
+            "交付失败时扣款已发生，待调用方退费"
+        );
+        // 调用方退费路径（refund_gold_atomic → TryAddGold 原子入账）：全额退回不截顶
+        assert!(refund_buy_remainder_atomic(&buyer, 400).await);
+        assert_eq!(buyer_gold(&buyer).await, 1000, "退费后金币必须全额恢复");
+    }
+
+    /// ② 余款退回原子性回归：近封顶（退款窗口内并发入账后离顶只剩 100）时，
+    /// 退款 1000 必须整体失败、不加不减（截顶 = 玩家物财两失），由调用方走
+    /// deliver_system_mail_critical 系统邮件全额兜底；恰好放得下则全额到账。
+    /// 红检：把 refund_buy_remainder_atomic 内部换回截顶语义 AddGold
+    ///（恒 true、超顶只加剩余额度）→ 「!ok」「金币不变」断言处必红（差额 900 蒸发）。
+    #[tokio::test]
+    async fn buy_remainder_refund_atomic_never_truncates() {
+        let (_db, gate_ref, world_ref) = spawn_test_stack().await;
+        let buyer = spawn_buyer("BuyRemainderCap", &gate_ref, &world_ref);
+        buyer
+            .ask(AddGold {
+                amount: u32::MAX as u64 - 100,
+            })
+            .await
+            .unwrap();
+
+        let ok = refund_buy_remainder_atomic(&buyer, 1000).await;
+        assert!(!ok, "会截顶必须整体失败，由调用方走系统邮件全额兜底");
+        assert_eq!(
+            buyer_gold(&buyer).await,
+            u32::MAX as u64 - 100,
+            "截顶失败必须不加不减，不得静默截顶"
+        );
+
+        assert!(refund_buy_remainder_atomic(&buyer, 100).await);
+        assert_eq!(buyer_gold(&buyer).await, u32::MAX as u64);
     }
 }

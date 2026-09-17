@@ -110,7 +110,22 @@ impl Mailbox {
         let items = std::mem::take(&mut mail.items);
         mail.gold = 0;
         mail.collected = true;
+        // 收取附件后自动解锁：锁定是为防误删带附件邮件，附件既已取出，锁定即失去保护对象；
+        // 迁移库中 locked=1 的带附件邮件因此可在收取后删除，不再永久占格。
+        // （取舍：无附件的纯消息锁定邮件仍需玩家用客户端 LockButton 自行解锁，与 C# 一致）
+        mail.locked = false;
         Some((gold, items))
+    }
+
+    /// 收取失败回写：把未能入包的金币/物品写回邮件附件（防丢件/防金币蒸发）。
+    /// 配合收取方「入包/入金失败回滚」使用；邮件已被并发删除时返回 false（调用方告警）。
+    pub fn restore_attachment(&mut self, mail_id: u64, gold: u64, items: Vec<UserItem>) -> bool {
+        let Some(mail) = self.get_mail_mut(mail_id) else {
+            return false;
+        };
+        mail.gold = mail.gold.saturating_add(gold);
+        mail.items.extend(items);
+        true
     }
 
     /// C# NPCScript CollectParcelKey：把所有包裹从邮局取回（collected=true），不转移金币/物品。
@@ -203,6 +218,14 @@ mod tests {
             locked: false,
             gold: 100,
             items: vec![],
+        }
+    }
+
+    fn make_item(uid: u64) -> UserItem {
+        UserItem {
+            unique_id: uid,
+            item_index: 100,
+            ..Default::default()
         }
     }
 
@@ -328,6 +351,51 @@ mod tests {
 
         assert!(!mailbox.delete_mail(1));
         assert_eq!(mailbox.inbox.len(), 1);
+    }
+
+    /// 收取并发安全①（回归）：入包/入金失败后 restore_attachment 把金币与物品原样写回邮件，
+    /// 附件不丢、邮件回到「有未收附件」状态（删除仍被拒）。
+    #[test]
+    fn test_restore_attachment_writes_back_after_failed_collect() {
+        let mut mailbox = Mailbox::new();
+        let mut m = make_mail(); // gold=100
+        m.items = vec![make_item(7001), make_item(7002)];
+        mailbox.add_mail(m);
+        assert_eq!(mailbox.release_parcels(), 1);
+
+        // 收取方已 mem::take 清空附件（此时背包并发填满 → 入包失败）
+        let (gold, items) = mailbox.collect_attachment(1).unwrap();
+        assert_eq!(gold, 100);
+        assert_eq!(items.len(), 2);
+        assert!(!mailbox.get_mail(1).unwrap().has_uncollected_parcel());
+
+        // 入包/入金失败 → 写回邮件
+        assert!(mailbox.restore_attachment(1, gold, items));
+        let mail = mailbox.get_mail(1).unwrap();
+        assert_eq!(mail.gold, 100);
+        assert_eq!(mail.items.len(), 2);
+        assert_eq!(mail.items[0].unique_id, 7001);
+        assert!(mail.has_uncollected_parcel());
+        assert!(!mailbox.delete_mail(1), "写回后带附件仍拒绝删除");
+
+        // 邮件已被并发删除 → 写回失败（调用方告警），不 panic
+        assert!(!mailbox.restore_attachment(999, 1, vec![make_item(1)]));
+    }
+
+    /// 收取并发安全③（回归）：收取附件后自动解锁——迁移库 locked=1 的带附件邮件
+    /// 收取后即可删除，不再永久占格。
+    #[test]
+    fn test_collect_attachment_auto_unlocks_migrated_locked_mail() {
+        let mut mailbox = Mailbox::new();
+        let mut m = make_mail(); // gold=100 未收取
+        m.locked = true; // 迁移库带入 locked=1
+        mailbox.add_mail(m);
+        assert_eq!(mailbox.release_parcels(), 1);
+
+        let (gold, _) = mailbox.collect_attachment(1).unwrap();
+        assert_eq!(gold, 100);
+        assert!(!mailbox.get_mail(1).unwrap().locked, "收取后应自动解锁");
+        assert!(mailbox.delete_mail(1), "无附件且已解锁 → 可删除");
     }
 
     /// has_uncollected_parcel：金币或物品任一未收取即为真

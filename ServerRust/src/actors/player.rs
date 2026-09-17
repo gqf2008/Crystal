@@ -1774,13 +1774,21 @@ impl Message<BroadcastMovement> for PlayerActor {
         body.extend_from_slice(&msg.y.to_le_bytes());
         body.push(msg.direction);
 
-        let _ = self
+        if let Err(e) = self
             .gate_ref
             .tell(SendToClient {
                 session_id: self.state.session_id,
                 data: build_packet_bytes(opcode as i16, &body),
             })
-            .await;
+            .try_send()
+        {
+            warn!(
+                "gate mailbox full: SendToClient dropped (session={} opcode={:?} err={})",
+                self.state.session_id,
+                crate::actors::world::dropped_send_opcode(&e),
+                e
+            );
+        }
     }
 }
 
@@ -1926,7 +1934,7 @@ impl Message<TakeDamage> for PlayerActor {
             self.state.mp = (self.state.mp - damage).max(0);
             let mut struck_body = Vec::new();
             struck_body.extend_from_slice(&msg.attacker_id.to_le_bytes());
-            let _ = self
+            if let Err(e) = self
                 .gate_ref
                 .tell(SendToClient {
                     session_id: self.state.session_id,
@@ -1935,11 +1943,19 @@ impl Message<TakeDamage> for PlayerActor {
                         &struck_body,
                     ),
                 })
-                .await;
+                .try_send()
+            {
+                warn!(
+                    "gate mailbox full: SendToClient dropped (session={} opcode={:?} err={})",
+                    self.state.session_id,
+                    crate::actors::world::dropped_send_opcode(&e),
+                    e
+                );
+            }
             let mut hb = Vec::new();
             hb.extend_from_slice(&(self.state.hp as u32).to_le_bytes());
             hb.extend_from_slice(&(self.state.mp as u32).to_le_bytes());
-            let _ = self
+            if let Err(e) = self
                 .gate_ref
                 .tell(SendToClient {
                     session_id: self.state.session_id,
@@ -1948,7 +1964,15 @@ impl Message<TakeDamage> for PlayerActor {
                         &hb,
                     ),
                 })
-                .await;
+                .try_send()
+            {
+                warn!(
+                    "gate mailbox full: SendToClient dropped (session={} opcode={:?} err={})",
+                    self.state.session_id,
+                    crate::actors::world::dropped_send_opcode(&e),
+                    e
+                );
+            }
             debug!(
                 "Player {} absorbed {} damage with MP (Protection)",
                 self.state.name, damage
@@ -1976,7 +2000,7 @@ impl Message<TakeDamage> for PlayerActor {
         // 发送 Struck（自己被攻击的动画）
         let mut struck_body = Vec::new();
         struck_body.extend_from_slice(&msg.attacker_id.to_le_bytes());
-        let _ = self
+        if let Err(e) = self
             .gate_ref
             .tell(SendToClient {
                 session_id: self.state.session_id,
@@ -1985,7 +2009,15 @@ impl Message<TakeDamage> for PlayerActor {
                     &struck_body,
                 ),
             })
-            .await;
+            .try_send()
+        {
+            warn!(
+                "gate mailbox full: SendToClient dropped (session={} opcode={:?} err={})",
+                self.state.session_id,
+                crate::actors::world::dropped_send_opcode(&e),
+                e
+            );
+        }
 
         // #1480：GM 无敌（C# GMNeverDie）——HP 钳到 ≥1，不进入死亡流程
         if self.state.gm_never_die {
@@ -1994,7 +2026,7 @@ impl Message<TakeDamage> for PlayerActor {
                 let mut hb = Vec::new();
                 hb.extend_from_slice(&(self.state.hp as u32).to_le_bytes());
                 hb.extend_from_slice(&(self.state.mp as u32).to_le_bytes());
-                let _ = self
+                if let Err(e) = self
                     .gate_ref
                     .tell(SendToClient {
                         session_id: self.state.session_id,
@@ -2003,7 +2035,15 @@ impl Message<TakeDamage> for PlayerActor {
                             &hb,
                         ),
                     })
-                    .await;
+                    .try_send()
+                {
+                    warn!(
+                        "gate mailbox full: SendToClient dropped (session={} opcode={:?} err={})",
+                        self.state.session_id,
+                        crate::actors::world::dropped_send_opcode(&e),
+                        e
+                    );
+                }
             }
             return false;
         }
@@ -2031,7 +2071,7 @@ impl Message<TakeDamage> for PlayerActor {
                     };
                     let mut dc_body = Vec::new();
                     if dc.write_body(&mut dc_body).is_ok() {
-                        let _ = self
+                        if let Err(e) = self
                             .gate_ref
                             .tell(SendToClient {
                                 session_id: self.state.session_id,
@@ -2040,13 +2080,21 @@ impl Message<TakeDamage> for PlayerActor {
                                     &dc_body,
                                 ),
                             })
-                            .await;
+                            .try_send()
+                        {
+                            warn!(
+                                "gate mailbox full: SendToClient dropped (session={} opcode={:?} err={})",
+                                self.state.session_id,
+                                crate::actors::world::dropped_send_opcode(&e),
+                                e
+                            );
+                        }
                     }
                     // S.HealthChanged 回满血
                     let mut hb = Vec::new();
                     hb.extend_from_slice(&(self.state.hp as u32).to_le_bytes());
                     hb.extend_from_slice(&(self.state.mp as u32).to_le_bytes());
-                    let _ = self
+                    if let Err(e) = self
                         .gate_ref
                         .tell(SendToClient {
                             session_id: self.state.session_id,
@@ -2055,7 +2103,15 @@ impl Message<TakeDamage> for PlayerActor {
                                 &hb,
                             ),
                         })
-                        .await;
+                        .try_send()
+                    {
+                        warn!(
+                            "gate mailbox full: SendToClient dropped (session={} opcode={:?} err={})",
+                            self.state.session_id,
+                            crate::actors::world::dropped_send_opcode(&e),
+                            e
+                        );
+                    }
                     self.send_equipment_changed();
                     debug!(
                         "Player {} revived by ring (dura={})",
@@ -2078,7 +2134,7 @@ impl Message<TakeDamage> for PlayerActor {
             death_body.extend_from_slice(&self.state.x.to_le_bytes());
             death_body.extend_from_slice(&self.state.y.to_le_bytes());
             death_body.push(self.state.direction);
-            let _ = self
+            if let Err(e) = self
                 .gate_ref
                 .tell(SendToClient {
                     session_id: self.state.session_id,
@@ -2087,7 +2143,15 @@ impl Message<TakeDamage> for PlayerActor {
                         &death_body,
                     ),
                 })
-                .await;
+                .try_send()
+            {
+                warn!(
+                    "gate mailbox full: SendToClient dropped (session={} opcode={:?} err={})",
+                    self.state.session_id,
+                    crate::actors::world::dropped_send_opcode(&e),
+                    e
+                );
+            }
             // S.ObjectDied 广播由 WorldActor 的 combat.rs 死亡分支处理（已实现）
 
             return true;
@@ -2098,7 +2162,7 @@ impl Message<TakeDamage> for PlayerActor {
             let mut health_body = Vec::new();
             health_body.extend_from_slice(&(self.state.hp as u32).to_le_bytes());
             health_body.extend_from_slice(&(self.state.mp as u32).to_le_bytes());
-            let _ = self
+            if let Err(e) = self
                 .gate_ref
                 .tell(SendToClient {
                     session_id: self.state.session_id,
@@ -2107,7 +2171,15 @@ impl Message<TakeDamage> for PlayerActor {
                         &health_body,
                     ),
                 })
-                .await;
+                .try_send()
+            {
+                warn!(
+                    "gate mailbox full: SendToClient dropped (session={} opcode={:?} err={})",
+                    self.state.session_id,
+                    crate::actors::world::dropped_send_opcode(&e),
+                    e
+                );
+            }
         }
         false
     }
@@ -2195,7 +2267,7 @@ impl Message<AddExperience> for PlayerActor {
         // 发送 GainExperience 给客户端
         let mut body = Vec::new();
         body.extend_from_slice(&(amount as u32).to_le_bytes());
-        let _ = self
+        if let Err(e) = self
             .gate_ref
             .tell(SendToClient {
                 session_id: self.state.session_id,
@@ -2204,7 +2276,15 @@ impl Message<AddExperience> for PlayerActor {
                     &body,
                 ),
             })
-            .await;
+            .try_send()
+        {
+            warn!(
+                "gate mailbox full: SendToClient dropped (session={} opcode={:?} err={})",
+                self.state.session_id,
+                crate::actors::world::dropped_send_opcode(&e),
+                e
+            );
+        }
 
         // 检查升级（用 SharedRust BaseStats 公式计算属性，对齐 C# RefreshLevelStats）
         const MAX_LEVEL: u16 = 200;
@@ -2283,7 +2363,7 @@ impl Message<AddExperience> for PlayerActor {
             lv_body.extend_from_slice(&self.state.level.to_le_bytes());
             lv_body.extend_from_slice(&self.state.experience.to_le_bytes());
             lv_body.extend_from_slice(&self.state.max_experience.to_le_bytes());
-            let _ = self
+            if let Err(e) = self
                 .gate_ref
                 .tell(SendToClient {
                     session_id: self.state.session_id,
@@ -2292,7 +2372,15 @@ impl Message<AddExperience> for PlayerActor {
                         &lv_body,
                     ),
                 })
-                .await;
+                .try_send()
+            {
+                warn!(
+                    "gate mailbox full: SendToClient dropped (session={} opcode={:?} err={})",
+                    self.state.session_id,
+                    crate::actors::world::dropped_send_opcode(&e),
+                    e
+                );
+            }
         }
         amount
     }
@@ -2325,7 +2413,7 @@ impl Message<DeductExperience> for PlayerActor {
         let mut body = Vec::new();
         body.extend_from_slice(&self.state.experience.to_le_bytes());
         body.extend_from_slice(&self.state.max_experience.to_le_bytes());
-        let _ = self
+        if let Err(e) = self
             .gate_ref
             .tell(SendToClient {
                 session_id: self.state.session_id,
@@ -2334,7 +2422,15 @@ impl Message<DeductExperience> for PlayerActor {
                     &body,
                 ),
             })
-            .await;
+            .try_send()
+        {
+            warn!(
+                "gate mailbox full: SendToClient dropped (session={} opcode={:?} err={})",
+                self.state.session_id,
+                crate::actors::world::dropped_send_opcode(&e),
+                e
+            );
+        }
 
         deducted
     }
@@ -2360,7 +2456,7 @@ impl Message<Heal> for PlayerActor {
         let mut body = Vec::new();
         body.extend_from_slice(&(self.state.hp as u32).to_le_bytes());
         body.extend_from_slice(&(self.state.mp as u32).to_le_bytes());
-        let _ = self
+        if let Err(e) = self
             .gate_ref
             .tell(SendToClient {
                 session_id: self.state.session_id,
@@ -2369,7 +2465,15 @@ impl Message<Heal> for PlayerActor {
                     &body,
                 ),
             })
-            .await;
+            .try_send()
+        {
+            warn!(
+                "gate mailbox full: SendToClient dropped (session={} opcode={:?} err={})",
+                self.state.session_id,
+                crate::actors::world::dropped_send_opcode(&e),
+                e
+            );
+        }
 
         debug!(
             "Player {} healed for {} HP ({} -> {})",
@@ -2413,7 +2517,7 @@ impl Message<ChangeMp> for PlayerActor {
         let mut body = Vec::new();
         body.extend_from_slice(&(self.state.hp as u32).to_le_bytes());
         body.extend_from_slice(&(self.state.mp as u32).to_le_bytes());
-        let _ = self
+        if let Err(e) = self
             .gate_ref
             .tell(SendToClient {
                 session_id: self.state.session_id,
@@ -2422,7 +2526,15 @@ impl Message<ChangeMp> for PlayerActor {
                     &body,
                 ),
             })
-            .await;
+            .try_send()
+        {
+            warn!(
+                "gate mailbox full: SendToClient dropped (session={} opcode={:?} err={})",
+                self.state.session_id,
+                crate::actors::world::dropped_send_opcode(&e),
+                e
+            );
+        }
 
         debug!(
             "Player {} MP changed by {} (now {})",
@@ -2499,7 +2611,7 @@ impl Message<TickPotionPool> for PlayerActor {
             let mut body = Vec::new();
             body.extend_from_slice(&(self.state.hp as u32).to_le_bytes());
             body.extend_from_slice(&(self.state.mp as u32).to_le_bytes());
-            let _ = self
+            if let Err(e) = self
                 .gate_ref
                 .tell(SendToClient {
                     session_id: self.state.session_id,
@@ -2508,7 +2620,15 @@ impl Message<TickPotionPool> for PlayerActor {
                         &body,
                     ),
                 })
-                .await;
+                .try_send()
+            {
+                warn!(
+                    "gate mailbox full: SendToClient dropped (session={} opcode={:?} err={})",
+                    self.state.session_id,
+                    crate::actors::world::dropped_send_opcode(&e),
+                    e
+                );
+            }
         }
     }
 }
@@ -2531,7 +2651,7 @@ impl Message<Revive> for PlayerActor {
         let mut body = Vec::new();
         body.extend_from_slice(&self.state.hp.to_le_bytes());
         body.extend_from_slice(&self.state.mp.to_le_bytes());
-        let _ = self
+        if let Err(e) = self
             .gate_ref
             .tell(SendToClient {
                 session_id: self.state.session_id,
@@ -2540,16 +2660,32 @@ impl Message<Revive> for PlayerActor {
                     &body,
                 ),
             })
-            .await;
+            .try_send()
+        {
+            warn!(
+                "gate mailbox full: SendToClient dropped (session={} opcode={:?} err={})",
+                self.state.session_id,
+                crate::actors::world::dropped_send_opcode(&e),
+                e
+            );
+        }
 
         // 发送 S.Revived（空 body）：客户端靠它清除死亡状态恢复输入（#55 实测缺失会导致卡死）
-        let _ = self
+        if let Err(e) = self
             .gate_ref
             .tell(SendToClient {
                 session_id: self.state.session_id,
                 data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::Revived as i16, &[]),
             })
-            .await;
+            .try_send()
+        {
+            warn!(
+                "gate mailbox full: SendToClient dropped (session={} opcode={:?} err={})",
+                self.state.session_id,
+                crate::actors::world::dropped_send_opcode(&e),
+                e
+            );
+        }
 
         debug!(
             "Player {} revived (hp={} mp={})",
@@ -3057,7 +3193,7 @@ impl Message<TickBuff> for PlayerActor {
                     };
                     let mut body = Vec::new();
                     if ir.write_body(&mut body).is_ok() {
-                        let _ = self
+                        if let Err(e) = self
                             .gate_ref
                             .tell(SendToClient {
                                 session_id: self.state.session_id,
@@ -3066,7 +3202,15 @@ impl Message<TickBuff> for PlayerActor {
                                     &body,
                                 ),
                             })
-                            .await;
+                            .try_send()
+                        {
+                            warn!(
+                                "gate mailbox full: SendToClient dropped (session={} opcode={:?} err={})",
+                                self.state.session_id,
+                                crate::actors::world::dropped_send_opcode(&e),
+                                e
+                            );
+                        }
                     }
                 }
             }
@@ -3212,7 +3356,7 @@ impl Message<TickBuff> for PlayerActor {
             let mut body = Vec::new();
             body.extend_from_slice(&self.state.hp.to_le_bytes());
             body.extend_from_slice(&self.state.mp.to_le_bytes());
-            let _ = self
+            if let Err(e) = self
                 .gate_ref
                 .tell(SendToClient {
                     session_id: self.state.session_id,
@@ -3221,7 +3365,15 @@ impl Message<TickBuff> for PlayerActor {
                         &body,
                     ),
                 })
-                .await;
+                .try_send()
+            {
+                warn!(
+                    "gate mailbox full: SendToClient dropped (session={} opcode={:?} err={})",
+                    self.state.session_id,
+                    crate::actors::world::dropped_send_opcode(&e),
+                    e
+                );
+            }
         }
     }
 }
@@ -3514,7 +3666,7 @@ impl Message<DamageEquipment> for PlayerActor {
                 };
                 let mut body = Vec::new();
                 if dc.write_body(&mut body).is_ok() {
-                    let _ = self
+                    if let Err(e) = self
                         .gate_ref
                         .tell(SendToClient {
                             session_id: self.state.session_id,
@@ -3523,7 +3675,15 @@ impl Message<DamageEquipment> for PlayerActor {
                                 &body,
                             ),
                         })
-                        .await;
+                        .try_send()
+                    {
+                        warn!(
+                            "gate mailbox full: SendToClient dropped (session={} opcode={:?} err={})",
+                            self.state.session_id,
+                            crate::actors::world::dropped_send_opcode(&e),
+                            e
+                        );
+                    }
                 }
             }
         }
@@ -3680,7 +3840,7 @@ impl Message<ClearBackpack> for PlayerActor {
             };
             let mut body = Vec::new();
             if pkt.write_body(&mut body).is_ok() {
-                let _ = self
+                if let Err(e) = self
                     .gate_ref
                     .tell(SendToClient {
                         session_id: self.state.session_id,
@@ -3689,7 +3849,15 @@ impl Message<ClearBackpack> for PlayerActor {
                             &body,
                         ),
                     })
-                    .await;
+                    .try_send()
+                {
+                    warn!(
+                        "gate mailbox full: SendToClient dropped (session={} opcode={:?} err={})",
+                        self.state.session_id,
+                        crate::actors::world::dropped_send_opcode(&e),
+                        e
+                    );
+                }
             }
         }
         self.send_inventory_changed();
@@ -3723,7 +3891,7 @@ impl Message<ResizeHeroInventory> for PlayerActor {
         };
         let mut body = Vec::new();
         if pkt.write_body(&mut body).is_ok() {
-            let _ = self
+            if let Err(e) = self
                 .gate_ref
                 .tell(SendToClient {
                     session_id: self.state.session_id,
@@ -3732,7 +3900,15 @@ impl Message<ResizeHeroInventory> for PlayerActor {
                         &body,
                     ),
                 })
-                .await;
+                .try_send()
+            {
+                warn!(
+                    "gate mailbox full: SendToClient dropped (session={} opcode={:?} err={})",
+                    self.state.session_id,
+                    crate::actors::world::dropped_send_opcode(&e),
+                    e
+                );
+            }
         }
         debug!("Hero inventory resized to {}", new_len);
         new_len
@@ -3762,12 +3938,17 @@ impl Message<PlaceItemAtSlot> for PlayerActor {
     }
 }
 
+/// 添加物品到背包
+/// 返回【实际入包 uid】：空格放置时 add_item 会重发 unique_id（全局原子计数器），
+/// 堆叠合并时入栈 uid 被丢弃、返回被并入的目标栈 uid——调用方若需事后收回
+/// （如交易回滚），必须用本返回值而非入包前的 uid；None = 失败（背包满）。
+/// 金币（item_index==0）不占背包，成功返回 Some(0)。
 pub struct AddItemToInventory {
     pub item: mir2_shared::data::item::UserItem,
 }
 
 impl Message<AddItemToInventory> for PlayerActor {
-    type Reply = bool;
+    type Reply = Option<u64>;
 
     async fn handle(
         &mut self,
@@ -3785,7 +3966,7 @@ impl Message<AddItemToInventory> for PlayerActor {
             // 原先错发 LoseGold 会让客户端先扣余额再靠 UserInformation 回刷。
             let mut body = Vec::new();
             body.extend_from_slice(&(msg.item.count as u32).to_le_bytes());
-            let _ = self
+            if let Err(e) = self
                 .gate_ref
                 .tell(SendToClient {
                     session_id: self.state.session_id,
@@ -3794,13 +3975,21 @@ impl Message<AddItemToInventory> for PlayerActor {
                         &body,
                     ),
                 })
-                .await;
-            return true;
+                .try_send()
+            {
+                warn!(
+                    "gate mailbox full: SendToClient dropped (session={} opcode={:?} err={})",
+                    self.state.session_id,
+                    crate::actors::world::dropped_send_opcode(&e),
+                    e
+                );
+            }
+            return Some(0); // 金币不占背包，无 uid
         }
         // C# GainItem：Enqueue(new S.GainedItem { Item = clonedItem })——克隆原物品（AddItem 会合并数量）
         let gained_item = msg.item.clone();
         match self.state.inventory.add_item(msg.item) {
-            Some((_grid, _uid)) => {
+            Some((_grid, uid)) => {
                 // C# GainItem：S.GainedItem（获得物品入包，客户端提示）
                 let packet = mir2_shared::packets::server::drops::GainedItem { item: gained_item };
                 let mut body = Vec::new();
@@ -3810,19 +3999,27 @@ impl Message<AddItemToInventory> for PlayerActor {
                 )
                 .is_ok()
                 {
-                    let _ = self
+                    if let Err(e) = self
                         .gate_ref
                         .tell(SendToClient {
                             session_id: self.state.session_id,
                             data: body,
                         })
-                        .await;
+                        .try_send()
+                    {
+                        warn!(
+                            "gate mailbox full: SendToClient dropped (session={} opcode={:?} err={})",
+                            self.state.session_id,
+                            crate::actors::world::dropped_send_opcode(&e),
+                            e
+                        );
+                    }
                 }
                 // 发送 ItemChanged 通知客户端更新背包
                 self.send_inventory_changed();
-                true
+                Some(uid)
             }
-            None => false,
+            None => None,
         }
     }
 }
@@ -4986,7 +5183,7 @@ impl Message<DeductMP> for PlayerActor {
             let mut body = Vec::new();
             body.extend_from_slice(&(self.state.hp as u32).to_le_bytes());
             body.extend_from_slice(&(self.state.mp as u32).to_le_bytes());
-            let _ = self
+            if let Err(e) = self
                 .gate_ref
                 .tell(SendToClient {
                     session_id: self.state.session_id,
@@ -4995,7 +5192,15 @@ impl Message<DeductMP> for PlayerActor {
                         &body,
                     ),
                 })
-                .await;
+                .try_send()
+            {
+                warn!(
+                    "gate mailbox full: SendToClient dropped (session={} opcode={:?} err={})",
+                    self.state.session_id,
+                    crate::actors::world::dropped_send_opcode(&e),
+                    e
+                );
+            }
             true
         } else {
             false
@@ -5020,7 +5225,7 @@ impl Message<AddMP> for PlayerActor {
         let mut body = Vec::new();
         body.extend_from_slice(&(self.state.hp as u32).to_le_bytes());
         body.extend_from_slice(&(self.state.mp as u32).to_le_bytes());
-        let _ = self
+        if let Err(e) = self
             .gate_ref
             .tell(SendToClient {
                 session_id: self.state.session_id,
@@ -5029,7 +5234,15 @@ impl Message<AddMP> for PlayerActor {
                     &body,
                 ),
             })
-            .await;
+            .try_send()
+        {
+            warn!(
+                "gate mailbox full: SendToClient dropped (session={} opcode={:?} err={})",
+                self.state.session_id,
+                crate::actors::world::dropped_send_opcode(&e),
+                e
+            );
+        }
     }
 }
 
@@ -5466,6 +5679,29 @@ impl Message<CollectMailAttachment> for PlayerActor {
     }
 }
 
+/// 收取邮件附件入包/入金失败后的附件写回（只改 mailbox 内对应邮件的附件字段）。
+/// 替代 world/mail.rs 的 GetPlayerState→改副本→SetPlayerState 整体状态 RMW：
+/// 该模式在并发窗口内会把交易投递/HP 变化/死亡等无关状态改动整体覆盖丢失。
+pub struct RestoreMailAttachment {
+    pub mail_id: u64,
+    pub gold: u64,
+    pub items: Vec<mir2_shared::data::item::UserItem>,
+}
+
+impl Message<RestoreMailAttachment> for PlayerActor {
+    type Reply = bool;
+
+    async fn handle(
+        &mut self,
+        msg: RestoreMailAttachment,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        self.state
+            .mailbox
+            .restore_attachment(msg.mail_id, msg.gold, msg.items)
+    }
+}
+
 /// C# NPCScript CollectParcelKey：把所有包裹从邮局取回（collected=true），不转移金币/物品。
 pub struct ReleaseMailParcels;
 
@@ -5810,7 +6046,7 @@ impl Message<TryQuestItemPickup> for PlayerActor {
             let pkt = mir2_shared::packets::server::miscellaneous::GainedQuestItem { item };
             let mut body = Vec::new();
             if pkt.write_body(&mut body).is_ok() {
-                let _ = self
+                if let Err(e) = self
                     .gate_ref
                     .tell(SendToClient {
                         session_id: self.state.session_id,
@@ -5819,7 +6055,15 @@ impl Message<TryQuestItemPickup> for PlayerActor {
                             &body,
                         ),
                     })
-                    .await;
+                    .try_send()
+                {
+                    warn!(
+                        "gate mailbox full: SendToClient dropped (session={} opcode={:?} err={})",
+                        self.state.session_id,
+                        crate::actors::world::dropped_send_opcode(&e),
+                        e
+                    );
+                }
             }
             // 更新物品任务进度（C# ProcessItem：按任务格数量对齐进度）
             for quest in &mut self.state.quest_log.quests {
@@ -6091,7 +6335,7 @@ impl Message<ChangeLevel> for PlayerActor {
         lv_body.extend_from_slice(&self.state.level.to_le_bytes());
         lv_body.extend_from_slice(&self.state.experience.to_le_bytes());
         lv_body.extend_from_slice(&self.state.max_experience.to_le_bytes());
-        let _ = self
+        if let Err(e) = self
             .gate_ref
             .tell(SendToClient {
                 session_id: self.state.session_id,
@@ -6100,7 +6344,15 @@ impl Message<ChangeLevel> for PlayerActor {
                     &lv_body,
                 ),
             })
-            .await;
+            .try_send()
+        {
+            warn!(
+                "gate mailbox full: SendToClient dropped (session={} opcode={:?} err={})",
+                self.state.session_id,
+                crate::actors::world::dropped_send_opcode(&e),
+                e
+            );
+        }
         // #283：通知 WorldActor 广播 ObjectLeveled
         let _ = self
             .world_ref
@@ -6356,7 +6608,7 @@ impl Message<DecreaseMountLoyalty> for PlayerActor {
             };
             let mut body = Vec::new();
             if dc.write_body(&mut body).is_ok() {
-                let _ = self
+                if let Err(e) = self
                     .gate_ref
                     .tell(SendToClient {
                         session_id: self.state.session_id,
@@ -6365,7 +6617,15 @@ impl Message<DecreaseMountLoyalty> for PlayerActor {
                             &body,
                         ),
                     })
-                    .await;
+                    .try_send()
+                {
+                    warn!(
+                        "gate mailbox full: SendToClient dropped (session={} opcode={:?} err={})",
+                        self.state.session_id,
+                        crate::actors::world::dropped_send_opcode(&e),
+                        e
+                    );
+                }
             }
             if mount.current_dura == 0 {
                 // C# RefreshMount：耐久归零自动下坐骑
@@ -6623,7 +6883,7 @@ impl Message<GainSpellExp> for PlayerActor {
                 };
                 let mut md_body = Vec::new();
                 if md.write_body(&mut md_body).is_ok() {
-                    let _ = self
+                    if let Err(e) = self
                         .gate_ref
                         .tell(crate::gate::actor::SendToClient {
                             session_id: self.state.session_id,
@@ -6632,7 +6892,15 @@ impl Message<GainSpellExp> for PlayerActor {
                                 &md_body,
                             ),
                         })
-                        .await;
+                        .try_send()
+                    {
+                        warn!(
+                            "gate mailbox full: SendToClient dropped (session={} opcode={:?} err={})",
+                            self.state.session_id,
+                            crate::actors::world::dropped_send_opcode(&e),
+                            e
+                        );
+                    }
                 }
             }
             // Send MagicLeveled packet (C# S.MagicLeveled: ObjectID u32 + Spell byte + Level byte + Experience u16)
@@ -6647,7 +6915,7 @@ impl Message<GainSpellExp> for PlayerActor {
                 warn!("Failed to serialize MagicLeveled: {}", e);
                 return;
             }
-            let _ = self
+            if let Err(e) = self
                 .gate_ref
                 .tell(crate::gate::actor::SendToClient {
                     session_id: self.state.session_id,
@@ -6656,7 +6924,15 @@ impl Message<GainSpellExp> for PlayerActor {
                         &body,
                     ),
                 })
-                .await;
+                .try_send()
+            {
+                warn!(
+                    "gate mailbox full: SendToClient dropped (session={} opcode={:?} err={})",
+                    self.state.session_id,
+                    crate::actors::world::dropped_send_opcode(&e),
+                    e
+                );
+            }
             debug!(
                 "GainSpellExp: {} leveled spell={:?} -> {}",
                 self.state.name, spell, level
@@ -7099,7 +7375,7 @@ impl Message<CanGainGold> for PlayerActor {
         msg: CanGainGold,
         _ctx: &mut Context<Self, Self::Reply>,
     ) -> Self::Reply {
-        (msg.amount as u64) + self.state.inventory.gold <= u32::MAX as u64
+        self.state.inventory.can_gain_gold(msg.amount as u64)
     }
 }
 
@@ -7769,7 +8045,7 @@ impl Message<ReviveAtHalfHp> for PlayerActor {
         let mut body = Vec::new();
         body.extend_from_slice(&self.state.hp.to_le_bytes());
         body.extend_from_slice(&self.state.mp.to_le_bytes());
-        let _ = self
+        if let Err(e) = self
             .gate_ref
             .tell(SendToClient {
                 session_id: self.state.session_id,
@@ -7778,7 +8054,15 @@ impl Message<ReviveAtHalfHp> for PlayerActor {
                     &body,
                 ),
             })
-            .await;
+            .try_send()
+        {
+            warn!(
+                "gate mailbox full: SendToClient dropped (session={} opcode={:?} err={})",
+                self.state.session_id,
+                crate::actors::world::dropped_send_opcode(&e),
+                e
+            );
+        }
 
         debug!(
             "ReviveAtHalfHp: {} hp={}/{}",
