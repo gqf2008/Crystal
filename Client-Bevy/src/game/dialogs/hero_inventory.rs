@@ -27,8 +27,8 @@ use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
 use crate::ui::sprite_ui::{shared_cjk_font, UiCjkFont, UiFont};
 use crate::ui::theme::{
-    load_lib_image, spawn_icon_button, spawn_image, spawn_item_cell_ui, spawn_label, spawn_panel,
-    UiItemCellData, UiItemCellIcon,
+    load_lib_image, spawn_close_button, spawn_icon_button, spawn_image, spawn_item_cell_ui,
+    spawn_label, spawn_panel, UiItemCellData, UiItemCellIcon,
 };
 
 // 布局常量（相对对话框左上角；C# HeroInventoryDialog）
@@ -40,6 +40,8 @@ const GRID_ROWS: usize = 5;
 /// → MirControl 默认 (0,0)。旧实现按屏幕居中，非 C# 行为。
 pub const DIALOG_X: f32 = 0.0;
 pub const DIALOG_Y: f32 = 0.0;
+/// 关闭键 `Prguse2[360..362]` @(299,2)（`HeroDialogs.cs:35-36`，无 `Size` → 原生 24x21）
+pub const CLOSE_POS: (f32, f32) = (299.0, 2.0);
 
 /// 英雄背包格相对坐标（C# Location = (14+x*37, 23+y*33)）
 fn hero_cell_pos(i: usize) -> (f32, f32) {
@@ -166,12 +168,10 @@ fn spawn_hero_inventory(
 
     commands.entity(panel).with_children(|p| {
         // 关闭（C# Prguse2 360/361/362 at (299,2)）
-        if let (Some(n), Some(h), Some(pr)) = (
-            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 360),
-            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 361),
-            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 362),
-        ) {
-            spawn_icon_button(p, n, h, pr, 299.0, 2.0, 20.0, 20.0, 10).insert(HeroInvClose);
+        if let Some(mut btn) =
+            spawn_close_button(p, &mut libs, &mut images, CLOSE_POS.0, CLOSE_POS.1, 10)
+        {
+            btn.insert(HeroInvClose);
         }
         // 40 格（通用 UiItemCell；渲染交给 item_cell_ui_system，#90）
         for i in 0..(GRID_COLS * GRID_ROWS) {

@@ -23,12 +23,14 @@ use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
 use crate::ui::sprite_ui::{shared_cjk_font, UiCjkFont, UiFont};
 use crate::ui::theme::{
-    load_lib_image, spawn_container, spawn_icon_button, spawn_image, spawn_label,
-    spawn_label_center, spawn_panel,
+    load_lib_image, spawn_close_button, spawn_container, spawn_icon_button, spawn_image,
+    spawn_label, spawn_label_center, spawn_panel,
 };
 
 pub const DIALOG_X: f32 = 1024.0 - 264.0;
 pub const DIALOG_Y: f32 = 0.0;
+/// 关闭键 `Prguse2[360..362]` @(241,3)（`CharacterDialog.cs:190-198`，无 `Size` → 原生 24x21）
+pub const CLOSE_POS: (f32, f32) = (241.0, 3.0);
 /// C# CharacterPage @ (8,90)（CharacterDialog.cs:45）：装备格父容器的页偏移
 pub const PAGE_X: f32 = 8.0;
 pub const PAGE_Y: f32 = 90.0;
@@ -297,12 +299,10 @@ fn spawn_character_dialog(
             }
         }
         // 关闭（Prguse2 360/361/362 @(241,3)）
-        if let (Some(n), Some(h), Some(pr)) = (
-            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 360),
-            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 361),
-            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 362),
-        ) {
-            spawn_icon_button(p, n, h, pr, 241.0, 3.0, 20.0, 20.0, 10).insert(CharClose);
+        if let Some(mut btn) =
+            spawn_close_button(p, &mut libs, &mut images, CLOSE_POS.0, CLOSE_POS.1, 10)
+        {
+            btn.insert(CharClose);
         }
         // 职业图（Prguse[100+职业] @(15,33)）
         // #2633 批次4 步7：实体缺失默认 Warrior=0，同原 hud.class 默认

@@ -16,6 +16,8 @@ pub(crate) fn setup_world(
     mut blend_materials: ResMut<Assets<MapBlendMaterial>>,
     // 只取地图相机（排除 UI 相机：UiEntity + Camera2d；否则两个相机 single_mut 失败 → 相机停在 (0,0) 显示左上角）
     mut camera: Query<&mut Transform, (With<Camera2d>, Without<crate::ui::sprite_ui::UiEntity>)>,
+    mut auth: ResMut<crate::ui::login::AuthFeedback>,
+    mut next: ResMut<NextState<crate::scenes::AppState>>,
 ) {
     // 1. 加载图像库（MapLibs）
     game_libs.0.ensure_initialized();
@@ -32,8 +34,12 @@ pub(crate) fn setup_world(
     let map = match MapReader::new(&map_path) {
         Ok(m) => m,
         Err(e) => {
+            // M4：加载失败必须玩家可见并退回登录，而不是只记日志静默黑屏。
+            // 旧实现还在此多 spawn 一个 Camera2d——唯一地图相机已由 Startup 的
+            // spawn_camera 创建，再 spawn 会让全库相机 single/single_mut 失败。
             tracing::error!("❌ 地图加载失败 {}: {}", map_path, e);
-            commands.spawn(Camera2d);
+            auth.login_error = Some(format!("地图 {} 加载失败：{}", map_name, e));
+            next.set(crate::scenes::AppState::Login);
             return;
         }
     };
@@ -205,6 +211,8 @@ pub(crate) fn setup_world(
                             img.sampler = ImageSampler::nearest();
                             let handle = assets.add(img);
                             commands.spawn((
+                                // 对象层大图无 chunk 归属（跨块），挂标记供 OnExit/换图统一清理
+                                MapMiddleObject,
                                 Sprite::from_image(handle),
                                 Transform::from_xyz(
                                     center_x,
@@ -428,4 +436,333 @@ pub fn make_image(rgba: Vec<u8>, width: u32, height: u32) -> Image {
         TextureFormat::Rgba8UnormSrgb,
         RenderAssetUsages::default(),
     )
+}
+
+// ============================================================================
+// 场景生命期：地图世界清理 / 换图重建（B1/S2）
+// ============================================================================
+
+/// S2/B1 共用：清掉当前地图的全部场景实体并重置 chunk 流式游标。
+/// 覆盖：Back/Middle 合成块（ChunkKey）、Front 瓦片（FrontChunkKey，含动画/混合）、
+/// 地图灯光（MapLight）、Middle 大图对象（MapMiddleObject）。
+/// 块纹理资产随实体释放；Front 贴图由 FrontImageCache 跨图共享持有，保留不删。
+/// chunk_stream_system 的 existing 集合来自实体查询——旧实体清掉后
+/// 不会被当成「已加载」保留，无需额外同步。
+pub(crate) fn clear_map_world(world: &mut World) {
+    let mut despawn = Vec::new();
+    let mut chunk_images = Vec::new();
+    let mut materials = Vec::new();
+    {
+        // Back/Middle 合成块：纹理逐块独有，随实体释放（对齐 chunk_stream 卸载路径）
+        let mut q = world.query_filtered::<(Entity, &Sprite), With<ChunkKey>>();
+        for (e, sprite) in q.iter(world) {
+            despawn.push(e);
+            chunk_images.push(sprite.image.clone());
+        }
+    }
+    {
+        // Front 瓦片（静态/动画/混合）：贴图走 FrontImageCache 共享，只回收混合材质
+        let mut q = world.query_filtered::<
+            (Entity, Option<&MeshMaterial2d<MapBlendMaterial>>),
+            With<FrontChunkKey>,
+        >();
+        for (e, mat) in q.iter(world) {
+            despawn.push(e);
+            if let Some(mat) = mat {
+                materials.push(mat.0.clone());
+            }
+        }
+    }
+    {
+        // 地图灯光
+        let mut q = world
+            .query_filtered::<(Entity, Option<&MeshMaterial2d<MapBlendMaterial>>), With<MapLight>>(
+            );
+        for (e, mat) in q.iter(world) {
+            despawn.push(e);
+            if let Some(mat) = mat {
+                materials.push(mat.0.clone());
+            }
+        }
+    }
+    {
+        // Middle 大图对象
+        let mut q = world.query_filtered::<Entity, With<MapMiddleObject>>();
+        for e in q.iter(world) {
+            despawn.push(e);
+        }
+    }
+    for e in despawn {
+        let _ = world.despawn(e);
+    }
+    if let Some(mut assets) = world.get_resource_mut::<Assets<Image>>() {
+        for h in chunk_images {
+            assets.remove(&h);
+        }
+    }
+    if let Some(mut mats) = world.get_resource_mut::<Assets<MapBlendMaterial>>() {
+        for h in materials {
+            mats.remove(&h);
+        }
+    }
+    if let Some(mut stream) = world.get_resource_mut::<ChunkStream>() {
+        // 强制 chunk_stream_system 下一帧按新相机/新图全量重估
+        stream.last_cam_chunk = None;
+    }
+}
+
+/// S2：离开 Game 场景（登出 / 断线回登录）统一清理地图实体。
+/// 此前 map_renderer 只有流式卸载，OnExit(Game) 无任何清理——同进程重进游戏时
+/// OnEnter 不会再跑第二次（「重进同状态不会再跑 OnEnter」），旧块/灯光/大图全部残留叠加。
+pub(crate) fn cleanup_map_world(world: &mut World) {
+    clear_map_world(world);
+}
+
+/// B1：运行中换图重建。
+/// MapChanged 只写 desired_map + next.set(Game)；游戏内收到时同态 set 是 no-op，
+/// OnEnter(Game) 不会重跑，而 desired_map 此前只有 setup_world 一个消费者 →
+/// 世界永远停在第一张图。这里按值比较（不靠变更检测 tick，避免同帧顺序坑）：
+/// desired_map 与已加载地图名不一致 → 全清旧世界后以 setup_world 原逻辑重建
+/// （含 walkable/doors、相机定位、初始窗口、GameData.map/map_reader 替换）。
+/// 加载失败走 setup_world 的 M4 分支：错误可见 + 退回登录。
+pub(crate) fn map_rebuild_system(world: &mut World) {
+    let needs = {
+        let gd = world.resource::<GameData>();
+        match (&gd.desired_map, &gd.map) {
+            (Some(desired), Some(loaded)) => desired != &loaded.name,
+            // 首次进图 map 尚为 None，由 OnEnter(Game) 的 setup_world 负责
+            _ => false,
+        }
+    };
+    if !needs {
+        return;
+    }
+    let name = world
+        .resource::<GameData>()
+        .desired_map
+        .clone()
+        .unwrap_or_default();
+    tracing::info!("🗺️ 检测到换图 {}，清理旧世界并重建", name);
+    clear_map_world(world);
+    use bevy::ecs::system::RunSystemOnce;
+    if let Err(e) = world.run_system_once(setup_world) {
+        tracing::error!("🗺️ 换图重建失败: {}", e);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::resources::libraries::Libraries;
+    use crate::scenes::AppState;
+    use crate::ui::login::AuthFeedback;
+
+    /// 造一个挂齐 setup_world 所需资源、且地图必然加载失败的 World：
+    /// GameLibraries.initialized = true 跳过 ensure_initialized 的磁盘扫描，
+    /// desired_map 指向不存在的地图文件 → 走 M4 失败分支（错误可见 + 回登录）。
+    fn world_with_old_map(old_name: &str, desired: Option<&str>) -> World {
+        let mut world = World::new();
+        world.insert_resource(Assets::<Image>::default());
+        world.insert_resource(Assets::<Mesh>::default());
+        world.insert_resource(Assets::<MapBlendMaterial>::default());
+        world.insert_resource(ChunkStream {
+            last_cam_chunk: Some((3, 3)),
+        });
+        let mut libs = Libraries::new("__no_data_dir_for_test__");
+        libs.initialized = true;
+        world.insert_resource(GameLibraries(libs));
+        world.init_resource::<TileImageCache>();
+        world.init_resource::<FrontImageCache>();
+        world.insert_resource(NextState::<AppState>::default());
+        world.init_resource::<AuthFeedback>();
+        world.insert_resource(GameData {
+            map: Some(LoadedMap {
+                name: old_name.to_string(),
+                width: 1,
+                height: 1,
+                doors: vec![vec![0]],
+                walkable: vec![vec![true]],
+            }),
+            map_reader: None,
+            desired_map: desired.map(|s| s.to_string()),
+            player_spawn: None,
+        });
+        world
+    }
+
+    /// 在世界里摆一套「旧地图」场景实体 + 一个无关实体，返回 5 个 Entity。
+    fn spawn_old_world_entities(world: &mut World) -> (Entity, Entity, Entity, Entity, Entity) {
+        let chunk = world
+            .spawn((
+                ChunkKey(0, 0, Layer::Back),
+                Sprite::default(),
+                MapFloorMark(Layer::Back),
+                Transform::default(),
+                Visibility::default(),
+            ))
+            .id();
+        let front = world
+            .spawn((
+                FrontChunkKey(0, 0),
+                Sprite::default(),
+                Transform::default(),
+                Visibility::default(),
+            ))
+            .id();
+        let light = world
+            .spawn((
+                MapLight,
+                LightChunkKey(0, 0),
+                Transform::default(),
+                Visibility::default(),
+            ))
+            .id();
+        let middle_obj = world
+            .spawn((
+                MapMiddleObject,
+                Sprite::default(),
+                Transform::default(),
+                Visibility::default(),
+            ))
+            .id();
+        let keeper = world.spawn(Transform::default()).id();
+        (chunk, front, light, middle_obj, keeper)
+    }
+
+    fn assert_map_entities_gone(world: &mut World, entities: [Entity; 4]) {
+        for e in entities {
+            assert!(world.get_entity(e).is_err(), "地图实体 {:?} 应被清理", e);
+        }
+        for (count, name) in [
+            (
+                world
+                    .query_filtered::<Entity, With<ChunkKey>>()
+                    .iter(world)
+                    .count(),
+                "ChunkKey",
+            ),
+            (
+                world
+                    .query_filtered::<Entity, With<FrontChunkKey>>()
+                    .iter(world)
+                    .count(),
+                "FrontChunkKey",
+            ),
+            (
+                world
+                    .query_filtered::<Entity, With<MapLight>>()
+                    .iter(world)
+                    .count(),
+                "MapLight",
+            ),
+            (
+                world
+                    .query_filtered::<Entity, With<MapMiddleObject>>()
+                    .iter(world)
+                    .count(),
+                "MapMiddleObject",
+            ),
+        ] {
+            assert_eq!(count, 0, "{} 应无残留", name);
+        }
+        assert_eq!(
+            world.resource::<ChunkStream>().last_cam_chunk,
+            None,
+            "ChunkStream 游标应重置"
+        );
+    }
+
+    /// B1 回归：游戏内 desired_map 变更 → 旧地图实体全清 + 流式游标重置 + 触发重建。
+    /// （修复前：desired_map 无人消费，旧实体原样保留，本测试红。）
+    #[test]
+    fn desired_map_change_triggers_world_rebuild() {
+        let mut world = world_with_old_map("old_map", Some("__missing_map_for_rebuild_test__"));
+        let (chunk, front, light, middle_obj, keeper) = spawn_old_world_entities(&mut world);
+
+        map_rebuild_system(&mut world);
+
+        assert_map_entities_gone(&mut world, [chunk, front, light, middle_obj]);
+        assert!(
+            world.get_entity(keeper).is_ok(),
+            "无关实体不应被地图清理误伤"
+        );
+        // 重建走到 setup_world 的 M4 失败分支（测试地图不存在）：错误必须玩家可见
+        // 且请求退回登录，而不是静默黑屏
+        assert!(
+            world.resource::<AuthFeedback>().login_error.is_some(),
+            "地图加载失败应给出玩家可见错误"
+        );
+        assert!(
+            matches!(
+                *world.resource::<NextState<AppState>>(),
+                NextState::Pending(AppState::Login)
+            ),
+            "地图加载失败应退回登录"
+        );
+        // 失败分支不得再 spawn 重复相机（唯一地图相机由 Startup spawn_camera 创建）
+        assert_eq!(
+            world
+                .query_filtered::<Entity, With<Camera2d>>()
+                .iter(&world)
+                .count(),
+            0,
+            "M4 失败分支不应 spawn 重复 Camera2d"
+        );
+    }
+
+    /// B1 反向用例：desired_map 与已加载地图一致 → 不动世界。
+    #[test]
+    fn same_desired_map_does_not_rebuild() {
+        let mut world = world_with_old_map("same_map", Some("same_map"));
+        let (chunk, _, _, _, _) = spawn_old_world_entities(&mut world);
+
+        map_rebuild_system(&mut world);
+
+        assert!(world.get_entity(chunk).is_ok(), "同图不应触发重建清理");
+        assert_eq!(
+            world.resource::<ChunkStream>().last_cam_chunk,
+            Some((3, 3)),
+            "同图不应重置流式游标"
+        );
+    }
+
+    /// S2 回归：OnExit(Game) 清理后四类地图实体无残留、游标重置、无关实体保留。
+    /// 走真实状态迁移（Game → Login），不是直接调清理函数。
+    #[test]
+    fn on_exit_game_cleans_all_map_entities() {
+        let mut app = App::new();
+        // App::new 只有 MainSchedulePlugin，状态迁移需要显式 StatesPlugin
+        app.add_plugins(bevy::state::app::StatesPlugin);
+        app.init_state::<AppState>();
+        app.insert_resource(Assets::<Image>::default());
+        app.insert_resource(Assets::<MapBlendMaterial>::default());
+        app.insert_resource(ChunkStream {
+            last_cam_chunk: Some((7, 7)),
+        });
+        app.add_systems(OnExit(AppState::Game), cleanup_map_world);
+
+        // 进入 Game（Intro → Game）
+        app.world_mut()
+            .resource_mut::<NextState<AppState>>()
+            .set(AppState::Game);
+        app.update();
+        assert_eq!(
+            *app.world().resource::<State<AppState>>().get(),
+            AppState::Game
+        );
+
+        let (chunk, front, light, middle_obj, keeper) = spawn_old_world_entities(app.world_mut());
+
+        // 退出 Game（Game → Login）→ OnExit 清理
+        app.world_mut()
+            .resource_mut::<NextState<AppState>>()
+            .set(AppState::Login);
+        app.update();
+
+        assert_map_entities_gone(app.world_mut(), [chunk, front, light, middle_obj]);
+        assert!(
+            app.world_mut().get_entity(keeper).is_ok(),
+            "无关实体不应被地图清理误伤"
+        );
+    }
 }

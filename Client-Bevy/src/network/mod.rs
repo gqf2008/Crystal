@@ -444,6 +444,14 @@ pub(crate) fn network_system(
                     auth.login_success = false;
                     net.to_server = None;
                     net.tcp_events = None;
+                    // S3：断线主动切回登录场景——此前 AppState 留在 Game，重连成功后
+                    // 自动 StartGame → MapChanged 的同态 next.set(Game) 是 no-op，
+                    // OnEnter 不重跑、世界不重建，断线前的远端玩家/地面物品成幽灵。
+                    // 切回 Login 触发 OnExit(Game) 全量清理（地图块/灯光/角色/对话框），
+                    // 重连入图时 set(Game) 才是真正的状态迁移，世界彻底重建。
+                    // 取舍：玩家会看到登录界面一闪（好过重连后满屏幽灵实体）；
+                    // 与服务端主动 Disconnect 包（handle_login.rs）同一路径。
+                    next.set(AppState::Login);
                     if net.auto_reconnect {
                         net.reconnecting = true;
                         net.reconnect_delay = 2.0;
@@ -515,6 +523,9 @@ pub(crate) fn network_system(
         auth.login_success = false;
         net.to_server = None;
         net.from_server = None;
+        // S3：同 TCP 断线分支——切回登录场景让 OnExit(Game) 全量清理世界，
+        // 重连入图时世界彻底重建，避免断线前远端对象成幽灵（详见 TCP 分支注释）
+        next.set(AppState::Login);
         if net.auto_reconnect {
             net.reconnecting = true;
             net.reconnect_delay = 2.0;

@@ -17,12 +17,16 @@ use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
 use crate::ui::sprite_ui::UiFont;
 use crate::ui::theme::{
-    load_lib_image, spawn_container, spawn_icon_button, spawn_image, spawn_label, spawn_panel,
+    load_lib_image, spawn_close_button, spawn_container, spawn_icon_button, spawn_image,
+    spawn_label, spawn_panel,
 };
 
 /// #2892 批B：面板精灵与 C# 原生尺寸（C# `FriendDialog.Index = 199; Library = Libraries.Title`）
 pub const PANEL: (LibraryName, usize) = (LibraryName::Title, 199);
 pub const PANEL_SIZE: (f32, f32) = (264.0, 272.0);
+/// 关闭键 `Prguse2[360..362]` @(237,3)（`FriendDialog.cs:123-124`，无 `Size` → 原生 24x21）；
+/// 曾错作 (206,3) → 偏左 31px
+pub const CLOSE_POS: (f32, f32) = (237.0, 3.0);
 
 /// 好友条目
 #[derive(Debug, Clone, Default)]
@@ -179,13 +183,11 @@ fn spawn_friend(
         if let Some(h) = load_lib_image(&mut libs, &mut images, LibraryName::Title, 6) {
             spawn_image(p, h, 18.0, 9.0, 57.0, 15.0, 9);
         }
-        // 关闭 Prguse2[360/361/362] @(206,3)
-        if let (Some(n), Some(h), Some(pr)) = (
-            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 360),
-            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 361),
-            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 362),
-        ) {
-            spawn_icon_button(p, n, h, pr, 206.0, 3.0, 20.0, 20.0, 10).insert(FriendClose);
+        // 关闭 Prguse2[360/361/362] @ CLOSE_POS
+        if let Some(mut btn) =
+            spawn_close_button(p, &mut libs, &mut images, CLOSE_POS.0, CLOSE_POS.1, 10)
+        {
+            btn.insert(FriendClose);
         }
         // 添加/删除/备注/邮件/私聊（Prguse 554-568 @(60/88/116/144/172, 241)）
         // #2771：末列为 C# `FriendDialog.cs` 的 Hint（141 AddFriend=添加、171 RemoveFriend=移除、

@@ -20,7 +20,8 @@ use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
 use crate::ui::sprite_ui::UiFont;
 use crate::ui::theme::{
-    load_lib_image, spawn_container, spawn_icon_button, spawn_image, spawn_label, spawn_panel,
+    load_lib_image, spawn_close_button, spawn_container, spawn_icon_button, spawn_image,
+    spawn_label, spawn_panel,
 };
 use bevy::prelude::*;
 
@@ -52,6 +53,8 @@ pub struct GroupState {
 /// #2892 批B：面板精灵与 C# 原生尺寸（供 `ui_alignment` 用真实精灵核对）
 pub const PANEL: (LibraryName, usize) = (LibraryName::Prguse, 120);
 pub const PANEL_SIZE: (f32, f32) = (232.0, 249.0);
+/// 关闭键 `Prguse2[360..362]` @(206,3)（`GroupDialog.cs:57-66`，无 `Size` → 原生 24x21）
+pub const CLOSE_POS: (f32, f32) = (206.0, 3.0);
 const GROUP_BG_INDEX: usize = 120;
 
 /// 屏幕中心原点公式（C# MirControl.Center，MirControl.cs:645：
@@ -192,12 +195,10 @@ fn spawn_group(
             spawn_image(p, h, 18.0, 8.0, 57.0, 15.0, 9);
         }
         // 关闭 Prguse2[360/361/362] @(206,3)
-        if let (Some(n), Some(h), Some(pr)) = (
-            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 360),
-            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 361),
-            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 362),
-        ) {
-            spawn_icon_button(p, n, h, pr, 206.0, 3.0, 20.0, 20.0, 10).insert(GroupClose);
+        if let Some(mut btn) =
+            spawn_close_button(p, &mut libs, &mut images, CLOSE_POS.0, CLOSE_POS.1, 10)
+        {
+            btn.insert(GroupClose);
         }
         // 允许组队开关 Prguse[114/115/116] @(25,219)
         if let (Some(n), Some(h), Some(pr)) = (

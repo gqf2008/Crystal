@@ -30,12 +30,15 @@ use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
 use crate::ui::sprite_ui::{shared_cjk_font, UiCjkFont, UiFont};
 use crate::ui::theme::{
-    load_lib_image, spawn_container, spawn_icon_button, spawn_image, spawn_label, spawn_panel,
+    load_lib_image, spawn_close_button, spawn_container, spawn_icon_button, spawn_image,
+    spawn_label, spawn_panel,
 };
 
 /// #2892 批B：面板精灵与 C# 原生尺寸（C# `KeyboardLayoutDialog.Index = 119; Location = Center`）
 pub const PANEL: (LibraryName, usize) = (LibraryName::Title, 119);
 pub const PANEL_SIZE: (f32, f32) = (512.0, 430.0);
+/// 关闭键 `Prguse2[360..362]` @(489,3)（`KeyboardLayoutDialog.cs:54-57`，无 `Size` → 原生 24x21）
+pub const CLOSE_POS: (f32, f32) = (489.0, 3.0);
 
 /// 单个键位绑定（动作 + 组 + 当前键）
 #[derive(Clone)]
@@ -542,12 +545,10 @@ fn spawn_keyboard_layout(
         // 标题“键位设置”（C# PageLabel (135,34)）
         spawn_label(p, &cjk, "键位设置", 135.0, 34.0, 15.0, Color::WHITE, 9);
         // 关闭按钮 (489,3)
-        if let (Some(n), Some(h), Some(pr)) = (
-            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 360),
-            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 361),
-            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 362),
-        ) {
-            spawn_icon_button(p, n, h, pr, 489.0, 3.0, 16.0, 14.0, 10).insert(KeyboardClose);
+        if let Some(mut btn) =
+            spawn_close_button(p, &mut libs, &mut images, CLOSE_POS.0, CLOSE_POS.1, 10)
+        {
+            btn.insert(KeyboardClose);
         }
         // 上滚 (491,88) / 下滚 (491,363)
         if let (Some(n), Some(h), Some(pr)) = (

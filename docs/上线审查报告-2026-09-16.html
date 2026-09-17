@@ -1,0 +1,304 @@
+<title>上线审查报告</title>
+<style>
+  :root {
+    --bg: #f7f5f1;
+    --surface: #ffffff;
+    --ink: #1d2126;
+    --ink-2: #4a5058;
+    --ink-3: #7a828c;
+    --line: #e3dfd6;
+    --accent: #8a5a18;
+    --accent-soft: #f3e8d4;
+    --crit: #b3261e;
+    --crit-bg: #fbeae8;
+    --high: #b95c10;
+    --high-bg: #fdf0e2;
+    --mid: #8a7213;
+    --mid-bg: #faf3d9;
+    --ok: #2e7d4f;
+    --ok-bg: #e6f2ea;
+    --code-bg: #efece5;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #16181b;
+      --surface: #1f2227;
+      --ink: #e8e6e1;
+      --ink-2: #b5b3ab;
+      --ink-3: #8a8782;
+      --line: #33373d;
+      --accent: #d29a4a;
+      --accent-soft: #3a2f1c;
+      --crit: #e0685f;
+      --crit-bg: #3a211f;
+      --high: #e08b3e;
+      --high-bg: #3a2a1a;
+      --mid: #cbb248;
+      --mid-bg: #35301b;
+      --ok: #5cb583;
+      --ok-bg: #1d3226;
+      --code-bg: #26292f;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #16181b;
+    --surface: #1f2227;
+    --ink: #e8e6e1;
+    --ink-2: #b5b3ab;
+    --ink-3: #8a8782;
+    --line: #33373d;
+    --accent: #d29a4a;
+    --accent-soft: #3a2f1c;
+    --crit: #e0685f;
+    --crit-bg: #3a211f;
+    --high: #e08b3e;
+    --high-bg: #3a2a1a;
+    --mid: #cbb248;
+    --mid-bg: #35301b;
+    --ok: #5cb583;
+    --ok-bg: #1d3226;
+    --code-bg: #26292f;
+  }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: "Noto Sans SC", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+    line-height: 1.65;
+  }
+  .wrap { max-width: 860px; margin: 0 auto; padding-inline: 18px; padding-block: 28px 60px; }
+  h1, h2, h3 { font-family: "Noto Serif SC", "Songti SC", "SimSun", serif; text-wrap: balance; }
+  code, .mono {
+    font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+    font-size: 0.86em;
+    background: var(--code-bg);
+    padding: 1px 5px;
+    border-radius: 4px;
+    word-break: break-all;
+  }
+  /* verdict banner */
+  .verdict {
+    border: 2px solid var(--crit);
+    background: var(--crit-bg);
+    border-radius: 10px;
+    padding: 18px 22px;
+    margin-block: 18px 26px;
+  }
+  .verdict h1 { margin: 0 0 6px; font-size: 1.5rem; color: var(--crit); }
+  .verdict p { margin: 4px 0; color: var(--ink-2); }
+  .verdict strong { color: var(--ink); }
+  .meta { color: var(--ink-3); font-size: 0.86rem; letter-spacing: 0.02em; }
+  /* summary tiles */
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-block: 0 28px; }
+  .tile { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; }
+  .tile .n { font-size: 1.6rem; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.1; }
+  .tile .l { font-size: 0.82rem; color: var(--ink-3); margin-top: 2px; }
+  .tile.crit .n { color: var(--crit); }
+  .tile.high .n { color: var(--high); }
+  .tile.ok .n { color: var(--ok); }
+  /* sections */
+  section { margin-block: 34px 0; }
+  .eyebrow { font-size: 0.78rem; letter-spacing: 0.14em; text-transform: uppercase; color: var(--accent); font-weight: 600; }
+  h2 { font-size: 1.3rem; margin: 4px 0 14px; padding-bottom: 8px; border-bottom: 1px solid var(--line); }
+  h3 { font-size: 1.05rem; margin: 22px 0 8px; }
+  /* finding cards */
+  .finding { background: var(--surface); border: 1px solid var(--line); border-left: 4px solid var(--crit); border-radius: 6px; padding: 12px 16px; margin-block: 10px; }
+  .finding.high { border-left-color: var(--high); }
+  .finding.mid { border-left-color: var(--mid); }
+  .finding h4 { margin: 0 0 6px; font-size: 0.98rem; }
+  .finding p { margin: 4px 0; font-size: 0.92rem; color: var(--ink-2); }
+  .finding .tag { display: inline-block; font-size: 0.72rem; font-weight: 700; letter-spacing: 0.06em; padding: 1px 8px; border-radius: 999px; margin-right: 8px; vertical-align: 1px; }
+  .tag.crit { background: var(--crit-bg); color: var(--crit); }
+  .tag.high { background: var(--high-bg); color: var(--high); }
+  .tag.ok { background: var(--ok-bg); color: var(--ok); }
+  .lbl { color: var(--ink-3); font-size: 0.8rem; font-weight: 600; margin-right: 4px; }
+  /* compact table */
+  .tbl { overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; font-size: 0.88rem; }
+  th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--ink-3); font-size: 0.78rem; letter-spacing: 0.06em; font-weight: 600; }
+  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  /* ok list */
+  .pass { background: var(--ok-bg); border-radius: 8px; padding: 12px 18px; }
+  .pass li { margin-block: 4px; font-size: 0.92rem; }
+  ul { padding-left: 1.3em; }
+  .order { counter-reset: step; padding-left: 0; list-style: none; }
+  .order li { counter-increment: step; margin-block: 8px; padding-left: 34px; position: relative; font-size: 0.93rem; }
+  .order li::before {
+    content: counter(step);
+    position: absolute; left: 0; top: 2px;
+    width: 22px; height: 22px; border-radius: 50%;
+    background: var(--accent); color: var(--bg);
+    font-size: 0.78rem; font-weight: 700;
+    display: flex; align-items: center; justify-content: center;
+  }
+</style>
+
+<div class="wrap">
+
+<div class="eyebrow">Crystal · Legend of Mir 2 · Bevy 客户端 + Rust 服务端</div>
+<div class="verdict">
+  <h1>结论：不可上线 — 修复阻断项后灰度</h1>
+  <p><strong>三路独立审查（UI 对齐核实 / 服务端生产就绪 / 客户端非 UI 就绪）+ 本地门禁全量测试。</strong>
+  测试门禁全绿（客户端 647、服务端 752，0 失败），但审查发现 <strong>10 个阻断级缺陷</strong>：服务端 8 个（丢装备、刷金、一个包打挂全服、公开 GM 口令）、客户端 2 个（玩家机器启动即闪退、换图不重建）。
+  另确认 8 月「技能按钮触发 UI 堆积」bug 的<strong>机制仍然存在</strong>（6 处孤儿弹窗无人清理）。</p>
+  <p class="meta">审查日期 2026-09-16 · 基准 master c8be7d67 · 方法：代码逐行核查 + 对照 C# 原版 + 带真实资产跑测试</p>
+</div>
+
+<div class="tiles">
+  <div class="tile crit"><div class="n">10</div><div class="l">阻断级（服务端 8 + 客户端 2）</div></div>
+  <div class="tile high"><div class="n">21</div><div class="l">严重级（服务端 16 + 客户端 5）</div></div>
+  <div class="tile"><div class="n">3</div><div class="l">UI 对齐保留项</div></div>
+  <div class="tile ok"><div class="n">1399</div><div class="l">测试全过（647 客户端 + 752 服务端）</div></div>
+</div>
+
+<section>
+  <div class="eyebrow">一、服务端 ServerRust · 阻断级（8）</div>
+  <h2>每一条在正式运营都是事故</h2>
+
+  <div class="finding"><h4><span class="tag crit">阻断 1</span>交易取消/断线/走路：已押物品永久销毁</h4>
+    <p><span class="lbl">位置</span><code>actors/social.rs:3762-3779 / 3060-3062 / 1985-2065</code>；触发源 <code>world/session.rs:1494-1500</code></p>
+    <p><span class="lbl">问题</span>物品放入交易栏时已从背包移除只存在内存会话里；取消、任一方掉线、<strong>随便走一格</strong>（每次 Walk/Run 无条件发 TradeCancel）、确认时复检失败——四条路径全部直接丢会话，物品永久消失且会被存档持久化。</p>
+    <p><span class="lbl">修复</span>对齐 C# <code>PlayerObject.TradeCancel</code>：所有丢弃交易会话的路径统一归还双方物品（背包满转离线邮件）并通知对方关窗。</p>
+  </div>
+
+  <div class="finding"><h4><span class="tag crit">阻断 2</span>交易金币不托管 + 扣减失败被吞 → 刷金</h4>
+    <p><span class="lbl">位置</span><code>social.rs:3682-3705 / 2067-2136</code>；<code>player.rs:4893-4910</code></p>
+    <p><span class="lbl">问题</span>押金只校验不扣款（World 与 Social 不同 actor，锁定前去商店花光余额的窗口天然存在）；成交时扣款失败被 <code>let _ =</code> 吞掉，对方照常收金。AddGold 截顶仍返回 true，超额蒸发。</p>
+    <p><span class="lbl">修复</span>押金即时扣款托管（取消退回）；成交改「先扣验、任何一步失败整体中止退还」。</p>
+  </div>
+
+  <div class="finding"><h4><span class="tag crit">阻断 3</span>商店出售不校验数量 → 1 件按 65535 件计价</h4>
+    <p><span class="lbl">位置</span><code>actors/world/item.rs:3901-3926</code></p>
+    <p><span class="lbl">问题</span>扣物品按实际堆叠 min 截断，给钱却按客户端声明的 count，全程无上限校验。发包 <code>SellItem(uid, 65535)</code> 卖 1 件得 65535 倍金币。</p>
+    <p><span class="lbl">修复</span>按实际移除数量计价；加金失败回退物品。</p>
+  </div>
+
+  <div class="finding"><h4><span class="tag crit">阻断 4</span>仓库满时存取吞物品</h4>
+    <p><span class="lbl">位置</span><code>actors/inventory.rs:1027-1066</code></p>
+    <p><span class="lbl">问题</span>先从源格 <code>take()</code> 再查目标空位，容器满时提前返回，已取出的物品被 drop。仓库满存入、背包满取出都会永久丢件。</p>
+    <p><span class="lbl">修复</span>先查空位再 take，或失败分支放回原格。</p>
+  </div>
+
+  <div class="finding"><h4><span class="tag crit">阻断 5</span>行会仓库取出越界 panic → 全服拒绝服务</h4>
+    <p><span class="lbl">位置</span><code>social.rs:5578 / 5584 / 5612</code></p>
+    <p><span class="lbl">问题</span>客户端 u8 下标直接索引固定 100 格容器，取出分支三处裸索引无边界检查（C# 有）。一个 <code>grid≥100</code> 的包打挂 SocialActor，交易/组队/行会全瘫。</p>
+    <p><span class="lbl">修复</span>取出分支入口加 <code>grid &lt; storage_items.len()</code> 校验。</p>
+  </div>
+
+  <div class="finding"><h4><span class="tag crit">阻断 6</span>RangeAttack 长度检查 off-by-2 → 一个包全服掉线</h4>
+    <p><span class="lbl">位置</span><code>gate/actor.rs:1878-1890</code></p>
+    <p><span class="lbl">问题</span>检查 <code>len() &lt; 19</code> 但随后读 <code>payload[17..21]</code>（协议本身就需 21 字节）。19~20 字节载荷切片越界 panic，GateActor 死亡，全部会话中断。全 gate 逐函数对账后的唯一漏网。</p>
+    <p><span class="lbl">修复</span>改为 <code>payload.len() &lt; 21</code>。</p>
+  </div>
+
+  <div class="finding"><h4><span class="tag crit">阻断 7</span>硬编码 GM 口令，任何人自助提权</h4>
+    <p><span class="lbl">位置</span><code>world/session.rs:2722-2736</code>（<code>const GM_PASSWORD = "C#Mir 4.0"</code>）</p>
+    <p><span class="lbl">问题</span>C# 的公开默认值，且 Rust 版是编译期常量无法配置。任意新号聊天发这串口令即得 @GOLD/@MAKE/@LEVEL/@KILL 全部 GM 命令，无限速无审计。</p>
+    <p><span class="lbl">修复</span>GM 提权只认 DB <code>admin_account</code> 位，删自助口令；至少改 server.toml 配置 + 限速 + 审计日志。</p>
+  </div>
+
+  <div class="finding"><h4><span class="tag crit">阻断 8</span>市场退款邮件被在线玩家下次存档整体抹除</h4>
+    <p><span class="lbl">位置</span><code>world/market.rs:509 / 743</code>；<code>db/mod.rs:2749</code></p>
+    <p><span class="lbl">问题</span>被超价/拍卖过期的退款邮件无条件直写 DB；玩家在线时 ≤30 秒后自动存档按内存邮箱 DELETE 重写，退款邮件连同托管金蒸发。成交物品邮件路径有在线判断是对的，唯独两条退款路径漏了。</p>
+    <p><span class="lbl">修复</span>与成交邮件同构：在线走 AddMail，仅离线才 insert_mail。</p>
+  </div>
+</section>
+
+<section>
+  <div class="eyebrow">二、服务端 · 严重级（16，摘要）</div>
+  <h2>阻断修完仍有等价后门，建议同批整改</h2>
+  <div class="tbl"><table>
+    <tr><th>#</th><th>位置</th><th>问题</th></tr>
+    <tr><td class="num">9</td><td><code>account.rs:226</code></td><td>登录即自动注册，绕过建号开关与每 IP 防刷，脚本可无限建号</td></tr>
+    <tr><td class="num">10</td><td><code>gate/actor.rs:2607</code></td><td>未登录可 NewCharacter，角色名冒充账号名，可把角色挂到受害者账号下</td></tr>
+    <tr><td class="num">11</td><td><code>gate/actor.rs:2351</code></td><td>ChangePassword 无需登录、旧密码错误不计数，可在线爆破改密盗号</td></tr>
+    <tr><td class="num">12</td><td><code>db/mod.rs:1613</code></td><td>save_account 漏列，每次登录清空 admin_account 与 credit——GM 登录一次永久丢权限</td></tr>
+    <tr><td class="num">13</td><td><code>http.rs:23-101</code></td><td>管理接口零鉴权（明文密码建号/全服广播），当前未接线，休眠炸弹</td></tr>
+    <tr><td class="num">14</td><td><code>market.rs:1319</code></td><td>寄售上架即落库 vs 玩家存档延迟 30s，崩溃窗口复制物品；写库失败吞结果寄售单复活</td></tr>
+    <tr><td class="num">15</td><td><code>world/mail.rs:553</code></td><td>邮件附件先清空再入包，背包满丢件；DeleteMail 可连附件删除</td></tr>
+    <tr><td class="num">16</td><td><code>market.rs:1003</code></td><td>拍卖成交入包失败仍记 delivered=true，赢家出钱拿不到货</td></tr>
+    <tr><td class="num">17</td><td><code>session.rs StartGame</code></td><td>同会话重复 StartGame 角色双开，两个 actor 持有同一背包可分别交易 → 复制</td></tr>
+    <tr><td class="num">18</td><td><code>session.rs:2292</code></td><td>断线不驱散宠物/租赁会话/英雄对象：双倍宠物、物主拔线物品永失、幽灵英雄</td></tr>
+    <tr><td class="num">19</td><td><code>gate/actor.rs:567</code></td><td>优雅 LogOut 不清 session_usernames，旧账号 is_online 永卡 true 无法登录</td></tr>
+    <tr><td class="num">20</td><td><code>main.rs:189</code></td><td>SocialActor 的 map/item 表永远空：NoGroup 校验失效，<strong>绑定物品可交易</strong></td></tr>
+    <tr><td class="num">21</td><td><code>social.rs:3290</code></td><td>组队/交易邀请共表跨类型消费，伪造回复可无邀请加入任意队伍</td></tr>
+    <tr><td class="num">22</td><td><code>gate/actor.rs:340</code></td><td>优雅关机依赖客户端回包，无响应客户端 5 秒内不回即丢档</td></tr>
+    <tr><td class="num">23</td><td><code>gate/actor.rs:119</code></td><td>SendChannel 无界，慢读客户端广播堆积 → 内存 DoS</td></tr>
+    <tr><td class="num">24</td><td><code>social.rs:2067</code></td><td>交易成交无即时存档，与 30s 自动存档并发 → 崩溃单方回档复制；行会存金吞结果刷金</td></tr>
+  </table></div>
+  <p style="font-size:0.88rem;color:var(--ink-3)">另有 15 项一般级（登录无限速、admin 端口 7001 绑 0.0.0.0 无鉴权、无闲置会话超时、xor_key 死配置、审计日志缺口、移动节流默认关闭、约 25 张会话表断线不清理内存斜坡等）随迭代清理。确认安全的面：帧编码 u16 上限、字符串 10KB 上限、SQL 全参数绑定、Argon2+PBKDF2、存档单事务、gate 解析除阻断 6 外防御到位、<strong>客户端侧无本地改金币/移速路径（移动/攻击/金币全服务端权威）</strong>。</p>
+</section>
+
+<section>
+  <div class="eyebrow">三、客户端 Client-Bevy · 阻断级（2）+ 严重级（5）</div>
+  <h2>发布即事故的部署缺陷，与堆积 bug 真凶</h2>
+
+  <div class="finding"><h4><span class="tag crit">阻断 B2</span>libpinyin 数据路径烧死在二进制 → 玩家机器启动即 panic</h4>
+    <p><span class="lbl">位置</span><code>ui/pinyin_ime.rs:74-90</code>；<code>build.rs</code></p>
+    <p><span class="lbl">问题</span>构建机绝对路径编译进客户端，玩家机器上 IME 初始化 panic；<code>windows_subsystem="windows"</code> 无控制台，玩家看到的就是<strong>双击没反应</strong>。</p>
+    <p><span class="lbl">修复</span>运行时按 exe 相对路径解析为第一候选；初始化失败降级为禁用内置拼音并记日志，不 panic。</p>
+  </div>
+
+  <div class="finding"><h4><span class="tag crit">阻断 B1</span>运行中换图完全不重建地图</h4>
+    <p><span class="lbl">位置</span><code>network/packets/handle_world.rs:91-100</code>；<code>map_renderer/chunks_build.rs:8</code></p>
+    <p><span class="lbl">问题</span><code>desired_map</code> 只有 OnEnter(Game) 一个消费者，已在 Game 态时同态 set 是 no-op。过门/@MOVE/NPC 传送/技能瞬移后：瓦片、灯光、寻路网格仍是旧图，新图对象叠在旧图上。换图是传奇核心高频玩法。</p>
+    <p><span class="lbl">修复</span>加系统侦测 desired_map 变更 → 清全部地图实体 → 重建；或换图走过渡态复用 OnEnter/OnExit（需先补 S2 清理）。</p>
+  </div>
+
+  <div class="finding high"><h4><span class="tag high">严重 S1</span>堆积 bug 真凶：6 处孤儿弹窗无人清理</h4>
+    <p><span class="lbl">位置</span><code>mentor.rs:233</code>（师徒邀请）、<code>relationship.rs:280</code>（求婚）、<code>trade.rs:370</code>（交易邀请）、<code>inventory.rs:1964</code>（背包确认）、<code>market.rs:1262</code>（市场确认）、<code>npc.rs:751</code>（NPC 输入框）</p>
+    <p><span class="lbl">问题</span>这些次级弹窗不挂 DialogRoot、OnExit(Game) 清理全部漏掉、驱动状态（TradeState.invite 等）不随登出重置。登出重进就再 spawn 一份，且 ui_system 遍历所有匹配实体统一置 Visible → 新旧一起显示。8 月「技能按钮触发堆积」的「画布孤儿实体」猜测被代码证据证实，正式运营必然复发。</p>
+    <p><span class="lbl">修复</span>次级弹窗挂 DialogRoot（guild.rs:1386 已有正确示范），登出时重置驱动状态资源。</p>
+  </div>
+
+  <div class="finding high"><h4><span class="tag high">严重 S4</span>帧上限客户端 32KB vs 服务端无上限 → 断线死循环</h4>
+    <p><span class="lbl">位置</span><code>Client-Bevy/src/network/codec.rs:6</code> vs <code>ServerRust/src/gate/codec.rs</code></p>
+    <p><span class="lbl">问题</span>服务端发 &gt;32KB 的包（行会成员/邮件列表/市场全量）→ 客户端报帧解码错误主动断开 → 自动重连 → 服务端重发 → 再断，无限循环刷错误日志。</p>
+    <p><span class="lbl">修复</span>客户端上限提到 u16 协议上限 65535。</p>
+  </div>
+
+  <div class="finding high"><h4><span class="tag high">严重 S2/S3/S5</span>场景生命期系列</h4>
+    <p><span class="lbl">S2</span>地图实体无 OnExit 清理，重进游戏双画、内存单调增长（<code>map_renderer/</code> 全目录无 OnExit）</p>
+    <p><span class="lbl">S3</span>游戏中断线自动重连不换场景：断线前的远端玩家/地面物品成幽灵，服务端不会补发移除（<code>network/mod.rs:440-456</code>）</p>
+    <p><span class="lbl">S5</span>assets 目录同为编译期绝对路径：玩家机器上昼夜/灯光 shader 静默失效（<code>main.rs:54-57</code>）</p>
+  </div>
+</section>
+
+<section>
+  <div class="eyebrow">四、UI 对齐核实 · 声明有保留</div>
+  <h2>codex「已全部对齐 C#」——主体属实，3 个真问题漏网</h2>
+  <div class="pass"><ul>
+    <li>#2892 六项历史偏差<strong>确已修复</strong>：ranking/timer/guild_territory/hero 四窗按 C# 重做且抽验一致；trade/storage 逐坐标核对完全吻合</li>
+    <li>48 窗全覆盖守卫真实有效（新增窗漏登记即编译失败）；49 条断言 / 626 处 assert 带真实资产实测全过</li>
+  </ul></div>
+  <div class="finding"><h4><span class="tag crit">保留 1</span>NPC 输入框仍是旧占位面板（生产链路）</h4>
+    <p><code>npc.rs:747-751</code>：<code>S.NPCRequestInput</code> 弹的还是 <code>Prguse[170] @(280,80)</code> 自造面板——堆积 bug 同款病灶模式的唯一残留。批30 已建好标准 <code>MirInputBox</code>，只接了行会/好友，NPC 这条没迁。任何带输入的 NPC 脚本（改名/数量/暗号）玩家看到自造面板。</p>
+  </div>
+  <div class="finding"><h4><span class="tag crit">保留 2</span>好友窗关闭钮错位 31px</h4>
+    <p><code>friend.rs:188</code> @(206,3) 20x20，C# 是 @(237,3) 24x21。面板级断言测不出子控件错位。</p>
+  </div>
+  <div class="finding"><h4><span class="tag crit">保留 3</span>16 个窗口关闭钮仍是自造 20x20（C# 24x21）</h4>
+    <p>批56 修了 4 窗没扫尾：mail / relationship / friend / group / mentor / notice / quest_log / npc / npc_goods / inspect / character / inventory / hero_inventory / game_shop / amount_box / fishing。</p>
+  </div>
+  <div class="finding mid"><h4><span class="tag high">机制建议</span>断言深度</h4>
+    <p>b1 批次 8 窗（Group/Friend/Mentor/Relationship/Help/Notice/Creature/Mail）只有面板级断言，子控件无钉——保留 2 就是这么漏的；部分断言写 C# 字面量而非实现常量（钓鱼窗案例证明抓不到实现错误）。建议沿用 ranking 的「pub const + 测试绑定」模式补子控件断言。</p>
+  </div>
+</section>
+
+<section>
+  <div class="eyebrow">五、建议修复顺序</div>
+  <h2>同一主题的缺陷一次整改最划算</h2>
+  <ol class="order">
+    <li><strong>经济原子性批</strong>（服务端阻断 1/2/3/4/8 + 严重 14/15/16/24）：同一「吞结果/无归还」模式，一次过。</li>
+    <li><strong>认证权限批</strong>（阻断 7 + 严重 9/10/11/12/13）：不修这些，阻断 7 修完仍有等价后门。</li>
+    <li><strong>抗毁批</strong>（阻断 5/6 + 严重 17/18/19/20/21/22/23）：边界检查 + 断线清理补齐。</li>
+    <li><strong>客户端场景生命期批</strong>（B1 + S1/S2/S3 + M6）：换图重建、孤儿弹窗、地图清理、重连世界重置一次整改。</li>
+    <li><strong>发布打包批</strong>（B2 + S5 + A3）：exe 相对路径、panic 降级、release 日志降 warn；顺手清客户端 130+ 编译 warning。</li>
+    <li><strong>UI 收尾批</strong>（保留 1/2/3 + b1 子控件断言）：NPC 输入框迁 MirInputBox、关闭钮全仓扫尾。</li>
+    <li>灰度上线：修完 1-4 批即可灰度；5/6 批随灰度期收口。</li>
+  </ol>
+</section>
+
+<p class="meta" style="margin-top:36px">三路独立审查 agent + 本地门禁 · 服务端审查含三个并行专项（经济原子性/并发清理/认证运维）关键发现双人复核 · 经验已沉淀至 ~/.agents/rules/LESSON_actor化迁移经济路径必查托管无归还与扣减吞结果.md 与 LESSON_Crystal_Bevy非DialogRoot次级弹窗OnExit不清理致孤儿面板堆积.md</p>
+
+</div>

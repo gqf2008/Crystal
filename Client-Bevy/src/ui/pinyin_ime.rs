@@ -28,6 +28,7 @@ use bevy::prelude::*;
 use bevy::sprite::Anchor;
 
 use crate::ui::sprite_ui::{UiEntity, UiFont};
+use std::path::{Path, PathBuf};
 
 /// 候选条每页数量
 const CANDS_PER_PAGE: usize = 9;
@@ -63,30 +64,63 @@ pub struct PinyinIme {
     /// 本帧 PreUpdate 已消费的键（逐事件记录，#2596-10：选字/编辑键本身被挡住，
     /// 同帧后续同款键放行给文本框，避免黑洞也不双写）
     consumed: std::collections::VecDeque<Key>,
-    /// libpinyin 引擎
-    engine: LibpinyinEngine,
+    /// libpinyin 引擎。Option：发布机缺数据目录时初始化失败降级为 None（禁用 IME，
+    /// 英文直输仍可用），绝不 panic（#B2）。
+    engine: Option<LibpinyinEngine>,
 }
 
 impl PinyinIme {
-    /// libpinyin 系统/用户数据目录。编译期取自 build.rs 注入的 LIBPINYIN_DATA_DIR/CONF_DIR，
-    /// 运行时可用环境变量覆盖（便于把数据目录放到游戏资源目录）。
-    fn libpinyin_dirs() -> (String, String) {
-        let data = std::env::var("LIBPINYIN_DATA_DIR")
-            .unwrap_or_else(|_| env!("LIBPINYIN_DATA_DIR").to_string());
-        let conf = std::env::var("LIBPINYIN_CONF_DIR")
-            .unwrap_or_else(|_| env!("LIBPINYIN_CONF_DIR").to_string());
+    /// libpinyin 数据/配置目录候选链（#B2 发布打包修复）：
+    ///   1) exe 相对：`exe_dir/libpinyin/{data,conf}`（发布布局：数据随 exe 分发）；
+    ///   2) 编译期 build.rs 注入的 OUT_DIR 安装根（开发回退——env! 固化的是构建机
+    ///      绝对路径，玩家机器上不存在，只能垫底）。
+    /// 环境变量 LIBPINYIN_DATA_DIR / LIBPINYIN_CONF_DIR 在解析后单独覆盖（保留调试逃生口）。
+    fn libpinyin_dir_candidates() -> Vec<(PathBuf, PathBuf)> {
+        let mut v = Vec::new();
+        if let Ok(exe) = std::env::current_exe() {
+            if let Some(dir) = exe.parent() {
+                let root = dir.join("libpinyin");
+                v.push((root.join("data"), root.join("conf")));
+            }
+        }
+        v.push((
+            PathBuf::from(env!("LIBPINYIN_DATA_DIR")),
+            PathBuf::from(env!("LIBPINYIN_CONF_DIR")),
+        ));
+        v
+    }
+
+    /// 候选链挑目录对：取第一个“数据目录含标志文件”的候选；全部缺失时回退
+    /// 最后一个候选（编译期路径）——初始化失败由 new() 降级，而非静默拿错路径。
+    fn pick_libpinyin_dirs(
+        candidates: &[(PathBuf, PathBuf)],
+        data_dir_valid: impl Fn(&Path) -> bool,
+    ) -> Option<(PathBuf, PathBuf)> {
+        candidates
+            .iter()
+            .find(|(data, _)| data_dir_valid(data))
+            .or_else(|| candidates.last())
+            .cloned()
+    }
+
+    /// 解析 libpinyin 数据/配置目录：运行时候选优先，环境变量可逐项覆盖。
+    fn resolve_libpinyin_dirs() -> (PathBuf, PathBuf) {
+        let candidates = Self::libpinyin_dir_candidates();
+        // 数据目录标志文件：pinyin_index.bin（libpinyin 词典索引，缺失则初始化必败）
+        let (mut data, mut conf) =
+            Self::pick_libpinyin_dirs(&candidates, |d| d.join("pinyin_index.bin").is_file())
+                .expect("libpinyin_dir_candidates 至少含编译期回退");
+        if let Ok(d) = std::env::var("LIBPINYIN_DATA_DIR") {
+            data = PathBuf::from(d);
+        }
+        if let Ok(c) = std::env::var("LIBPINYIN_CONF_DIR") {
+            conf = PathBuf::from(c);
+        }
         (data, conf)
     }
 
-    pub fn new() -> Self {
-        let (data, conf) = Self::libpinyin_dirs();
-        let engine = LibpinyinEngine::new(&data, &conf).unwrap_or_else(|| {
-            panic!(
-                "内置拼音 IME 初始化失败：libpinyin 数据/配置目录无效（data={} conf={}）。\
-                 请按 mir2x 方式提供 libpinyin 安装（设置 LIBPINYIN_DIR / LIBPINYIN_DATA_DIR / LIBPINYIN_CONF_DIR）",
-                data, conf
-            )
-        });
+    /// 引擎缺失时的降级实例：恒禁用、所有操作无效果（#B2）。
+    fn without_engine() -> Self {
         Self {
             enabled: false,
             composing: String::new(),
@@ -96,7 +130,28 @@ impl PinyinIme {
             ate_edit: 0,
             ate_cancel: false,
             consumed: std::collections::VecDeque::new(),
-            engine,
+            engine: None,
+        }
+    }
+
+    pub fn new() -> Self {
+        let (data, conf) = Self::resolve_libpinyin_dirs();
+        match LibpinyinEngine::new(&data.to_string_lossy(), &conf.to_string_lossy()) {
+            Some(engine) => Self {
+                engine: Some(engine),
+                ..Self::without_engine()
+            },
+            None => {
+                // 降级而非 panic：windows_subsystem="windows" 无控制台，
+                // panic 表现为双击没反应（#B2）。禁用内置拼音 IME，英文直输仍可用。
+                error!(
+                    "内置拼音 IME 初始化失败，已禁用（data={} conf={}）。\
+                     发布包需随 exe 分发 libpinyin/{{data,conf}} 数据目录",
+                    data.display(),
+                    conf.display()
+                );
+                Self::without_engine()
+            }
         }
     }
 
@@ -120,7 +175,10 @@ impl PinyinIme {
 
     /// 候选条左段显示文本：当前组合拼音（剩余未上屏部分）。
     pub fn display_text(&self) -> String {
-        self.engine.input().to_string()
+        self.engine
+            .as_ref()
+            .map(|e| e.input().to_string())
+            .unwrap_or_default()
     }
 
     pub fn has_commit(&self) -> bool {
@@ -152,20 +210,33 @@ impl PinyinIme {
         self.ate_edit = 0;
         self.ate_cancel = false;
         self.consumed.clear();
-        self.engine.clear();
+        if let Some(e) = &mut self.engine {
+            e.clear();
+        }
     }
 
     fn toggle(&mut self) {
+        if self.engine.is_none() {
+            // #B2 降级：无引擎恒禁用，Shift 切换是 no-op
+            return;
+        }
         self.enabled = !self.enabled;
         self.composing.clear();
         self.candidates.clear();
         self.page = 0;
-        self.engine.clear();
+        if let Some(e) = &mut self.engine {
+            e.clear();
+        }
     }
 
     fn feed_letter(&mut self, c: char) {
+        if self.engine.is_none() {
+            return;
+        }
         self.composing.push(c);
-        self.engine.feed(c);
+        if let Some(e) = &mut self.engine {
+            e.feed(c);
+        }
         self.page = 0;
         self.recompute();
     }
@@ -174,7 +245,9 @@ impl PinyinIme {
         if self.composing.pop().is_some() {
             self.ate_edit += 1;
             self.page = 0;
-            self.engine.backspace();
+            if let Some(e) = &mut self.engine {
+                e.backspace();
+            }
             self.recompute();
         }
     }
@@ -182,7 +255,8 @@ impl PinyinIme {
     /// 选中候选：立即上屏选中词，剩余拼音继续组合（审查 B2 修正：选中即上屏 + 剩余续打）。
     fn select(&mut self, idx: usize) {
         let abs = self.page * CANDS_PER_PAGE + idx;
-        if let Some((word, consumed)) = self.engine.choose(abs) {
+        let chosen = self.engine.as_mut().and_then(|e| e.choose(abs));
+        if let Some((word, consumed)) = chosen {
             // 上屏选中词
             if let Some(existing) = &mut self.commit_pending {
                 existing.push_str(&word);
@@ -192,10 +266,14 @@ impl PinyinIme {
             // 剩余拼音继续组合（consumed 为已消费的 ASCII 拼音字节数）
             if consumed < self.composing.len() {
                 self.composing = self.composing[consumed..].to_string();
-                self.engine.set_input(self.composing.clone());
+                if let Some(e) = &mut self.engine {
+                    e.set_input(self.composing.clone());
+                }
             } else {
                 self.composing.clear();
-                self.engine.clear();
+                if let Some(e) = &mut self.engine {
+                    e.clear();
+                }
             }
             self.page = 0;
             self.recompute();
@@ -208,7 +286,9 @@ impl PinyinIme {
             self.select(0);
         } else if !self.composing.is_empty() {
             let raw = std::mem::take(&mut self.composing);
-            self.engine.clear();
+            if let Some(e) = &mut self.engine {
+                e.clear();
+            }
             if let Some(existing) = &mut self.commit_pending {
                 existing.push_str(&raw);
             } else {
@@ -222,7 +302,9 @@ impl PinyinIme {
         self.candidates.clear();
         self.page = 0;
         self.ate_cancel = true;
-        self.engine.clear();
+        if let Some(e) = &mut self.engine {
+            e.clear();
+        }
     }
 
     fn page_next(&mut self) {
@@ -239,7 +321,11 @@ impl PinyinIme {
     }
 
     fn recompute(&mut self) {
-        self.candidates = self.engine.candidates().to_vec();
+        self.candidates = self
+            .engine
+            .as_ref()
+            .map(|e| e.candidates().to_vec())
+            .unwrap_or_default();
     }
 
     /// 返回当前页候选（供 UI 渲染）
@@ -640,7 +726,8 @@ impl Plugin for PinyinImePlugin {
         let mut ime = PinyinIme::new();
         // #2635-1：默认中文（常规 IME 激活方式）——聚焦非密码文本框即可直接打拼音，
         // 无需先按 Shift；Shift 单按仍可切回英文。
-        ime.enabled = true;
+        // #B2：引擎缺失（发布机无 libpinyin 数据）时保持禁用，只留英文直输。
+        ime.enabled = ime.engine.is_some();
         app.insert_resource(ime);
         app.init_resource::<ImeFocus>();
         app.add_systems(PreUpdate, (pinyin_ime_system, clear_ime_focus).chain());
@@ -688,6 +775,85 @@ mod tests {
 
     fn focus(app: &mut App, rect: Option<(f32, f32, f32, f32)>) {
         app.world_mut().resource_mut::<ImeFocus>().rect = rect;
+    }
+
+    // ---- 发布打包路径解析（#B2：exe 相对优先，编译期路径仅作开发回退）----
+
+    fn exe_pair() -> (PathBuf, PathBuf) {
+        (
+            PathBuf::from("/exe/libpinyin/data"),
+            PathBuf::from("/exe/libpinyin/conf"),
+        )
+    }
+
+    fn build_pair() -> (PathBuf, PathBuf) {
+        (
+            PathBuf::from("/build/out/libpinyin/install/lib/libpinyin/data"),
+            PathBuf::from("/build/out/libpinyin/install/lib/libpinyin/conf"),
+        )
+    }
+
+    #[test]
+    fn pick_prefers_exe_relative_when_valid() {
+        // 发布布局：exe 旁 libpinyin/data 含词典 → 用 exe 相对，不落编译期路径
+        let candidates = vec![exe_pair(), build_pair()];
+        let picked = PinyinIme::pick_libpinyin_dirs(&candidates, |d| *d == exe_pair().0).unwrap();
+        assert_eq!(picked, exe_pair());
+    }
+
+    #[test]
+    fn pick_falls_back_to_compile_time_when_exe_missing() {
+        // 开发布局：exe 在 target/debug，旁边无 libpinyin/ → 回退编译期注入路径
+        let candidates = vec![exe_pair(), build_pair()];
+        let picked = PinyinIme::pick_libpinyin_dirs(&candidates, |d| *d == build_pair().0).unwrap();
+        assert_eq!(picked, build_pair());
+    }
+
+    #[test]
+    fn pick_returns_last_candidate_when_all_missing() {
+        // 全部缺失 → 仍回退最后一个候选（编译期路径），由引擎初始化失败走降级，
+        // 而不是拿到一个静默错误的空结果
+        let candidates = vec![exe_pair(), build_pair()];
+        let picked = PinyinIme::pick_libpinyin_dirs(&candidates, |_| false).unwrap();
+        assert_eq!(picked, build_pair());
+    }
+
+    #[test]
+    fn candidates_always_end_with_compile_time_fallback() {
+        // 候选链顺序：exe 相对在前，编译期 env! 回退垫底且恒在
+        let candidates = PinyinIme::libpinyin_dir_candidates();
+        assert!(candidates.len() >= 2, "exe 相对 + 编译期回退至少两项");
+        let (data, conf) = candidates.last().unwrap();
+        assert_eq!(data, &PathBuf::from(env!("LIBPINYIN_DATA_DIR")));
+        assert_eq!(conf, &PathBuf::from(env!("LIBPINYIN_CONF_DIR")));
+        assert_eq!(candidates[0].0.file_name().unwrap(), "data");
+    }
+
+    // ---- 引擎缺失降级（#B2：初始化失败禁用 IME，绝不 panic）----
+
+    #[test]
+    fn without_engine_stays_disabled_and_all_ops_safe() {
+        let mut ime = PinyinIme::without_engine();
+        assert!(!ime.enabled());
+        // Shift 切换是 no-op：无引擎绝不启用
+        ime.toggle();
+        assert!(!ime.enabled());
+        // 全部状态机操作安全无效果（修复前这些路径直接解引用引擎，等效 panic）
+        ime.feed_letter('n');
+        ime.backspace();
+        ime.select(0);
+        ime.commit_default();
+        ime.cancel();
+        ime.reset_activity();
+        ime.recompute();
+        assert!(!ime.is_composing());
+        assert!(!ime.has_candidates());
+        assert!(!ime.has_commit());
+        assert!(ime.take_commit().is_none());
+        assert_eq!(ime.display_text(), "");
+        assert!(ime.page_candidates().is_empty());
+        // consumes_key 恒 false：文本框照常收英文直输
+        assert!(!ime.consumes_key(&char_key("n")));
     }
 
     // ---- 纯逻辑 ----

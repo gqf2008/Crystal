@@ -18,7 +18,7 @@ use crate::actor::LocalPlayer;
 use crate::game::dialogs::inventory::{InvClickState, InvItem, InvLockReason, InvLockedSlots};
 use crate::game::dialogs::market_filter::{self, MarketFilterSprites};
 use crate::game::dialogs::text_input::TextInputState;
-use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
+use crate::game::dialogs::{AlwaysVisible, DialogKind, DialogManager, DialogRoot};
 use crate::game::player_state::Inventory;
 use crate::map_renderer::GameLibraries;
 use crate::network::NetConnection;
@@ -1268,9 +1268,13 @@ fn spawn_market(
             TM_CONFIRM_H,
             45,
         );
-        commands
-            .entity(panel)
-            .insert((MarketConfirmWidget, Visibility::Hidden));
+        commands.entity(panel).insert((
+            DialogRoot(DialogKind::Market),
+            // 独立弹窗不随 Market 开关门控；挂 DialogRoot 仅为 OnExit 时随寄售窗口一起清理
+            AlwaysVisible,
+            MarketConfirmWidget,
+            Visibility::Hidden,
+        ));
         commands.entity(panel).with_children(|p| {
             spawn_label(
                 p,

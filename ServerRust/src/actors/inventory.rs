@@ -1023,13 +1023,13 @@ impl PlayerInventory {
         None
     }
 
-    /// 存入仓库指定格（C# StoreItem{From=背包格, To=仓库格} 语义）：优先目标格，占用则找第一个空位
+    /// 存入仓库指定格（C# StoreItem{From=背包格, To=仓库格} 语义）：优先目标格，占用则找第一个空位。
+    /// 必须先确定目标空位再从背包 take，否则仓库满时已取出的物品会被 drop（吞物）。
     pub fn store_item_to(&mut self, from: i32, to: i32) -> Option<(UserItem, usize)> {
         let idx = from as usize;
-        if idx >= self.backpack.len() {
+        if idx >= self.backpack.len() || self.backpack[idx].is_none() {
             return None;
         }
-        let item = self.backpack[idx].take()?.item;
         let mut target = to;
         if target < 0
             || target as usize >= self.storage.len()
@@ -1037,6 +1037,7 @@ impl PlayerInventory {
         {
             target = self.storage.iter().position(|s| s.is_none())? as i32;
         }
+        let item = self.backpack[idx].take()?.item;
         self.storage[target as usize] = Some(InventorySlot {
             grid: target as u8,
             item: item.clone(),
@@ -1044,13 +1045,13 @@ impl PlayerInventory {
         Some((item, target as usize))
     }
 
-    /// 从仓库指定格取出（C# TakeBackItem{From=仓库格, To=背包格} 语义）：优先目标格，占用则找第一个空位
+    /// 从仓库指定格取出（C# TakeBackItem{From=仓库格, To=背包格} 语义）：优先目标格，占用则找第一个空位。
+    /// 必须先确定目标空位再从仓库 take，否则背包满时已取出的物品会被 drop（吞物）。
     pub fn take_back_item_to(&mut self, from: i32, to: i32) -> Option<(UserItem, u8)> {
         let sidx = from as usize;
-        if sidx >= self.storage.len() {
+        if sidx >= self.storage.len() || self.storage[sidx].is_none() {
             return None;
         }
-        let item = self.storage[sidx].take()?.item;
         let mut target = to;
         if target < 0
             || target as usize >= self.backpack.len()
@@ -1058,6 +1059,7 @@ impl PlayerInventory {
         {
             target = self.backpack.iter().position(|s| s.is_none())? as i32;
         }
+        let item = self.storage[sidx].take()?.item;
         self.backpack[target as usize] = Some(InventorySlot {
             grid: target as u8,
             item: item.clone(),
@@ -1959,5 +1961,65 @@ mod tests {
     fn test_equip_from_storage_empty_slot_returns_none() {
         let mut inv = PlayerInventory::new();
         assert!(inv.equip_from_storage(0, EquipmentSlot::Weapon).is_none());
+    }
+
+    /// 回归：仓库满时 store_item_to 必须返回 None 且物品仍留在背包
+    ///（原实现先 take 背包物品再查仓库空位，仓库满时物品被 drop 吞掉）
+    #[test]
+    fn test_store_item_to_full_storage_keeps_item_in_backpack() {
+        let mut inv = PlayerInventory::new();
+        // 填满仓库
+        for g in 0..STORAGE_SIZE {
+            inv.storage[g] = Some(InventorySlot {
+                grid: g as u8,
+                item: make_item(1, 1),
+            });
+        }
+        inv.add_item(make_item(42, 1));
+        assert!(inv.store_item_to(0, 0).is_none());
+        // 物品仍在背包 0 格
+        let slot = inv.backpack[0].as_ref().expect("物品不应被吞");
+        assert_eq!(slot.item.item_index, 42);
+        // 仓库未被改动
+        assert!(inv.storage.iter().all(|s| s.is_some()));
+    }
+
+    /// 回归：背包满时 take_back_item_to 必须返回 None 且物品仍留在仓库
+    ///（原实现先 take 仓库物品再查背包空位，背包满时物品被 drop 吞掉）
+    #[test]
+    fn test_take_back_item_to_full_backpack_keeps_item_in_storage() {
+        let mut inv = PlayerInventory::new();
+        // 填满背包
+        for g in 0..BACKPACK_SIZE {
+            inv.backpack[g] = Some(InventorySlot {
+                grid: g as u8,
+                item: make_item(1, 1),
+            });
+        }
+        inv.storage[0] = Some(InventorySlot {
+            grid: 0,
+            item: make_item(42, 1),
+        });
+        assert!(inv.take_back_item_to(0, -1).is_none());
+        // 物品仍在仓库 0 格
+        let slot = inv.storage[0].as_ref().expect("物品不应被吞");
+        assert_eq!(slot.item.item_index, 42);
+        // 背包未被改动
+        assert!(inv.backpack.iter().all(|s| s.is_some()));
+    }
+
+    /// 正常路径：store_item_to / take_back_item_to 有空位时正常移动
+    #[test]
+    fn test_store_and_take_back_item_to_success() {
+        let mut inv = PlayerInventory::new();
+        inv.add_item(make_item(7, 1));
+        let (_, sgrid) = inv.store_item_to(0, 3).expect("目标格 3 空，应成功");
+        assert_eq!(sgrid, 3);
+        assert!(inv.backpack[0].is_none());
+        assert_eq!(inv.storage[3].as_ref().unwrap().item.item_index, 7);
+        let (_, bgrid) = inv.take_back_item_to(3, 5).expect("背包 5 空，应成功");
+        assert_eq!(bgrid, 5);
+        assert!(inv.storage[3].is_none());
+        assert_eq!(inv.backpack[5].as_ref().unwrap().item.item_index, 7);
     }
 }

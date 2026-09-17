@@ -12,6 +12,7 @@
 // 用途（C# 服务端发起式取名）：
 //   - `S.GuildNameRequest` → 输入公会名 → `C.GuildNameReturn`（`GameScene.cs:5772-5800`）
 //   - `S.GuildRequestWar`  → 输入宣战目标公会名 → `C.GuildWarReturn`（`GameScene.cs:5784-5802`）
+//   - `S.NPCRequestInput`  → 输入 NPC 索要的信息 → `C.NPCConfirmInput`（`GameScene.cs:4266-4275`）
 // ============================================================================
 
 use bevy::input::keyboard::{Key, KeyboardInput};
@@ -56,7 +57,7 @@ pub const CANCEL_FRAMES: (usize, usize, usize) = (203, 204, 205);
 pub const INPUT_FIELD_ID: usize = 40;
 
 /// 输入框用途（决定 OK 时回哪个包）
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum InputPurpose {
     #[default]
     None,
@@ -67,6 +68,9 @@ pub enum InputPurpose {
     /// #2892 批D：好友窗「添加好友」→ `C.AddFriend{Name, Blocked}`
     /// （C# `FriendDialog.cs:143-160`：`new MirInputBox(FriendEnterAddName/FriendEnterBlockName)`，OK 时发包）
     AddFriend { blocked: bool },
+    /// #272：NPC 请求输入（`S.NPCRequestInput`）→ `C.NPCConfirmInput{Value, NPCID, PageName}`
+    /// （C# `GameScene.cs:4266-4275`：`new MirInputBox(PleaseEnterRequiredInformation)`，OK 时发包）
+    NpcConfirm { npc_id: u32, page_name: String },
 }
 
 /// 输入框状态（C# 每次 `new MirInputBox(message)` 一个新窗口；本端复用同一实体）
@@ -215,7 +219,7 @@ pub fn open_input_box(
     tracing::info!("⌨️ [INPUTBOX] 打开输入框（客户端发起）：{title}");
 }
 
-/// 服务端发起式取名 → 打开输入框（C# `GameScene.GuildNameRequest` / `GuildRequestWar`）
+/// 服务端发起式取名 → 打开输入框（C# `GameScene.GuildNameRequest` / `GuildRequestWar` / `NPCRequestInput`）
 fn input_box_open_system(
     mut state: ResMut<InputBoxState>,
     mut input: ResMut<TextInputState>,
@@ -225,16 +229,26 @@ fn input_box_open_system(
         let (purpose, title) = match ev {
             crate::network::server_event::ServerEvent::GuildNameRequested => (
                 InputPurpose::GuildNameReturn,
-                "请输入公会名称，长度必须为 3~20 个字符。",
+                "请输入公会名称，长度必须为 3~20 个字符。".to_string(),
             ),
-            crate::network::server_event::ServerEvent::TerritoryWar { .. } => {
-                (InputPurpose::GuildWarReturn, "请输入你想宣战的公会名称。")
-            }
+            crate::network::server_event::ServerEvent::TerritoryWar { .. } => (
+                InputPurpose::GuildWarReturn,
+                "请输入你想宣战的公会名称。".to_string(),
+            ),
+            // C# `GameScene.cs:4266-4275`：`new MirInputBox(PleaseEnterRequiredInformation)`
+            crate::network::server_event::ServerEvent::NpcInputRequest { npc_id, page_name } => (
+                InputPurpose::NpcConfirm {
+                    npc_id: *npc_id,
+                    page_name: page_name.clone(),
+                },
+                // `ClientTextKeys.PleaseEnterRequiredInformation`（Chinese.json）
+                "请输入所需信息。".to_string(),
+            ),
             _ => continue,
         };
         state.open = true;
         state.purpose = purpose;
-        state.title = title.to_string();
+        state.title = title.clone();
         if input.texts.len() <= INPUT_FIELD_ID {
             input.texts.resize(INPUT_FIELD_ID + 1, String::new());
         }
@@ -251,6 +265,7 @@ fn input_box_ui_system(
     mut state: ResMut<InputBoxState>,
     input: Res<TextInputState>,
     net: Res<NetConnection>,
+    mut npc_input: ResMut<crate::game::dialogs::npc::NpcInputState>,
     mut keys: MessageReader<KeyboardInput>,
     ok: Query<&Interaction, (With<InputBoxOk>, Without<InputBoxCancel>)>,
     cancel: Query<&Interaction, (With<InputBoxCancel>, Without<InputBoxOk>)>,
@@ -309,7 +324,7 @@ fn input_box_ui_system(
             .chars()
             .take(INPUT_MAX_LEN)
             .collect();
-        match state.purpose {
+        match state.purpose.clone() {
             InputPurpose::GuildWarReturn => {
                 net.send_packet(&mir2_shared::packets::client::guild::GuildWarReturn {
                     guild_name: body.clone(),
@@ -330,11 +345,24 @@ fn input_box_ui_system(
                 });
                 tracing::info!("👥 [INPUTBOX] C.AddFriend name={body} blocked={blocked}");
             }
+            InputPurpose::NpcConfirm { npc_id, page_name } => {
+                // C# `GameScene.cs:4270-4271`：`C.NPCConfirmInput{Value, NPCID, PageName}`
+                net.send_packet(&mir2_shared::packets::client::npc::NPCConfirmInput {
+                    npc_id,
+                    page_name: page_name.clone(),
+                    value: body.clone(),
+                });
+                tracing::info!("⌨️ [INPUTBOX] C.NPCConfirmInput npc={npc_id} page={page_name}");
+            }
             InputPurpose::None => {}
         }
         dismiss = true;
     }
     if dismiss {
+        // NPC 输入请求已了结（确认或取消），复位探针状态
+        if matches!(state.purpose, InputPurpose::NpcConfirm { .. }) {
+            npc_input.active = false;
+        }
         state.open = false;
         state.purpose = InputPurpose::None;
         sync_dialog_state(&mut mgr, DialogKind::InputBox, false);
@@ -372,6 +400,7 @@ mod tests {
         app.init_resource::<DialogManager>();
         app.init_resource::<InputBoxState>();
         app.init_resource::<TextInputState>();
+        app.init_resource::<crate::game::dialogs::npc::NpcInputState>();
         app.insert_resource(NetConnection::default());
         app.add_message::<KeyboardInput>();
         app.add_message::<TextInputSubmit>();
@@ -501,6 +530,112 @@ mod tests {
         assert_eq!(
             app.world().resource::<TextInputState>().texts[INPUT_FIELD_ID],
             ""
+        );
+    }
+
+    /// C# `GameScene.cs:4266-4275`：`S.NPCRequestInput` → `MirInputBox(PleaseEnterRequiredInformation)`
+    #[test]
+    fn npc_request_opens_box_with_csharp_caption() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.init_resource::<InputBoxState>();
+        app.init_resource::<TextInputState>();
+        app.add_message::<ServerEvent>();
+        app.add_systems(Update, input_box_open_system);
+
+        app.world_mut().write_message(ServerEvent::NpcInputRequest {
+            npc_id: 110,
+            page_name: "Amount".to_string(),
+        });
+        app.update();
+        let st = app.world().resource::<InputBoxState>();
+        assert!(st.open, "收到 NPCRequestInput 应打开输入框");
+        assert_eq!(
+            st.purpose,
+            InputPurpose::NpcConfirm {
+                npc_id: 110,
+                page_name: "Amount".to_string()
+            }
+        );
+        assert_eq!(
+            st.title, "请输入所需信息。",
+            "C# `ClientTextKeys.PleaseEnterRequiredInformation`（Chinese.json）"
+        );
+        assert_eq!(
+            app.world().resource::<TextInputState>().active,
+            Some(INPUT_FIELD_ID),
+            "打开即聚焦"
+        );
+    }
+
+    /// C# `GameScene.cs:4270-4271`：OK → `C.NPCConfirmInput{Value, NPCID, PageName}`
+    #[test]
+    fn npc_confirm_ok_sends_packet_and_closes() {
+        let mut app = app_with_ui_system();
+        let (tx, rx) = crossbeam_channel::unbounded::<Vec<u8>>();
+        app.world_mut().resource_mut::<NetConnection>().to_server = Some(tx);
+        set_text(&mut app, "5");
+        {
+            let mut st = app.world_mut().resource_mut::<InputBoxState>();
+            st.open = true;
+            st.purpose = InputPurpose::NpcConfirm {
+                npc_id: 110,
+                page_name: "Amount".to_string(),
+            };
+        }
+        app.world_mut()
+            .resource_mut::<crate::game::dialogs::npc::NpcInputState>()
+            .active = true;
+        app.world_mut().spawn((InputBoxOk, Interaction::Pressed));
+        app.update();
+
+        let raw = rx.try_recv().expect("OK 应发出 C.NPCConfirmInput");
+        let pkt: mir2_shared::packets::client::npc::NPCConfirmInput =
+            mir2_shared::packets::base::deserialize_packet(&mut std::io::Cursor::new(raw))
+                .expect("应为 NPCConfirmInput 包");
+        assert_eq!(pkt.npc_id, 110);
+        assert_eq!(pkt.page_name, "Amount");
+        assert_eq!(pkt.value, "5");
+        assert!(
+            !app.world().resource::<InputBoxState>().open,
+            "确认后应关闭"
+        );
+        assert!(
+            !app.world()
+                .resource::<crate::game::dialogs::npc::NpcInputState>()
+                .active,
+            "确认后 NPC 输入探针状态复位"
+        );
+    }
+
+    /// NPC 输入框 Cancel → 关闭、不发包、探针状态复位
+    #[test]
+    fn npc_confirm_cancel_closes_without_sending() {
+        let mut app = app_with_ui_system();
+        let (tx, rx) = crossbeam_channel::unbounded::<Vec<u8>>();
+        app.world_mut().resource_mut::<NetConnection>().to_server = Some(tx);
+        set_text(&mut app, "不该发出");
+        {
+            let mut st = app.world_mut().resource_mut::<InputBoxState>();
+            st.open = true;
+            st.purpose = InputPurpose::NpcConfirm {
+                npc_id: 110,
+                page_name: "Amount".to_string(),
+            };
+        }
+        app.world_mut()
+            .resource_mut::<crate::game::dialogs::npc::NpcInputState>()
+            .active = true;
+        app.world_mut()
+            .spawn((InputBoxCancel, Interaction::Pressed));
+        app.update();
+
+        assert!(rx.try_recv().is_err(), "取消不得发包");
+        assert!(!app.world().resource::<InputBoxState>().open);
+        assert!(
+            !app.world()
+                .resource::<crate::game::dialogs::npc::NpcInputState>()
+                .active
         );
     }
 

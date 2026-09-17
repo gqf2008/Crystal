@@ -12,19 +12,22 @@
 
 use bevy::prelude::*;
 
-use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
+use crate::game::dialogs::{AlwaysVisible, DialogKind, DialogManager, DialogRoot};
 use crate::map_renderer::GameLibraries;
 use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
 use crate::ui::sprite_ui::{shared_cjk_font, UiCjkFont, UiFont};
 use crate::ui::theme::{
-    load_lib_image, spawn_container, spawn_icon_button, spawn_image, spawn_label, spawn_panel,
+    load_lib_image, spawn_close_button, spawn_container, spawn_icon_button, spawn_image,
+    spawn_label, spawn_panel,
 };
 
 /// #2892 批B：面板精灵与 C# 原生尺寸（C# `MentorDialog.Index = 170; Library = Libraries.Prguse`）
 pub const PANEL: (LibraryName, usize) = (LibraryName::Prguse, 170);
 pub const PANEL_SIZE: (f32, f32) = (244.0, 207.0);
+/// 关闭键 `Prguse2[360..362]` @(219,3)（`MentorDialog.cs:39-48`，无 `Size` → 原生 24x21）
+pub const CLOSE_POS: (f32, f32) = (219.0, 3.0);
 
 /// 师徒状态（MentorUpdate 写入；mentor_* 字段语义同 C# MentorDialog：对方信息）
 #[derive(Resource, Default)]
@@ -135,12 +138,10 @@ fn spawn_mentor(
             spawn_image(p, h, 18.0, 8.0, 103.0, 17.0, 9);
         }
         // 关闭 Prguse2[360/361/362] @(219,3)
-        if let (Some(n), Some(h), Some(pr)) = (
-            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 360),
-            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 361),
-            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 362),
-        ) {
-            spawn_icon_button(p, n, h, pr, 219.0, 3.0, 20.0, 20.0, 10).insert(MentorClose);
+        if let Some(mut btn) =
+            spawn_close_button(p, &mut libs, &mut images, CLOSE_POS.0, CLOSE_POS.1, 10)
+        {
+            btn.insert(MentorClose);
         }
         // 信息行（标题 + 师父 + 徒弟 + 经验/允许状态）@ C# 区块。
         for (i, (x, y)) in [
@@ -231,7 +232,12 @@ fn spawn_mentor(
     let (bx, by) = (284.0, 289.0);
     if let Some(h) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 360) {
         let inv = spawn_panel(&mut commands, h, bx, by, 456.0, 190.0, 45);
-        commands.entity(inv).insert(MentorInviteWidget);
+        commands.entity(inv).insert((
+            DialogRoot(DialogKind::Mentor),
+            // 独立弹窗不随 Mentor 开关门控；挂 DialogRoot 仅为 OnExit 时随师徒窗口一起清理
+            AlwaysVisible,
+            MentorInviteWidget,
+        ));
         commands.entity(inv).with_children(|ip| {
             spawn_label(ip, &font, "", 35.0, 35.0, 12.0, Color::WHITE, 9).insert(MentorInviteText);
             if let (Some(n), Some(h), Some(pr)) = (

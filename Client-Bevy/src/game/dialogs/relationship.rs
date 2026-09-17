@@ -14,19 +14,22 @@ use bevy::prelude::*;
 
 use crate::game::chat::ChatState;
 use crate::game::dialogs::mail::ComposeMail;
-use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
+use crate::game::dialogs::{AlwaysVisible, DialogKind, DialogManager, DialogRoot};
 use crate::map_renderer::GameLibraries;
 use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
 use crate::ui::sprite_ui::{shared_cjk_font, UiCjkFont, UiFont};
 use crate::ui::theme::{
-    load_lib_image, spawn_container, spawn_icon_button, spawn_label, spawn_panel,
+    load_lib_image, spawn_close_button, spawn_container, spawn_icon_button, spawn_label,
+    spawn_panel,
 };
 
 /// #2892 批B：面板精灵与 C# 原生尺寸（C# `RelationshipDialog.Index = 583; Library = Libraries.Prguse`）
 pub const PANEL: (LibraryName, usize) = (LibraryName::Prguse, 583);
 pub const PANEL_SIZE: (f32, f32) = (284.0, 194.0);
+/// 关闭键 `Prguse2[360..362]` @(260,3)（`RelationshipDialog.cs:38-47`，无 `Size` → 原生 24x21）
+pub const CLOSE_POS: (f32, f32) = (260.0, 3.0);
 
 /// 婚姻状态
 #[derive(Resource, Default)]
@@ -190,12 +193,10 @@ fn spawn_relationship(
 
     commands.entity(panel).with_children(|p| {
         // 关闭 Prguse2[360/361/362] @(260,3)
-        if let (Some(n), Some(h), Some(pr)) = (
-            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 360),
-            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 361),
-            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 362),
-        ) {
-            spawn_icon_button(p, n, h, pr, 260.0, 3.0, 20.0, 20.0, 10).insert(RelationshipClose);
+        if let Some(mut btn) =
+            spawn_close_button(p, &mut libs, &mut images, CLOSE_POS.0, CLOSE_POS.1, 10)
+        {
+            btn.insert(RelationshipClose);
         }
         // C# 信息行 4 @(30,40/65/90/115)
         for (i, y) in [40.0, 65.0, 90.0, 115.0].into_iter().enumerate() {
@@ -278,7 +279,12 @@ fn spawn_relationship(
     let (bx, by) = (284.0, 289.0);
     if let Some(h) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 360) {
         let inv = spawn_panel(&mut commands, h, bx, by, 456.0, 190.0, 45);
-        commands.entity(inv).insert(MarriageInviteWidget);
+        commands.entity(inv).insert((
+            DialogRoot(DialogKind::Relationship),
+            // 独立弹窗不随 Relationship 开关门控；挂 DialogRoot 仅为 OnExit 时随婚姻窗口一起清理
+            AlwaysVisible,
+            MarriageInviteWidget,
+        ));
         commands.entity(inv).with_children(|ip| {
             // Label（C# (35,35)，390x110）
             spawn_label(ip, &font, "", 35.0, 35.0, 12.0, Color::WHITE, 9)

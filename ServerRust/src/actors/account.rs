@@ -107,6 +107,9 @@ pub struct AccountActor {
     gate_ref: ActorRef<crate::gate::actor::GateActor>,
     /// SQLite 数据库连接池
     db_pool: DbPool,
+    /// 是否允许注册新账号（C# Settings.AllowNewAccount，server.toml [social] allow_new_account）；
+    /// 关闭时登录不存在账号不再自动注册（对齐 C# Envir.Login：无自助注册）
+    allow_new_account: bool,
 }
 
 impl AccountActor {
@@ -115,6 +118,7 @@ impl AccountActor {
             accounts: HashMap::new(),
             gate_ref,
             db_pool,
+            allow_new_account: true,
         }
     }
 
@@ -224,7 +228,15 @@ impl AccountActor {
             info!("Account logged in: {}", username);
             (true, needs_migration)
         } else {
-            // 自动注册不存在的账号
+            // 登录不存在账号的自动注册：受 AllowNewAccount 门控（C# 本无自助注册，
+            // 本服兼容开关；关闭时拒绝，避免绕过 gate 的注册开关与每 IP 防刷）
+            if !self.allow_new_account {
+                warn!(
+                    "Login rejected: account '{}' not found and AllowNewAccount=false",
+                    username
+                );
+                return (false, false);
+            }
             info!("Auto-registering account: {}", username);
             self.register(username, password);
             (true, false)
@@ -265,6 +277,15 @@ impl Actor for AccountActor {
         _actor_ref: ActorRef<Self>,
     ) -> Result<Self, Self::Error> {
         let mut actor = Self::new(gate_ref, db_pool);
+
+        // 读取 AllowNewAccount 开关（C# Settings.AllowNewAccount；与 main.rs 相同的
+        // 配置路径解析：argv[1] 或 config/server.toml；读取失败回退 C# 默认 true）
+        let config_path = std::env::args()
+            .nth(1)
+            .unwrap_or_else(|| "config/server.toml".to_string());
+        actor.allow_new_account = crate::util::config::load_config(&config_path)
+            .map(|c| c.social.allow_new_account)
+            .unwrap_or(true);
 
         // 从数据库加载已有账号到内存
         match db::load_all_accounts(&actor.db_pool).await {
@@ -639,6 +660,23 @@ pub struct AccountChangePassword {
     pub new_password: String,
 }
 
+/// 查询账号封禁到期时间（封禁检查/测试观测缝）
+pub struct GetAccountBannedUntil {
+    pub username: String,
+}
+
+impl Message<GetAccountBannedUntil> for AccountActor {
+    type Reply = Option<i64>;
+
+    async fn handle(
+        &mut self,
+        msg: GetAccountBannedUntil,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        self.banned_until(&msg.username)
+    }
+}
+
 impl Message<AccountChangePassword> for AccountActor {
     type Reply = ();
 
@@ -704,10 +742,27 @@ impl Message<AccountChangePassword> for AccountActor {
         // Verify old password before changing（C#：不匹配 → Result=5）
         let (ok, _needs_migration) = verify_password(&msg.old_password, &account.password_hash);
         if !ok {
-            warn!("Old password mismatch for account: {}", msg.username);
+            // 安全加固（超越 C#）：旧密码错误计数 + >=5 封禁 2 分钟，镜像 login() 的
+            // WrongPasswordCount 机制——否则 ChangePassword 是在线爆破任意账号口令的后门。
+            account.wrong_password_count = account.wrong_password_count.saturating_add(1);
+            if account.wrong_password_count >= 5 {
+                account.banned_until = now_secs + 120;
+                warn!(
+                    "Account '{}' banned for 2 minutes (too many wrong old-password attempts)",
+                    msg.username
+                );
+            } else {
+                warn!(
+                    "Old password mismatch for account: {} (attempt {})",
+                    msg.username, account.wrong_password_count
+                );
+            }
             send_result(5).await;
             return;
         }
+        // 旧密码验证通过：重置错误计数（与登录成功同语义）
+        account.wrong_password_count = 0;
+        account.banned_until = 0;
         account.password_hash = hash_password(&msg.new_password);
         // C# ChangePassword：成功后 RequirePasswordChange = false
         account.require_password_change = false;
@@ -723,5 +778,85 @@ impl Message<AccountChangePassword> for AccountActor {
         }
         // C#：成功 → Result=6
         send_result(6).await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use kameo::actor::Spawn;
+
+    /// 红绿回归：登录不存在账号的自动注册必须受 AllowNewAccount 门控（严重9）。
+    /// 红检：删掉 login() 里的 allow_new_account 判断 → 第一组断言 FAILED（账号被自动注册）。
+    #[tokio::test]
+    async fn login_unknown_account_respects_allow_new_account() {
+        let gate_ref = crate::gate::actor::GateActor::spawn(());
+        let db_pool = db::init_db_pool("sqlite::memory:").await.expect("init_db");
+
+        // 关闭开关：不自动注册、不创建账号
+        let mut actor = AccountActor::new(gate_ref.clone(), db_pool.clone());
+        actor.allow_new_account = false;
+        let (ok, _) = actor.login("ghost", "pw12345");
+        assert!(!ok, "AllowNewAccount=false 时未知账号登录必须失败");
+        assert!(
+            !actor.accounts.contains_key("ghost"),
+            "AllowNewAccount=false 时不得自动注册账号"
+        );
+
+        // 开启开关：保持既有兼容行为（自动注册并登录成功）
+        let mut actor = AccountActor::new(gate_ref, db_pool);
+        actor.allow_new_account = true;
+        let (ok, _) = actor.login("newbie", "pw12345");
+        assert!(ok, "AllowNewAccount=true 时未知账号登录自动注册");
+        assert!(actor.accounts.contains_key("newbie"));
+    }
+
+    /// 红绿回归：ChangePassword 旧密码错误必须计数并在 >=5 次后封禁 2 分钟（严重11 后半）。
+    /// 红检：把 handle 里 wrong_password_count 累加分支删掉 → 第五次后 banned_until 仍为 0，断言失败。
+    #[tokio::test]
+    async fn change_password_wrong_old_password_counts_and_bans() {
+        use kameo::actor::ActorRef;
+        let gate_ref = crate::gate::actor::GateActor::spawn(());
+        let db_pool = db::init_db_pool("sqlite::memory:").await.expect("init_db");
+        let actor_ref = AccountActor::spawn((gate_ref, db_pool));
+
+        // 注册账号（走注册消息，避免依赖自动注册行为）
+        let registered = actor_ref
+            .ask(RegisterAccountRequest {
+                username: "victim".to_string(),
+                password: "correct_pw".to_string(),
+            })
+            .await
+            .expect("register");
+        assert!(registered);
+
+        // 连续 5 次错误旧密码
+        for _ in 0..5 {
+            actor_ref
+                .ask(AccountChangePassword {
+                    session_id: 1,
+                    username: "victim".to_string(),
+                    old_password: "wrong_pw".to_string(),
+                    new_password: "new_pw".to_string(),
+                })
+                .await
+                .expect("change attempt");
+        }
+
+        let banned = actor_ref
+            .ask(GetAccountBannedUntil {
+                username: "victim".to_string(),
+            })
+            .await
+            .expect("query ban")
+            .expect("5 次错误旧密码后必须处于封禁期");
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+        assert!(
+            banned > now,
+            "5 次错误旧密码后账号必须处于封禁期（banned_until={banned}, now={now}）"
+        );
     }
 }

@@ -20,7 +20,15 @@ pub type DbPool = SqlitePool;
 
 /// Initialize the SQLite database from a URL and run migrations
 pub async fn init_db_pool(db_url: &str) -> anyhow::Result<DbPool> {
-    let pool = SqlitePool::connect(db_url).await?;
+    // FK 必须池级禁用：PRAGMA foreign_keys 是【每连接】设置，而 sqlx 默认给每条新连接
+    // 开 FK——此前只对第一条连接执行 OFF，连接池回收/扩容后新连接 FK 仍开，
+    // INSERT OR REPLACE 在 characters 表会触发子表级联删除+重插导致 FK constraint failed。
+    // 游戏服务器的数据完整性由应用层保证（save_character 用事务）。
+    let options = db_url
+        .parse::<sqlx::sqlite::SqliteConnectOptions>()?
+        .foreign_keys(false)
+        .busy_timeout(std::time::Duration::from_secs(5));
+    let pool = SqlitePool::connect_with(options).await?;
 
     // Phase 1.2: SQLite WAL 模式 + 同步策略调优(生产级持久化)
     //   WAL = Write-Ahead Logging,允许并发读不阻塞写,显著提升高负载性能
@@ -35,12 +43,7 @@ pub async fn init_db_pool(db_url: &str) -> anyhow::Result<DbPool> {
     sqlx::query("PRAGMA busy_timeout=5000")
         .execute(&pool)
         .await?;
-    // FK 禁用：INSERT OR REPLACE 在 characters 表会触发子表级联删除+重插，
-    // 中间状态（character 行被删、子表引用悬空）导致 FK constraint failed。
-    // 游戏服务器的数据完整性由应用层保证（save_character 用事务）。
-    sqlx::query("PRAGMA foreign_keys=OFF")
-        .execute(&pool)
-        .await?;
+    // foreign_keys 已在连接选项池级禁用（见上），此处再对首连接冗余执行无害。
 
     // Create tables if not exists
     // Phase A fix: sqlx::query() 不支持多语句;改用 raw_sql() 执行整个 schema 批次
@@ -1610,15 +1613,18 @@ pub async fn init_db(db_path: &Path) -> anyhow::Result<DbPool> {
 // Account save/load
 // ============================================================
 
+/// 保存账号。已存在行走 UPDATE——绝不写 admin_account/credit：GM 权限只能由运维直改库
+/// 授予，credit 由 add/try_deduct_account_credit 原子直改库，内存 AccountInfo.credit
+/// 是加载时快照，回写会丢并发更新（旧 INSERT OR REPLACE 未列全字段，更会把
+/// admin_account/credit 直接重置为默认值 0）。不存在才 INSERT（新注册账号入库）。
 pub async fn save_account(pool: &DbPool, account: &AccountInfo) -> anyhow::Result<()> {
-    sqlx::query(
-        r#"INSERT OR REPLACE INTO accounts
-           (username, password_hash, is_online, storage_password_hash, storage_password_last_set,
-            wrong_password_count, banned_until, require_password_change,
-            has_expanded_storage, expanded_storage_expiry_date)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#,
+    let updated = sqlx::query(
+        r#"UPDATE accounts SET
+            password_hash = ?, is_online = ?, storage_password_hash = ?, storage_password_last_set = ?,
+            wrong_password_count = ?, banned_until = ?, require_password_change = ?,
+            has_expanded_storage = ?, expanded_storage_expiry_date = ?
+           WHERE username = ?"#,
     )
-    .bind(&account.username)
     .bind(&account.password_hash)
     .bind(if account.is_online { 1 } else { 0 })
     .bind(account.storage_password_hash.as_deref())
@@ -1632,8 +1638,36 @@ pub async fn save_account(pool: &DbPool, account: &AccountInfo) -> anyhow::Resul
     })
     .bind(if account.has_expanded_storage { 1 } else { 0 })
     .bind(account.expanded_storage_expiry_date)
+    .bind(&account.username)
     .execute(pool)
-    .await?;
+    .await?
+    .rows_affected();
+
+    if updated == 0 {
+        sqlx::query(
+            r#"INSERT INTO accounts
+               (username, password_hash, is_online, storage_password_hash, storage_password_last_set,
+                wrong_password_count, banned_until, require_password_change,
+                has_expanded_storage, expanded_storage_expiry_date)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#,
+        )
+        .bind(&account.username)
+        .bind(&account.password_hash)
+        .bind(if account.is_online { 1 } else { 0 })
+        .bind(account.storage_password_hash.as_deref())
+        .bind(account.storage_password_last_set)
+        .bind(account.wrong_password_count as i64)
+        .bind(account.banned_until)
+        .bind(if account.require_password_change {
+            1
+        } else {
+            0
+        })
+        .bind(if account.has_expanded_storage { 1 } else { 0 })
+        .bind(account.expanded_storage_expiry_date)
+        .execute(pool)
+        .await?;
+    }
     Ok(())
 }
 
@@ -6603,6 +6637,64 @@ mod tests {
         assert!(!try_deduct_account_credit(&pool, "ghost", 1).await.unwrap());
     }
 
+    /// 红绿回归（严重12）：save_account 不得清掉 admin_account/credit。
+    /// 红检：把 save_account 改回旧的 INSERT OR REPLACE（漏列版本）→ 两条断言 FAILED。
+    #[tokio::test]
+    async fn test_save_account_preserves_admin_and_credit() {
+        let pool = init_db_pool("sqlite::memory:?cache=shared").await.unwrap();
+        sqlx::query(
+            "INSERT INTO accounts (username, password_hash, credit, admin_account) VALUES ('gm_user', 'x', 500, 1)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let mut acc = load_account(&pool, "gm_user")
+            .await
+            .unwrap()
+            .expect("account exists");
+        acc.is_online = true; // 模拟登录保存
+        save_account(&pool, &acc).await.unwrap();
+        let (credit, admin): (i64, i64) =
+            sqlx::query_as("SELECT credit, admin_account FROM accounts WHERE username = 'gm_user'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(credit, 500, "save_account 不得重置 credit");
+        assert_eq!(admin, 1, "save_account 不得清掉 admin_account");
+        // 常规字段确实落库
+        let reloaded = load_account(&pool, "gm_user")
+            .await
+            .unwrap()
+            .expect("account exists");
+        assert!(reloaded.is_online);
+    }
+
+    /// 新注册账号（库中无行）save_account 必须 INSERT 建档，重复保存走 UPDATE 不报错
+    #[tokio::test]
+    async fn test_save_account_inserts_when_missing() {
+        let pool = init_db_pool("sqlite::memory:?cache=shared").await.unwrap();
+        let acc = AccountInfo {
+            username: "fresh".to_string(),
+            password_hash: "h".to_string(),
+            is_online: true,
+            storage_password_hash: None,
+            storage_password_last_set: 0,
+            credit: 0,
+            wrong_password_count: 0,
+            banned_until: 0,
+            require_password_change: false,
+            has_expanded_storage: false,
+            expanded_storage_expiry_date: 0,
+        };
+        save_account(&pool, &acc).await.unwrap();
+        let loaded = load_account(&pool, "fresh")
+            .await
+            .unwrap()
+            .expect("inserted");
+        assert!(loaded.is_online);
+        save_account(&pool, &acc).await.unwrap();
+    }
+
     /// #2566：每账号商城限购计数累加（C# GSpurchases[Product.GIndex] += Quantity）
     #[tokio::test]
     async fn test_gameshop_purchases_counter() {
@@ -6723,4 +6815,37 @@ pub async fn add_account_credit(pool: &DbPool, username: &str, delta: i64) -> an
         .execute(pool)
         .await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod pool_fk_off_tests {
+    /// 池级 FK 禁用回归：mail 表有 REFERENCES characters(name)，向不存在角色的邮箱
+    /// 插入（交易归还离线邮件场景）在任何池连接上都不得报 FK 787。
+    /// 修复前 PRAGMA foreign_keys=OFF 只作用于首连接，新连接 sqlx 默认开 FK。
+    #[tokio::test]
+    async fn insert_mail_for_unknown_character_succeeds_on_any_pool_connection() {
+        let pool = crate::db::init_db_pool("sqlite::memory:").await.expect("init");
+        let mail = crate::actors::mail::MailMessage {
+            mail_id: crate::actors::mail::generate_mail_id(),
+            sender_name: "交易系统".into(),
+            receiver_name: "Alice".into(),
+            subject: "s".into(),
+            body: "b".into(),
+            timestamp: 1,
+            read: false,
+            collected: false,
+            locked: false,
+            gold: 500,
+            items: vec![],
+        };
+        crate::db::insert_mail(&pool, "Alice", &mail)
+            .await
+            .expect("FK 池级禁用后插入必须成功");
+        let rows: Vec<(i64,)> = sqlx::query_as("SELECT gold FROM mail WHERE character_name = ?")
+            .bind("Alice")
+            .fetch_all(&pool)
+            .await
+            .expect("query");
+        assert_eq!(rows.len(), 1);
+    }
 }

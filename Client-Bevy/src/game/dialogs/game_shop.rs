@@ -21,12 +21,15 @@ use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
 use crate::ui::sprite_ui::{shared_cjk_font, UiCjkFont, UiFont};
 use crate::ui::theme::{
-    load_lib_image, spawn_container, spawn_icon_button, spawn_image, spawn_label, spawn_panel,
+    load_lib_image, spawn_close_button, spawn_container, spawn_icon_button, spawn_image,
+    spawn_label, spawn_panel,
 };
 
 /// #2892 批B：面板精灵与 C# 原生尺寸（C# `GameShopDialog.Index = 749; Location = Center`）
 pub const PANEL: (LibraryName, usize) = (LibraryName::Title, 749);
 pub const PANEL_SIZE: (f32, f32) = (696.0, 476.0);
+/// 关闭键 `Prguse2[360..362]` @(671,4)（`GameShopDialog.cs:67-76`，无 `Size` → 原生 24x21）
+pub const CLOSE_POS: (f32, f32) = (671.0, 4.0);
 
 /// 商城商品（GameShopInfo 写入）
 #[derive(Debug, Clone, Default)]
@@ -233,12 +236,10 @@ fn spawn_game_shop(
             spawn_image(p, h, 18.0, 9.0, 103.0, 17.0, 8);
         }
         // 关闭（C# (671,4)）
-        if let (Some(n), Some(h), Some(pr)) = (
-            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 360),
-            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 361),
-            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 362),
-        ) {
-            spawn_icon_button(p, n, h, pr, 671.0, 4.0, 20.0, 20.0, 10).insert(GameShopClose);
+        if let Some(mut btn) =
+            spawn_close_button(p, &mut libs, &mut images, CLOSE_POS.0, CLOSE_POS.1, 10)
+        {
+            btn.insert(GameShopClose);
         }
         // 分类页签（C# Filters 区 @(11,102)，每页 10 行）
         for i in 0..10usize {

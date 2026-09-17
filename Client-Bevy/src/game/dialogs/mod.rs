@@ -779,6 +779,219 @@ mod tests {
         assert_eq!(sorted, vec![40, 50], "Mail 两面板抬到 40/50，内部层级保留");
         assert_eq!(char_gz, 30, "Character 未置顶保持原值");
     }
+
+    /// S1 回归：孤儿弹窗（邀请/确认框）挂 `DialogRoot` + `AlwaysVisible` 后——
+    /// 1) `enforce_dialog_visibility` 不得因 kind 未 open 而误隐藏它们（显隐由各自
+    ///    ui_system 驱动）；
+    /// 2) 同 kind 的普通根仍被兜底隐藏。
+    #[test]
+    fn enforce_visibility_skips_orphan_popup_but_hides_unopened_root() {
+        let mut world = World::new();
+        world.insert_resource(DialogManager::default());
+        let orphan = world
+            .spawn((
+                DialogRoot(DialogKind::Mentor),
+                AlwaysVisible,
+                Visibility::Visible,
+            ))
+            .id();
+        let plain = world
+            .spawn((DialogRoot(DialogKind::Trade), Visibility::Visible))
+            .id();
+
+        world
+            .run_system_once(enforce_dialog_visibility)
+            .expect("enforce 系统应运行");
+
+        assert_eq!(
+            world.entity(orphan).get::<Visibility>(),
+            Some(&Visibility::Visible),
+            "孤儿弹窗（AlwaysVisible）显隐由自身系统驱动，不被兜底误伤"
+        );
+        assert_eq!(
+            world.entity(plain).get::<Visibility>(),
+            Some(&Visibility::Hidden),
+            "未 open 的普通 DialogRoot 仍被兜底隐藏"
+        );
+    }
+
+    /// S1 回归：孤儿弹窗挂 `DialogRoot` 后，OnExit(Game) 的清理系统（各插件同款
+    /// 「despawn 全部 DialogRoot」）能把它们一并清掉，登出重进不再堆积。
+    #[test]
+    fn exit_cleanup_despawns_orphan_popups() {
+        fn cleanup_all(mut commands: Commands, roots: Query<Entity, With<DialogRoot>>) {
+            for e in roots.iter() {
+                commands.entity(e).despawn();
+            }
+        }
+        let mut world = World::new();
+        // 主面板 + 三个孤儿弹窗（邀请/确认框均带 GlobalZIndex + AlwaysVisible）
+        world.spawn((DialogRoot(DialogKind::Mentor), Visibility::Hidden));
+        world.spawn((
+            DialogRoot(DialogKind::Mentor),
+            AlwaysVisible,
+            mentor::MentorInviteWidget,
+            Visibility::Hidden,
+        ));
+        world.spawn((
+            DialogRoot(DialogKind::Inventory),
+            AlwaysVisible,
+            inventory::InvConfirmWidget,
+            Visibility::Hidden,
+        ));
+        world.spawn((
+            DialogRoot(DialogKind::Market),
+            AlwaysVisible,
+            market::MarketConfirmWidget,
+            Visibility::Hidden,
+        ));
+
+        world
+            .run_system_once(cleanup_all)
+            .expect("cleanup 系统应运行");
+
+        let mut q = world.query::<&DialogRoot>();
+        assert_eq!(
+            q.iter(&world).count(),
+            0,
+            "OnExit 清理后不应残留任何 DialogRoot（含孤儿弹窗）"
+        );
+        let mut q = world.query::<&mentor::MentorInviteWidget>();
+        assert_eq!(q.iter(&world).count(), 0);
+    }
+
+    /// logout 测试脚手架：装满「登出前」状态的世界
+    fn logout_test_app() -> App {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.init_resource::<DialogManager>();
+        app.init_resource::<crate::network::SessionState>();
+        app.insert_resource(crate::network::NetConnection::default());
+        app.init_resource::<mentor::MentorState>();
+        app.init_resource::<relationship::RelationshipState>();
+        app.init_resource::<trade::TradeState>();
+        app.init_resource::<inventory::InvDropConfirm>();
+        app.init_resource::<market::MarketConfirm>();
+        app.init_resource::<npc::NpcInputState>();
+        app.init_resource::<input_box::InputBoxState>();
+        app.add_message::<crate::network::server_event::ServerEvent>();
+        app.add_systems(Update, logout_server_events);
+        app
+    }
+
+    /// 把世界弄脏成「登出前」：对话框栈 + 全部孤儿弹窗驱动状态
+    fn dirty_logout_state(app: &mut App) {
+        app.world_mut()
+            .resource_mut::<DialogManager>()
+            .open(DialogKind::Trade);
+        app.world_mut().resource_mut::<mentor::MentorState>().invite =
+            Some(("师父".to_string(), 40));
+        app.world_mut()
+            .resource_mut::<relationship::RelationshipState>()
+            .invite = Some("恋人".to_string());
+        app.world_mut().resource_mut::<trade::TradeState>().invite = Some("商人".to_string());
+        app.world_mut()
+            .resource_mut::<inventory::InvDropConfirm>()
+            .visible = true;
+        app.world_mut()
+            .resource_mut::<market::MarketConfirm>()
+            .visible = true;
+        app.world_mut().resource_mut::<npc::NpcInputState>().active = true;
+        app.world_mut()
+            .resource_mut::<input_box::InputBoxState>()
+            .open = true;
+    }
+
+    fn assert_dialog_state_clean(app: &App, ctx: &str) {
+        let w = app.world();
+        assert!(
+            w.resource::<DialogManager>().open.is_empty(),
+            "{ctx}: 对话框栈应清空"
+        );
+        assert!(
+            w.resource::<mentor::MentorState>().invite.is_none(),
+            "{ctx}: MentorState.invite 应复位"
+        );
+        assert!(
+            w.resource::<relationship::RelationshipState>()
+                .invite
+                .is_none(),
+            "{ctx}: RelationshipState.invite 应复位"
+        );
+        assert!(
+            w.resource::<trade::TradeState>().invite.is_none(),
+            "{ctx}: TradeState.invite 应复位"
+        );
+        assert!(
+            !w.resource::<inventory::InvDropConfirm>().visible,
+            "{ctx}: InvDropConfirm 应复位"
+        );
+        assert!(
+            !w.resource::<market::MarketConfirm>().visible,
+            "{ctx}: MarketConfirm 应复位"
+        );
+        assert!(
+            !w.resource::<npc::NpcInputState>().active,
+            "{ctx}: NpcInputState 应复位"
+        );
+        assert!(
+            !w.resource::<input_box::InputBoxState>().open,
+            "{ctx}: InputBoxState 应复位"
+        );
+    }
+
+    /// S1 回归：登出成功 → 对话框栈清空 + 孤儿弹窗驱动状态复位
+    #[test]
+    fn logout_clears_dialogs_and_orphan_popup_states() {
+        let mut app = logout_test_app();
+        dirty_logout_state(&mut app);
+        app.world_mut()
+            .write_message(crate::network::server_event::ServerEvent::LogOutSuccess);
+        app.update();
+        assert_dialog_state_clean(&app, "LogOutSuccess");
+    }
+
+    /// M6 回归：TCP 断线走自动重连（`reconnecting` 上升沿）→ 对话框同样全清；
+    /// 且只在上升沿触发一次（重连成功后再次断线能再次触发）。
+    #[test]
+    fn disconnect_reconnect_edge_clears_dialogs() {
+        let mut app = logout_test_app();
+        dirty_logout_state(&mut app);
+        app.world_mut()
+            .resource_mut::<crate::network::NetConnection>()
+            .reconnecting = true;
+        app.update();
+        assert_dialog_state_clean(&app, "断线上升沿");
+
+        // 持续 reconnecting（重试中）不重复清，也不 panic
+        app.update();
+
+        // 重连成功（reconnecting=false）后对话框可再开
+        app.world_mut()
+            .resource_mut::<crate::network::NetConnection>()
+            .reconnecting = false;
+        app.update();
+        app.world_mut()
+            .resource_mut::<DialogManager>()
+            .open(DialogKind::Trade);
+        app.update();
+        assert!(
+            app.world()
+                .resource::<DialogManager>()
+                .is_open(DialogKind::Trade),
+            "重连成功后对话框可正常打开（不被误清）"
+        );
+
+        // 再次断线 → 再次全清
+        app.world_mut()
+            .resource_mut::<crate::network::NetConnection>()
+            .reconnecting = true;
+        app.update();
+        assert!(
+            app.world().resource::<DialogManager>().open.is_empty(),
+            "再次断线应再次清空"
+        );
+    }
 }
 
 /// 对话框根标记（OnExit(Game) 统一清理）
@@ -1269,16 +1482,61 @@ impl Plugin for DialogsPlugin {
     }
 }
 
+/// 登出/断线共用清理：清空对话框栈 + 复位孤儿弹窗（邀请/确认/输入框）驱动状态。
+/// 资源跨 Game 状态存活——不复位则登出重进/断线重连后，旧邀请与旧确认框随新 spawn
+/// 再次显示（8 月实机「一堆 UI 堆屏幕」堆积 bug 的状态层根因）。
+fn clear_dialog_session(
+    mgr: &mut DialogManager,
+    mentor: &mut mentor::MentorState,
+    relationship: &mut relationship::RelationshipState,
+    trade: &mut trade::TradeState,
+    inv_confirm: &mut inventory::InvDropConfirm,
+    market_confirm: &mut market::MarketConfirm,
+    npc_input: &mut npc::NpcInputState,
+    input_box: &mut input_box::InputBoxState,
+) {
+    mgr.open.clear();
+    mentor.invite = None;
+    relationship.invite = None;
+    trade.invite = None;
+    *inv_confirm = inventory::InvDropConfirm::default();
+    *market_confirm = market::MarketConfirm::default();
+    *npc_input = npc::NpcInputState::default();
+    input_box.open = false;
+    input_box.purpose = input_box::InputPurpose::None;
+}
+
 /// #182 登出成功：清理对话框与会话状态（返回选角前）
+/// M6 补充：TCP 断线走自动重连路径时（`NetConnection.reconnecting` 上升沿）同样
+/// 全清对话框——否则断线瞬间打开的对话框与孤儿弹窗状态原样保留，重连后新旧叠加。
+#[allow(clippy::too_many_arguments)]
 fn logout_server_events(
     mut events: MessageReader<crate::network::server_event::ServerEvent>,
     mut mgr: ResMut<DialogManager>,
     mut session: ResMut<crate::network::SessionState>,
+    net: Res<crate::network::NetConnection>,
+    mut was_reconnecting: Local<bool>,
+    mut mentor: ResMut<mentor::MentorState>,
+    mut relationship: ResMut<relationship::RelationshipState>,
+    mut trade: ResMut<trade::TradeState>,
+    mut inv_confirm: ResMut<inventory::InvDropConfirm>,
+    mut market_confirm: ResMut<market::MarketConfirm>,
+    mut npc_input: ResMut<npc::NpcInputState>,
+    mut input_box: ResMut<input_box::InputBoxState>,
 ) {
     use crate::network::server_event::ServerEvent;
     for ev in events.read() {
         if let ServerEvent::LogOutSuccess = ev {
-            mgr.open.clear();
+            clear_dialog_session(
+                &mut mgr,
+                &mut mentor,
+                &mut relationship,
+                &mut trade,
+                &mut inv_confirm,
+                &mut market_confirm,
+                &mut npc_input,
+                &mut input_box,
+            );
             session.self_position = None;
             session.local_player_id = None;
             session.selected_index = None;
@@ -1286,11 +1544,36 @@ fn logout_server_events(
         }
         if let ServerEvent::ReturnToLogin = ev {
             // #289：服务端要求返回登录界面，同样清理对话框/会话
-            mgr.open.clear();
+            clear_dialog_session(
+                &mut mgr,
+                &mut mentor,
+                &mut relationship,
+                &mut trade,
+                &mut inv_confirm,
+                &mut market_confirm,
+                &mut npc_input,
+                &mut input_box,
+            );
             session.self_position = None;
             session.local_player_id = None;
             session.selected_index = None;
             tracing::info!("🧹 返回登录：已清理对话框/会话");
         }
+    }
+    // M6：断线自动重连（`network_system` 置 `reconnecting = true`）上升沿全清对话框
+    let disconnect_edge = net.reconnecting && !*was_reconnecting;
+    *was_reconnecting = net.reconnecting;
+    if disconnect_edge {
+        clear_dialog_session(
+            &mut mgr,
+            &mut mentor,
+            &mut relationship,
+            &mut trade,
+            &mut inv_confirm,
+            &mut market_confirm,
+            &mut npc_input,
+            &mut input_box,
+        );
+        tracing::info!("🧹 断线重连：已清理对话框");
     }
 }

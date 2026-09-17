@@ -16,14 +16,16 @@ use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
 use crate::ui::sprite_ui::{shared_cjk_font, UiCjkFont, UiFont};
 use crate::ui::theme::{
-    load_lib_image, spawn_icon_button, spawn_item_cell_ui, spawn_label, spawn_panel,
-    spawn_scroll_bar_ui, UiItemCellData, UiScrollList,
+    load_lib_image, spawn_close_button, spawn_icon_button, spawn_item_cell_ui, spawn_label,
+    spawn_panel, spawn_scroll_bar_ui, UiItemCellData, UiScrollList,
 };
 
 /// #2892 批B：面板精灵与 C# 原生尺寸/坐标（C# `NPCGoodsDialog.Index = 1000; Location = (0,224)`）
 pub const PANEL: (LibraryName, usize) = (LibraryName::Prguse, 1000);
 pub const PANEL_SIZE: (f32, f32) = (244.0, 334.0);
 pub const PANEL_POS: (f32, f32) = (0.0, 224.0);
+/// 关闭键 `Prguse2[360..362]` @(217,3)（`NPCDialogs.cs:1113-1114`，无 `Size` → 原生 24x21）
+pub const CLOSE_POS: (f32, f32) = (217.0, 3.0);
 
 /// 商品条目
 #[derive(Debug, Clone)]
@@ -191,12 +193,10 @@ fn spawn_npc_goods(
         // 滚动条（轨道+滑块，面板子节点，面板内右侧）
         spawn_scroll_bar_ui(p, (220.0, 16.0, 4.0, 176.0), 9);
         // 关闭按钮（C# (217,3)）
-        if let (Some(n), Some(h), Some(pr)) = (
-            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 360),
-            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 361),
-            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 362),
-        ) {
-            spawn_icon_button(p, n, h, pr, 217.0, 3.0, 20.0, 20.0, 10).insert(NpcGoodsClose);
+        if let Some(mut btn) =
+            spawn_close_button(p, &mut libs, &mut images, CLOSE_POS.0, CLOSE_POS.1, 10)
+        {
+            btn.insert(NpcGoodsClose);
         }
         // 购买按钮（C# (77,304)）
         if let (Some(n), Some(h), Some(pr)) = (

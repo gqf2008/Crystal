@@ -30,6 +30,14 @@ pub struct MailMessage {
     pub items: Vec<UserItem>,
 }
 
+impl MailMessage {
+    /// 是否还有未收取的附件（金币或物品）——删除前必须检查，防丢件
+    /// （C# 客户端 MailDialogs.cs:239-248 删除带附件邮件需玩家确认；服务端以此兜底）
+    pub fn has_uncollected_parcel(&self) -> bool {
+        self.gold > 0 || !self.items.is_empty()
+    }
+}
+
 /// 玩家收件箱
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct Mailbox {
@@ -77,8 +85,13 @@ impl Mailbox {
     }
 
     /// 删除邮件
+    /// 拒绝删除：带未收取附件（防丢件）或已锁定（C# 客户端 DeleteButton：Locked 直接 return）
     pub fn delete_mail(&mut self, mail_id: u64) -> bool {
         if let Some(idx) = self.inbox.iter().position(|m| m.mail_id == mail_id) {
+            let mail = &self.inbox[idx];
+            if mail.has_uncollected_parcel() || mail.locked {
+                return false;
+            }
             self.inbox.remove(idx);
             true
         } else {
@@ -272,13 +285,58 @@ mod tests {
     #[test]
     fn test_delete_mail() {
         let mut mailbox = Mailbox::new();
-        mailbox.add_mail(make_mail());
-        mailbox.add_mail(make_mail());
+        let mut m1 = make_mail();
+        m1.gold = 0; // 无附件才可删除
+        let mut m2 = make_mail();
+        m2.mail_id = 2;
+        m2.gold = 0;
+        mailbox.add_mail(m1);
+        mailbox.add_mail(m2);
         assert_eq!(mailbox.inbox.len(), 2);
 
         assert!(mailbox.delete_mail(1));
         assert_eq!(mailbox.inbox.len(), 1);
         assert!(!mailbox.delete_mail(999));
+    }
+
+    /// 严重15-2：带未收取附件（金币/物品）的邮件拒绝删除，附件不丢
+    #[test]
+    fn test_delete_mail_refuses_uncollected_parcel() {
+        let mut mailbox = Mailbox::new();
+        let gold_mail = make_mail(); // gold=100 未收取
+        mailbox.add_mail(gold_mail);
+
+        assert!(!mailbox.delete_mail(1));
+        assert_eq!(mailbox.inbox.len(), 1);
+        assert_eq!(mailbox.get_mail(1).unwrap().gold, 100);
+
+        // 收取附件后即可删除
+        assert_eq!(mailbox.release_parcels(), 1);
+        let _ = mailbox.collect_attachment(1).unwrap();
+        assert!(mailbox.delete_mail(1));
+        assert!(mailbox.inbox.is_empty());
+    }
+
+    /// 严重15-2：已锁定邮件拒绝删除（C# 客户端 Locked 直接 return）
+    #[test]
+    fn test_delete_mail_refuses_locked() {
+        let mut mailbox = Mailbox::new();
+        let mut m = make_mail();
+        m.gold = 0;
+        m.locked = true;
+        mailbox.add_mail(m);
+
+        assert!(!mailbox.delete_mail(1));
+        assert_eq!(mailbox.inbox.len(), 1);
+    }
+
+    /// has_uncollected_parcel：金币或物品任一未收取即为真
+    #[test]
+    fn test_has_uncollected_parcel() {
+        let mut m = make_mail();
+        assert!(m.has_uncollected_parcel()); // gold=100
+        m.gold = 0;
+        assert!(!m.has_uncollected_parcel());
     }
 
     #[test]

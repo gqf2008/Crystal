@@ -4885,6 +4885,52 @@ impl Message<AddGold> for PlayerActor {
     }
 }
 
+/// 尝试添加金币（交易结算用）：会截顶时整体失败、不加不减
+///
+/// 与 AddGold（C# GainGold 截顶语义）不同，本消息用于交易等要求原子性的场景：
+/// 全额到账返回 true，否则状态不变返回 false（调用方据此回滚）。
+pub struct TryAddGold {
+    pub amount: u64,
+}
+
+impl Message<TryAddGold> for PlayerActor {
+    type Reply = bool;
+
+    async fn handle(
+        &mut self,
+        msg: TryAddGold,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        let before = self.state.inventory.gold.min(u32::MAX as u64);
+        if before.saturating_add(msg.amount) > u32::MAX as u64 {
+            return false;
+        }
+        let after = before + msg.amount;
+        self.state.inventory.gold = after;
+        self.send_gold_changed();
+        // 与 AddGold 一致：S.GainedGold 客户端金币浮字
+        if msg.amount > 0 {
+            let packet = mir2_shared::packets::server::drops::GainedGold {
+                gold: msg.amount as u32,
+            };
+            let mut body = Vec::new();
+            if packet.write_body(&mut body).is_ok() {
+                let _ = self
+                    .gate_ref
+                    .tell(SendToClient {
+                        session_id: self.state.session_id,
+                        data: build_packet_bytes(
+                            mir2_shared::enums::ServerPacketIds::GainedGold as i16,
+                            &body,
+                        ),
+                    })
+                    .try_send();
+            }
+        }
+        true
+    }
+}
+
 /// 扣减金币
 pub struct DeductGold {
     pub amount: u64,

@@ -23,8 +23,8 @@ use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
 use crate::ui::sprite_ui::UiFont;
 use crate::ui::theme::{
-    load_lib_image, spawn_icon_button, spawn_image, spawn_item_cell_ui, spawn_label_center,
-    UiItemCellData,
+    load_lib_image, spawn_close_button, spawn_icon_button, spawn_image, spawn_item_cell_ui,
+    spawn_label_center, UiItemCellData,
 };
 
 /// #2892 批B：面板精灵与 C# 原生尺寸（C# `InspectDialog.Index = 430; Location = (536,0)`）
@@ -36,6 +36,8 @@ pub const BG_X: f32 = 536.0;
 pub const BG_Y: f32 = 0.0;
 /// 角色页 Prguse[340] @(8,70)（C# :2159-2165）
 pub const PAGE_REL: (f32, f32) = (8.0, 70.0);
+/// 关闭键 `Prguse2[360..362]` @(241,3)（C# `InspectDialog`，`MainDialogs.cs:2209-2217`，无 `Size` → 原生 24x21）
+pub const CLOSE_POS: (f32, f32) = (241.0, 3.0);
 /// 装备格尺寸（C# 36x32，同角色对话框）
 pub const SLOT_W: f32 = 36.0;
 pub const SLOT_H: f32 = 32.0;
@@ -185,12 +187,10 @@ fn spawn_inspect(
             spawn_image(p, h, PAGE_REL.0, PAGE_REL.1, 248.0, 284.0, 8).insert(InspectPage);
         }
         // 关闭 @(241,3)
-        if let (Some(n), Some(h), Some(pr)) = (
-            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 360),
-            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 361),
-            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 362),
-        ) {
-            spawn_icon_button(p, n, h, pr, 241.0, 3.0, 20.0, 20.0, 10).insert(InspectClose);
+        if let Some(mut btn) =
+            spawn_close_button(p, &mut libs, &mut images, CLOSE_POS.0, CLOSE_POS.1, 10)
+        {
+            btn.insert(InspectClose);
         }
         // 名字（8F 居中 @ 框心 (145,22)）/ 行会（@ 框心 (145,48)）
         // #2786：名字/行会用共享宋体（`font` 是 Arial，中文行会名会整行豆腐）

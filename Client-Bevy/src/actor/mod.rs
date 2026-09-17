@@ -120,11 +120,13 @@ impl Plugin for ActorPlugin {
 ///（在役行为组件——待机转向/周期攻击，非 --demo 专属；demo_drive 驱动全部挂接者，
 /// 网络对象路径 spawn.rs NetObject::Monster/Npc 同样经过），故本过滤器实际覆盖
 /// 网络怪物/NPC——此前它们登出后无任何清理、靠 #1813 去重兜底（幽灵实体泄漏），
-/// 登出清理由此顺带消除泄漏；重登服务端全量重发。已知不对称：远端玩家/地面物品
-/// 仍残留（复审 FINDING 2 登记，另案处理）。
+/// 登出清理由此顺带消除泄漏；重登服务端全量重发。
+/// 2026-09-17 补齐已知不对称（原「另案处理」）：远端玩家/地面物品/地面金币全部
+/// 带 NetObjectId，纳入同一清理——断线切登录（S3）再重进 Game 时服务端全量重发，
+/// 残留旧实体只会变幽灵。
 pub(crate) fn despawn_local_player(
     mut commands: Commands,
-    q: Query<Entity, Or<(With<LocalPlayer>, With<DemoBehavior>)>>,
+    q: Query<Entity, Or<(With<LocalPlayer>, With<DemoBehavior>, With<NetObjectId>)>>,
 ) {
     for e in &q {
         commands.entity(e).despawn();

@@ -31,6 +31,48 @@ use client_bevy::ui::select::SelectPlugin;
 
 mod auto;
 
+use std::path::{Path, PathBuf};
+
+/// 解析 assets 根目录（#S5 发布打包修复）。
+/// 运行时 exe 相对优先（发布布局 `exe_dir/assets`）；开发期回退编译期
+/// CARGO_MANIFEST_DIR——env! 固化的是构建机绝对路径，玩家机器上不存在，
+/// shaders/*.wgsl 会静默加载失败（昼夜/灯光失效）。
+fn resolve_assets_path() -> String {
+    let mut candidates: Vec<PathBuf> = Vec::new();
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            candidates.push(dir.join("assets"));
+        }
+    }
+    candidates.push(PathBuf::from(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/assets"
+    )));
+    pick_first_dir(&candidates, |p| p.is_dir())
+        .expect("assets 候选链至少含编译期回退")
+        .to_string_lossy()
+        .into_owned()
+}
+
+/// 候选链取首个存在目录；全部缺失时回退最后一个候选（编译期路径）。
+fn pick_first_dir(candidates: &[PathBuf], exists: impl Fn(&Path) -> bool) -> Option<PathBuf> {
+    candidates
+        .iter()
+        .find(|p| exists(p))
+        .or_else(|| candidates.last())
+        .cloned()
+}
+
+/// 日志过滤器（#A3）：debug 保持 info 全量；release 默认 warn——拖窗/置顶/chunk
+/// 流式全刷 info 会刷屏，仅排障需要的模块（网络收发/断线重连、战斗结算）白名单保留 info。
+fn log_filter() -> &'static str {
+    if cfg!(debug_assertions) {
+        "info,bevy_render=warn,bevy_asset=warn,bevy_log=warn,bevy_diagnostic=warn,wgpu_hal=warn,naga=warn,icu4x=error,icu_segmenter=error"
+    } else {
+        "warn,client_bevy::network=info,client_bevy::game::combat=info,icu4x=error,icu_segmenter=error"
+    }
+}
+
 // #71：全局给 UI 实体打 RenderLayers layer 1（由独立 UI 相机渲染，地图相机不重画 UI）
 use client_bevy::ui::sprite_ui::mark_ui_render_layers;
 // #2521：layer 1 向下传播到 UiEntity 的后代（RenderLayers 不随层级传播）
@@ -50,9 +92,9 @@ fn main() {
     let mut app = App::new();
     app.add_plugins(
         DefaultPlugins
-            // 资源目录固定到源码 assets/（Bevy 0.19 默认按 exe 目录解析，跨 target 运行会找不到 shader）
+            // assets 目录运行时解析：exe 相对优先（发布），编译期 manifest 回退（开发）
             .set(AssetPlugin {
-                file_path: concat!(env!("CARGO_MANIFEST_DIR"), "/assets").to_string(),
+                file_path: resolve_assets_path(),
                 ..default()
             })
             // 使用 DX12 后端（Vulkan 的 swapchain present 在此机器上会冻结）
@@ -71,9 +113,7 @@ fn main() {
                 ..default()
             })
             .set(LogPlugin {
-                filter:
-                    "info,bevy_render=warn,bevy_asset=warn,bevy_log=warn,bevy_diagnostic=warn,wgpu_hal=warn,naga=warn,icu4x=error,icu_segmenter=error"
-                        .into(),
+                filter: log_filter().into(),
                 ..default()
             })
             .set(WindowPlugin {
@@ -160,4 +200,62 @@ fn main() {
         app.add_plugins((MapRenderPlugin, ActorPlugin));
     }
     app.run();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn exe_candidate() -> PathBuf {
+        PathBuf::from("/exe/assets")
+    }
+
+    fn manifest_candidate() -> PathBuf {
+        PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/assets"))
+    }
+
+    #[test]
+    fn pick_prefers_exe_relative_assets_when_present() {
+        // 发布布局：exe 旁 assets 存在 → 用 exe 相对，不落编译期路径
+        let candidates = vec![exe_candidate(), manifest_candidate()];
+        let picked = pick_first_dir(&candidates, |p| *p == exe_candidate()).unwrap();
+        assert_eq!(picked, exe_candidate());
+    }
+
+    #[test]
+    fn pick_falls_back_to_manifest_when_exe_dir_missing() {
+        // 开发布局：exe 在 target/debug，旁边无 assets → 回退编译期 manifest
+        let candidates = vec![exe_candidate(), manifest_candidate()];
+        let picked = pick_first_dir(&candidates, |p| *p == manifest_candidate()).unwrap();
+        assert_eq!(picked, manifest_candidate());
+    }
+
+    #[test]
+    fn pick_returns_last_candidate_when_all_missing() {
+        // 全部缺失 → 仍回退编译期候选（保底给出一个确定路径）
+        let candidates = vec![exe_candidate(), manifest_candidate()];
+        let picked = pick_first_dir(&candidates, |_| false).unwrap();
+        assert_eq!(picked, manifest_candidate());
+    }
+
+    #[test]
+    fn resolve_assets_path_always_yields_assets_dir() {
+        // 本机开发环境：target 下无 assets → 必然落到真实存在的 manifest assets
+        let p = resolve_assets_path();
+        assert!(p.ends_with("assets"));
+        assert!(Path::new(&p).is_dir(), "解析结果应真实存在: {}", p);
+    }
+
+    #[test]
+    fn log_filter_debug_info_release_warn_whitelist() {
+        let f = log_filter();
+        if cfg!(debug_assertions) {
+            assert!(f.starts_with("info"), "debug 保持 info 全量: {}", f);
+        } else {
+            // release 默认 warn，排障模块白名单保留 info
+            assert!(f.starts_with("warn"), "release 默认 warn: {}", f);
+            assert!(f.contains("client_bevy::network=info"));
+            assert!(f.contains("client_bevy::game::combat=info"));
+        }
+    }
 }
