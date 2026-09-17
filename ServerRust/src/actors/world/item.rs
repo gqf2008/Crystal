@@ -142,6 +142,13 @@ pub(crate) fn compute_item_price_per_unit(
     p as u64
 }
 
+/// 出售总价（C# SellItem：Price()/2 × 实际卖出数量）。
+/// actual_count 必须取服务端实际移除数量（RemoveItemFromInventoryCount 按堆叠截断后的值），
+/// 不能用客户端声明的 count，否则声明 count > 实际堆叠 时可刷金。
+pub(crate) fn compute_sell_gold(per_unit: u64, actual_count: u64) -> u64 {
+    (per_unit / 2).max(1) * actual_count
+}
+
 /// 计算修理费（对齐 C# Shared/Data/ItemData.cs RepairPrice()）
 /// p = floor(MaxDura * (Price/2 / Durability) + Price/2) * (AddedStats.Count*0.1 + 1)
 /// cost = p * Count - Price；有租赁信息 ×2；特殊修理 ×3
@@ -3899,6 +3906,8 @@ impl Message<SellItemRequest> for WorldActor {
         }
 
         // 移除物品（C# SellItem：堆叠按 count 拆分，非堆叠整件移除）
+        // 注意：RemoveItemFromInventoryCount 会按实际堆叠 min 截断扣物，
+        // 返回的 removed.count 才是【实际移除数量】，计价必须用它而非客户端声明的 msg.count
         let removed = record
             .actor_ref
             .ask(crate::actors::player::RemoveItemFromInventoryCount {
@@ -3907,24 +3916,45 @@ impl Message<SellItemRequest> for WorldActor {
             })
             .await
             .unwrap_or(None);
-        if removed.is_none() {
+        let Some(removed_item) = removed else {
+            send_sell_item_response(&self.gate_ref, msg.session_id, msg.unique_id, msg.count, false);
             send_system_message(&self.gate_ref, msg.session_id, "移除物品失败");
             return;
-        }
+        };
+        let actual_count = removed_item.count as u64;
 
-        // 定价：C# Price() / 2（单价含耐久比例/附加属性；按卖出数量计）
+        // 定价：C# Price() / 2（单价含耐久比例/附加属性；按实际卖出数量计）
         let per_unit = item_db
             .as_ref()
             .map(|info| compute_item_price_per_unit(&item_data, info))
             .unwrap_or_else(|| item_data.item_index as u64 * 5);
-        let total_gold = (per_unit / 2).max(1) * msg.count as u64;
+        let total_gold = compute_sell_gold(per_unit, actual_count);
 
         let success = record
             .actor_ref
             .ask(AddGold { amount: total_gold })
             .await
             .unwrap_or(false);
-        if success {
+        if !success {
+            // AddGold 失败：回退已扣物品，避免吞物
+            let restored = record
+                .actor_ref
+                .ask(crate::actors::player::AddItemToInventory {
+                    item: removed_item,
+                })
+                .await
+                .unwrap_or(false);
+            if !restored {
+                warn!(
+                    "SellItem rollback failed: {} item={} x{} lost after AddGold failure",
+                    state.name, item_data.item_index, actual_count
+                );
+            }
+            send_sell_item_response(&self.gate_ref, msg.session_id, msg.unique_id, msg.count, false);
+            send_system_message(&self.gate_ref, msg.session_id, "出售失败：金币入账失败");
+            return;
+        }
+        {
             // 记录到回购列表（C# Settings.GoodsBuyBackMaxStored/GoodsBuyBackTime；GoodsOn 门控，#2376）
             if self.goods_on {
                 let now_ms = std::time::SystemTime::now()
@@ -3932,10 +3962,7 @@ impl Message<SellItemRequest> for WorldActor {
                     .map(|d| d.as_millis() as i64)
                     .unwrap_or(0);
                 let buyback = BuybackItem {
-                    item: removed
-                        .as_ref()
-                        .cloned()
-                        .unwrap_or_else(|| item_data.clone()),
+                    item: removed_item.clone(),
                     sell_price: total_gold,
                     expires_at: now_ms + self.goods_buy_back_time_minutes as i64 * 60 * 1000,
                     // #1542：记录卖出 NPC（C# NPCObject.BuyBack[Name] 按 NPC 隔离）
@@ -3951,7 +3978,7 @@ impl Message<SellItemRequest> for WorldActor {
                 &self.gate_ref,
                 msg.session_id,
                 msg.unique_id,
-                msg.count,
+                actual_count as u32,
                 true,
             );
             // 完整 UserInformation 刷新（背包 + 金币）
@@ -3967,7 +3994,7 @@ impl Message<SellItemRequest> for WorldActor {
             }
             debug!(
                 "SellItem: {} sold item={} x{} for {} gold",
-                state.name, item_data.item_index, msg.count, total_gold
+                state.name, item_data.item_index, actual_count, total_gold
             );
         }
     }
@@ -4361,6 +4388,12 @@ impl Message<StoreItemRequest> for WorldActor {
             return;
         }
 
+        // 仓库满预检：无空位直接报错，物品留在背包（store_item_to 内部也已先查空位再 take）
+        if !state.inventory.storage_has_space() {
+            send_system_message(&self.gate_ref, msg.session_id, "仓库已满，无法存入");
+            return;
+        }
+
         // 执行存入（目标格优先，占用则找第一个空位）
         let result = record
             .actor_ref
@@ -4433,6 +4466,12 @@ impl Message<TakeBackItemRequest> for WorldActor {
             || state.inventory.storage[msg.from as usize].is_none()
         {
             send_system_message(&self.gate_ref, msg.session_id, "仓库该格为空");
+            return;
+        }
+
+        // 背包满预检：无空位直接报错，物品留在仓库（take_back_item_to 内部也已先查空位再 take）
+        if !state.inventory.has_space() {
+            send_system_message(&self.gate_ref, msg.session_id, "背包已满，无法取出");
             return;
         }
 
@@ -6074,6 +6113,18 @@ impl Message<DisassembleItemRequest> for WorldActor {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 回归：出售计价必须按【实际移除数量】而非客户端声明 count
+    ///（原 total_gold = per_unit/2 * msg.count，声明 count=65535 而实际堆叠只有 3 时可刷金）
+    #[test]
+    fn test_compute_sell_gold_uses_actual_removed_count() {
+        // 单价 100：per_unit/2 = 50；实际移除 3 件 → 150，而非 65535 件的 3276750
+        assert_eq!(compute_sell_gold(100, 3), 150);
+        // 单价 1：per_unit/2 = 0 → max(1) 保底 1 金/件
+        assert_eq!(compute_sell_gold(1, 3), 3);
+        // 实际移除 0 件 → 0 金
+        assert_eq!(compute_sell_gold(100, 0), 0);
+    }
 
     /// #2188：C# ItemType → 装备槽位映射（MirItemCell.cs 双击装备槽位判定）
     #[test]
