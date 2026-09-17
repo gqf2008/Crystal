@@ -27,6 +27,10 @@ type SendChannel = mpsc::Sender<Vec<u8>>;
 /// 每会话待发队列容量；积满说明客户端慢读/不读，直接踢线
 const SESSION_SEND_CAPACITY: usize = 1024;
 
+/// ShutdownAll 逐会话清理的整体超时（通知已 fire-and-forget，正常即时完成；
+/// 超时仅兜底防回归，超时后后台清理任务继续跑）
+const SHUTDOWN_ALL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+
 /// GateActor 状态
 pub struct GateActor {
     /// 活跃会话的发送通道
@@ -38,6 +42,13 @@ pub struct GateActor {
     pending_password_change: HashMap<SessionId, String>,
     /// 会话关联的客户端 IP（C# MirConnection.IPAddress）
     session_ips: HashMap<SessionId, String>,
+    /// 每会话踢线/清理信号：terminate_session 触发后读循环排空已排队数据并关闭 TCP
+    /// （踢线实效化——旧实现只删映射，TCP 读循环存活，被踢连接可继续发包）
+    session_cancels: HashMap<SessionId, tokio::sync::watch::Sender<bool>>,
+    /// 登出中（LogOut 已受理、LogOutCleanup 未落地）的会话：
+    /// 此窗口内除 KeepAlive 外拒收一切包——world 侧玩家记录已删而 gate 会话/
+    /// 登录映射尚在，客户端 rapid-fire 的 StartGame 会以旧角色状态重进
+    logging_out: std::collections::HashSet<SessionId>,
     /// 被封禁 IP -> 解封时间（unix 秒；C# Envir.IPBlocks）
     ip_blocks: HashMap<String, i64>,
     /// 每 IP 创建角色时间戳（unix 秒；C# ConnectionLogs[IP].CharactersMade）
@@ -61,6 +72,8 @@ impl GateActor {
             session_usernames: HashMap::new(),
             pending_password_change: HashMap::new(),
             session_ips: HashMap::new(),
+            session_cancels: HashMap::new(),
+            logging_out: std::collections::HashSet::new(),
             ip_blocks: HashMap::new(),
             ip_character_creations: HashMap::new(),
             ip_accounts_made: HashMap::new(),
@@ -91,21 +104,34 @@ impl GateActor {
         self.sessions.remove(&session_id);
         self.session_ips.remove(&session_id);
         self.pending_password_change.remove(&session_id);
+        // 登出标记随会话清理一并清位（LogOutCleanup 路径的正常出口）
+        self.logging_out.remove(&session_id);
+        // 踢线实效化：通知读循环退出并关闭 TCP——旧实现只删映射，读循环存活，
+        // 被踢连接可继续发 ClientData（靠入口拦截兜底）、关了 TCP 也因
+        // ClientDisconnected 守卫早退导致 is_online 永卡
+        if let Some(cancel) = self.session_cancels.remove(&session_id) {
+            let _ = cancel.send(true);
+        }
         let logged_out_username = self.session_usernames.remove(&session_id);
-        let account_ref = self.account_ref.clone();
-        let world_ref = self.world_ref.clone();
+        // 有界邮箱死锁加固（#23）：gate 处理器内联 ask world/account 时，world 清理
+        // 又 tell(SendToClient) 回 gate（邮箱满即阻塞）构成 gate→world→gate 循环等待
+        // ——对世界/账号的通知一律 fire-and-forget，gate 不内联 await
         if let Some(username) = logged_out_username {
-            if let Some(account_ref) = account_ref {
-                let _ = account_ref
-                    .ask(crate::actors::account::LogoutRequest { username })
-                    .await;
+            if let Some(account_ref) = self.account_ref.clone() {
+                crate::util::tasks::spawn("gate.account_logout", async move {
+                    let _ = account_ref
+                        .ask(crate::actors::account::LogoutRequest { username })
+                        .await;
+                });
             }
         }
         if notify_world {
-            if let Some(world_ref) = world_ref {
-                let _ = world_ref
-                    .ask(crate::actors::world::PlayerDisconnected { session_id })
-                    .await;
+            if let Some(world_ref) = self.world_ref.clone() {
+                crate::util::tasks::spawn("gate.player_disconnected", async move {
+                    let _ = world_ref
+                        .ask(crate::actors::world::PlayerDisconnected { session_id })
+                        .await;
+                });
             }
         }
     }
@@ -162,6 +188,12 @@ pub async fn run_gate_listener(addr: String, actor_ref: ActorRef<GateActor>) -> 
             .await;
 
         let gate_ref = actor_ref.clone();
+        // 踢线/会话清理信号：terminate_session 触发后本读循环排空已排队数据并关 TCP
+        let kick_rx = actor_ref
+            .ask(TakeSessionCancel { session_id: sid })
+            .await
+            .ok()
+            .flatten();
 
         // #2606：每连接读循环也登记（生命周期 = 连接；关闭信号兜底唤醒）
         let session_shutdown = shutdown.clone();
@@ -174,6 +206,44 @@ pub async fn run_gate_listener(addr: String, actor_ref: ActorRef<GateActor>) -> 
                     // 进程关闭：不再读，交由 ShutdownAll 的断连/存档流程收尾
                     _ = session_shutdown.cancelled() => {
                         debug!("Session {} stopped by server shutdown", sid);
+                        return;
+                    }
+                    // 踢线/会话清理：先把已排队数据（如 S.Disconnect）尽量写完，再关 TCP
+                    _ = async {
+                        if let Some(rx) = &kick_rx {
+                            let mut rx = rx.clone();
+                            // 订阅前已被踢（注册后立即 terminate 的竞态）：
+                            // 当前值已是 true 时立即返回，不傻等下一次变化
+                            if *rx.borrow_and_update() {
+                                return;
+                            }
+                            let _ = rx.changed().await;
+                        }
+                    }, if kick_rx.is_some() => {
+                        // 排空写加整体超时：慢读僵尸连接的内核缓冲塞满后 write_all
+                        // 会永久挂起，session_reader 任务随之泄漏（长占连接资源）。
+                        // 收尾包（如 S.Disconnect）尽力而为即可——2s 写不完放弃排空，
+                        // 直接关 TCP 释放任务
+                        let drain = async {
+                            while let Ok(data) = rx.try_recv() {
+                                let mut encoded = Vec::new();
+                                encode(&data, &mut encoded);
+                                if stream.write_all(&encoded).await.is_err() {
+                                    break;
+                                }
+                            }
+                        };
+                        if tokio::time::timeout(std::time::Duration::from_secs(2), drain)
+                            .await
+                            .is_err()
+                        {
+                            warn!(
+                                "Session {} kick drain write timed out, forcing close",
+                                sid
+                            );
+                        }
+                        let _ = stream.shutdown().await;
+                        debug!("Session {} closed by gate (session terminated)", sid);
                         return;
                     }
                     // 从网络读取数据
@@ -254,6 +324,20 @@ pub struct ClientDisconnected {
     pub session_id: SessionId,
 }
 
+/// 登出收尾清理（WorldActor 在 S.LogOutSuccess 落链之后入队；gate 邮箱 FIFO 保证
+/// 先处理 SendToClient 再处理本消息）。只有收到它 gate 才删会话 + 置账号离线——
+/// 否则 LogOutSuccess 会因会话先删被静默丢弃（严重19）。
+pub struct LogOutCleanup {
+    pub session_id: SessionId,
+}
+
+/// 顶号解绑（原 UnbindSessionLogin）已移除：world dup-kick 改经
+/// StartGameReply.kicked_session_id 把被踢旧会话 id 带回，gate 在下方
+/// StartGame 臂内联摘除 session_usernames——同 handler 内完成，先于邮箱中
+/// 任何后到的 ClientDisconnected/LogOutCleanup 落地（原 spawn 异步 tell 与
+/// 已排队断开消息无 happens-before；且旧客户端被踢后重新 Login 会重建绑定，
+/// 迟到的异步解绑会误删新绑定，保留它不是兜底而是新竞态源，故移除）。
+
 /// 登录结果（从 AccountActor 返回）
 pub struct LoginResult {
     pub session_id: SessionId,
@@ -300,6 +384,86 @@ impl Message<TestProbeSession> for GateActor {
             self.sessions.contains_key(&msg.session_id),
             self.session_usernames.contains_key(&msg.session_id),
         )
+    }
+}
+
+/// 测试辅助：直接写入登录绑定（session_usernames）——顶号路径回归需要第二会话
+/// 持同账号绑定经 gate StartGame 臂（同账号在线时 Login 被拒，无法走正常登录），
+/// 与 TestProbeSession/TestSetLoggingOut 同为红绿回归专用，不得用于生产路径
+pub struct TestBindSessionLogin {
+    pub session_id: SessionId,
+    pub username: String,
+}
+
+impl Message<TestBindSessionLogin> for GateActor {
+    type Reply = ();
+
+    async fn handle(
+        &mut self,
+        msg: TestBindSessionLogin,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        self.session_usernames.insert(msg.session_id, msg.username);
+    }
+}
+
+/// 测试探针：会话是否处于登出窗口（logging_out），红绿回归断言用，只读
+pub struct TestProbeLoggingOut {
+    pub session_id: SessionId,
+}
+
+impl Message<TestProbeLoggingOut> for GateActor {
+    type Reply = bool;
+
+    async fn handle(
+        &mut self,
+        msg: TestProbeLoggingOut,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        self.logging_out.contains(&msg.session_id)
+    }
+}
+
+/// 测试探针：直接置/清登出标记——生产路径只能经 LogOut Success 置位、
+/// terminate_session 清位；此消息供红绿回归确定性撑开竞态窗口（置位后
+/// 验证门禁拒收语义），不得用于生产路径
+pub struct TestSetLoggingOut {
+    pub session_id: SessionId,
+    pub on: bool,
+}
+
+impl Message<TestSetLoggingOut> for GateActor {
+    type Reply = ();
+
+    async fn handle(
+        &mut self,
+        msg: TestSetLoggingOut,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        if msg.on {
+            self.logging_out.insert(msg.session_id);
+        } else {
+            self.logging_out.remove(&msg.session_id);
+        }
+    }
+}
+
+/// 订阅会话踢线信号（gate listener 的读循环在注册后取走；terminate_session 触发）
+pub struct TakeSessionCancel {
+    pub session_id: SessionId,
+}
+
+impl Message<TakeSessionCancel> for GateActor {
+    type Reply = Option<tokio::sync::watch::Receiver<bool>>;
+
+    async fn handle(
+        &mut self,
+        msg: TakeSessionCancel,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        self.session_cancels
+            .get(&msg.session_id)
+            .map(|tx| tx.subscribe())
     }
 }
 
@@ -350,6 +514,9 @@ impl Message<SessionCreated> for GateActor {
         }
         self.sessions.insert(msg.session_id, msg.sender);
         self.session_ips.insert(msg.session_id, msg.ip.clone());
+        // 踢线信号通道（读循环经 TakeSessionCancel 订阅；terminate_session 触发）
+        let (cancel_tx, _) = tokio::sync::watch::channel(false);
+        self.session_cancels.insert(msg.session_id, cancel_tx);
         debug!(
             "Session {} created (active={})",
             msg.session_id,
@@ -364,7 +531,7 @@ impl Message<SessionCreated> for GateActor {
                 session_id: msg.session_id,
                 data: connected_data,
             })
-            .await;
+            .try_send();
     }
 }
 
@@ -412,9 +579,62 @@ impl Message<ShutdownAll> for GateActor {
             }
         }
         // #22：主动逐会话触发 PlayerDisconnected 落库 + 账号下线，
-        // 不等客户端 Disconnect 回包（客户端 5 秒内不回即丢档）
-        for sid in session_ids {
-            self.terminate_session(sid, true).await;
+        // 不等客户端 Disconnect 回包（客户端 5 秒内不回即丢档）。
+        // 有界邮箱死锁加固：terminate_session 对世界/账号的通知已改 fire-and-forget，
+        // 本循环不再内联 await world/account；仍加整体超时兜底 + 日志，
+        // 优雅关机不得被单点拖死（C# 主循环显式 join 全部后台线程，同语义）。
+        let terminated = session_ids.len();
+        match tokio::time::timeout(SHUTDOWN_ALL_TIMEOUT, async {
+            for sid in session_ids {
+                self.terminate_session(sid, true).await;
+            }
+        })
+        .await
+        {
+            Ok(()) => info!("ShutdownAll: {} sessions terminated", terminated),
+            Err(_) => {
+                // 超时兜底：terminate_session 处理过的会话已自行移出 sessions，
+                // 剩余的就是未处理的——它们尚未收到 world/account 通知（丢档 + 卡在
+                // 在线）。spawn 一个无超时后台任务继续逐个补发通知（通知本身
+                // spawn fire-and-forget，循环不阻塞）；gate 本地映射随进程退出收尾
+                let remaining: Vec<(SessionId, Option<String>)> = self
+                    .sessions
+                    .keys()
+                    .map(|sid| (*sid, self.session_usernames.get(sid).cloned()))
+                    .collect();
+                error!(
+                    "ShutdownAll: timed out after {:?} ({} of {} sessions cleaned inline; dispatching world/account notifications for the remaining {} in a detached background task)",
+                    SHUTDOWN_ALL_TIMEOUT,
+                    terminated - remaining.len(),
+                    terminated,
+                    remaining.len()
+                );
+                let account_ref = self.account_ref.clone();
+                let world_ref = self.world_ref.clone();
+                crate::util::tasks::spawn("gate.shutdown_all_notify_bg", async move {
+                    for (sid, username) in remaining {
+                        if let Some(username) = username {
+                            if let Some(account_ref) = account_ref.clone() {
+                                crate::util::tasks::spawn("gate.account_logout", async move {
+                                    let _ = account_ref
+                                        .ask(crate::actors::account::LogoutRequest { username })
+                                        .await;
+                                });
+                            }
+                        }
+                        if let Some(world_ref) = world_ref.clone() {
+                            crate::util::tasks::spawn("gate.player_disconnected", async move {
+                                let _ = world_ref
+                                    .ask(crate::actors::world::PlayerDisconnected {
+                                        session_id: sid,
+                                    })
+                                    .await;
+                            });
+                        }
+                    }
+                    info!("ShutdownAll: background notifications for remaining sessions dispatched");
+                });
+            }
         }
         count
     }
@@ -466,6 +686,32 @@ impl Message<ClientData> for GateActor {
         let payload = &msg.data[HEADER_SIZE..length];
         let gate_ref = ctx.actor_ref().clone();
 
+        // 踢线实效化：会话已注销（被踢/已清理）的连接除协议心跳外一律拒收——
+        // 旧实现入口无注册检查，被踢连接（其读循环可能尚未退出）重发 Login 直达
+        // AccountActor，LoginResult 再无条件回插映射，门禁全放行
+        if opcode != ClientPacketIds::KeepAlive as i16
+            && !self.sessions.contains_key(&msg.session_id)
+        {
+            debug!(
+                "ClientData rejected: session {} not registered (opcode={})",
+                msg.session_id, opcode
+            );
+            return;
+        }
+
+        // 登出窗口门禁：LogOut 已受理（S.LogOutSuccess → LogOutCleanup 在途）到
+        // 会话清理落地之间，除 KeepAlive 外一律拒收——否则客户端 rapid-fire 的
+        // StartGame 会趁 gate 登录映射尚在、world 玩家记录已删的窗口重进游戏
+        if opcode != ClientPacketIds::KeepAlive as i16
+            && self.logging_out.contains(&msg.session_id)
+        {
+            debug!(
+                "ClientData rejected: session {} is logging out (opcode={})",
+                msg.session_id, opcode
+            );
+            return;
+        }
+
         match opcode {
             x if x == ClientPacketIds::ClientVersion as i16 => {
                 // ClientVersion - 验证 payload 后回复 accepted
@@ -492,7 +738,7 @@ impl Message<ClientData> for GateActor {
                             session_id: msg.session_id,
                             data,
                         })
-                        .await;
+                        .try_send();
                     warn!(
                         "Login rejected: AllowLogin=false session={}",
                         msg.session_id
@@ -529,20 +775,38 @@ impl Message<ClientData> for GateActor {
             }
             x if x == ClientPacketIds::StartGame as i16 => {
                 // StartGame - 转发到 WorldActor
-                if let Some(world_ref) = &self.world_ref {
+                if let Some(world_ref) = self.world_ref.clone() {
                     if payload.len() >= 4 {
                         let character_index =
                             i32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]);
                         debug!("StartGame request: character_index={}", character_index);
                         // 必须已登录才能进入游戏
-                        if let Some(username) = self.session_usernames.get(&msg.session_id) {
-                            let _ = world_ref
+                        let username = self.session_usernames.get(&msg.session_id).cloned();
+                        if let Some(username) = username {
+                            // 顶号解绑（确定性顺序）：world dup-kick 后在 reply 带回被踢
+                            // 的旧会话 id，本 handler 内联摘除其登录绑定——gate 邮箱 FIFO
+                            // 串行处理，解绑先于任何后到的 ClientDisconnected/LogOutCleanup
+                            // 落地，后者再处理时 terminate_session 已取不到旧绑定，不会把
+                            // 新会话在用的同账号误置离线（替代原 world spawn 异步 tell
+                            // UnbindSessionLogin：与已排队断开消息无 happens-before，且
+                            // 旧会话重登后迟到的解绑会误删新绑定，该消息已移除）
+                            if let Ok(reply) = world_ref
                                 .ask(crate::actors::world::StartGameRequest {
                                     session_id: msg.session_id,
                                     character_index,
-                                    account_username: username.clone(),
+                                    account_username: username,
                                 })
-                                .await;
+                                .await
+                            {
+                                if let Some(old_sid) = reply.kicked_session_id {
+                                    if self.session_usernames.remove(&old_sid).is_some() {
+                                        info!(
+                                            "Session {} login binding removed (duplicate-login kick)",
+                                            old_sid
+                                        );
+                                    }
+                                }
+                            }
                         } else {
                             warn!(
                                 "StartGame rejected: session {} not logged in",
@@ -624,19 +888,45 @@ impl Message<ClientData> for GateActor {
             }
             x if x == ClientPacketIds::LogOut as i16 => {
                 // LogOut - 通知 WorldActor 清理并落库（C# MirConnection.LogOut → StopGame）
+                // 严重19 回归修复：gate 不得在此无条件 terminate_session——
+                // Success 路径 S.LogOutSuccess 是 world 在 ask 期间 tell 进 gate 邮箱的，
+                // 先删会话会让它静默丢弃（客户端卡死游戏场景、is_online 永卡）；
+                // Blocked（战斗 10s 内）路径误清会留下幽灵 PlayerActor + 账号离线。
+                // 正确顺序由 world 保证：S.LogOutSuccess 落链后再 tell LogOutCleanup
+                // （gate 邮箱 FIFO 保序），gate 收到 LogOutCleanup 才 terminate_session；
+                // Blocked 时 gate 不动任何状态（会话未删，S.LogOutFailed 天然可达）。
+                // 已知权衡（头阻塞，暂不改行为）：本臂内联 await world ask（PlayerLogOut
+                // 含落库 DB 写），world 处理期间 gate 收包主循环停摆、全服客户端包排队。
+                // 当前接受该代价——换来严格 FIFO 保序（LogOutSuccess → LogOutCleanup
+                // 不得乱序，见上）且落库通常在毫秒~百毫秒级；后续方向：world 收单即
+                // 早应答、清理结果异步回推（复用 LogOutCleanup 通道），或按会话有序
+                // 任务队列把落库移出 gate 收包关键路径。
                 if let Some(world_ref) = &self.world_ref {
-                    let _ = world_ref
+                    match world_ref
                         .ask(crate::actors::world::PlayerLogOut {
                             session_id: msg.session_id,
                         })
-                        .await;
+                        .await
+                    {
+                        Ok(crate::actors::world::PlayerLogOutReply::Success) => {
+                            // world 已按序入队 S.LogOutSuccess → LogOutCleanup，等清理消息；
+                            // 清理落地前打登出标记，拒收 rapid-fire 的 StartGame 等重进包
+                            self.logging_out.insert(msg.session_id);
+                        }
+                        Ok(crate::actors::world::PlayerLogOutReply::Blocked) => {
+                            debug!(
+                                "LogOut blocked by world (combat cooldown), session {} untouched",
+                                msg.session_id
+                            );
+                        }
+                        Err(e) => {
+                            warn!(
+                                "PlayerLogOut ask failed for session {}: {}",
+                                msg.session_id, e
+                            );
+                        }
+                    }
                 }
-                // #19：对齐断连路径的账号清理——清 session_usernames 并通知
-                // AccountActor 置离线；否则 is_online 永卡 true，重登被拒
-                // （AccountActor::login 拒绝在线账号）。连接本身保留，
-                // 客户端需重新 Login 后再 StartGame。
-                // （WorldActor 侧已由 PlayerLogOut 落库，不再重复 PlayerDisconnected）
-                self.terminate_session(msg.session_id, false).await;
             }
             x if x == ClientPacketIds::Disconnect as i16 => {
                 debug!("Client disconnect request from session {}", msg.session_id);
@@ -828,7 +1118,7 @@ impl Message<ClientData> for GateActor {
                             session_id: msg.session_id,
                             data,
                         })
-                        .await;
+                        .try_send();
                     warn!(
                         "NewCharacter rejected: IP {} rate-limited (session {})",
                         ip, msg.session_id
@@ -1289,6 +1579,20 @@ impl Message<SendToClient> for GateActor {
     }
 }
 
+impl Message<LogOutCleanup> for GateActor {
+    type Reply = ();
+
+    async fn handle(
+        &mut self,
+        msg: LogOutCleanup,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        // WorldActor 侧已由 PlayerLogOut 落库，不再重复 PlayerDisconnected；
+        // 账号置离线（LogoutRequest）随之延后到此处，保证 LogOutSuccess 先落链
+        self.terminate_session(msg.session_id, false).await;
+    }
+}
+
 impl Message<ClientDisconnected> for GateActor {
     type Reply = ();
 
@@ -1316,6 +1620,24 @@ impl Message<LoginResult> for GateActor {
         ctx: &mut Context<Self, Self::Reply>,
     ) -> Self::Reply {
         if msg.success {
+            // 踢线后门禁：会话已注销（被踢后读循环存活期间重 Login）不得回插映射——
+            // 旧代码无条件回插 session_usernames，被踢连接重 Login 后门禁全放行
+            if !self.sessions.contains_key(&msg.session_id) {
+                warn!(
+                    "LoginResult ignored: session {} no longer registered (user={})",
+                    msg.session_id, msg.username
+                );
+                // AccountActor 已置 is_online=true：回退置离线，否则该账号永卡在线
+                if let Some(account_ref) = self.account_ref.clone() {
+                    let username = msg.username.clone();
+                    crate::util::tasks::spawn("gate.login_online_rollback", async move {
+                        let _ = account_ref
+                            .ask(crate::actors::account::LogoutRequest { username })
+                            .await;
+                    });
+                }
+                return;
+            }
             // 记录 session 关联的用户名（用于 ChangePassword 等）
             self.session_usernames
                 .insert(msg.session_id, msg.username.clone());
@@ -1356,7 +1678,7 @@ impl Message<LoginResult> for GateActor {
                     session_id: msg.session_id,
                     data: response_data,
                 })
-                .await;
+                .try_send();
         } else if msg.require_password_change {
             // C#：RequirePasswordChange=true → S.Login { Result = 5 }
             // #11：登记该会话的强制改密待办——允许此会话未登录态改密（仅此账号），
@@ -1370,7 +1692,7 @@ impl Message<LoginResult> for GateActor {
                     session_id: msg.session_id,
                     data: response_data,
                 })
-                .await;
+                .try_send();
         } else if let Some(until) = msg.banned_until {
             // C#：封禁期登录 → S.LoginBanned（Reason + ExpiryDate，.NET DateTime ticks）
             let expiry_ticks = (until + 62135596800) * 10_000_000;
@@ -1387,7 +1709,7 @@ impl Message<LoginResult> for GateActor {
                         session_id: msg.session_id,
                         data,
                     })
-                    .await;
+                    .try_send();
             }
         } else {
             // Login failure
@@ -1398,7 +1720,7 @@ impl Message<LoginResult> for GateActor {
                     session_id: msg.session_id,
                     data: response_data,
                 })
-                .await;
+                .try_send();
         }
     }
 }
@@ -1479,7 +1801,7 @@ async fn handle_client_version(
             session_id,
             data: response,
         })
-        .await;
+        .try_send();
 }
 
 impl GateActor {
@@ -1499,7 +1821,7 @@ impl GateActor {
                     session_id,
                     data: response,
                 })
-                .await;
+                .try_send();
         };
 
         // C# Settings.AllowNewAccount → Result=0
@@ -1620,7 +1942,7 @@ async fn handle_keep_alive(gate_ref: &ActorRef<GateActor>, session_id: SessionId
             session_id,
             data: response,
         })
-        .await;
+        .try_send();
 }
 
 /// 解析 DotNetString: [length: i32 LE][bytes...]
@@ -2458,14 +2780,19 @@ async fn forward_change_password(
     // 防止任意连接爆破他人账号旧密码（Result=5 构成口令预言机）。
     // 唯一例外：登录返回 Result=5（RequirePasswordChange）的会话，
     // 允许未登录态改密、且只能改登记的账号。
-    let authorized = session_usernames.contains_key(&session_id)
-        || pending_password_change
+    // 跨账号喷洒加固：登录态会话只能改【本会话登录的账号】——旧代码登录后放行
+    // 任意 account_id，构成对已登录他人账号旧密码的在线爆破/锁定喷洒面
+    let session_account = session_usernames.get(&session_id).cloned();
+    let authorized = match &session_account {
+        Some(logged_in) => logged_in == &account_id,
+        None => pending_password_change
             .get(&session_id)
             .map(|u| u == &account_id)
-            .unwrap_or(false);
+            .unwrap_or(false),
+    };
     if !authorized {
         warn!(
-            "ChangePassword rejected: session {} not logged in (account={})",
+            "ChangePassword rejected: session {} not authorized for account={}",
             session_id, account_id
         );
         return;
@@ -2476,7 +2803,7 @@ async fn forward_change_password(
         let mut body = Vec::new();
         if packet.write_body(&mut body).is_ok() {
             let data = build_packet_bytes(ServerPacketIds::ChangePassword as i16, &body);
-            let _ = gate_ref.tell(SendToClient { session_id, data }).await;
+            let _ = gate_ref.tell(SendToClient { session_id, data }).try_send();
         }
     };
 
@@ -2513,6 +2840,9 @@ async fn forward_change_password(
                 username: account_id,
                 old_password,
                 new_password,
+                // 纵深防御：AccountActor 侧再校验一次「登录态只能改本会话账号」；
+                // None = 强制改密待办例外路径（账号名已在上方比对登记值）
+                session_account,
             })
             .try_send();
     } else {
@@ -5686,5 +6016,160 @@ mod tests {
         payload.extend_from_slice(&200i32.to_le_bytes());
         assert_eq!(parse_pet_pickup(&payload), None);
         assert_eq!(parse_pet_pickup(&[]), None);
+    }
+
+    fn big_stack_runtime() -> tokio::runtime::Runtime {
+        tokio::runtime::Builder::new_multi_thread()
+            .thread_stack_size(8 * 1024 * 1024)
+            .enable_time()
+            .build()
+            .unwrap()
+    }
+
+    fn client_version_packet() -> Vec<u8> {
+        let mut body = Vec::new();
+        body.extend_from_slice(&4i32.to_le_bytes());
+        body.extend_from_slice(b"test");
+        build_packet_bytes(ClientPacketIds::ClientVersion as i16, &body)
+    }
+
+    /// 红绿回归（LogOut+StartGame 竞态）：登出窗口内（LogOut 已受理、
+    /// LogOutCleanup 未落地）除 KeepAlive 外一切包必须拒收——否则 rapid-fire
+    /// 的 StartGame 会趁 gate 登录映射尚在、world 玩家记录已删的窗口重进游戏。
+    /// 红检：删掉 ClientData 里的 logging_out 守卫 → 窗口内 ClientVersion 会
+    /// 收到 S.ClientVersion 响应 → 断言 FAILED。
+    #[test]
+    fn logging_out_session_rejects_all_but_keepalive() {
+        use kameo::actor::Spawn;
+        use std::time::Duration;
+        let rt = big_stack_runtime();
+        rt.block_on(async {
+            let gate_ref = GateActor::spawn(());
+            let (tx, mut rx) = mpsc::channel::<Vec<u8>>(16);
+            let _ = gate_ref
+                .ask(SessionCreated {
+                    session_id: 1,
+                    sender: tx,
+                    ip: "127.0.0.1".to_string(),
+                })
+                .await;
+            // 排空注册即发的 S.Connected（否则干扰后续响应断言）
+            let _ = tokio::time::timeout(Duration::from_secs(2), rx.recv())
+                .await
+                .expect("SessionCreated 必须发 S.Connected");
+
+            // 置登出标记（生产路径只能经 LogOut Success 置位；
+            // 测试直接置位以确定性撑开竞态窗口）
+            let _ = gate_ref
+                .ask(TestSetLoggingOut {
+                    session_id: 1,
+                    on: true,
+                })
+                .await;
+            assert!(
+                gate_ref
+                    .ask(TestProbeLoggingOut { session_id: 1 })
+                    .await
+                    .unwrap(),
+                "登出标记必须置位"
+            );
+
+            // 窗口内 ClientVersion 必须被拒（无任何响应）
+            let _ = gate_ref
+                .ask(ClientData {
+                    session_id: 1,
+                    data: client_version_packet(),
+                })
+                .await;
+            assert!(
+                tokio::time::timeout(Duration::from_millis(300), rx.recv())
+                    .await
+                    .is_err(),
+                "登出窗口内 ClientVersion 必须被拒收（不得有响应）"
+            );
+
+            // KeepAlive 仍放行（连接保活不受门禁影响）
+            let _ = gate_ref
+                .ask(ClientData {
+                    session_id: 1,
+                    data: build_packet_bytes(ClientPacketIds::KeepAlive as i16, &[]),
+                })
+                .await;
+            let resp = tokio::time::timeout(Duration::from_secs(2), rx.recv())
+                .await
+                .expect("KeepAlive 必须放行")
+                .expect("channel open");
+            assert_eq!(
+                i16::from_le_bytes([resp[2], resp[3]]),
+                ServerPacketIds::KeepAlive as i16,
+                "登出窗口内 KeepAlive 必须照常应答"
+            );
+
+            // 清标记后恢复正常放行
+            let _ = gate_ref
+                .ask(TestSetLoggingOut {
+                    session_id: 1,
+                    on: false,
+                })
+                .await;
+            let _ = gate_ref
+                .ask(ClientData {
+                    session_id: 1,
+                    data: client_version_packet(),
+                })
+                .await;
+            let resp = tokio::time::timeout(Duration::from_secs(2), rx.recv())
+                .await
+                .expect("清标记后 ClientVersion 必须放行")
+                .expect("channel open");
+            assert_eq!(
+                i16::from_le_bytes([resp[2], resp[3]]),
+                ServerPacketIds::ClientVersion as i16
+            );
+        });
+    }
+
+    /// 红绿回归：登出标记必须随会话清理（LogOutCleanup → terminate_session）
+    /// 一并清位，不得泄漏到后续同名会话状态判断。
+    /// 红检：删掉 terminate_session 里的 logging_out.remove → 清理后探针仍 true
+    /// → 断言 FAILED。
+    #[test]
+    fn logging_out_flag_cleared_on_cleanup() {
+        use kameo::actor::Spawn;
+        let rt = big_stack_runtime();
+        rt.block_on(async {
+            let gate_ref = GateActor::spawn(());
+            let (tx, _rx) = mpsc::channel::<Vec<u8>>(16);
+            let _ = gate_ref
+                .ask(SessionCreated {
+                    session_id: 2,
+                    sender: tx,
+                    ip: "127.0.0.1".to_string(),
+                })
+                .await;
+            let _ = gate_ref
+                .ask(TestSetLoggingOut {
+                    session_id: 2,
+                    on: true,
+                })
+                .await;
+
+            let _ = gate_ref
+                .tell(LogOutCleanup { session_id: 2 })
+                .await;
+
+            assert!(
+                !gate_ref
+                    .ask(TestProbeLoggingOut { session_id: 2 })
+                    .await
+                    .unwrap(),
+                "会话清理后登出标记必须清位"
+            );
+            let (has_session, _) = gate_ref
+                .ask(TestProbeSession { session_id: 2 })
+                .await
+                .unwrap();
+            assert!(!has_session, "LogOutCleanup 必须删除会话");
+        });
     }
 }

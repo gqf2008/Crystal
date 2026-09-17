@@ -238,7 +238,15 @@ impl AccountActor {
                 return (false, false);
             }
             info!("Auto-registering account: {}", username);
-            self.register(username, password);
+            if self.register(username, password) {
+                // 与正常 login 分支对齐：注册成功即本次登录成功，必须置在线——
+                // 否则「在线账号拒登」对新账号首登不生效，第三方可随即同账号登入，
+                // 直到一次 logout/login 周期才恢复
+                if let Some(account) = self.accounts.get_mut(username) {
+                    account.is_online = true;
+                }
+                info!("Account logged in: {}", username);
+            }
             (true, false)
         }
     }
@@ -531,7 +539,11 @@ impl Message<ValidateStoragePasswordRequest> for AccountActor {
         };
         let mut body = Vec::new();
         if packet.write_body(&mut body).is_ok() {
-            let _ = self
+            // #23 下行 try_send：gate forward_unlock_storage 对本消息内联 ask，
+            // 此处若阻塞等 gate 邮箱空位即构成 gate→account→gate ask-reply 活锁环
+            // （单连接 DoS）。校验结果已由 ask reply 返回 gate，发包只是下行通知，
+            // 邮箱满丢包 warn 容忍，由 gate 会话通道积满踢线路径兜底。
+            if let Err(e) = self
                 .gate_ref
                 .tell(crate::gate::actor::SendToClient {
                     session_id: msg.session_id,
@@ -540,7 +552,15 @@ impl Message<ValidateStoragePasswordRequest> for AccountActor {
                         &body,
                     ),
                 })
-                .await;
+                .try_send()
+            {
+                warn!(
+                    "gate mailbox full: SendToClient dropped (session={} opcode={:?} err={})",
+                    msg.session_id,
+                    crate::actors::world::dropped_send_opcode(&e),
+                    e
+                );
+            }
         }
         // #200：校验成功（0=成功 / 4=无密码直接解锁）→ GateActor 通知 WorldActor 下发仓库
         result == 0 || result == 4
@@ -593,7 +613,8 @@ impl Message<SetStoragePasswordRequest> for AccountActor {
         };
         let mut body = Vec::new();
         if packet.write_body(&mut body).is_ok() {
-            let _ = self
+            // #23 下行 try_send（见 ValidateStoragePasswordRequest 注释）
+            if let Err(e) = self
                 .gate_ref
                 .tell(crate::gate::actor::SendToClient {
                     session_id: msg.session_id,
@@ -602,7 +623,15 @@ impl Message<SetStoragePasswordRequest> for AccountActor {
                         &body,
                     ),
                 })
-                .await;
+                .try_send()
+            {
+                warn!(
+                    "gate mailbox full: SendToClient dropped (session={} opcode={:?} err={})",
+                    msg.session_id,
+                    crate::actors::world::dropped_send_opcode(&e),
+                    e
+                );
+            }
         }
     }
 }
@@ -638,7 +667,8 @@ impl Message<ClearStoragePasswordRequest> for AccountActor {
         };
         let mut body = Vec::new();
         if packet.write_body(&mut body).is_ok() {
-            let _ = self
+            // #23 下行 try_send（见 ValidateStoragePasswordRequest 注释）
+            if let Err(e) = self
                 .gate_ref
                 .tell(crate::gate::actor::SendToClient {
                     session_id: msg.session_id,
@@ -647,7 +677,15 @@ impl Message<ClearStoragePasswordRequest> for AccountActor {
                         &body,
                     ),
                 })
-                .await;
+                .try_send()
+            {
+                warn!(
+                    "gate mailbox full: SendToClient dropped (session={} opcode={:?} err={})",
+                    msg.session_id,
+                    crate::actors::world::dropped_send_opcode(&e),
+                    e
+                );
+            }
         }
     }
 }
@@ -658,6 +696,9 @@ pub struct AccountChangePassword {
     pub username: String,
     pub old_password: String,
     pub new_password: String,
+    /// 本会话登录的账号（gate 侧 session_usernames 值；None = 强制改密待办例外路径）。
+    /// 纵深防御：登录态会话只能改本会话登录的账号，防跨账号喷洒（gate 已拦，此处再校验）
+    pub session_account: Option<String>,
 }
 
 /// 查询账号封禁到期时间（封禁检查/测试观测缝）
@@ -692,7 +733,8 @@ impl Message<AccountChangePassword> for AccountActor {
             let packet = mir2_shared::packets::server::login::ChangePassword { result };
             let mut body = Vec::new();
             if packet.write_body(&mut body).is_ok() {
-                let _ = gate_ref
+                // #23 下行 try_send（见 ValidateStoragePasswordRequest 注释）
+                if let Err(e) = gate_ref
                     .tell(crate::gate::actor::SendToClient {
                         session_id: msg.session_id,
                         data: crate::util::wire::build_packet_bytes(
@@ -700,10 +742,31 @@ impl Message<AccountChangePassword> for AccountActor {
                             &body,
                         ),
                     })
-                    .await;
+                    .try_send()
+                {
+                    warn!(
+                        "gate mailbox full: SendToClient dropped (session={} opcode={:?} err={})",
+                        msg.session_id,
+                        crate::actors::world::dropped_send_opcode(&e),
+                        e
+                    );
+                }
             }
         };
 
+        // 跨账号喷洒校验（纵深防御；gate 已拦）：登录态会话只能改本会话登录账号；
+        // None = RequirePasswordChange 强制改密例外（账号名 gate 已比对登记值）。
+        // 按 Result=4（账号不存在）回复，与未知账号同响应，不泄露账号是否存在
+        if let Some(expected) = &msg.session_account {
+            if expected != &msg.username {
+                warn!(
+                    "ChangePassword rejected: session account '{}' cannot target '{}'",
+                    expected, msg.username
+                );
+                send_result(4).await;
+                return;
+            }
+        }
         let Some(account) = self.accounts.get_mut(&msg.username) else {
             // C#：账号不存在 → Result=4
             warn!("Account '{}' not found for password change", msg.username);
@@ -719,7 +782,8 @@ impl Message<AccountChangePassword> for AccountActor {
             };
             let mut body = Vec::new();
             if packet.write_body(&mut body).is_ok() {
-                let _ = ban_gate_ref
+                // #23 下行 try_send（见 ValidateStoragePasswordRequest 注释）
+                if let Err(e) = ban_gate_ref
                     .tell(crate::gate::actor::SendToClient {
                         session_id: msg.session_id,
                         data: crate::util::wire::build_packet_bytes(
@@ -727,7 +791,15 @@ impl Message<AccountChangePassword> for AccountActor {
                             &body,
                         ),
                     })
-                    .await;
+                    .try_send()
+                {
+                    warn!(
+                        "gate mailbox full: SendToClient dropped (session={} opcode={:?} err={})",
+                        msg.session_id,
+                        crate::actors::world::dropped_send_opcode(&e),
+                        e
+                    );
+                }
             }
             warn!(
                 "ChangePassword rejected: account '{}' banned until {}",
@@ -744,6 +816,9 @@ impl Message<AccountChangePassword> for AccountActor {
         if !ok {
             // 安全加固（超越 C#）：旧密码错误计数 + >=5 封禁 2 分钟，镜像 login() 的
             // WrongPasswordCount 机制——否则 ChangePassword 是在线爆破任意账号口令的后门。
+            // 计数与登录【不分离】：C# 每账号只有单一 WrongPasswordCount 字段
+            // （登录成功/改密成功清零，错误累加），分开计数会偏离 C# 语义且给爆破者
+            // 两条独立的 5 次额度；共享计数下任一路径错误都消耗同一额度。
             account.wrong_password_count = account.wrong_password_count.saturating_add(1);
             if account.wrong_password_count >= 5 {
                 account.banned_until = now_secs + 120;
@@ -811,11 +886,33 @@ mod tests {
         assert!(actor.accounts.contains_key("newbie"));
     }
 
+    /// 红绿回归：自动注册分支登录成功后必须置 is_online（严重）。
+    /// 红检：回退修复（删掉注册分支里的 is_online = true）→ 首登后第三方
+    /// 同账号登录不被拒，最后一条断言 FAILED。
+    #[tokio::test]
+    async fn auto_register_first_login_marks_online_and_rejects_relogin() {
+        let gate_ref = crate::gate::actor::GateActor::spawn(());
+        let db_pool = db::init_db_pool("sqlite::memory:").await.expect("init_db");
+        let mut actor = AccountActor::new(gate_ref, db_pool);
+        actor.allow_new_account = true;
+
+        // 新账号首登：自动注册 + 登录成功，且必须立即置在线
+        let (ok, _) = actor.login("fresh", "pw12345");
+        assert!(ok, "未知账号首登自动注册并成功");
+        assert!(
+            actor.accounts.get("fresh").map(|a| a.is_online) == Some(true),
+            "自动注册分支登录成功后必须置 is_online（与正常 login 分支对齐）"
+        );
+
+        // 第三方随即持同口令同账号登入：必须被「在线账号拒登」拦下
+        let (ok2, _) = actor.login("fresh", "pw12345");
+        assert!(!ok2, "账号在线期间同账号再次登录必须被拒");
+    }
+
     /// 红绿回归：ChangePassword 旧密码错误必须计数并在 >=5 次后封禁 2 分钟（严重11 后半）。
     /// 红检：把 handle 里 wrong_password_count 累加分支删掉 → 第五次后 banned_until 仍为 0，断言失败。
     #[tokio::test]
     async fn change_password_wrong_old_password_counts_and_bans() {
-        use kameo::actor::ActorRef;
         let gate_ref = crate::gate::actor::GateActor::spawn(());
         let db_pool = db::init_db_pool("sqlite::memory:").await.expect("init_db");
         let actor_ref = AccountActor::spawn((gate_ref, db_pool));
@@ -838,6 +935,7 @@ mod tests {
                     username: "victim".to_string(),
                     old_password: "wrong_pw".to_string(),
                     new_password: "new_pw".to_string(),
+                    session_account: Some("victim".to_string()),
                 })
                 .await
                 .expect("change attempt");

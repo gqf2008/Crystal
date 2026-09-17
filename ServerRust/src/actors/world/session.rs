@@ -199,7 +199,7 @@ impl WorldActor {
                         &body,
                     ),
                 })
-                .await;
+                .try_send();
         }
         info!(
             "Login notice sent to {} (session={})",
@@ -213,6 +213,18 @@ pub struct StartGameRequest {
     pub session_id: u64,
     pub character_index: i32,
     pub account_username: String,
+}
+
+/// StartGameRequest 的处理结果（顶号解绑确定性顺序）：world 不再 spawn 异步
+/// tell gate 解绑——异步入队与旧会话已排队的 ClientDisconnected/LogOutCleanup
+/// 无 happens-before，gate 先处理到后者时 terminate_session 仍取到旧绑定发
+/// LogoutRequest，会把新会话在用的同账号误置离线。改由 ask reply 带回被踢的
+/// 旧会话 id，gate 在自身 StartGame 臂内联摘除 session_usernames（同 handler
+/// 内完成，先于其邮箱中任何后到的断开/清理消息；不新增 world→gate 的 await 边）
+#[derive(Debug, Clone, Copy, PartialEq, Eq, kameo::Reply)]
+pub struct StartGameReply {
+    /// 本次 StartGame 顶号踢掉的旧会话（无顶号为 None）
+    pub kicked_session_id: Option<u64>,
 }
 
 /// 移动请求（从 GateActor 转发）
@@ -236,6 +248,17 @@ pub struct PlayerDisconnected {
 /// 玩家主动登出（从 GateActor 转发）
 pub struct PlayerLogOut {
     pub session_id: u64,
+}
+
+/// PlayerLogOut 的处理结果（严重19 回归修复：gate 按结果决定是否动会话状态）
+#[derive(Debug, Clone, Copy, PartialEq, Eq, kameo::Reply)]
+pub enum PlayerLogOutReply {
+    /// 登出受理：world 已按序入队 S.LogOutSuccess → LogOutCleanup（gate 邮箱 FIFO
+    /// 保序），gate 收到 LogOutCleanup 才 terminate_session；world 侧无玩家记录时
+    /// 同样入队 LogOutCleanup（无 LogOutSuccess 需要保序），语义仍为 Success
+    Success,
+    /// 战斗/施法 10s 内被拒（C# LogTime → S.LogOutFailed）：gate 不得动任何状态
+    Blocked,
 }
 
 /// 聊天请求（从 GateActor 转发）
@@ -303,8 +326,81 @@ pub struct RemoveSlotItemRequest {
     pub from_unique_id: u64,
 }
 
+/// 邮箱死锁加固（#23 有界邮箱）：world→gate 的广播不得内联 await——gate 处理器
+/// 内联 ask world 时若 gate 邮箱满，world 阻塞、gate 等 world，构成循环等待。
+/// 广播一律 try_send：邮箱满即丢该条（洪峰/慢读场景由 gate SendToClient 的
+/// 会话通道积满踢线路径兜底），语义同 mod.rs 的 broadcast_to_map。
+pub(crate) async fn broadcast_to_map_nb(
+    gate_ref: &ActorRef<GateActor>,
+    players: &HashMap<u64, PlayerRecord>,
+    map_index: u16,
+    data: &[u8],
+) {
+    for (sid, rec) in players {
+        if let Ok(Some(s)) = rec
+            .actor_ref
+            .ask(crate::actors::player::GetPlayerState)
+            .await
+        {
+            if s.map_index == map_index {
+                let _ = gate_ref
+                    .tell(SendToClient {
+                        session_id: *sid,
+                        data: data.to_vec(),
+                    })
+                    .try_send();
+            }
+        }
+    }
+}
+
+impl WorldActor {
+    /// 租赁清理退物统一入口：先入包（Reply=Option<u64>，Some=交付后真实 uid），
+    /// 失败（None=背包满 / ask Err=actor 异常）不得静默吞物——按角色名走在线感知
+    /// 系统归还邮件兜底（deliver_system_mail_critical：失败 error! + 重试一次，
+    /// 对齐 market.rs 托管兜底模式）并 error! 审计；仍失败=物品蒸发，日志留痕
+    /// 待人工核查。
+    async fn return_rental_item_or_mail(
+        &self,
+        actor_ref: &ActorRef<PlayerActor>,
+        owner_name: &str,
+        item: mir2_shared::data::item::UserItem,
+    ) {
+        let readded = matches!(
+            actor_ref.ask(AddItemToInventory { item: item.clone() }).await,
+            Ok(Some(_))
+        );
+        if readded {
+            return;
+        }
+        tracing::error!(
+            "Rental item return to bag failed (owner={} uid={} item_index={}), falling back to system mail",
+            owner_name,
+            item.unique_id,
+            item.item_index
+        );
+        let mail = MailMessage {
+            mail_id: generate_mail_id(),
+            sender_name: "物品租赁".to_string(),
+            receiver_name: owner_name.to_string(),
+            subject: "租赁归还".to_string(),
+            body: "租赁取消退回的物品无法放入背包（背包已满或角色状态异常），改经邮件返还".to_string(),
+            timestamp: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs() as i64)
+                .unwrap_or(0),
+            read: false,
+            collected: false,
+            locked: false,
+            gold: 0,
+            items: vec![item],
+        };
+        let _ = self.deliver_system_mail_critical(mail).await;
+    }
+}
+
 impl Message<StartGameRequest> for WorldActor {
-    type Reply = ();
+    type Reply = StartGameReply;
 
     async fn handle(
         &mut self,
@@ -323,7 +419,9 @@ impl Message<StartGameRequest> for WorldActor {
                 "StartGame rejected: session {} already in game (duplicate StartGame)",
                 msg.session_id
             );
-            return;
+            return StartGameReply {
+                kicked_session_id: None,
+            };
         }
 
         // 尝试从数据库加载角色
@@ -391,13 +489,15 @@ impl Message<StartGameRequest> for WorldActor {
                                 &body,
                             ),
                         })
-                        .await;
+                        .try_send();
                 }
                 warn!(
                     "StartGame rejected: character_index {} not found for account {}",
                     msg.character_index, msg.account_username
                 );
-                return;
+                return StartGameReply {
+                    kicked_session_id: None,
+                };
             }
         };
 
@@ -419,13 +519,15 @@ impl Message<StartGameRequest> for WorldActor {
                             &body,
                         ),
                     })
-                    .await;
+                    .try_send();
             }
             warn!(
                 "StartGame rejected: character '{}' banned until ticks {}",
                 state.name, state.char_ban_expiry_ticks
             );
-            return;
+            return StartGameReply {
+                kicked_session_id: None,
+            };
         }
         if state.char_ban_expiry_ticks > 0 {
             // 到期自动解封（C# info.Banned=false + 清空原因/过期时间后继续）
@@ -456,13 +558,140 @@ impl Message<StartGameRequest> for WorldActor {
                             &body,
                         ),
                     })
-                    .await;
+                    .try_send();
             }
             warn!(
                 "StartGame rejected: AllowStartGame=false for account {}",
                 msg.account_username
             );
-            return;
+            return StartGameReply {
+                kicked_session_id: None,
+            };
+        }
+
+        // 双开防护（角色名查重）：同名角色在线则踢旧 actor 再上新——旧代码只按
+        // session_id 拦重复 StartGame，第二个会话用同名角色会再建 PlayerActor
+        // （双开同一背包/存档互相覆盖）。C# 语义为后者顶号：旧侧广播移除 + 落库。
+        // 名称比对用精确匹配（DB 角色名大小写敏感，与 NewCharacter 查重一致）
+        let dup_session = self
+            .players
+            .iter()
+            .find(|(_, rec)| rec.name == state.name)
+            .map(|(sid, _)| *sid);
+        if let Some(old_sid) = dup_session {
+            warn!(
+                "StartGame: character '{}' already online (session {}), kicking old actor for new session {}",
+                state.name, old_sid, msg.session_id
+            );
+            if let Some(old) = self.players.remove(&old_sid) {
+                // 与断连清理对齐的关键子集：清会话键 → 落库 → 广播移除 → 社交下线
+                self.invisible_sessions.remove(&old_sid);
+                self.hidden_sessions.remove(&old_sid);
+                self.gm_observer_sessions.remove(&old_sid);
+                self.sneaking_sessions.remove(&old_sid);
+                self.remove_observe_links(old_sid);
+                self.session_npc_page.remove(&old_sid);
+                self.market_search_next_ms.remove(&old_sid);
+                self.market_search_cache.remove(&old_sid);
+                self.player_stacking.remove(&old_sid);
+                self.slaying_armed.remove(&old_sid);
+                self.in_trap_rock.remove(&old_sid);
+                self.transform_appearance.remove(&old_sid);
+                self.player_logout_block_ms.remove(&old_sid);
+
+                // 顶号解绑（确定性顺序）：不再 spawn 异步 tell gate——异步入队与旧
+                // 会话已排队的 ClientDisconnected/LogOutCleanup 无 happens-before，
+                // gate 先处理到后者时 terminate_session 仍取到旧绑定发 LogoutRequest，
+                // 会把新会话在用的同账号误置离线。改为经 StartGameReply.kicked_session_id
+                // 带回，gate 在自身 StartGame 臂内联摘除 session_usernames（同 handler
+                // 内完成，先于其邮箱中任何后到的断开/清理消息；不新增 world→gate 的
+                // await 边）。spawn 版 UnbindSessionLogin 随之移除而非保留兜底：旧客户
+                // 端被踢后可重新 Login 重建绑定，迟到的异步解绑会误删新绑定——保留它
+                // 不是兜底而是新竞态源。
+
+                // 旧客户端被踢通知：旧连接仍在 gate 注册，顶号后不给交代会僵尸卡死
+                // （不断开旧 TCP——同账号新会话已在线，terminate 会误把账号置离线）
+                send_system_message(&self.gate_ref, old_sid, "该角色已在别处登录，你已被踢下线");
+
+                // 租赁会话清理（与 PlayerLogOut 对齐；C# StopGame → CancelItemRental）：
+                // 会话键 = 物主（存物方），partner = 租客；存入物品始终退回物主，
+                // 否则旧 actor 移除后租赁状态泄漏、寄存物品卡死
+                if let Some(session) = self.rental_sessions.remove(&old_sid) {
+                    // 被踢方是物主：物品退回本人（old 仍是其玩家 actor）；
+                    // 入包失败（背包满/actor 异常）走系统归还邮件，不得静默吞物
+                    if let Some(item) = session.owner_item {
+                        self.return_rental_item_or_mail(&old.actor_ref, &old.name, item)
+                            .await;
+                    }
+                    send_system_message(
+                        &self.gate_ref,
+                        session.partner_session,
+                        "租赁对方已下线，租赁已取消",
+                    );
+                }
+                // 被踢方是租客：物品退回另一端的物主
+                let owner_session = self
+                    .rental_sessions
+                    .iter()
+                    .find(|(_, s)| s.partner_session == old_sid)
+                    .map(|(k, _)| *k);
+                if let Some(owner_sid) = owner_session {
+                    if let Some(session) = self.rental_sessions.remove(&owner_sid) {
+                        if let Some(item) = session.owner_item {
+                            if let Some(owner_record) = self.players.get(&owner_sid) {
+                                self.return_rental_item_or_mail(
+                                    &owner_record.actor_ref,
+                                    &owner_record.name,
+                                    item,
+                                )
+                                .await;
+                                send_system_message(
+                                    &self.gate_ref,
+                                    owner_sid,
+                                    "租赁对方已下线，物品已退回",
+                                );
+                            }
+                        }
+                    }
+                }
+
+                if let Ok(Some(old_state)) = old.actor_ref.ask(GetPlayerState).await {
+                    self.persist_tamed_pets(old_sid, &old_state.name).await;
+                    self.despawn_session_pets(old_sid).await;
+                    // M61：旧会话按会话生成的 NPC/怪物一并清理（与 PlayerLogOut 对齐），
+                    // 否则同图无其他玩家时旧会话的生成集泄漏（新会话进图再生成一份）
+                    self.cleanup_map_spawns(old_state.map_index).await;
+                    if let Err(e) =
+                        db::save_character(&self.db_pool, &old_state, &old.account_username).await
+                    {
+                        warn!(
+                            "Failed to save kicked duplicate player {}: {}",
+                            old_state.name, e
+                        );
+                    }
+                    let db_heroes: Vec<db::DbHero> = self.db_heroes_snapshot(old_sid);
+                    if let Err(e) = db::save_heroes(&self.db_pool, &old_state.name, &db_heroes).await
+                    {
+                        warn!(
+                            "Failed to save heroes for kicked duplicate {}: {}",
+                            old_state.name, e
+                        );
+                    }
+                    self.broadcast_hero_remove(old.object_id).await;
+                    let opcode = mir2_shared::enums::ServerPacketIds::ObjectRemove as i16;
+                    let mut body = Vec::new();
+                    body.extend_from_slice(&old_state.object_id.to_le_bytes());
+                    let packet = build_packet_bytes(opcode, &body);
+                    broadcast_to_map_nb(&self.gate_ref, &self.players, old_state.map_index, &packet)
+                        .await;
+                }
+                let _ = self
+                    .social_ref
+                    .tell(crate::actors::social::SocialPlayerLeft {
+                        session_id: old_sid,
+                    })
+                    .try_send();
+            }
         }
 
         let object_id = self.alloc_object_id();
@@ -749,7 +978,7 @@ impl Message<StartGameRequest> for WorldActor {
                                 &body,
                             ),
                         })
-                        .await;
+                        .try_send();
                 }
             }
         }
@@ -864,7 +1093,7 @@ impl Message<StartGameRequest> for WorldActor {
                 session_id: msg.session_id,
                 data: self_packet,
             })
-            .await;
+            .try_send();
 
         // 多玩家可见性：向新玩家发送已有玩家的 ObjectPlayer（同图 + 跳过隐身，#1651/#1653）
         self.send_map_players_to(msg.session_id, &loaded_state, loaded_state.map_index)
@@ -930,7 +1159,7 @@ impl Message<StartGameRequest> for WorldActor {
                             &sg_body,
                         ),
                     })
-                    .await;
+                    .try_send();
             }
         }
 
@@ -1009,7 +1238,7 @@ impl Message<StartGameRequest> for WorldActor {
                     session_id: msg.session_id,
                     data: new_map_info,
                 })
-                .await;
+                .try_send();
             info!(
                 "NewMapInfo: map={} npcs={} movements={}",
                 map_info_idx,
@@ -1031,7 +1260,7 @@ impl Message<StartGameRequest> for WorldActor {
                         session_id: msg.session_id,
                         data: wm,
                     })
-                    .await;
+                    .try_send();
                 info!("WorldMapSetup: sent to session {}", msg.session_id);
             }
         }
@@ -1088,7 +1317,7 @@ impl Message<StartGameRequest> for WorldActor {
                             session_id: msg.session_id,
                             data: buf,
                         })
-                        .await;
+                        .try_send();
                 }
             } else {
                 let object_item = mir2_shared::packets::server::ObjectItem {
@@ -1110,7 +1339,7 @@ impl Message<StartGameRequest> for WorldActor {
                             session_id: msg.session_id,
                             data: buf,
                         })
-                        .await;
+                        .try_send();
                 }
             }
         }
@@ -1145,7 +1374,7 @@ impl Message<StartGameRequest> for WorldActor {
                                 &body,
                             ),
                         })
-                        .await;
+                        .try_send();
                 }
                 // Send SpellToggle for toggled-on spells
                 if magic.toggled {
@@ -1162,7 +1391,7 @@ impl Message<StartGameRequest> for WorldActor {
                                 &toggle_body,
                             ),
                         })
-                        .await;
+                        .try_send();
                 }
             }
         }
@@ -1182,7 +1411,7 @@ impl Message<StartGameRequest> for WorldActor {
                         &body,
                     ),
                 })
-                .await;
+                .try_send();
         }
         {
             let body = vec![loaded_state.pet_mode as u8];
@@ -1195,7 +1424,7 @@ impl Message<StartGameRequest> for WorldActor {
                         &body,
                     ),
                 })
-                .await;
+                .try_send();
         }
         // C# StartGameSuccess（:1221）：下发默认 NPC ObjectID（客户端默认 NPC 按钮路由）
         {
@@ -1210,7 +1439,7 @@ impl Message<StartGameRequest> for WorldActor {
                         &body,
                     ),
                 })
-                .await;
+                .try_send();
         }
 
         // C# SendBaseStats（HumanObject.cs:1726）：登录下发职业基础属性（BaseStats.Stats 按公式计算当前等级值）
@@ -1232,7 +1461,7 @@ impl Message<StartGameRequest> for WorldActor {
                             &body,
                         ),
                     })
-                    .await;
+                    .try_send();
             }
         }
 
@@ -1249,7 +1478,7 @@ impl Message<StartGameRequest> for WorldActor {
                         &body,
                     ),
                 })
-                .await;
+                .try_send();
         }
 
         // 发送自动药水设置（恢复持久化数据）
@@ -1266,7 +1495,7 @@ impl Message<StartGameRequest> for WorldActor {
                         &body,
                     ),
                 })
-                .await;
+                .try_send();
         }
         if loaded_state.auto_pot_mp > 0 {
             let mut body = Vec::new();
@@ -1281,7 +1510,7 @@ impl Message<StartGameRequest> for WorldActor {
                         &body,
                     ),
                 })
-                .await;
+                .try_send();
         }
 
         // 发送欢迎消息
@@ -1301,6 +1530,12 @@ impl Message<StartGameRequest> for WorldActor {
                 online_count, light_name
             ),
         );
+
+        // 顶号解绑确定性顺序：被踢旧会话 id 经 reply 带回，gate 在其 StartGame 臂
+        // 内联摘除登录绑定（见 gate/actor.rs StartGame 臂注释）
+        StartGameReply {
+            kicked_session_id: dup_session,
+        }
     }
 }
 
@@ -1730,7 +1965,7 @@ impl Message<WorldMoveRequest> for WorldActor {
                                     Some(&dest_mi),
                                 ),
                             })
-                            .await;
+                            .try_send();
                         // C# GetMapInfo：换图补发 MapInformation
                         let map_info = super::build_map_information_packet(
                             dest_map_index as u16,
@@ -1744,7 +1979,7 @@ impl Message<WorldMoveRequest> for WorldActor {
                                 session_id: msg.session_id,
                                 data: map_info,
                             })
-                            .await;
+                            .try_send();
 
                         // Send UserLocation to confirm new position
                         if let Ok(Some(new_state)) = player_ref.ask(GetPlayerState).await {
@@ -1761,7 +1996,7 @@ impl Message<WorldMoveRequest> for WorldActor {
                                         &loc_body,
                                     ),
                                 })
-                                .await;
+                                .try_send();
                         }
 
                         // 清理旧地图视野：发送 ObjectRemove 给该玩家（移除旧地图上的怪物/玩家/地面物品）
@@ -1780,7 +2015,7 @@ impl Message<WorldMoveRequest> for WorldActor {
                                             &rb,
                                         ),
                                     })
-                                    .await;
+                                    .try_send();
                             }
                         }
                         for (sid, rec) in &self.players {
@@ -1792,7 +2027,7 @@ impl Message<WorldMoveRequest> for WorldActor {
                                         let _ = self.gate_ref.tell(SendToClient {
                                             session_id: msg.session_id,
                                             data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::ObjectRemove as i16, &rb),
-                                        }).await;
+                                        }).try_send();
                                     }
                                 }
                             }
@@ -1811,7 +2046,7 @@ impl Message<WorldMoveRequest> for WorldActor {
                                             &rb,
                                         ),
                                     })
-                                    .await;
+                                    .try_send();
                             }
                         }
 
@@ -1904,7 +2139,7 @@ impl Message<WorldMoveRequest> for WorldActor {
                                             session_id: msg.session_id,
                                             data: buf,
                                         })
-                                        .await;
+                                        .try_send();
                                 }
                             } else {
                                 let object_item = mir2_shared::packets::server::ObjectItem {
@@ -1926,7 +2161,7 @@ impl Message<WorldMoveRequest> for WorldActor {
                                             session_id: msg.session_id,
                                             data: buf,
                                         })
-                                        .await;
+                                        .try_send();
                                 }
                             }
                         }
@@ -1948,7 +2183,7 @@ impl Message<WorldMoveRequest> for WorldActor {
                                 mir2_shared::enums::ServerPacketIds::ObjectRemove as i16,
                                 &rm,
                             );
-                            broadcast_to_map(
+                            broadcast_to_map_nb(
                                 &self.gate_ref,
                                 &self.players,
                                 old_map,
@@ -1972,7 +2207,7 @@ impl Message<WorldMoveRequest> for WorldActor {
                                     mir2_shared::enums::ServerPacketIds::ObjectRemove as i16,
                                     &rh,
                                 );
-                                broadcast_to_map(
+                                broadcast_to_map_nb(
                                     &self.gate_ref,
                                     &self.players,
                                     old_map,
@@ -2111,7 +2346,7 @@ impl WorldActor {
                     session_id: viewer_session,
                     data: packet,
                 })
-                .await;
+                .try_send();
         }
     }
 
@@ -2149,7 +2384,7 @@ impl WorldActor {
                     session_id: *sid,
                     data: packet,
                 })
-                .await;
+                .try_send();
         }
     }
 }
@@ -2330,9 +2565,11 @@ impl Message<PlayerDisconnected> for WorldActor {
         // 租赁会话清理（与 PlayerLogOut 对齐；C# StopGame → CancelItemRental）：
         // 会话键 = 物主（存物方），partner = 租客；存入物品始终退回物主
         if let Some(session) = self.rental_sessions.remove(&msg.session_id) {
-            // 断线方是物主：物品退回本人（record 仍是其玩家 actor）
+            // 断线方是物主：物品退回本人（record 仍是其玩家 actor）；
+            // 入包失败（背包满/actor 异常）走系统归还邮件，不得静默吞物
             if let Some(item) = session.owner_item {
-                let _ = record.actor_ref.ask(AddItemToInventory { item }).await;
+                self.return_rental_item_or_mail(&record.actor_ref, &record.name, item)
+                    .await;
             }
             send_system_message(
                 &self.gate_ref,
@@ -2350,14 +2587,28 @@ impl Message<PlayerDisconnected> for WorldActor {
             if let Some(session) = self.rental_sessions.remove(&owner_sid) {
                 if let Some(item) = session.owner_item {
                     if let Some(owner_record) = self.players.get(&owner_sid) {
-                        let _ = owner_record
-                            .actor_ref
-                            .ask(AddItemToInventory { item })
-                            .await;
+                        self.return_rental_item_or_mail(
+                            &owner_record.actor_ref,
+                            &owner_record.name,
+                            item,
+                        )
+                        .await;
                         send_system_message(
                             &self.gate_ref,
                             owner_sid,
                             "租赁对方已下线，物品已退回",
+                        );
+                    } else {
+                        // 物主记录已不在 players：world 各 players.remove 路径均在
+                        // 同一 handler 内原子清租赁会话，正常不可达；防御性 error!
+                        // 留痕（RentalSession 只存 partner_name，无物主名可邮件兜底，
+                        // 物品蒸发待人工核查）
+                        tracing::error!(
+                            "Rental owner record gone at renter disconnect cleanup, item dropped: owner_session={} partner={} uid={} item_index={}",
+                            owner_sid,
+                            session.partner_name,
+                            item.unique_id,
+                            item.item_index
                         );
                     }
                 }
@@ -2434,13 +2685,180 @@ impl Message<PlayerDisconnected> for WorldActor {
             let mut body = Vec::new();
             body.extend_from_slice(&state.object_id.to_le_bytes());
             let packet = build_packet_bytes(opcode, &body);
-            broadcast_to_map(&self.gate_ref, &self.players, state.map_index, &packet).await;
+            broadcast_to_map_nb(&self.gate_ref, &self.players, state.map_index, &packet).await;
         }
     }
 }
 
-impl Message<PlayerLogOut> for WorldActor {
+/// 测试探针：当前在线玩家的 session_id 列表（双开踢旧回归断言用，只读；
+/// 对齐 gate 的 TestProbeSession 先例）
+pub struct TestPlayerSessionIds;
+
+impl Message<TestPlayerSessionIds> for WorldActor {
+    type Reply = Vec<u64>;
+
+    async fn handle(
+        &mut self,
+        _msg: TestPlayerSessionIds,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        let mut ids: Vec<u64> = self.players.keys().copied().collect();
+        ids.sort_unstable();
+        ids
+    }
+}
+
+/// 测试探针：注入一条无寄存物品的租赁会话（dup-kick 租赁清理回归用，
+/// 生产路径只能经市场租赁流程建立）
+pub struct TestInjectRentalSession {
+    pub owner_session: u64,
+    pub partner_session: u64,
+}
+
+impl Message<TestInjectRentalSession> for WorldActor {
     type Reply = ();
+
+    async fn handle(
+        &mut self,
+        msg: TestInjectRentalSession,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        self.rental_sessions.insert(
+            msg.owner_session,
+            RentalSession {
+                partner_session: msg.partner_session,
+                partner_name: "partner".to_string(),
+                fee: 0,
+                period_hours: 1,
+                owner_item: None,
+                renter_locked: false,
+                owner_locked: false,
+            },
+        );
+    }
+}
+
+/// 测试探针：当前租赁会话总数（dup-kick 租赁清理回归断言用，只读）
+pub struct TestRentalSessionCount;
+
+impl Message<TestRentalSessionCount> for WorldActor {
+    type Reply = usize;
+
+    async fn handle(
+        &mut self,
+        _msg: TestRentalSessionCount,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        self.rental_sessions.len()
+    }
+}
+
+/// 测试探针：注入一条带寄存物品的租赁会话（退物入包失败→系统邮件兜底回归用；
+/// owner_item 为 Some 时清理路径才会走退物分支）
+pub struct TestInjectRentalWithItem {
+    pub owner_session: u64,
+    pub partner_session: u64,
+    pub item: mir2_shared::data::item::UserItem,
+}
+
+impl Message<TestInjectRentalWithItem> for WorldActor {
+    type Reply = ();
+
+    async fn handle(
+        &mut self,
+        msg: TestInjectRentalWithItem,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        self.rental_sessions.insert(
+            msg.owner_session,
+            RentalSession {
+                partner_session: msg.partner_session,
+                partner_name: "partner".to_string(),
+                fee: 0,
+                period_hours: 1,
+                owner_item: Some(msg.item),
+                renter_locked: false,
+                owner_locked: false,
+            },
+        );
+    }
+}
+
+/// 测试探针：立即杀掉指定会话的 PlayerActor（构造「actor 死亡 → 退物 ask 失败」
+/// 场景，邮件兜底回归用；生产路径无此消息）。返回是否有该玩家记录
+pub struct TestKillPlayerActor {
+    pub session_id: u64,
+}
+
+impl Message<TestKillPlayerActor> for WorldActor {
+    type Reply = bool;
+
+    async fn handle(
+        &mut self,
+        msg: TestKillPlayerActor,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        if let Some(record) = self.players.get(&msg.session_id) {
+            record.actor_ref.kill();
+            true
+        } else {
+            false
+        }
+    }
+}
+
+/// 测试探针：在指定玩家所在地图注入一个假 NPC（dup-kick 的 cleanup_map_spawns
+/// 回归用；测试 harness 无 spawn 配置，只能靠注入构造可观察的地图生成物）
+pub struct TestInjectNpcOnPlayerMap {
+    pub session_id: u64,
+    pub object_id: u32,
+}
+
+impl Message<TestInjectNpcOnPlayerMap> for WorldActor {
+    type Reply = ();
+
+    async fn handle(
+        &mut self,
+        msg: TestInjectNpcOnPlayerMap,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        let Some(record) = self.players.get(&msg.session_id) else {
+            return;
+        };
+        if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+            self.npcs.insert(
+                msg.object_id,
+                NpcState {
+                    object_id: msg.object_id,
+                    name: "TestNpc".to_string(),
+                    x: 0,
+                    y: 0,
+                    direction: 0,
+                    db_index: 0,
+                    map_index: state.map_index,
+                },
+            );
+        }
+    }
+}
+
+/// 测试探针：当前 NPC 总数（cleanup_map_spawns 回归断言用，只读）
+pub struct TestNpcCount;
+
+impl Message<TestNpcCount> for WorldActor {
+    type Reply = usize;
+
+    async fn handle(
+        &mut self,
+        _msg: TestNpcCount,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        self.npcs.len()
+    }
+}
+
+impl Message<PlayerLogOut> for WorldActor {
+    type Reply = PlayerLogOutReply;
 
     async fn handle(
         &mut self,
@@ -2459,6 +2877,8 @@ impl Message<PlayerLogOut> for WorldActor {
                 msg.session_id,
                 block_until.unwrap_or(0)
             );
+            // Blocked 路径会话未被清理，S.LogOutFailed 天然可达；
+            // try_send：gate 邮箱满时不得阻塞 world（循环等待加固）
             let _ = self
                 .gate_ref
                 .tell(SendToClient {
@@ -2468,16 +2888,27 @@ impl Message<PlayerLogOut> for WorldActor {
                         &[],
                     ),
                 })
-                .await;
-            return;
+                .try_send();
+            return PlayerLogOutReply::Blocked;
         }
         self.player_logout_block_ms.remove(&msg.session_id);
 
         let record = match self.players.remove(&msg.session_id) {
             Some(r) => r,
             None => {
+                // 无玩家记录（如选角界面发 LogOut）：无 LogOutSuccess 需要保序，
+                // 直接入队清理消息让 gate 收尾（置账号离线 + 删会话），语义 Success
                 warn!("Logout request for unknown session {}", msg.session_id);
-                return;
+                let gate_ref = self.gate_ref.clone();
+                let sid = msg.session_id;
+                // 关键路径不得 try_send 吞错：gate 邮箱满即丢会让会话永不清
+                // （is_online 永卡）；spawn 内 await tell 与同函数其余两处一致
+                crate::util::tasks::spawn("world.logout_cleanup", async move {
+                    let _ = gate_ref
+                        .tell(crate::gate::actor::LogOutCleanup { session_id: sid })
+                        .await;
+                });
+                return PlayerLogOutReply::Success;
             }
         };
         self.invisible_sessions.remove(&msg.session_id);
@@ -2496,9 +2927,11 @@ impl Message<PlayerLogOut> for WorldActor {
 
         // 租赁会话清理：会话键 = 物主（存物方），partner = 租客；存入物品始终退回物主
         if let Some(session) = self.rental_sessions.remove(&msg.session_id) {
-            // 断线方是物主：物品退回本人（record 仍是其玩家 actor）
+            // 登出方是物主：物品退回本人（record 仍是其玩家 actor）；
+            // 入包失败（背包满/actor 异常）走系统归还邮件，不得静默吞物
             if let Some(item) = session.owner_item {
-                let _ = record.actor_ref.ask(AddItemToInventory { item }).await;
+                self.return_rental_item_or_mail(&record.actor_ref, &record.name, item)
+                    .await;
             }
             send_system_message(
                 &self.gate_ref,
@@ -2506,7 +2939,7 @@ impl Message<PlayerLogOut> for WorldActor {
                 "租赁对方已下线，租赁已取消",
             );
         }
-        // 断线方是租客：物品退回另一端的物主
+        // 登出方是租客：物品退回另一端的物主
         let owner_session = self
             .rental_sessions
             .iter()
@@ -2516,14 +2949,28 @@ impl Message<PlayerLogOut> for WorldActor {
             if let Some(session) = self.rental_sessions.remove(&owner_sid) {
                 if let Some(item) = session.owner_item {
                     if let Some(owner_record) = self.players.get(&owner_sid) {
-                        let _ = owner_record
-                            .actor_ref
-                            .ask(AddItemToInventory { item })
-                            .await;
+                        self.return_rental_item_or_mail(
+                            &owner_record.actor_ref,
+                            &owner_record.name,
+                            item,
+                        )
+                        .await;
                         send_system_message(
                             &self.gate_ref,
                             owner_sid,
                             "租赁对方已下线，物品已退回",
+                        );
+                    } else {
+                        // 物主记录已不在 players：world 各 players.remove 路径均在
+                        // 同一 handler 内原子清租赁会话，正常不可达；防御性 error!
+                        // 留痕（RentalSession 只存 partner_name，无物主名可邮件兜底，
+                        // 物品蒸发待人工核查）
+                        tracing::error!(
+                            "Rental owner record gone at renter logout cleanup, item dropped: owner_session={} partner={} uid={} item_index={}",
+                            owner_sid,
+                            session.partner_name,
+                            item.unique_id,
+                            item.item_index
                         );
                     }
                 }
@@ -2558,7 +3005,17 @@ impl Message<PlayerLogOut> for WorldActor {
             // 重新取状态（group_id 已清）
             let state = match record.actor_ref.ask(GetPlayerState).await {
                 Ok(Some(s)) => s,
-                _ => return,
+                _ => {
+                    // 玩家已移除但取状态失败：仍须让 gate 收尾（无 LogOutSuccess 可发）
+                    let gate_ref = self.gate_ref.clone();
+                    let sid = msg.session_id;
+                    crate::util::tasks::spawn("world.logout_cleanup", async move {
+                        let _ = gate_ref
+                            .tell(crate::gate::actor::LogOutCleanup { session_id: sid })
+                            .await;
+                    });
+                    return PlayerLogOutReply::Success;
+                }
             };
             // 保存玩家数据到数据库
             if let Err(e) =
@@ -2608,16 +3065,24 @@ impl Message<PlayerLogOut> for WorldActor {
                 let ticks = 621355968000000000i64 + now_secs * 10_000_000;
                 body.extend_from_slice(&ticks.to_le_bytes());
             }
-            let _ = self
-                .gate_ref
-                .tell(SendToClient {
-                    session_id: msg.session_id,
-                    data: build_packet_bytes(
-                        mir2_shared::enums::ServerPacketIds::LogOutSuccess as i16,
-                        &body,
-                    ),
-                })
-                .await;
+            // 严重19 回归修复：S.LogOutSuccess 必须先于 gate 的会话清理落链。
+            // 由同一任务顺序 tell（gate 邮箱 FIFO 保序）：LogOutSuccess → LogOutCleanup；
+            // fire-and-forget 也避免 world 内联 await gate（有界邮箱循环等待，#23）
+            let gate_ref = self.gate_ref.clone();
+            let sid = msg.session_id;
+            let success_packet =
+                build_packet_bytes(mir2_shared::enums::ServerPacketIds::LogOutSuccess as i16, &body);
+            crate::util::tasks::spawn("world.logout_success", async move {
+                let _ = gate_ref
+                    .tell(SendToClient {
+                        session_id: sid,
+                        data: success_packet,
+                    })
+                    .await;
+                let _ = gate_ref
+                    .tell(crate::gate::actor::LogOutCleanup { session_id: sid })
+                    .await;
+            });
 
             // 通知其他玩家该玩家已离开
             // #1680：玩家登出 ObjectRemove 只发同图玩家（C# CurrentMap）
@@ -2625,9 +3090,10 @@ impl Message<PlayerLogOut> for WorldActor {
             let mut remove_body = Vec::new();
             remove_body.extend_from_slice(&state.object_id.to_le_bytes());
             let packet = build_packet_bytes(opcode, &remove_body);
-            broadcast_to_map(&self.gate_ref, &self.players, state.map_index, &packet).await;
+            broadcast_to_map_nb(&self.gate_ref, &self.players, state.map_index, &packet).await;
         }
         // 玩家已从 self.players 移除，无需再发 PlayerDisconnected
+        PlayerLogOutReply::Success
     }
 }
 
@@ -2916,7 +3382,7 @@ impl Message<ChatRequest> for WorldActor {
                                             &in_body,
                                         ),
                                     })
-                                    .await;
+                                    .try_send();
                                 // WhisperOut 给自己（C#："/" + 原消息）
                                 let mut out_body = Vec::new();
                                 write_dotnet_string(
@@ -2933,7 +3399,7 @@ impl Message<ChatRequest> for WorldActor {
                                             &out_body,
                                         ),
                                     })
-                                    .await;
+                                    .try_send();
                                 debug!("Whisper: {} -> {}: {}", self_name, target, message);
                                 break;
                             }
@@ -2970,7 +3436,7 @@ impl Message<ChatRequest> for WorldActor {
                                         session_id: *sid,
                                         data: packet.clone(),
                                     })
-                                    .await;
+                                    .try_send();
                             }
                         }
                     }
@@ -3002,7 +3468,7 @@ impl Message<ChatRequest> for WorldActor {
                                         session_id: *sid,
                                         data: packet.clone(),
                                     })
-                                    .await;
+                                    .try_send();
                             }
                         }
                     }
@@ -3035,7 +3501,7 @@ impl Message<ChatRequest> for WorldActor {
                                         session_id: *sid,
                                         data: packet.clone(),
                                     })
-                                    .await;
+                                    .try_send();
                                 break;
                             }
                         }
@@ -3047,7 +3513,7 @@ impl Message<ChatRequest> for WorldActor {
                                 session_id: msg.session_id,
                                 data: packet,
                             })
-                            .await;
+                            .try_send();
                     } else {
                         send_system_message(&self.gate_ref, msg.session_id, "导师不在线");
                     }
@@ -3080,7 +3546,7 @@ impl Message<ChatRequest> for WorldActor {
                                         session_id: *sid,
                                         data: packet.clone(),
                                     })
-                                    .await;
+                                    .try_send();
                                 break;
                             }
                         }
@@ -3092,7 +3558,7 @@ impl Message<ChatRequest> for WorldActor {
                                 session_id: msg.session_id,
                                 data: packet,
                             })
-                            .await;
+                            .try_send();
                     } else {
                         send_system_message(&self.gate_ref, msg.session_id, "配偶不在线");
                     }
@@ -3120,7 +3586,7 @@ impl Message<ChatRequest> for WorldActor {
                                 session_id: *sid,
                                 data: packet.clone(),
                             })
-                            .await;
+                            .try_send();
                     }
                     return;
                 }
@@ -3188,7 +3654,7 @@ impl Message<ChatRequest> for WorldActor {
                                             &body,
                                         ),
                                     })
-                                    .await;
+                                    .try_send();
                             }
                         }
                     }
@@ -3219,7 +3685,7 @@ impl Message<ChatRequest> for WorldActor {
                                     &body,
                                 ),
                             })
-                            .await;
+                            .try_send();
                     }
                     return;
                 } else {
@@ -3250,7 +3716,7 @@ impl Message<ChatRequest> for WorldActor {
                                             &body,
                                         ),
                                     })
-                                    .await;
+                                    .try_send();
                             }
                         }
                     }
@@ -4105,7 +4571,7 @@ impl Message<ChatRequest> for WorldActor {
                                 if self.monsters.remove(oid).is_some() {
                                     removed += 1;
                                     let packet = Self::build_object_remove_packet(*oid);
-                                    broadcast_to_map(
+                                    broadcast_to_map_nb(
                                         &self.gate_ref,
                                         &self.players,
                                         map_index,
@@ -4489,7 +4955,7 @@ impl Message<ChatRequest> for WorldActor {
                                                             session_id: *psid,
                                                             data: died_packet.clone(),
                                                         })
-                                                        .await;
+                                                        .try_send();
                                                 }
                                                 self.handle_player_death_drop(
                                                     sid,
@@ -4581,7 +5047,7 @@ impl Message<ChatRequest> for WorldActor {
                                                 session_id: *sid,
                                                 data: died_packet.clone(),
                                             })
-                                            .await;
+                                            .try_send();
                                     }
                                     self.handle_player_death_drop(
                                         target_sid,
@@ -4667,7 +5133,7 @@ impl Message<ChatRequest> for WorldActor {
                                                 session_id: *sid,
                                                 data: died_packet.clone(),
                                             })
-                                            .await;
+                                            .try_send();
                                     }
                                     self.handle_player_death_drop(
                                         msg.session_id,
@@ -4868,7 +5334,7 @@ impl Message<ChatRequest> for WorldActor {
                                     session_id: msg.session_id,
                                     data: packet,
                                 })
-                                .await;
+                                .try_send();
                             // 广播同图 DataRange(16) 内其他玩家（C# Spawned → BroadcastInfo）
                             self.broadcast_deco_on_map(
                                 object_id,
@@ -5609,7 +6075,7 @@ impl Message<ChatRequest> for WorldActor {
                                     &resize_body,
                                 ),
                             })
-                            .await;
+                            .try_send();
                     }
 
                     // DB 持久化（重启不丢；C# AccountInfo 存档）
@@ -5718,7 +6184,7 @@ impl Message<ChatRequest> for WorldActor {
                                 session_id: msg.session_id,
                                 data: body,
                             })
-                            .await;
+                            .try_send();
                     }
                     send_system_message(
                         &self.gate_ref,
@@ -5978,7 +6444,7 @@ impl Message<ChatRequest> for WorldActor {
                                             &body,
                                         ),
                                     })
-                                    .await;
+                                    .try_send();
                                 send_system_message(
                                     &self.gate_ref,
                                     msg.session_id,
@@ -6341,7 +6807,7 @@ impl Message<ChatRequest> for WorldActor {
                                     &observe_body,
                                 ),
                             })
-                            .await;
+                            .try_send();
                     }
                     send_system_message(
                         &self.gate_ref,
@@ -6412,7 +6878,7 @@ impl Message<ChatRequest> for WorldActor {
                                     &resize_body,
                                 ),
                             })
-                            .await;
+                            .try_send();
                     }
                     send_system_message(
                         &self.gate_ref,
@@ -6449,7 +6915,7 @@ impl Message<ChatRequest> for WorldActor {
                                         session_id: *sid,
                                         data: packet.clone(),
                                     })
-                                    .await;
+                                    .try_send();
                             }
                         }
                     }
@@ -6522,7 +6988,7 @@ impl Message<ChatRequest> for WorldActor {
                                         &in_body,
                                     ),
                                 })
-                                .await;
+                                .try_send();
                             // 发给自己: WhisperOut
                             let mut out_body = Vec::new();
                             write_dotnet_string(
@@ -6539,7 +7005,7 @@ impl Message<ChatRequest> for WorldActor {
                                         &out_body,
                                     ),
                                 })
-                                .await;
+                                .try_send();
                             debug!(
                                 "Whisper: {} -> {}: {}",
                                 player_name, target_name, whisper_msg
@@ -6583,7 +7049,7 @@ impl Message<ChatRequest> for WorldActor {
                                             &body,
                                         ),
                                     })
-                                    .await;
+                                    .try_send();
                                 sent = true;
                             }
                         }
@@ -6628,7 +7094,7 @@ impl Message<ChatRequest> for WorldActor {
                                             &body,
                                         ),
                                     })
-                                    .await;
+                                    .try_send();
                                 sent = true;
                             }
                         }
@@ -6676,7 +7142,7 @@ impl Message<ChatRequest> for WorldActor {
                                         &body,
                                     ),
                                 })
-                                .await;
+                                .try_send();
                             sent += 1;
                         }
                     }
@@ -6818,7 +7284,7 @@ impl Message<ChatRequest> for WorldActor {
                             session_id: *sid,
                             data: packet.clone(),
                         })
-                        .await;
+                        .try_send();
                 }
             }
         }
@@ -6853,7 +7319,7 @@ impl Message<ChangeAModeRequest> for WorldActor {
                 session_id: msg.session_id,
                 data: packet,
             })
-            .await;
+            .try_send();
         debug!(
             "ChangeAMode: session={} mode={:?}",
             msg.session_id, msg.mode
@@ -6890,7 +7356,7 @@ impl Message<ChangePModeRequest> for WorldActor {
                 session_id: msg.session_id,
                 data: packet,
             })
-            .await;
+            .try_send();
         debug!(
             "ChangePMode: session={} mode={:?}",
             msg.session_id, msg.mode
@@ -7052,7 +7518,7 @@ impl Message<SpellToggleRequest> for WorldActor {
                     &body,
                 ),
             })
-            .await;
+            .try_send();
     }
 }
 
@@ -7085,7 +7551,7 @@ impl Message<SetHeroBehaviourRequest> for WorldActor {
                     &body,
                 ),
             })
-            .await;
+            .try_send();
     }
 }
 
@@ -7130,7 +7596,7 @@ impl Message<SetAutoPotValueRequest> for WorldActor {
                     &body,
                 ),
             })
-            .await;
+            .try_send();
     }
 }
 
@@ -7181,7 +7647,7 @@ impl Message<SetAutoPotItemRequest> for WorldActor {
                     &body,
                 ),
             })
-            .await;
+            .try_send();
     }
 }
 
@@ -7224,7 +7690,7 @@ impl Message<RemoveSlotItemRequest> for WorldActor {
                     &body,
                 ),
             })
-            .await;
+            .try_send();
         // #937：卸装/换装后临时技能同步
         if success {
             self.sync_temp_skills(msg.session_id).await;
@@ -7513,7 +7979,7 @@ async fn send_user_location_sync(
                 &body,
             ),
         })
-        .await;
+        .try_send();
 }
 
 impl WorldActor {
@@ -7911,8 +8377,22 @@ mod auth_regression_tests {
         while (tokio::time::timeout(Duration::from_millis(quiet_ms), rx.recv()).await).is_ok() {}
     }
 
-    /// 登录并进图（testuser/TestChar），返回时 StartGame 已成功
-    async fn login_and_enter_game(gate_ref: &GateActorRef, session_id: u64, rx: &mut RxChannel) {
+    /// 登录并进图（testuser/TestChar），返回时 StartGame 已成功；返回 WorldActor 引用
+    /// （调用方不需要时可忽略返回值）
+    async fn login_and_enter_game(
+        gate_ref: &GateActorRef,
+        session_id: u64,
+        rx: &mut RxChannel,
+    ) -> kameo::actor::ActorRef<WorldActor> {
+        login_and_enter_game_full(gate_ref, session_id, rx).await.0
+    }
+
+    /// 同 login_and_enter_game，但一并返回 db_pool（DB 断言用，如系统邮件落库回归）
+    async fn login_and_enter_game_full(
+        gate_ref: &GateActorRef,
+        session_id: u64,
+        rx: &mut RxChannel,
+    ) -> (kameo::actor::ActorRef<WorldActor>, db::DbPool) {
         let db_pool = db::init_db_pool("sqlite::memory:").await.expect("init_db");
         let account_ref = AccountActor::spawn((gate_ref.clone(), db_pool.clone()));
         let _ = gate_ref.ask(SetAccountRef { account_ref }).await;
@@ -8009,7 +8489,11 @@ mod auth_regression_tests {
             random_item_stats: Vec::new(),
             guild_buff_infos: Vec::new(),
         });
-        let _ = gate_ref.ask(SetWorldRef { world_ref }).await;
+        let _ = gate_ref
+            .ask(SetWorldRef {
+                world_ref: world_ref.clone(),
+            })
+            .await;
 
         // NewCharacter
         let mut nc_body = Vec::new();
@@ -8051,6 +8535,93 @@ mod auth_regression_tests {
                 .await
                 .is_some(),
             "StartGame"
+        );
+        (world_ref, db_pool)
+    }
+
+    /// 第二个及后续会话经 gate 正常登录进图（account/world 已由首个会话链路挂好）：
+    /// ClientVersion → Login（自动注册）→ NewCharacter → StartGame
+    async fn gate_login_and_enter(
+        gate_ref: &GateActorRef,
+        session_id: u64,
+        rx: &mut RxChannel,
+        username: &str,
+        char_name: &str,
+    ) {
+        let mut cv_body = Vec::new();
+        let hash = b"test";
+        cv_body.extend_from_slice(&(hash.len() as i32).to_le_bytes());
+        cv_body.extend_from_slice(hash);
+        let _ = gate_ref
+            .ask(ClientData {
+                session_id,
+                data: build_packet_bytes(
+                    mir2_shared::enums::ClientPacketIds::ClientVersion as i16,
+                    &cv_body,
+                ),
+            })
+            .await;
+
+        let mut login_body = Vec::new();
+        let _ = mir2_shared::binary::write_dotnet_string(&mut login_body, username);
+        let _ = mir2_shared::binary::write_dotnet_string(&mut login_body, "testpass");
+        let _ = gate_ref
+            .ask(ClientData {
+                session_id,
+                data: build_packet_bytes(
+                    mir2_shared::enums::ClientPacketIds::Login as i16,
+                    &login_body,
+                ),
+            })
+            .await;
+        assert!(
+            wait_opcode_body(rx, mir2_shared::enums::ServerPacketIds::LoginSuccess as i16, 3)
+                .await
+                .is_some(),
+            "LoginSuccess({})",
+            username
+        );
+
+        let mut nc_body = Vec::new();
+        let _ = mir2_shared::binary::write_dotnet_string(&mut nc_body, char_name);
+        nc_body.push(0u8);
+        nc_body.push(0u8);
+        let _ = gate_ref
+            .ask(ClientData {
+                session_id,
+                data: build_packet_bytes(
+                    mir2_shared::enums::ClientPacketIds::NewCharacter as i16,
+                    &nc_body,
+                ),
+            })
+            .await;
+        assert!(
+            wait_opcode_body(
+                rx,
+                mir2_shared::enums::ServerPacketIds::NewCharacterSuccess as i16,
+                3
+            )
+            .await
+            .is_some(),
+            "NewCharacterSuccess({})",
+            char_name
+        );
+
+        let _ = gate_ref
+            .ask(ClientData {
+                session_id,
+                data: build_packet_bytes(
+                    mir2_shared::enums::ClientPacketIds::StartGame as i16,
+                    &0i32.to_le_bytes().to_vec(),
+                ),
+            })
+            .await;
+        assert!(
+            wait_opcode_body(rx, mir2_shared::enums::ServerPacketIds::StartGame as i16, 5)
+                .await
+                .is_some(),
+            "StartGame({})",
+            char_name
         );
     }
 
@@ -8132,6 +8703,749 @@ mod auth_regression_tests {
                 .await
                 .is_none(),
                 "重复 StartGame 不得再收到 S.StartGame（已在游戏内必须忽略）"
+            );
+        });
+    }
+
+    /// 红绿回归（严重19a）：LogOut 成功路径——客户端必须收到 S.LogOutSuccess，
+    /// 且会话随后被清理（gate 先删会话的旧实现会让 world 入队的 LogOutSuccess
+    /// 静默丢弃，客户端卡死游戏场景、is_online 永卡）。
+    /// 红检：LogOut 臂恢复无条件 terminate_session → LogOutSuccess 收不到 → FAILED。
+    #[test]
+    fn e2e_logout_success_reaches_client_then_session_cleaned() {
+        let rt = big_stack_runtime();
+        rt.block_on(async {
+            let session_id = 43u64;
+            let (gate_ref, mut rx) = setup_gate_and_session(session_id).await;
+            login_and_enter_game(&gate_ref, session_id, &mut rx).await;
+            drain_until_quiet(&mut rx, 400).await;
+
+            let _ = gate_ref
+                .ask(ClientData {
+                    session_id,
+                    data: build_packet_bytes(
+                        mir2_shared::enums::ClientPacketIds::LogOut as i16,
+                        &[],
+                    ),
+                })
+                .await;
+
+            // 1) 客户端必须收到 LogOutSuccess（带角色列表，C# SelectScene 用）
+            assert!(
+                wait_opcode_body(
+                    &mut rx,
+                    mir2_shared::enums::ServerPacketIds::LogOutSuccess as i16,
+                    5
+                )
+                .await
+                .is_some(),
+                "LogOutSuccess 必须送达客户端（不得因会话先删被静默丢弃）"
+            );
+
+            // 2) 随后会话被清理（LogOutCleanup 排在 LogOutSuccess 之后，FIFO 保序）
+            let deadline = tokio::time::Instant::now() + Duration::from_secs(3);
+            loop {
+                let (has_session, has_username) = gate_ref
+                    .ask(crate::gate::actor::TestProbeSession { session_id })
+                    .await
+                    .unwrap();
+                if !has_session && !has_username {
+                    break;
+                }
+                assert!(
+                    tokio::time::Instant::now() < deadline,
+                    "LogOutSuccess 落链后会话必须被清理（session={} username={}）",
+                    has_session,
+                    has_username
+                );
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+        });
+    }
+
+    /// 红绿回归（严重19b）：LogOut 被 world 拒绝（战斗 10s 内，C# LogTime）时
+    /// gate 不得动任何状态——客户端收 S.LogOutFailed，会话保持注册+登录，
+    /// world 侧玩家仍在（重复 LogOut 仍被拒）。
+    /// 红检：Blocked 路径恢复 terminate_session → LogOutFailed 被丢弃且会话被清 → FAILED。
+    #[test]
+    fn e2e_logout_blocked_keeps_session_untouched() {
+        let rt = big_stack_runtime();
+        rt.block_on(async {
+            let session_id = 44u64;
+            let (gate_ref, mut rx) = setup_gate_and_session(session_id).await;
+            login_and_enter_game(&gate_ref, session_id, &mut rx).await;
+            drain_until_quiet(&mut rx, 400).await;
+
+            // 攻击触发 10s 登出封锁（C# HumanObject.Attack LogTime）
+            let _ = gate_ref
+                .ask(ClientData {
+                    session_id,
+                    data: build_packet_bytes(
+                        mir2_shared::enums::ClientPacketIds::Attack as i16,
+                        &[0u8, 0u8],
+                    ),
+                })
+                .await;
+
+            let _ = gate_ref
+                .ask(ClientData {
+                    session_id,
+                    data: build_packet_bytes(
+                        mir2_shared::enums::ClientPacketIds::LogOut as i16,
+                        &[],
+                    ),
+                })
+                .await;
+
+            // 1) 客户端必须收到 LogOutFailed
+            assert!(
+                wait_opcode_body(
+                    &mut rx,
+                    mir2_shared::enums::ServerPacketIds::LogOutFailed as i16,
+                    5
+                )
+                .await
+                .is_some(),
+                "Blocked 路径必须收到 S.LogOutFailed"
+            );
+
+            // 2) 会话状态不动（注册 + 登录映射都在）
+            let (has_session, has_username) = gate_ref
+                .ask(crate::gate::actor::TestProbeSession { session_id })
+                .await
+                .unwrap();
+            assert!(has_session, "Blocked 路径不得删除会话");
+            assert!(has_username, "Blocked 路径不得清登录映射");
+
+            // 3) world 侧玩家仍在：再次 LogOut 仍被拒（再次收到 LogOutFailed）
+            let _ = gate_ref
+                .ask(ClientData {
+                    session_id,
+                    data: build_packet_bytes(
+                        mir2_shared::enums::ClientPacketIds::LogOut as i16,
+                        &[],
+                    ),
+                })
+                .await;
+            assert!(
+                wait_opcode_body(
+                    &mut rx,
+                    mir2_shared::enums::ServerPacketIds::LogOutFailed as i16,
+                    5
+                )
+                .await
+                .is_some(),
+                "Blocked 后玩家必须仍在游戏内（重复 LogOut 仍被拒）"
+            );
+        });
+    }
+
+    /// 红绿回归（StartGame 双开）：第二个会话以同名角色 StartGame 必须踢掉旧 actor
+    /// （广播移除 + 落库）再上新——旧实现只按 session_id 拦重复，同名双会话双 PlayerActor。
+    /// 红检：删掉角色名查重块 → players 同时含两个会话 → FAILED。
+    #[test]
+    fn e2e_start_game_same_name_kicks_old() {
+        let rt = big_stack_runtime();
+        rt.block_on(async {
+            let session_a = 45u64;
+            let session_b = 46u64;
+            let (gate_ref, mut rx_a) = setup_gate_and_session(session_a).await;
+            // B 会话注册到 gate（world 回包有处可去；不走 gate 登录——本测试针对 world 双开防护）
+            let (tx_b, _rx_b) = mpsc::channel::<Vec<u8>>(1024);
+            let _ = gate_ref
+                .ask(SessionCreated {
+                    session_id: session_b,
+                    sender: tx_b,
+                    ip: "127.0.0.1".to_string(),
+                })
+                .await;
+            let world_ref = login_and_enter_game(&gate_ref, session_a, &mut rx_a).await;
+
+            let ids = world_ref
+                .ask(crate::actors::world::TestPlayerSessionIds)
+                .await
+                .unwrap();
+            assert_eq!(ids, vec![session_a], "进图后仅 A 在线");
+
+            // B 以同名角色（同账号 character_index=0）直接 StartGame
+            let _ = world_ref
+                .ask(crate::actors::world::StartGameRequest {
+                    session_id: session_b,
+                    character_index: 0,
+                    account_username: "testuser".to_string(),
+                })
+                .await;
+
+            let ids = world_ref
+                .ask(crate::actors::world::TestPlayerSessionIds)
+                .await
+                .unwrap();
+            assert_eq!(
+                ids,
+                vec![session_b],
+                "同名角色上线必须踢掉旧会话（旧 actor 移除并落库）"
+            );
+        });
+    }
+
+    /// 红绿回归（LogOut+StartGame 竞态）：LogOut 受理后 rapid-fire 连发 StartGame
+    /// 必须被拒（gate 登出窗口门禁），world 不得以旧角色状态重建 PlayerActor。
+    /// 红检：确定性红在 gate 单测 logging_out_session_rejects_all_but_keepalive
+    /// （删 ClientData 守卫必红）；本用例验证端到端接线——删 LogOut 臂的
+    /// logging_out.insert 后，首个 StartGame 若抢在 LogOutCleanup 前处理即重进
+    /// （竞态窗口小，红非每次必现，故接线断言以幂等拒绝为准）。
+    #[test]
+    fn e2e_logout_rapid_start_game_rejected() {
+        let rt = big_stack_runtime();
+        rt.block_on(async {
+            let session_id = 47u64;
+            let (gate_ref, mut rx) = setup_gate_and_session(session_id).await;
+            let world_ref = login_and_enter_game(&gate_ref, session_id, &mut rx).await;
+            drain_until_quiet(&mut rx, 400).await;
+
+            // 登出（ask 返回即 world 已受理、gate 已打登出标记）
+            let _ = gate_ref
+                .ask(ClientData {
+                    session_id,
+                    data: build_packet_bytes(
+                        mir2_shared::enums::ClientPacketIds::LogOut as i16,
+                        &[],
+                    ),
+                })
+                .await;
+
+            // rapid-fire：清理落地窗口内连发 StartGame（客户端抢跑重进场景）
+            for _ in 0..5 {
+                let _ = gate_ref
+                    .ask(ClientData {
+                        session_id,
+                        data: build_packet_bytes(
+                            mir2_shared::enums::ClientPacketIds::StartGame as i16,
+                            &0i32.to_le_bytes().to_vec(),
+                        ),
+                    })
+                    .await;
+            }
+
+            // 1) world 不得重建玩家记录（重进会把 session 重新插入 players）
+            let ids = world_ref
+                .ask(crate::actors::world::TestPlayerSessionIds)
+                .await
+                .unwrap();
+            assert!(
+                ids.is_empty(),
+                "登出窗口内 rapid-fire StartGame 不得重进游戏，got {:?}",
+                ids
+            );
+
+            // 2) 客户端不得收到第二个 S.StartGame（重进成功的标志）；
+            // LogOutSuccess 必须照常送达
+            let start_game_opcode = mir2_shared::enums::ServerPacketIds::StartGame as i16;
+            let logout_success_opcode =
+                mir2_shared::enums::ServerPacketIds::LogOutSuccess as i16;
+            let mut saw_start_game = false;
+            let mut saw_logout_success = false;
+            let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+            while tokio::time::Instant::now() < deadline {
+                let remaining = deadline - tokio::time::Instant::now();
+                match tokio::time::timeout(remaining, rx.recv()).await {
+                    Ok(Some(data)) if data.len() >= 4 => {
+                        let opcode = i16::from_le_bytes([data[2], data[3]]);
+                        if opcode == start_game_opcode {
+                            saw_start_game = true;
+                        }
+                        if opcode == logout_success_opcode {
+                            saw_logout_success = true;
+                        }
+                    }
+                    _ => break,
+                }
+            }
+            assert!(saw_logout_success, "LogOutSuccess 必须照常送达");
+            assert!(
+                !saw_start_game,
+                "rapid-fire StartGame 不得再收到 S.StartGame（必须被拒）"
+            );
+        });
+    }
+
+    /// 红绿回归（dup-kick 三件套之租赁+通知）：同名角色顶号必须取消旧会话的
+    /// 租赁会话（物主/租客两侧）并通知旧客户端被踢——旧实现只清会话键与落库，
+    /// 租赁状态泄漏、旧客户端僵尸卡死。
+    /// 红检：删掉 dup-kick 块的租赁清理 → 计数不归零 → FAILED；
+    /// 删掉 send_system_message 通知 → 旧客户端收不到 Chat → FAILED。
+    #[test]
+    fn e2e_dup_kick_cancels_rental_and_notifies_old_client() {
+        let rt = big_stack_runtime();
+        rt.block_on(async {
+            let session_a = 48u64;
+            let session_b = 49u64;
+            let (gate_ref, mut rx_a) = setup_gate_and_session(session_a).await;
+            let (tx_b, _rx_b) = mpsc::channel::<Vec<u8>>(1024);
+            let _ = gate_ref
+                .ask(SessionCreated {
+                    session_id: session_b,
+                    sender: tx_b,
+                    ip: "127.0.0.1".to_string(),
+                })
+                .await;
+            let world_ref = login_and_enter_game(&gate_ref, session_a, &mut rx_a).await;
+            drain_until_quiet(&mut rx_a, 400).await;
+
+            // A 两侧各挂一条租赁：A 是物主（partner=998）、A 是租客（owner=999）
+            let _ = world_ref
+                .ask(crate::actors::world::TestInjectRentalSession {
+                    owner_session: session_a,
+                    partner_session: 998,
+                })
+                .await;
+            let _ = world_ref
+                .ask(crate::actors::world::TestInjectRentalSession {
+                    owner_session: 999,
+                    partner_session: session_a,
+                })
+                .await;
+            let count = world_ref
+                .ask(crate::actors::world::TestRentalSessionCount)
+                .await
+                .unwrap();
+            assert_eq!(count, 2, "注入后必须有两条租赁会话");
+
+            // B 以同名角色顶号
+            let _ = world_ref
+                .ask(crate::actors::world::StartGameRequest {
+                    session_id: session_b,
+                    character_index: 0,
+                    account_username: "testuser".to_string(),
+                })
+                .await;
+
+            // 1) 旧会话的租赁会话（物主/租客两侧）必须全部取消
+            let count = world_ref
+                .ask(crate::actors::world::TestRentalSessionCount)
+                .await
+                .unwrap();
+            assert_eq!(count, 0, "dup-kick 必须取消旧会话的租赁会话（两侧）");
+
+            // 2) 旧客户端必须收到被踢通知
+            let texts = collect_system_chats(&mut rx_a, 2).await;
+            assert!(
+                texts.iter().any(|t| t.contains("踢下线")),
+                "旧客户端必须收到被踢通知，got: {:?}",
+                texts
+            );
+        });
+    }
+
+    /// 红绿回归（dup-kick 三件套之地图生成物）：同名角色顶号且旧会话所在地图
+    /// 无其他玩家时，必须调 cleanup_map_spawns 清掉旧会话按会话生成的 NPC/怪物
+    /// ——NPC/怪物是按会话生成的（spawn_npcs_and_monsters 带 session_id），不清
+    /// 则新会话进图再生成一份（M61 泄漏）。
+    /// 红检：删掉 dup-kick 块的 cleanup_map_spawns 调用 → NPC 计数不归零 → FAILED。
+    #[test]
+    fn e2e_dup_kick_cleans_map_spawns() {
+        let rt = big_stack_runtime();
+        rt.block_on(async {
+            let session_a = 50u64;
+            let session_b = 51u64;
+            let (gate_ref, mut rx_a) = setup_gate_and_session(session_a).await;
+            let (tx_b, _rx_b) = mpsc::channel::<Vec<u8>>(1024);
+            let _ = gate_ref
+                .ask(SessionCreated {
+                    session_id: session_b,
+                    sender: tx_b,
+                    ip: "127.0.0.1".to_string(),
+                })
+                .await;
+            let world_ref = login_and_enter_game(&gate_ref, session_a, &mut rx_a).await;
+
+            // 在 A 所在地图注入一个假 NPC（harness 无 spawn 配置，只能注入）
+            let _ = world_ref
+                .ask(crate::actors::world::TestInjectNpcOnPlayerMap {
+                    session_id: session_a,
+                    object_id: 9_999_001,
+                })
+                .await;
+            let count = world_ref
+                .ask(crate::actors::world::TestNpcCount)
+                .await
+                .unwrap();
+            assert_eq!(count, 1, "注入后必须有一个 NPC");
+
+            // B 以同名角色顶号（此刻 B 尚未进 players，旧图无其他玩家）
+            let _ = world_ref
+                .ask(crate::actors::world::StartGameRequest {
+                    session_id: session_b,
+                    character_index: 0,
+                    account_username: "testuser".to_string(),
+                })
+                .await;
+
+            let count = world_ref
+                .ask(crate::actors::world::TestNpcCount)
+                .await
+                .unwrap();
+            assert_eq!(
+                count, 0,
+                "dup-kick 必须清理旧会话地图的按会话生成物（cleanup_map_spawns）"
+            );
+        });
+    }
+
+    /// 红绿回归（顶号后账号在线状态失同步）：同名角色顶号后，旧会话的登录绑定
+    /// 必须在 StartGame 应答时已被 gate 摘除——world 经 StartGameReply.
+    /// kicked_session_id 带回被踢旧会话，gate 在其 StartGame 臂内联解绑（同
+    /// handler 内完成，先于其邮箱中任何后到的断开/清理消息；确定性顺序，无轮询）。
+    /// 旧客户端随后断开（ClientDisconnected → terminate_session）不得再触发
+    /// LogoutRequest 把新会话正在使用的同账号置离线；否则「在线账号拒登」失效，
+    /// 第三方可在其在线期间并发登入同账号（账号级数据并发写）。
+    /// 红检：删掉 gate StartGame 臂的内联解绑（回退为 world spawn 异步解绑）→
+    /// 步骤 1 立即断言 FAILED；且旧会话断开后账号被置离线、步骤 3 第三方同账号
+    /// 登录会收到 LoginSuccess → FAILED（两条路径独立必红）。
+    #[test]
+    fn e2e_dup_kick_old_session_disconnect_keeps_account_online() {
+        let rt = big_stack_runtime();
+        rt.block_on(async {
+            let session_a = 52u64;
+            let session_b = 53u64;
+            let (gate_ref, mut rx_a) = setup_gate_and_session(session_a).await;
+            // B 会话注册到 gate 并写入登录绑定（顶号方经 gate StartGame 臂顶号——
+            // 同账号在线时 Login 被拒走不了正常登录，用 TestBindSessionLogin 测试
+            // 辅助写绑定，驱动 gate 臂内真实的解绑路径）
+            let (tx_b, _rx_b) = mpsc::channel::<Vec<u8>>(1024);
+            let _ = gate_ref
+                .ask(SessionCreated {
+                    session_id: session_b,
+                    sender: tx_b,
+                    ip: "127.0.0.1".to_string(),
+                })
+                .await;
+            let _ = gate_ref
+                .ask(crate::gate::actor::TestBindSessionLogin {
+                    session_id: session_b,
+                    username: "testuser".to_string(),
+                })
+                .await;
+            let _world_ref = login_and_enter_game(&gate_ref, session_a, &mut rx_a).await;
+
+            // 前置：account.rs 已修复——auto-register 首登即置 is_online=true，
+            // 「在线拒登」前提直接成立（无需补登）
+
+            // B 以同名角色顶号（踢 A）——经 gate StartGame 臂，ask 返回即 world
+            // 已踢人且 gate 已内联摘除旧会话登录绑定（确定性顺序，无轮询）
+            let _ = gate_ref
+                .ask(ClientData {
+                    session_id: session_b,
+                    data: build_packet_bytes(
+                        mir2_shared::enums::ClientPacketIds::StartGame as i16,
+                        &0i32.to_le_bytes().to_vec(),
+                    ),
+                })
+                .await;
+
+            // 1) StartGame 应答时旧会话登录绑定必须已被摘除（立即断言，不轮询）；
+            // 会话注册本身保留（旧 TCP 不断，旧客户端还能收被踢通知）
+            let (has_session, has_username) = gate_ref
+                .ask(crate::gate::actor::TestProbeSession {
+                    session_id: session_a,
+                })
+                .await
+                .unwrap();
+            assert!(has_session, "顶号只解绑不得断旧 TCP（会话注册须保留）");
+            assert!(
+                !has_username,
+                "StartGame 应答时旧会话登录绑定必须已被 gate 内联摘除（确定性顺序）"
+            );
+
+            // 2) 旧客户端断开 TCP：不得触发 LogoutRequest（账号须保持在线）。
+            // 断开后留出窗口让任何（错误的）异步履账号登出落地
+            let _ = gate_ref
+                .ask(crate::gate::actor::ClientDisconnected {
+                    session_id: session_a,
+                })
+                .await;
+            tokio::time::sleep(Duration::from_millis(500)).await;
+
+            // 3) 账号必须仍在线：第三方同账号登录必须被拒（S.Login result=4），
+            // 不得收到 LoginSuccess（账号被误置离线时此处会登录成功）
+            let session_c = 54u64;
+            let (tx_c, mut rx_c) = mpsc::channel::<Vec<u8>>(1024);
+            let _ = gate_ref
+                .ask(SessionCreated {
+                    session_id: session_c,
+                    sender: tx_c,
+                    ip: "127.0.0.1".to_string(),
+                })
+                .await;
+            let mut cv_body = Vec::new();
+            let hash = b"test";
+            cv_body.extend_from_slice(&(hash.len() as i32).to_le_bytes());
+            cv_body.extend_from_slice(hash);
+            let _ = gate_ref
+                .ask(ClientData {
+                    session_id: session_c,
+                    data: build_packet_bytes(
+                        mir2_shared::enums::ClientPacketIds::ClientVersion as i16,
+                        &cv_body,
+                    ),
+                })
+                .await;
+            let mut login_body = Vec::new();
+            let _ = mir2_shared::binary::write_dotnet_string(&mut login_body, "testuser");
+            let _ = mir2_shared::binary::write_dotnet_string(&mut login_body, "testpass");
+            let _ = gate_ref
+                .ask(ClientData {
+                    session_id: session_c,
+                    data: build_packet_bytes(
+                        mir2_shared::enums::ClientPacketIds::Login as i16,
+                        &login_body,
+                    ),
+                })
+                .await;
+            let login_opcode = mir2_shared::enums::ServerPacketIds::Login as i16;
+            let body = wait_opcode_body(&mut rx_c, login_opcode, 3)
+                .await
+                .expect("在线账号重复登录必须收到 S.Login 拒绝（result=4）");
+            assert_eq!(
+                body.first().copied(),
+                Some(4u8),
+                "顶号后旧会话断开不得把账号置离线（在线账号重复登录必须被拒）"
+            );
+            assert!(
+                wait_opcode_body(
+                    &mut rx_c,
+                    mir2_shared::enums::ServerPacketIds::LoginSuccess as i16,
+                    1
+                )
+                .await
+                .is_none(),
+                "账号在线期间第三方同账号登录不得成功（LoginSuccess 不得出现）"
+            );
+        });
+    }
+
+    /// 红绿回归（顶号解绑 vs 旧会话断开 背靠背竞态，更严苛时序）：旧会话的
+    /// ClientDisconnected 与顶号 StartGame 背靠背入 gate 邮箱时，解绑必须先于
+    /// 断开清理落地——gate StartGame 臂内联解绑（handler 跑完才处理下一条），
+    /// 邮箱 FIFO 保序，断开清理执行时已取不到旧绑定。原 spawn 异步 tell
+    /// UnbindSessionLogin 与已排队断开消息无 happens-before：断开先处理即
+    /// terminate_session 取旧绑定发 LogoutRequest，把新会话在用的同账号置离线。
+    /// 红检：回退为纯 spawn 异步解绑（world spawn tell UnbindSessionLogin +
+    /// gate StartGame 臂不内联解绑）→ ClientDisconnected 先于解绑入队处理 →
+    /// 账号被置离线 → 末段第三方同账号登录成功（收 LoginSuccess）→ FAILED
+    /// （背靠背入队使该时序确定性复现，非概率红）。
+    #[test]
+    fn e2e_dup_kick_unbind_wins_back_to_back_disconnect() {
+        let rt = big_stack_runtime();
+        rt.block_on(async {
+            let session_a = 58u64;
+            let session_b = 59u64;
+            let (gate_ref, mut rx_a) = setup_gate_and_session(session_a).await;
+            let (tx_b, _rx_b) = mpsc::channel::<Vec<u8>>(1024);
+            let _ = gate_ref
+                .ask(SessionCreated {
+                    session_id: session_b,
+                    sender: tx_b,
+                    ip: "127.0.0.1".to_string(),
+                })
+                .await;
+            let _ = gate_ref
+                .ask(crate::gate::actor::TestBindSessionLogin {
+                    session_id: session_b,
+                    username: "testuser".to_string(),
+                })
+                .await;
+            let _world_ref = login_and_enter_game(&gate_ref, session_a, &mut rx_a).await;
+
+            // 前置（同上用例）：auto-register 首登即在线，无需补登
+
+            // 背靠背入队：顶号 StartGame 在前、旧会话 ClientDisconnected 紧随其后
+            // （tell 只等入队不等处理；gate 邮箱 FIFO——StartGame 先处理，其
+            // handler 内联解绑完成后断开清理才执行）
+            let _ = gate_ref
+                .tell(ClientData {
+                    session_id: session_b,
+                    data: build_packet_bytes(
+                        mir2_shared::enums::ClientPacketIds::StartGame as i16,
+                        &0i32.to_le_bytes().to_vec(),
+                    ),
+                })
+                .await;
+            let _ = gate_ref
+                .tell(crate::gate::actor::ClientDisconnected {
+                    session_id: session_a,
+                })
+                .await;
+
+            // 邮箱 FIFO：探针 ask 排在前两条之后，返回即两者均已处理完——旧会话
+            // 已整体清理（注册与绑定俱删），且解绑必须先于断开清理落地（否则下方
+            // 账号在线断言必红）
+            let (has_session, has_username) = gate_ref
+                .ask(crate::gate::actor::TestProbeSession {
+                    session_id: session_a,
+                })
+                .await
+                .unwrap();
+            assert!(
+                !has_session && !has_username,
+                "旧会话断开清理后注册与绑定俱删，got session={} username={}",
+                has_session,
+                has_username
+            );
+
+            // 留出窗口让任何（错误的）异步履账号登出落地
+            tokio::time::sleep(Duration::from_millis(500)).await;
+
+            // 账号必须仍在线：第三方同账号登录必须被拒（S.Login result=4），
+            // 不得收到 LoginSuccess
+            let session_c = 60u64;
+            let (tx_c, mut rx_c) = mpsc::channel::<Vec<u8>>(1024);
+            let _ = gate_ref
+                .ask(SessionCreated {
+                    session_id: session_c,
+                    sender: tx_c,
+                    ip: "127.0.0.1".to_string(),
+                })
+                .await;
+            let mut cv_body = Vec::new();
+            let hash = b"test";
+            cv_body.extend_from_slice(&(hash.len() as i32).to_le_bytes());
+            cv_body.extend_from_slice(hash);
+            let _ = gate_ref
+                .ask(ClientData {
+                    session_id: session_c,
+                    data: build_packet_bytes(
+                        mir2_shared::enums::ClientPacketIds::ClientVersion as i16,
+                        &cv_body,
+                    ),
+                })
+                .await;
+            let mut login_body = Vec::new();
+            let _ = mir2_shared::binary::write_dotnet_string(&mut login_body, "testuser");
+            let _ = mir2_shared::binary::write_dotnet_string(&mut login_body, "testpass");
+            let _ = gate_ref
+                .ask(ClientData {
+                    session_id: session_c,
+                    data: build_packet_bytes(
+                        mir2_shared::enums::ClientPacketIds::Login as i16,
+                        &login_body,
+                    ),
+                })
+                .await;
+            let login_opcode = mir2_shared::enums::ServerPacketIds::Login as i16;
+            let body = wait_opcode_body(&mut rx_c, login_opcode, 3)
+                .await
+                .expect("在线账号重复登录必须收到 S.Login 拒绝（result=4）");
+            assert_eq!(
+                body.first().copied(),
+                Some(4u8),
+                "背靠背时序下解绑必须先于断开清理落地（账号不得被误置离线）"
+            );
+            assert!(
+                wait_opcode_body(
+                    &mut rx_c,
+                    mir2_shared::enums::ServerPacketIds::LoginSuccess as i16,
+                    1
+                )
+                .await
+                .is_none(),
+                "账号在线期间第三方同账号登录不得成功（LoginSuccess 不得出现）"
+            );
+        });
+    }
+
+    /// 红绿回归（dup-kick 租赁退物兜底）：顶号清理租赁会话退物入包失败
+    /// （AddItemToInventory Reply=None/ask Err）时不得静默吞物——必须按角色名
+    /// 走系统归还邮件（物主不在线/actor 死亡时落库 mail 表）。
+    /// 构造：C 是物主（寄存物品 uid=7777001）、A 是租客；杀掉 C 的 PlayerActor
+    /// 使退物 ask 必失败，B 顶号踢 A 触发租客侧退物 → C 收系统邮件。
+    /// 红检：helper 退回 let _ = ask(AddItemToInventory)（吞错）→ 无邮件落库
+    /// → 步骤断言 FAILED。
+    #[test]
+    fn e2e_dup_kick_rental_item_falls_back_to_mail_when_return_fails() {
+        let rt = big_stack_runtime();
+        rt.block_on(async {
+            let session_a = 55u64; // 租客（被踢方）
+            let session_b = 56u64; // 顶号方
+            let session_c = 57u64; // 物主（actor 将被杀，退物必失败）
+            let (gate_ref, mut rx_a) = setup_gate_and_session(session_a).await;
+            let (tx_b, _rx_b) = mpsc::channel::<Vec<u8>>(1024);
+            let _ = gate_ref
+                .ask(SessionCreated {
+                    session_id: session_b,
+                    sender: tx_b,
+                    ip: "127.0.0.1".to_string(),
+                })
+                .await;
+            let (world_ref, db_pool) =
+                login_and_enter_game_full(&gate_ref, session_a, &mut rx_a).await;
+
+            // C 经 gate 正常登录进图（第二账号/第二角色 TestChar2）
+            let (tx_c, mut rx_c) = mpsc::channel::<Vec<u8>>(1024);
+            let _ = gate_ref
+                .ask(SessionCreated {
+                    session_id: session_c,
+                    sender: tx_c,
+                    ip: "127.0.0.1".to_string(),
+                })
+                .await;
+            gate_login_and_enter(&gate_ref, session_c, &mut rx_c, "testuser2", "TestChar2")
+                .await;
+
+            // 注入租赁：物主 C、租客 A，寄存物品 uid=7777001
+            let mut item = mir2_shared::data::item::UserItem::default();
+            item.unique_id = 7_777_001;
+            item.item_index = 100;
+            item.count = 1;
+            let _ = world_ref
+                .ask(crate::actors::world::TestInjectRentalWithItem {
+                    owner_session: session_c,
+                    partner_session: session_a,
+                    item,
+                })
+                .await;
+
+            // 杀掉 C 的 PlayerActor：退物 ask 必失败（Err）→ 邮件兜底
+            let killed = world_ref
+                .ask(crate::actors::world::TestKillPlayerActor {
+                    session_id: session_c,
+                })
+                .await
+                .unwrap();
+            assert!(killed, "C 的玩家记录必须存在");
+
+            // B 以同名角色顶号踢 A（触发租客侧退物：物品退回物主 C）
+            let _ = world_ref
+                .ask(crate::actors::world::StartGameRequest {
+                    session_id: session_b,
+                    character_index: 0,
+                    account_username: "testuser".to_string(),
+                })
+                .await;
+
+            // 退物失败 → 系统归还邮件必须落库（收件人 TestChar2，含寄存物品）。
+            // 邮件投递在 StartGame handler 内联 await，ask 返回即已落库；
+            // 轮询兜底防实现改为异步
+            let deadline = tokio::time::Instant::now() + Duration::from_secs(3);
+            let mailbox = loop {
+                let mailbox = db::load_mail(&db_pool, "TestChar2")
+                    .await
+                    .expect("load_mail");
+                if !mailbox.inbox.is_empty() {
+                    break mailbox;
+                }
+                assert!(
+                    tokio::time::Instant::now() < deadline,
+                    "退物入包失败必须经系统归还邮件兜底（mail 表须有 TestChar2 的邮件）"
+                );
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            };
+            let mail = &mailbox.inbox[0];
+            assert_eq!(mail.receiver_name, "TestChar2");
+            assert!(
+                mail.items.iter().any(|i| i.unique_id == 7_777_001),
+                "归还邮件必须含寄存物品 uid=7777001，got: {:?}",
+                mail.items.iter().map(|i| i.unique_id).collect::<Vec<_>>()
             );
         });
     }
