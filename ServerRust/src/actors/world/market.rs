@@ -488,8 +488,44 @@ impl Message<MarketBuyRequest> for WorldActor {
                 send_system_message(&self.gate_ref, msg.session_id, "金币不足");
                 return;
             }
+            let deducted = record
+                .actor_ref
+                .ask(DeductGold { amount: bid })
+                .await
+                .unwrap_or(false);
+            if !deducted {
+                send_system_message(&self.gate_ref, msg.session_id, "金币扣除失败");
+                return;
+            }
+            // #2566：出价托管态先落库再改内存/退款——写库失败时全额退回新出价，
+            // 内存态与被超价者均不动（否则重启后托管金蒸发、或被超价者退款后记录又回退 → 刷金）
+            let bid_persist = db::update_auction_bid(
+                &self.db_pool,
+                msg.listing_id as i64,
+                bid as i64,
+                &buyer_state.name,
+            )
+            .await;
+            if !db_write_ok(bid_persist) {
+                warn!(
+                    "Failed to persist auction bid (auction={}), rolling back",
+                    msg.listing_id
+                );
+                let _ = record.actor_ref.ask(AddGold { amount: bid }).await;
+                send_system_message(
+                    &self.gate_ref,
+                    msg.session_id,
+                    "出价失败：数据库错误，金币已退回",
+                );
+                return;
+            }
+            if let Some(a) = self.auctions.get_mut(auction_idx) {
+                a.current_bid = bid;
+                a.current_buyer = Some(buyer_state.name.clone());
+            }
             if let Some(prev_buyer) = current_buyer {
-                // 退还被超价者之前的出价（C# OutbidRefundGold 邮件）
+                // 退还被超价者之前的出价（C# OutbidRefundGold 邮件 → Envir.MailCharacter 在线感知；
+                // 在线必须进内存邮箱，直接 insert_mail 会被收件人下次存档 DELETE 重写抹掉）
                 let mail = MailMessage {
                     mail_id: generate_mail_id(),
                     sender_name: "市场交易".to_string(),
@@ -506,34 +542,12 @@ impl Message<MarketBuyRequest> for WorldActor {
                     gold: current_bid,
                     items: Vec::new(),
                 };
-                let _ = db::insert_mail(&self.db_pool, &prev_buyer, &mail).await;
-            }
-            let deducted = record
-                .actor_ref
-                .ask(DeductGold { amount: bid })
-                .await
-                .unwrap_or(false);
-            if !deducted {
-                send_system_message(&self.gate_ref, msg.session_id, "金币扣除失败");
-                return;
-            }
-            if let Some(a) = self.auctions.get_mut(auction_idx) {
-                a.current_bid = bid;
-                a.current_buyer = Some(buyer_state.name.clone());
-            }
-            // #2566：出价托管态落库（重启后 current_bid/current_buyer 不回退，托管金不蒸发）
-            if let Err(e) = db::update_auction_bid(
-                &self.db_pool,
-                msg.listing_id as i64,
-                bid as i64,
-                &buyer_state.name,
-            )
-            .await
-            {
-                warn!(
-                    "Failed to persist auction bid (auction={}): {}",
-                    msg.listing_id, e
-                );
+                if !self.deliver_system_mail(mail).await {
+                    warn!(
+                        "Outbid refund mail undelivered: auction={} prev={} gold={}",
+                        msg.listing_id, prev_buyer, current_bid
+                    );
+                }
             }
             send_system_message(
                 &self.gate_ref,
@@ -611,14 +625,47 @@ impl Message<MarketBuyRequest> for WorldActor {
         }
 
         // Item delivered successfully — now persist the sale
-        if let Err(e) =
-            db::mark_auction_sold(&self.db_pool, msg.listing_id as i64, &buyer_state.name).await
-        {
+        let sold_persist =
+            db::mark_auction_sold(&self.db_pool, msg.listing_id as i64, &buyer_state.name).await;
+        if !db_write_ok(sold_persist) {
+            // 写库失败必须回滚内存态：收回已交付物品并退款，寄售记录保持未售
+            // （否则重启后该单在 DB 仍未售，可被重复购买 → 物品复制）
             warn!(
-                "Failed to mark auction {} sold in DB: {}",
-                msg.listing_id, e
+                "Failed to mark auction {} sold in DB, rolling back",
+                msg.listing_id
             );
-            // In-memory state is still updated; the sale is valid
+            let clawed = record
+                .actor_ref
+                .ask(crate::actors::player::RemoveItemFromInventory {
+                    unique_id: item.unique_id,
+                })
+                .await
+                .ok()
+                .flatten();
+            if clawed.is_none() {
+                warn!(
+                    "Consign buy rollback: failed to claw back item {} from {}",
+                    item.unique_id, buyer_state.name
+                );
+            }
+            let _ = record.actor_ref.ask(AddGold { amount: price }).await;
+            send_system_message(
+                &self.gate_ref,
+                msg.session_id,
+                "购买失败：数据库错误，物品与金币已退回",
+            );
+            // 背包/金币回刷
+            if let Ok(Some(new_state)) = record.actor_ref.ask(GetPlayerState).await {
+                let packet = super::build_user_information_packet(&new_state, &self.item_infos);
+                let _ = self
+                    .gate_ref
+                    .tell(SendToClient {
+                        session_id: msg.session_id,
+                        data: packet,
+                    })
+                    .await;
+            }
+            return;
         }
 
         if let Some(a) = self.auctions.get_mut(auction_idx) {
@@ -720,7 +767,43 @@ impl Message<MarketGetBackRequest> for WorldActor {
 
         // Any(0)/Expired(2)：取回物品（未售出或已到期）
         if (msg.mode == 0 || msg.mode == 2) && (!auction.sold || auction.expired) {
-            // C# TakeAuction：过期拍卖若有当前出价 → 退款给出价人（:8680-8684）
+            // 取回物品（C# CanGainItem 失败 → Fail 5）
+            let added = record
+                .actor_ref
+                .ask(AddItemToInventory {
+                    item: auction.item.clone(),
+                })
+                .await
+                .unwrap_or(false);
+            if !added {
+                self.send_market_fail(msg.session_id, 5);
+                return;
+            }
+            // 先落库删除再退款：写库失败时收回物品、寄售记录原样保留
+            // （否则重启后记录复现 → 物品复制；且出价人若先被退款会双重退款 → 刷金）
+            let deleted = db::delete_auction(&self.db_pool, msg.auction_id as i64).await;
+            if !db_write_ok(deleted) {
+                warn!(
+                    "Failed to delete auction {} on take-back, rolling back",
+                    msg.auction_id
+                );
+                let _ = record
+                    .actor_ref
+                    .ask(crate::actors::player::RemoveItemFromInventory {
+                        unique_id: auction.item.unique_id,
+                    })
+                    .await;
+                send_system_message(
+                    &self.gate_ref,
+                    msg.session_id,
+                    "取回失败：数据库错误，请重试",
+                );
+                self.send_market_fail(msg.session_id, 0);
+                return;
+            }
+            self.auctions.remove(auction_idx);
+            // C# TakeAuction：过期拍卖若有当前出价 → 退款给出价人（:8680-8684；
+            // 在线必须进内存邮箱，直接 insert_mail 会被其下次存档 DELETE 重写抹掉 → 托管金蒸发）
             if let Some(buyer) = &auction.current_buyer {
                 let bid = auction.current_bid;
                 if bid > 0 {
@@ -740,23 +823,14 @@ impl Message<MarketGetBackRequest> for WorldActor {
                         gold: bid,
                         items: Vec::new(),
                     };
-                    let _ = db::insert_mail(&self.db_pool, buyer, &mail).await;
+                    if !self.deliver_system_mail(mail).await {
+                        warn!(
+                            "Auction expired refund mail undelivered: auction={} buyer={} gold={}",
+                            msg.auction_id, buyer, bid
+                        );
+                    }
                 }
             }
-            // 取回物品（C# CanGainItem 失败 → Fail 5）
-            let added = record
-                .actor_ref
-                .ask(AddItemToInventory {
-                    item: auction.item.clone(),
-                })
-                .await
-                .unwrap_or(false);
-            if !added {
-                self.send_market_fail(msg.session_id, 5);
-                return;
-            }
-            let _ = db::delete_auction(&self.db_pool, msg.auction_id as i64).await;
-            self.auctions.remove(auction_idx);
             self.send_market_success(msg.session_id, "取回寄售物品成功".to_string());
             return;
         }
@@ -780,8 +854,23 @@ impl Message<MarketGetBackRequest> for WorldActor {
                 self.send_market_fail(msg.session_id, 8);
                 return;
             }
+            // 先落库删除再发金币：写库失败时不付钱、记录保留
+            // （否则重启后记录复现可重复领取 → 无中生有刷金）
+            let deleted = db::delete_auction(&self.db_pool, msg.auction_id as i64).await;
+            if !db_write_ok(deleted) {
+                warn!(
+                    "Failed to delete auction {} on gold collection, aborting",
+                    msg.auction_id
+                );
+                send_system_message(
+                    &self.gate_ref,
+                    msg.session_id,
+                    "领取失败：数据库错误，请重试",
+                );
+                self.send_market_fail(msg.session_id, 0);
+                return;
+            }
             let _ = record.actor_ref.ask(AddGold { amount: gold }).await;
-            let _ = db::delete_auction(&self.db_pool, msg.auction_id as i64).await;
             self.auctions.remove(auction_idx);
             let commission = cost - gold;
             let text = format!("售出金币 {}（含佣金 {}）已领取", gold, commission);
@@ -794,7 +883,63 @@ impl Message<MarketGetBackRequest> for WorldActor {
     }
 }
 
+/// 系统邮件（退款/成交交付）投递路由：收件人在线 → 内存邮箱（AddMail），离线 → 落库 insert_mail
+/// （阻断8：在线玩家若直接 insert_mail，其下次存档按内存邮箱 DELETE 重写会把这封邮件抹掉 → 托管金蒸发）
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SystemMailRoute {
+    OnlineMailbox(u64),
+    OfflineDb,
+}
+
+pub(crate) fn system_mail_route(online_session: Option<u64>) -> SystemMailRoute {
+    match online_session {
+        Some(sid) => SystemMailRoute::OnlineMailbox(sid),
+        None => SystemMailRoute::OfflineDb,
+    }
+}
+
+/// DB 写结果归一化：Ok(true)=成功；Ok(false)（0 行受影响，记录已被并发改写/删除）与 Err 一律视为失败，
+/// 调用方必须回滚内存态（auction 不建立/状态还原），不得 warn 后继续（否则重启后双卖/重复领取）
+pub(crate) fn db_write_ok(res: anyhow::Result<bool>) -> bool {
+    matches!(res, Ok(true))
+}
+
 impl WorldActor {
+    /// 在线感知投递系统邮件（对齐 mail.rs 玩家邮件与 C# Envir.MailCharacter）：
+    /// 收件人在线 → AddMail 进内存邮箱 + ReceiveMail 通知；仅离线才 db::insert_mail（登录时读回）。
+    /// 返回是否投递成功；失败时调用方应 warn/回滚（邮件内含托管金/物品，丢失=蒸发）
+    pub(crate) async fn deliver_system_mail(&self, mail: MailMessage) -> bool {
+        let online = self
+            .find_session_by_name_ignore_case(&mail.receiver_name)
+            .await;
+        if let SystemMailRoute::OnlineMailbox(sid) = system_mail_route(online) {
+            if let Some(record) = self.players.get(&sid) {
+                if record
+                    .actor_ref
+                    .ask(crate::actors::player::AddMail { mail: mail.clone() })
+                    .await
+                    .is_ok()
+                {
+                    send_mail_received_packet(&self.gate_ref, sid, &mail);
+                    // C# PlayerObject.Process：收到新邮件 → 系统消息提示
+                    send_system_message(&self.gate_ref, sid, "你收到了一封新邮件");
+                    return true;
+                }
+                // 会话恰在查找后断开：落到离线落库
+            }
+        }
+        match db::insert_mail(&self.db_pool, &mail.receiver_name, &mail).await {
+            Ok(()) => true,
+            Err(e) => {
+                warn!(
+                    "Failed to save offline mail for {}: {}",
+                    mail.receiver_name, e
+                );
+                false
+            }
+        }
+    }
+
     fn send_market_success(&self, session_id: u64, message: String) {
         let packet = mir2_shared::packets::server::market_system::MarketSuccess { message };
         let mut body = Vec::new();
@@ -1005,21 +1150,26 @@ pub(crate) async fn resolve_expired_auctions(world: &mut WorldActor) {
                 for record in world.players.values() {
                     if let Ok(Some(st)) = record.actor_ref.ask(GetPlayerState).await {
                         if st.name == winner {
-                            let _ = record
+                            // 入包失败（背包满）不得记 delivered——改走邮件交付，否则物品蒸发
+                            let added = record
                                 .actor_ref
                                 .ask(AddItemToInventory { item: item.clone() })
-                                .await;
-                            send_system_message(
-                                &world.gate_ref,
-                                record.session_id,
-                                &format!("你以 {} 金币拍得 {}", bid, item_name),
-                            );
-                            delivered = true;
+                                .await
+                                .unwrap_or(false);
+                            if added {
+                                send_system_message(
+                                    &world.gate_ref,
+                                    record.session_id,
+                                    &format!("你以 {} 金币拍得 {}", bid, item_name),
+                                );
+                                delivered = true;
+                            }
                             break;
                         }
                     }
                 }
                 if !delivered {
+                    // 在线感知投递：买家在线（背包满）→ 内存邮箱；离线 → 落库
                     let mail = MailMessage {
                         mail_id: generate_mail_id(),
                         sender_name: "市场交易".to_string(),
@@ -1033,7 +1183,12 @@ pub(crate) async fn resolve_expired_auctions(world: &mut WorldActor) {
                         gold: 0,
                         items: vec![item],
                     };
-                    let _ = db::insert_mail(&world.db_pool, &winner, &mail).await;
+                    if !world.deliver_system_mail(mail).await {
+                        warn!(
+                            "Auction won item mail undelivered: auction={} winner={} item={}",
+                            id, winner, item_name
+                        );
+                    }
                 }
             }
             // C#：拍卖成交金币托管在寄售记录上，卖家经 MarketGetBack(Sold/Any) 领取（含 5% 佣金；不直接支付）
@@ -1044,7 +1199,14 @@ pub(crate) async fn resolve_expired_auctions(world: &mut WorldActor) {
                     &format!("你的 {} 以 {} 金币成交，可在市场领取金币", item_name, bid),
                 );
             }
-            let _ = db::mark_auction_sold(&world.db_pool, id as i64, &winner).await;
+            let sold_persist = db::mark_auction_sold(&world.db_pool, id as i64, &winner).await;
+            if !db_write_ok(sold_persist) {
+                // 物品已交付买家：此处无法无损回滚，只能告警（重启后该单会重新结算，需人工核查）
+                warn!(
+                    "Failed to mark expired auction {} sold in DB after delivery",
+                    id
+                );
+            }
             if let Some(a) = world.auctions.iter_mut().find(|a| a.auction_id == id) {
                 a.sold = true;
                 a.buyer_name = Some(winner);
@@ -1127,7 +1289,24 @@ impl Message<MarketSellNowRequest> for WorldActor {
             return;
         }
 
-        // 买家出价时金币已托管扣款：物品交付买家（在线直接进包，离线走邮件，C# MailCharacter）
+        // 买家出价时金币已托管扣款。先落库删除寄售记录：失败则整体中止
+        // （不交付、不付款，记录与托管态原样保留；否则重启后记录复现 → 物品/金币双份）
+        let deleted = db::delete_auction(&self.db_pool, msg.auction_id as i64).await;
+        if !db_write_ok(deleted) {
+            warn!(
+                "Failed to delete auction {} on sell-now, aborting",
+                msg.auction_id
+            );
+            send_system_message(
+                &self.gate_ref,
+                msg.session_id,
+                "立即售出失败：数据库错误，请重试",
+            );
+            self.send_market_fail(msg.session_id, 0);
+            return;
+        }
+
+        // 物品交付买家（在线直接进包，入包失败/离线走邮件，C# MailCharacter）
         let buyer_name = auction.current_buyer.clone().unwrap_or_default();
         let cost = auction.current_bid;
         let item_name = self
@@ -1139,23 +1318,28 @@ impl Message<MarketSellNowRequest> for WorldActor {
         for r in self.players.values() {
             if let Ok(Some(st)) = r.actor_ref.ask(GetPlayerState).await {
                 if st.name == buyer_name {
-                    let _ = r
+                    // 入包失败（背包满）不得记 delivered——改走邮件交付，否则物品蒸发
+                    let added = r
                         .actor_ref
                         .ask(AddItemToInventory {
                             item: auction.item.clone(),
                         })
-                        .await;
-                    send_system_message(
-                        &self.gate_ref,
-                        r.session_id,
-                        &format!("你以 {} 金币购得 {}", cost, item_name),
-                    );
-                    delivered = true;
+                        .await
+                        .unwrap_or(false);
+                    if added {
+                        send_system_message(
+                            &self.gate_ref,
+                            r.session_id,
+                            &format!("你以 {} 金币购得 {}", cost, item_name),
+                        );
+                        delivered = true;
+                    }
                     break;
                 }
             }
         }
         if !delivered {
+            // 在线感知投递：买家在线（背包满）→ 内存邮箱；离线 → 落库
             let mail = MailMessage {
                 mail_id: generate_mail_id(),
                 sender_name: "市场交易".to_string(),
@@ -1172,11 +1356,15 @@ impl Message<MarketSellNowRequest> for WorldActor {
                 gold: 0,
                 items: vec![auction.item.clone()],
             };
-            let _ = db::insert_mail(&self.db_pool, &buyer_name, &mail).await;
+            if !self.deliver_system_mail(mail).await {
+                warn!(
+                    "SellNow delivery mail undelivered: auction={} buyer={} item={}",
+                    msg.auction_id, buyer_name, item_name
+                );
+            }
         }
 
-        // 成交：删除寄售记录，卖家得托管出价 − 5% 佣金（佣金回收）
-        let _ = db::delete_auction(&self.db_pool, msg.auction_id as i64).await;
+        // 成交：内存移除记录，卖家得托管出价 − 5% 佣金（佣金回收）
         self.auctions.remove(auction_idx);
 
         let _ = record
@@ -1276,6 +1464,16 @@ impl Message<ConsignItemRequest> for WorldActor {
             return;
         }
 
+        // 序列化先于扣费/移除物品：此分支失败时无任何状态变更，无需回滚
+        let item_json = match serde_json::to_string(&item) {
+            Ok(j) => j,
+            Err(e) => {
+                warn!("Failed to serialize item for auction: {}", e);
+                send_system_message(&self.gate_ref, msg.session_id, "寄售失败：数据错误");
+                return;
+            }
+        };
+
         let price = msg.price as u32;
         // #1325：寄售/拍卖费用（C# Globals：ConsignmentCost/AuctionCost 均为 5000）
         const CONSIGN_FEE: u64 = 5000;
@@ -1344,15 +1542,6 @@ impl Message<ConsignItemRequest> for WorldActor {
             .map(|d| d.as_secs() as i64)
             .unwrap_or(0);
 
-        let item_json = match serde_json::to_string(&item) {
-            Ok(j) => j,
-            Err(e) => {
-                warn!("Failed to serialize item for auction: {}", e);
-                send_system_message(&self.gate_ref, msg.session_id, "寄售失败：数据错误");
-                return;
-            }
-        };
-
         // 保存到数据库
         if let Err(e) = db::save_auction(
             &self.db_pool,
@@ -1366,11 +1555,34 @@ impl Message<ConsignItemRequest> for WorldActor {
         .await
         {
             warn!("Failed to save auction: {}", e);
-            // Rollback: return item and refund fee
-            let _ = record
+            // Rollback: return item and refund fee（物品已离包、费用已扣，必须归还；
+            // 背包异常时改走在线感知邮件归还，杜绝物品蒸发）
+            let returned = record
                 .actor_ref
                 .ask(AddItemToInventory { item: item.clone() })
-                .await;
+                .await
+                .unwrap_or(false);
+            if !returned {
+                let mail = MailMessage {
+                    mail_id: generate_mail_id(),
+                    sender_name: "市场交易".to_string(),
+                    receiver_name: state.name.clone(),
+                    subject: "寄售失败退回".to_string(),
+                    body: "寄售失败，物品已退回".to_string(),
+                    timestamp: now,
+                    read: false,
+                    collected: false,
+                    locked: false,
+                    gold: 0,
+                    items: vec![item.clone()],
+                };
+                if !self.deliver_system_mail(mail).await {
+                    warn!(
+                        "Consign rollback mail undelivered: {} item={}",
+                        state.name, item.unique_id
+                    );
+                }
+            }
             let _ = record.actor_ref.ask(AddGold { amount: fee }).await;
             send_system_message(
                 &self.gate_ref,
@@ -1398,6 +1610,19 @@ impl Message<ConsignItemRequest> for WorldActor {
             current_buyer: None,
             expired: false,
         });
+
+        // 严重14：关闭寄售崩溃窗口——物品已离包且 auction 已落库，立即存档该玩家；
+        // 否则崩溃后按延迟旧存档回档，玩家背包与寄售记录各有一份物品（复制）
+        if let Ok(Some(save_state)) = record.actor_ref.ask(GetPlayerState).await {
+            if let Err(e) =
+                db::save_character(&self.db_pool, &save_state, &record.account_username).await
+            {
+                warn!(
+                    "ConsignItem: immediate save failed for {}: {}",
+                    save_state.name, e
+                );
+            }
+        }
 
         // 发送成功响应
         // 完整 UserInformation 刷新（背包移除 + 寄售费扣除，客户端本地背包同步）
@@ -2579,5 +2804,34 @@ mod tests {
         assert!(consign_price_validate(1, 50_000).is_ok());
         assert!(consign_price_validate(1, 50_001).is_err());
         assert!(consign_price_validate(1, 5_000).is_ok());
+    }
+
+    /// 阻断8 回归：系统邮件（被超价退款/拍卖过期退款/成交交付）路由——
+    /// 收件人在线必须进内存邮箱（AddMail），仅离线才允许 insert_mail；
+    /// 在线直插库会被收件人下次存档按内存邮箱 DELETE 重写抹掉（托管金蒸发）
+    #[test]
+    fn system_mail_route_online_goes_to_mailbox_not_db() {
+        assert_eq!(
+            system_mail_route(Some(42)),
+            SystemMailRoute::OnlineMailbox(42),
+            "在线收件人必须路由到内存邮箱"
+        );
+        assert_eq!(
+            system_mail_route(None),
+            SystemMailRoute::OfflineDb,
+            "离线收件人才允许落库"
+        );
+    }
+
+    /// 严重14 回归：DB 写结果归一化——Ok(false)（0 行受影响）与 Err 一律视为失败，
+    /// 调用方必须回滚内存态（不得 warn 后继续，否则重启后双卖/重复领取 → 刷金）
+    #[test]
+    fn db_write_ok_treats_zero_rows_and_err_as_failure() {
+        assert!(db_write_ok(Ok(true)));
+        assert!(!db_write_ok(Ok(false)), "0 行受影响必须视为失败并回滚");
+        assert!(
+            !db_write_ok(Err(anyhow::anyhow!("db down"))),
+            "写库错误必须视为失败并回滚"
+        );
     }
 }
