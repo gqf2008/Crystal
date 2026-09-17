@@ -14,11 +14,11 @@ use crate::actors::group::{Group, GroupMember};
 use crate::actors::guild::{Guild, GuildRank};
 use crate::actors::inventory::EquipmentSlot;
 use crate::actors::player::{
-    AddFriendToSelf, AddGold, AddItemToInventory, CanGainGold, DeductGold, GetItemInfo,
-    GetPlayerState, PlayerActor, RemoveFriendFromSelf, RemoveItemFromInventory,
-    SetAllowLoverRecall, SetAllowMarriage, SetAllowMentor, SetEnableGroupRecall, SetFriendMemo,
-    SetGroupId, SetGuildInfo, SetLastRecallTime, SetMentor, SetMentorExp, SetPlayerPosition,
-    SetPlayerState, SetSpouse,
+    AddFriendToSelf, AddGold, AddItemToInventory, CanGainGold, DeductGold, GetPlayerState,
+    PlayerActor, RemoveFriendFromSelf, RemoveItemFromInventory, SetAllowLoverRecall,
+    SetAllowMarriage, SetAllowMentor, SetEnableGroupRecall, SetFriendMemo, SetGroupId,
+    SetGuildInfo, SetLastRecallTime, SetMentor, SetMentorExp, SetPlayerPosition, SetPlayerState,
+    SetSpouse,
 };
 use crate::actors::social_packets::*;
 use crate::actors::trade::TradeSession;
@@ -1394,8 +1394,9 @@ impl Actor for SocialActor {
             players: HashMap::new(),
             groups: HashMap::new(),
             next_group_id: 1,
-            pending_invites: HashMap::new(),
+            group_invites: HashMap::new(),
             active_trades: HashMap::new(),
+            trade_invites: HashMap::new(),
             last_trade_request: HashMap::new(),
             last_group_invite: HashMap::new(),
             guilds,
@@ -1419,10 +1420,13 @@ pub struct SocialActor {
     // === 组队状态 ===
     groups: HashMap<u64, Group>,
     next_group_id: u64,
-    pending_invites: HashMap<u64, u64>,
+    /// 组队邀请（target_session -> inviter_session；与交易邀请分表，防跨类型消费伪造回复）
+    group_invites: HashMap<u64, u64>,
 
     // === 交易状态 ===
     active_trades: HashMap<u64, TradeSession>,
+    /// 交易邀请（target_session -> inviter_session；与组队邀请分表）
+    trade_invites: HashMap<u64, u64>,
     /// #919：交易邀请冷却（C# Settings.TradeDelay=2000ms，session -> 上次时间戳 ms）
     last_trade_request: HashMap<u64, i64>,
     /// #919：组队邀请冷却（C# Settings.GroupInviteDelay=2000ms，session -> 上次时间戳 ms）
@@ -1446,6 +1450,52 @@ pub struct SocialActor {
     world_ref: Option<ActorRef<crate::actors::world::WorldActor>>,
     db_pool: DbPool,
     config: SocialActorConfig,
+}
+
+/// 行会仓库格子索引校验（客户端 u8 可控，容器固定 100 格；C# PlayerObject.cs:10194 from 越界拒绝）
+fn guild_storage_slot_valid(grid: u8, storage_len: usize) -> bool {
+    (grid as usize) < storage_len
+}
+
+/// 构造交易归还邮件：金币挂第一封，物品按收件上限 5 件/封分封
+/// （C# TradeCancel GainItemMail 语义；与 market 退款 insert_mail 同款模式）
+fn build_trade_return_mails(
+    receiver_name: &str,
+    gold: u64,
+    items: Vec<mir2_shared::data::item::UserItem>,
+) -> Vec<crate::actors::mail::MailMessage> {
+    const MAIL_ITEM_CAP: usize = 5; // MailMessage.items 附件上限
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    let mut mails = Vec::new();
+    let mut chunks: Vec<Vec<mir2_shared::data::item::UserItem>> =
+        items.chunks(MAIL_ITEM_CAP).map(|c| c.to_vec()).collect();
+    if chunks.is_empty() && gold > 0 {
+        chunks.push(Vec::new());
+    }
+    let total = chunks.len();
+    for (idx, chunk) in chunks.into_iter().enumerate() {
+        mails.push(crate::actors::mail::MailMessage {
+            mail_id: crate::actors::mail::generate_mail_id(),
+            sender_name: "交易系统".to_string(),
+            receiver_name: receiver_name.to_string(),
+            subject: "交易取消物品退回".to_string(),
+            body: format!(
+                "交易取消/中止，托管的金币与物品退回（第 {}/{} 封）",
+                idx + 1,
+                total
+            ),
+            timestamp: now,
+            read: false,
+            collected: false,
+            locked: false,
+            gold: if idx == 0 { gold } else { 0 },
+            items: chunk,
+        });
+    }
+    mails
 }
 
 /// C# Functions.FacingEachOther：双方朝向彼此
@@ -1626,6 +1676,63 @@ impl SocialActor {
         self.active_trades
             .values_mut()
             .find(|t| t.side_a.session_id == session_id || t.side_b.session_id == session_id)
+    }
+
+    /// 交易中止统一归还：双方托管在会话里的物品/金币退回本人
+    /// （C# TradeCancel PlayerObject.cs:10889-10957——物品放回背包、背包满 GainItemMail、
+    /// 金币 GainGold 退回）。玩家离线或背包放不下的转离线邮件（market 退款同款 insert_mail）。
+    async fn return_trade_items(&mut self, trade: &TradeSession) {
+        for side in [&trade.side_a, &trade.side_b] {
+            let online = self.players.get(&side.session_id).cloned();
+            let mut mail_gold = 0u64;
+            let mut mail_items: Vec<mir2_shared::data::item::UserItem> = Vec::new();
+
+            // 金币退回：TryAddGold 全额不到账即失败（防截顶吞金），失败转邮件
+            if side.gold > 0 {
+                let refunded = match &online {
+                    Some(rec) => rec
+                        .ask(crate::actors::player::TryAddGold { amount: side.gold })
+                        .await
+                        .unwrap_or(false),
+                    None => false,
+                };
+                if !refunded {
+                    mail_gold = side.gold;
+                }
+            }
+
+            // 物品退回：背包放不下或玩家离线转邮件
+            for entry in &side.items {
+                let Some(item) = entry.item_data.clone() else {
+                    continue;
+                };
+                let returned = match &online {
+                    Some(rec) => rec
+                        .ask(AddItemToInventory { item: item.clone() })
+                        .await
+                        .unwrap_or(false),
+                    None => false,
+                };
+                if !returned {
+                    mail_items.push(item);
+                }
+            }
+
+            if mail_gold > 0 || !mail_items.is_empty() {
+                for mail in build_trade_return_mails(&side.name, mail_gold, mail_items) {
+                    if let Err(e) = db::insert_mail(&self.db_pool, &side.name, &mail).await {
+                        warn!(
+                            "交易归还邮件落库失败: {} -> {} gold={} items={}: {}",
+                            mail.sender_name,
+                            side.name,
+                            mail.gold,
+                            mail.items.len(),
+                            e
+                        );
+                    }
+                }
+            }
+        }
     }
 
     /// 发送好友列表
@@ -1983,13 +2090,15 @@ impl SocialActor {
             _ => false,
         };
         if !recheck_ok {
+            // 先移除会话防重入，再把双方托管物品/金币归还本人（背包满/离线转邮件）
+            self.active_trades.remove(&trade_data.side_a.session_id);
+            self.return_trade_items(&trade_data).await;
             send_system_message(&self.gate_ref, s1, "距离过远或状态异常，交易已取消");
             send_system_message(&self.gate_ref, s2, "距离过远或状态异常，交易已取消");
             send_trade_cancel_packet(&self.gate_ref, s1);
             send_trade_cancel_packet(&self.gate_ref, s2);
             send_trade_close_packet(&self.gate_ref, s1);
             send_trade_close_packet(&self.gate_ref, s2);
-            self.active_trades.remove(&trade_data.side_a.session_id);
             return;
         }
 
@@ -2038,6 +2147,8 @@ impl SocialActor {
         };
 
         if !a_can_receive {
+            self.active_trades.remove(&trade_data.side_a.session_id);
+            self.return_trade_items(&trade_data).await;
             send_system_message(
                 &self.gate_ref,
                 s1,
@@ -2047,10 +2158,11 @@ impl SocialActor {
             send_trade_cancel_packet(&self.gate_ref, s2);
             send_trade_close_packet(&self.gate_ref, s1);
             send_trade_close_packet(&self.gate_ref, s2);
-            self.active_trades.remove(&trade_data.side_a.session_id);
             return;
         }
         if !b_can_receive {
+            self.active_trades.remove(&trade_data.side_a.session_id);
+            self.return_trade_items(&trade_data).await;
             send_system_message(
                 &self.gate_ref,
                 s2,
@@ -2060,79 +2172,141 @@ impl SocialActor {
             send_trade_cancel_packet(&self.gate_ref, s2);
             send_trade_close_packet(&self.gate_ref, s1);
             send_trade_close_packet(&self.gate_ref, s2);
-            self.active_trades.remove(&trade_data.side_a.session_id);
             return;
         }
 
-        // 从 A 扣除金币和物品
-        if let Some(rec) = self.players.get(&s1) {
-            if gold_a > 0 {
-                let _ = rec.ask(DeductGold { amount: gold_a }).await;
-            }
-            for item in &items_a {
-                let _ = rec
-                    .ask(RemoveItemFromInventory {
-                        unique_id: item.uid,
-                    })
-                    .await;
-            }
-        }
+        // === 原子交付 ===
+        // 金币/物品在放入交易栏时已托管进会话（TradeAddGold 即时扣款、TradeAddItem 即从背包移除），
+        // 此处只做交付。任一步失败整体中止：已交付部分收回，与剩余托管一并归还双方。
+        let mut a_got_gold = 0u64;
+        let mut a_got_items: Vec<u64> = Vec::new();
+        let mut b_got_gold = 0u64;
+        let mut b_got_items: Vec<u64> = Vec::new();
+        let mut transfer_failed = false;
 
-        // 从 B 扣除金币和物品
-        if let Some(rec) = self.players.get(&s2) {
+        // B 的金币/物品 → A
+        'give_a: {
+            let Some(rec) = self.players.get(&s1) else {
+                transfer_failed = true;
+                break 'give_a;
+            };
             if gold_b > 0 {
-                let _ = rec.ask(DeductGold { amount: gold_b }).await;
+                match rec
+                    .ask(crate::actors::player::TryAddGold { amount: gold_b })
+                    .await
+                {
+                    Ok(true) => a_got_gold = gold_b,
+                    _ => {
+                        transfer_failed = true;
+                        break 'give_a;
+                    }
+                }
             }
             for item in &items_b {
-                let _ = rec
-                    .ask(RemoveItemFromInventory {
-                        unique_id: item.uid,
-                    })
-                    .await;
-            }
-        }
-
-        // 将 B 的金币和物品给 A
-        if let Some(rec) = self.players.get(&s1) {
-            if gold_b > 0 {
-                let _ = rec.ask(AddGold { amount: gold_b }).await;
-            }
-            for item in &items_b {
-                // 优先使用交易侧缓存的完整物品（DepositTradeItemBySlot 已从背包移除，不能再查询）
-                if let Some(data) = item.item_data.clone() {
-                    let _ = rec.ask(AddItemToInventory { item: data }).await;
-                } else if let Some(rec2) = self.players.get(&s2) {
-                    if let Ok(Some(item_data)) = rec2
-                        .ask(GetItemInfo {
-                            unique_id: item.uid,
-                        })
-                        .await
-                    {
-                        let _ = rec.ask(AddItemToInventory { item: item_data }).await;
+                let Some(data) = item.item_data.clone() else {
+                    continue;
+                };
+                match rec.ask(AddItemToInventory { item: data }).await {
+                    Ok(true) => a_got_items.push(item.uid),
+                    _ => {
+                        transfer_failed = true;
+                        break 'give_a;
                     }
                 }
             }
         }
 
-        // 将 A 的金币和物品给 B
-        if let Some(rec) = self.players.get(&s2) {
-            if gold_a > 0 {
-                let _ = rec.ask(AddGold { amount: gold_a }).await;
-            }
-            for item in &items_a {
-                if let Some(data) = item.item_data.clone() {
-                    let _ = rec.ask(AddItemToInventory { item: data }).await;
-                } else if let Some(rec2) = self.players.get(&s1) {
-                    if let Ok(Some(item_data)) = rec2
-                        .ask(GetItemInfo {
-                            unique_id: item.uid,
-                        })
+        // A 的金币/物品 → B
+        if !transfer_failed {
+            'give_b: {
+                let Some(rec) = self.players.get(&s2) else {
+                    transfer_failed = true;
+                    break 'give_b;
+                };
+                if gold_a > 0 {
+                    match rec
+                        .ask(crate::actors::player::TryAddGold { amount: gold_a })
                         .await
                     {
-                        let _ = rec.ask(AddItemToInventory { item: item_data }).await;
+                        Ok(true) => b_got_gold = gold_a,
+                        _ => {
+                            transfer_failed = true;
+                            break 'give_b;
+                        }
+                    }
+                }
+                for item in &items_a {
+                    let Some(data) = item.item_data.clone() else {
+                        continue;
+                    };
+                    match rec.ask(AddItemToInventory { item: data }).await {
+                        Ok(true) => b_got_items.push(item.uid),
+                        _ => {
+                            transfer_failed = true;
+                            break 'give_b;
+                        }
                     }
                 }
             }
+        }
+
+        if transfer_failed {
+            // 收回已交付部分：金币扣回、物品从收方背包移除（销毁交付副本），
+            // 原托管清单（trade_data，交付前克隆）完整保留，据此统一归还双方。
+            if a_got_gold > 0 {
+                if let Some(rec) = self.players.get(&s1) {
+                    if !rec
+                        .ask(DeductGold { amount: a_got_gold })
+                        .await
+                        .unwrap_or(false)
+                    {
+                        warn!(
+                            "execute_trade 回滚扣回金币失败 session={} amount={}",
+                            s1, a_got_gold
+                        );
+                    }
+                }
+            }
+            if b_got_gold > 0 {
+                if let Some(rec) = self.players.get(&s2) {
+                    if !rec
+                        .ask(DeductGold { amount: b_got_gold })
+                        .await
+                        .unwrap_or(false)
+                    {
+                        warn!(
+                            "execute_trade 回滚扣回金币失败 session={} amount={}",
+                            s2, b_got_gold
+                        );
+                    }
+                }
+            }
+            if let Some(rec) = self.players.get(&s1) {
+                for uid in &a_got_items {
+                    match rec.ask(RemoveItemFromInventory { unique_id: *uid }).await {
+                        Ok(Some(_)) => {}
+                        _ => warn!("execute_trade 回滚收回物品失败 session={} uid={}", s1, uid),
+                    }
+                }
+            }
+            if let Some(rec) = self.players.get(&s2) {
+                for uid in &b_got_items {
+                    match rec.ask(RemoveItemFromInventory { unique_id: *uid }).await {
+                        Ok(Some(_)) => {}
+                        _ => warn!("execute_trade 回滚收回物品失败 session={} uid={}", s2, uid),
+                    }
+                }
+            }
+
+            self.active_trades.remove(&trade_data.side_a.session_id);
+            self.return_trade_items(&trade_data).await;
+            send_system_message(&self.gate_ref, s1, "交易结算失败，已取消并退回双方物品金币");
+            send_system_message(&self.gate_ref, s2, "交易结算失败，已取消并退回双方物品金币");
+            send_trade_cancel_packet(&self.gate_ref, s1);
+            send_trade_cancel_packet(&self.gate_ref, s2);
+            send_trade_close_packet(&self.gate_ref, s1);
+            send_trade_close_packet(&self.gate_ref, s2);
+            return;
         }
 
         // 移除交易会话
@@ -3056,13 +3230,30 @@ impl Message<SocialPlayerLeft> for SocialActor {
             self.broadcast_group_update(gid);
         }
 
-        // 清理交易
-        self.active_trades.retain(|_, trade| {
-            trade.side_a.session_id != msg.session_id && trade.side_b.session_id != msg.session_id
-        });
+        // 清理交易：归还双方托管物品/金币（离线方走邮件），并通知对方关窗
+        // （players 已在上方移除，离线方的 AddItem/TryAddGold 必然失败 → 落邮件）
+        let departed_trades: Vec<TradeSession> = self
+            .active_trades
+            .values()
+            .filter(|t| {
+                t.side_a.session_id == msg.session_id || t.side_b.session_id == msg.session_id
+            })
+            .cloned()
+            .collect();
+        for trade in &departed_trades {
+            self.active_trades.remove(&trade.side_a.session_id);
+            if let Some(partner) = trade.other_session(msg.session_id) {
+                send_system_message(&self.gate_ref, partner, "对方已离线，交易取消");
+                send_trade_cancel_packet(&self.gate_ref, partner);
+                send_trade_close_packet(&self.gate_ref, partner);
+            }
+            self.return_trade_items(trade).await;
+        }
 
         // 清理邀请
-        self.pending_invites
+        self.group_invites
+            .retain(|&k, &mut v| k != msg.session_id && v != msg.session_id);
+        self.trade_invites
             .retain(|&k, &mut v| k != msg.session_id && v != msg.session_id);
         self.pending_guild_invites.remove(&msg.session_id);
         self.pending_marriage_invites
@@ -3228,7 +3419,7 @@ impl Message<GroupInviteRequest> for SocialActor {
             return;
         }
         // C# AddMember（:9322-9326）：目标已有待处理邀请
-        if self.pending_invites.contains_key(&target_session) {
+        if self.group_invites.contains_key(&target_session) {
             send_system_message(&self.gate_ref, msg.session_id, "对方已有待处理的组队邀请");
             return;
         }
@@ -3287,7 +3478,7 @@ impl Message<GroupInviteRequest> for SocialActor {
             msg.session_id,
         );
         // 记录待处理邀请
-        self.pending_invites.insert(target_session, msg.session_id);
+        self.group_invites.insert(target_session, msg.session_id);
         debug!(
             "Group invite: {} -> {}",
             inviter_state.name, target_state.name
@@ -3299,11 +3490,14 @@ impl Message<GroupInviteReply> for SocialActor {
     type Reply = ();
 
     async fn handle(&mut self, msg: GroupInviteReply, _ctx: &mut Context<Self, Self::Reply>) {
-        // 解析邀请者 ID
-        let inviter_id = self
-            .pending_invites
-            .remove(&msg.session_id)
-            .unwrap_or(msg.inviter_id);
+        // 解析邀请者 ID：只认服务端邀请表；客户端自报 inviter_id 不可信，伪造回复直接拒绝
+        let Some(inviter_id) = self.group_invites.remove(&msg.session_id) else {
+            warn!(
+                "GroupInviteReply: 无待处理组队邀请，拒绝伪造回复 session={} 自报 inviter={}",
+                msg.session_id, msg.inviter_id
+            );
+            return;
+        };
 
         if !msg.accept {
             send_system_message(&self.gate_ref, inviter_id, "对方拒绝了组队邀请");
@@ -3573,11 +3767,11 @@ impl Message<TradeStartRequest> for SocialActor {
         if let Some((target, _dist)) = nearest_target {
             // 记录待处理交易请求
             // C# TradeRequest（:10680-10684）：目标已有待处理交易邀请 → 拒绝
-            if self.pending_invites.contains_key(&target) {
+            if self.trade_invites.contains_key(&target) {
                 send_system_message(&self.gate_ref, msg.session_id, "对方已有待处理的交易请求");
                 return;
             }
-            self.pending_invites.insert(target, msg.session_id);
+            self.trade_invites.insert(target, msg.session_id);
             send_trade_invite_packet(&self.gate_ref, target, &state.name);
             debug!(
                 "Trade request: {} -> session {} (dist={})",
@@ -3599,18 +3793,12 @@ impl Message<TradeStartReply> for SocialActor {
     type Reply = ();
 
     async fn handle(&mut self, msg: TradeStartReply, _ctx: &mut Context<Self, Self::Reply>) {
-        // 解析发起者
-        let initiator_id = self.pending_invites.remove(&msg.session_id).or_else(|| {
-            self.active_trades.get(&msg.session_id).map(|t| {
-                if t.side_a.session_id == msg.session_id {
-                    t.side_b.session_id
-                } else {
-                    t.side_a.session_id
-                }
-            })
-        });
-
-        let Some(initiator_id) = initiator_id else {
+        // 解析发起者：只认服务端交易邀请表，伪造回复直接拒绝
+        let Some(initiator_id) = self.trade_invites.remove(&msg.session_id) else {
+            warn!(
+                "TradeStartReply: 无待处理交易邀请，拒绝伪造回复 session={}",
+                msg.session_id
+            );
             return;
         };
 
@@ -3672,58 +3860,69 @@ impl Message<TradeAddGold> for SocialActor {
         // C# PlayerObject.TradeGold（PlayerObject.cs:10744-10760）：
         // - amount<1 拒绝（:10750）
         // - TradeGoldAmount **累计**（:10755 +=，客户端 my_gold += n 同语义）
-        // - 余额按已押+本次校验（C# 押金即时扣款故按剩余额查；本服押金
-        //   成交时统一结算，故改为已押总额+本次 ≤ 持有）
+        // - 即时扣款托管（:10756 Account.Gold -= amount）；取消/断线由
+        //   return_trade_items 与物品一并退回
         if msg.amount < 1 {
             return;
         }
 
-        // 先读已押金币与余额（ask 跨 await 不能持有交易借用，与原注释同理）
-        let (committed, has_enough_gold) = {
-            let committed = match self.find_trade_mut(msg.session_id) {
-                Some(t) => match t.side_of_mut(msg.session_id) {
-                    Some(s) => s.gold,
-                    None => return,
-                },
-                None => {
-                    send_system_message(&self.gate_ref, msg.session_id, "你不在交易中");
-                    return;
-                }
-            };
-            let record = match self.players.get(&msg.session_id) {
-                Some(r) => r,
-                None => return,
-            };
-            match record.ask(GetPlayerState).await {
-                Ok(Some(s)) => (committed, s.inventory.gold >= committed + msg.amount as u64),
-                _ => return,
-            }
+        // 必须在交易中（先校验再扣款，避免无会话扣款）
+        if self.find_trade(msg.session_id).is_none() {
+            send_system_message(&self.gate_ref, msg.session_id, "你不在交易中");
+            return;
+        }
+
+        let record = match self.players.get(&msg.session_id) {
+            Some(r) => r.clone(),
+            None => return,
         };
-        if !has_enough_gold {
+
+        // 即时扣款：失败即余额不足（已押部分此前已扣，不重复校验）
+        let deducted = record
+            .ask(DeductGold {
+                amount: msg.amount as u64,
+            })
+            .await
+            .unwrap_or(false);
+        if !deducted {
             send_system_message(&self.gate_ref, msg.session_id, "金币不足");
             return;
         }
 
-        let trade = match self.find_trade_mut(msg.session_id) {
-            Some(t) => t,
-            None => {
-                send_system_message(&self.gate_ref, msg.session_id, "你不在交易中");
-                return;
+        // 托管进会话；会话在扣款间隙消失（对方取消/断线）→ 立即退回本次扣款
+        {
+            let trade = match self.find_trade_mut(msg.session_id) {
+                Some(t) => t,
+                None => {
+                    let _ = record
+                        .ask(crate::actors::player::TryAddGold {
+                            amount: msg.amount as u64,
+                        })
+                        .await;
+                    send_system_message(&self.gate_ref, msg.session_id, "交易已取消，金币已退回");
+                    return;
+                }
+            };
+            let side = match trade.side_of_mut(msg.session_id) {
+                Some(s) => s,
+                None => {
+                    let _ = record
+                        .ask(crate::actors::player::TryAddGold {
+                            amount: msg.amount as u64,
+                        })
+                        .await;
+                    return;
+                }
+            };
+            side.gold += msg.amount as u64;
+            side.unlock();
+
+            // 对方看到**累计总额**（C# :10759 S.TradeGold{Amount=TradeGoldAmount}）
+            let total = side.gold;
+            let other_session = trade.other_session(msg.session_id);
+            if let Some(other) = other_session {
+                send_trade_gold_update_packet(&self.gate_ref, other, msg.session_id, total);
             }
-        };
-
-        let side = match trade.side_of_mut(msg.session_id) {
-            Some(s) => s,
-            None => return,
-        };
-        side.gold = committed + msg.amount as u64;
-        side.unlock();
-
-        // 对方看到**累计总额**（C# :10759 S.TradeGold{Amount=TradeGoldAmount}）
-        let total = side.gold;
-        let other_session = trade.other_session(msg.session_id);
-        if let Some(other) = other_session {
-            send_trade_gold_update_packet(&self.gate_ref, other, msg.session_id, total);
         }
     }
 }
@@ -3769,11 +3968,15 @@ impl Message<TradeCancel> for SocialActor {
         };
 
         let (s1, s2) = trade.participant_sessions();
+        // 先移除会话防重入，再归还双方托管物品/金币（C# TradeCancel：背包满 GainItemMail）
         self.active_trades.remove(&trade.side_a.session_id);
+        self.return_trade_items(&trade).await;
 
-        // 通知双方
+        // 通知双方关窗
         send_trade_cancel_packet(&self.gate_ref, s1);
         send_trade_cancel_packet(&self.gate_ref, s2);
+        send_trade_close_packet(&self.gate_ref, s1);
+        send_trade_close_packet(&self.gate_ref, s2);
         debug!("Trade cancelled: session {}", s1);
     }
 }
@@ -5373,11 +5576,16 @@ impl Message<GuildStorageGoldChangeRequest> for SocialActor {
                     send_system_message(&self.gate_ref, msg.session_id, "金币不足");
                     return;
                 }
-                let _ = record
+                let deducted = record
                     .ask(DeductGold {
                         amount: msg.amount as u64,
                     })
-                    .await;
+                    .await
+                    .unwrap_or(false);
+                if !deducted {
+                    send_system_message(&self.gate_ref, msg.session_id, "金币扣除失败");
+                    return;
+                }
                 guild.gold += msg.amount as u64;
                 send_system_message(
                     &self.gate_ref,
@@ -5571,6 +5779,12 @@ impl Message<GuildStorageItemChangeRequest> for SocialActor {
 
                 if !state.inventory.has_space() {
                     send_system_message(&self.gate_ref, msg.session_id, "背包已满");
+                    return;
+                }
+
+                // 客户端 u8 grid 可控，容器固定 100 格：越界直接拒绝
+                // （C# PlayerObject.cs:10194 from >= StoredItems.Length → return；移动分支已有同款校验）
+                if !guild_storage_slot_valid(msg.grid, guild.storage_items.len()) {
                     return;
                 }
 
@@ -6695,8 +6909,9 @@ impl SocialActor {
 mod tests {
     use super::{
         apply_guild_war_mirror, facing_each_other, front_tile, leader_leave_outcome,
-        LeaderLeaveOutcome,
+        LeaderLeaveOutcome, SocialActor, SocialActorConfig,
     };
+    use std::collections::HashMap;
 
     #[test]
     fn leader_leave_outcome_matches_csharp_deletemember() {
@@ -6924,5 +7139,125 @@ mod tests {
         assert_eq!(mentor_settle_amount(true, 130), 130);
         assert_eq!(mentor_settle_amount(true, 0), 0);
         assert_eq!(mentor_settle_amount(false, 130), 0);
+    }
+
+    /// 行会仓库取出越界：grid=100/255（客户端 u8 可控，容器固定 100 格）必须拒绝；
+    /// 修复前 social.rs 三处 storage_items[msg.grid] 裸索引会 panic
+    #[test]
+    fn guild_storage_slot_valid_bounds() {
+        use super::guild_storage_slot_valid;
+        assert!(guild_storage_slot_valid(0, 100));
+        assert!(guild_storage_slot_valid(99, 100));
+        assert!(!guild_storage_slot_valid(100, 100));
+        assert!(!guild_storage_slot_valid(255, 100));
+        // 与 Guild::withdraw_item 内部校验一致（容器 100 格）
+        let mut g = crate::actors::guild::Guild::new("G".into(), "Leader".into(), 1);
+        assert_eq!(g.storage_items.len(), 100);
+        assert!(g.withdraw_item(100).is_none());
+        assert!(g.withdraw_item(255).is_none());
+    }
+
+    /// 交易归还邮件：金币挂首封、物品按 5 件/封分封（C# TradeCancel GainItemMail 语义）
+    #[test]
+    fn trade_return_mails_chunk_items_and_carry_gold() {
+        use super::build_trade_return_mails;
+        let mk = |uid: u64| {
+            let mut it = mir2_shared::data::item::UserItem::default();
+            it.unique_id = uid;
+            it
+        };
+        // 纯金币：1 封无物品
+        let mails = build_trade_return_mails("A", 500, vec![]);
+        assert_eq!(mails.len(), 1);
+        assert_eq!(mails[0].gold, 500);
+        assert!(mails[0].items.is_empty());
+        assert_eq!(mails[0].receiver_name, "A");
+        // 7 物品 + 金币：5+2 两封，金币只在首封
+        let items: Vec<_> = (1..=7).map(mk).collect();
+        let mails = build_trade_return_mails("B", 100, items);
+        assert_eq!(mails.len(), 2);
+        assert_eq!(mails[0].items.len(), 5);
+        assert_eq!(mails[0].gold, 100);
+        assert_eq!(mails[1].items.len(), 2);
+        assert_eq!(mails[1].gold, 0);
+        // 无金无物：不发邮件
+        assert!(build_trade_return_mails("C", 0, vec![]).is_empty());
+    }
+
+    /// 交易取消归还：双方离线时托管金币/物品全量转离线邮件（不丢物、不吞金）
+    /// 修复前 TradeCancel/SocialPlayerLeft 直接移除会话，托管物品金币凭空消失
+    #[tokio::test]
+    async fn trade_cancel_returns_escrow_via_mail_when_offline() {
+        use crate::actors::trade::TradeSession;
+        use kameo::actor::Spawn;
+
+        let db_pool = crate::db::init_db_pool("sqlite::memory:")
+            .await
+            .expect("init_db");
+        let gate_ref = crate::gate::actor::GateActor::spawn(());
+        // players 为空（双方离线）→ 归还只能走邮件
+        let mut social = SocialActor {
+            players: HashMap::new(),
+            groups: HashMap::new(),
+            next_group_id: 1,
+            group_invites: HashMap::new(),
+            active_trades: HashMap::new(),
+            trade_invites: HashMap::new(),
+            last_trade_request: HashMap::new(),
+            last_group_invite: HashMap::new(),
+            guilds: HashMap::new(),
+            pending_guild_invites: HashMap::new(),
+            guild_wars: HashMap::new(),
+            pending_marriage_invites: HashMap::new(),
+            pending_mentor_invites: HashMap::new(),
+            gate_ref,
+            world_ref: None,
+            db_pool: db_pool.clone(),
+            config: SocialActorConfig::default(),
+        };
+
+        let mk = |uid: u64| {
+            let mut it = mir2_shared::data::item::UserItem::default();
+            it.unique_id = uid;
+            it.count = 1;
+            it
+        };
+        let mut trade = TradeSession::new(1, "Alice".into(), 2, "Bob".into());
+        trade.side_a.gold = 500;
+        trade.side_a.add_item(42, 0, 1, Some(mk(42)));
+        for uid in 100..106 {
+            trade.side_b.add_item(uid, 0, 1, Some(mk(uid)));
+        }
+
+        social.return_trade_items(&trade).await;
+
+        // Alice：1 封邮件，gold=500，物品 1 件（uid=42）
+        let rows: Vec<(i64, String)> = sqlx::query_as(
+            "SELECT gold, items_json FROM mail WHERE character_name = ? ORDER BY mail_id",
+        )
+        .bind("Alice")
+        .fetch_all(&db_pool)
+        .await
+        .expect("query alice mail");
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].0, 500);
+        let items: serde_json::Value = serde_json::from_str(&rows[0].1).unwrap();
+        assert_eq!(items.as_array().unwrap().len(), 1);
+
+        // Bob：6 件物品分 2 封（5+1），无金币
+        let rows: Vec<(i64, String)> = sqlx::query_as(
+            "SELECT gold, items_json FROM mail WHERE character_name = ? ORDER BY mail_id",
+        )
+        .bind("Bob")
+        .fetch_all(&db_pool)
+        .await
+        .expect("query bob mail");
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].0, 0);
+        assert_eq!(rows[1].0, 0);
+        let first: serde_json::Value = serde_json::from_str(&rows[0].1).unwrap();
+        let second: serde_json::Value = serde_json::from_str(&rows[1].1).unwrap();
+        assert_eq!(first.as_array().unwrap().len(), 5);
+        assert_eq!(second.as_array().unwrap().len(), 1);
     }
 }
