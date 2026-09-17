@@ -39,7 +39,13 @@ pub(crate) fn setup_world(
             // spawn_camera 创建，再 spawn 会让全库相机 single/single_mut 失败。
             tracing::error!("❌ 地图加载失败 {}: {}", map_path, e);
             auth.login_error = Some(format!("地图 {} 加载失败：{}", map_name, e));
-            next.set(crate::scenes::AppState::Login);
+            // set_if_neq：setup_world 仅两个入口——OnEnter(Game) 与游戏内换图重建
+            // （map_rebuild_system，in_state(Game) 门控）——执行到本失败分支时当前态
+            // 恒为 Game（OnEnter 触发时迁移已完成），Game→Login 必为真实迁移，
+            // set 与 set_if_neq 行为相同。统一用 set_if_neq 只是防御：Bevy 0.19
+            // 同态 set 非 no-op（会真实重跑 OnExit/OnEnter），未来若新增同态入口
+            // 不至于静默重建场景
+            (*next).set_if_neq(crate::scenes::AppState::Login);
             return;
         }
     };
@@ -513,17 +519,21 @@ pub(crate) fn clear_map_world(world: &mut World) {
 
 /// S2：离开 Game 场景（登出 / 断线回登录）统一清理地图实体。
 /// 此前 map_renderer 只有流式卸载，OnExit(Game) 无任何清理——同进程重进游戏时
-/// OnEnter 不会再跑第二次（「重进同状态不会再跑 OnEnter」），旧块/灯光/大图全部残留叠加。
+/// 旧块/灯光/大图全部残留叠加（OnEnter 只负责 spawn，不负责先清上一局）。
 pub(crate) fn cleanup_map_world(world: &mut World) {
     clear_map_world(world);
 }
 
 /// B1：运行中换图重建。
-/// MapChanged 只写 desired_map + next.set(Game)；游戏内收到时同态 set 是 no-op，
-/// OnEnter(Game) 不会重跑，而 desired_map 此前只有 setup_world 一个消费者 →
-/// 世界永远停在第一张图。这里按值比较（不靠变更检测 tick，避免同帧顺序坑）：
+/// MapChanged 只写 desired_map + next.set_if_neq(Game)；游戏内收到时 set_if_neq
+/// 不写 Pending、OnExit/OnEnter(Game) 都不重跑（Bevy 0.19 同态 NextState::set
+/// 反而会真实重跑 OnExit+OnEnter，必须用 set_if_neq），而 desired_map 此前
+/// 只有 setup_world 一个消费者 → 世界永远停在第一张图。这里按值比较
+/// （不靠变更检测 tick，避免同帧顺序坑）：
 /// desired_map 与已加载地图名不一致 → 全清旧世界后以 setup_world 原逻辑重建
 /// （含 walkable/doors、相机定位、初始窗口、GameData.map/map_reader 替换）。
+/// 旧图网络实体（NetObjectId、非本地玩家）一并清掉：同态换图不经过
+/// OnExit(Game)，despawn_local_player 不会跑，不清则旧图 NPC/怪物成幽灵。
 /// 加载失败走 setup_world 的 M4 分支：错误可见 + 退回登录。
 pub(crate) fn map_rebuild_system(world: &mut World) {
     let needs = {
@@ -544,6 +554,48 @@ pub(crate) fn map_rebuild_system(world: &mut World) {
         .unwrap_or_default();
     tracing::info!("🗺️ 检测到换图 {}，清理旧世界并重建", name);
     clear_map_world(world);
+    // 幽灵清理（复核发现）：同态换图不经过 OnExit(Game)，despawn_local_player
+    // 不会跑——旧图的 NPC/怪物/远端玩家/地面物品/金币（NetObjectId、非本地玩家）
+    // 必须随旧世界一起清掉，否则在新图同 object_id 实体到达前一直可见成幽灵。
+    // 新图对象由服务端换图后全量重发。本地玩家必须显式排除——注意这是唯一
+    // 防线而非「双保险」：spawn_local_player_with（actor/spawn_helpers.rs:177-178）
+    // 给本地玩家同时挂 LocalPlayer 和 NetObjectId，误删 Without<LocalPlayer>
+    // 排除条件换图即删玩家（过滤器写法对齐 actor::despawn_local_player 的清理面）。
+    {
+        let mut q = world.query_filtered::<
+            Entity,
+            (
+                With<crate::actor::NetObjectId>,
+                Without<crate::actor::LocalPlayer>,
+            ),
+        >();
+        let ghosts: Vec<Entity> = q.iter(world).collect();
+        for e in ghosts {
+            let _ = world.despawn(e);
+        }
+    }
+    // 换图落位（复核 minor）：旧图未走完的点击移动（LocalMove/MoveTween）若带入
+    // 新图，会在新图继续走；且 apply_self_position 在 LocalMove 非空时直接丢弃
+    // UserLocation 校正（movement.rs:240-282），坐标漂移永远校不回来。对齐 C#
+    // MapChanged 直设 CurrentLocation 语义：重建时清移动状态并按 player_spawn 落位。
+    {
+        let spawn = world.resource::<GameData>().player_spawn;
+        let mut q = world.query_filtered::<Entity, With<crate::actor::LocalPlayer>>();
+        let players: Vec<Entity> = q.iter(world).collect();
+        for e in players {
+            let mut em = world.entity_mut(e);
+            em.remove::<crate::game::movement::LocalMove>();
+            em.remove::<crate::game::movement::MoveTween>();
+            if let Some((tx, ty, _dir)) = spawn {
+                let p = crate::game::movement::tile_to_world(tx as i32, ty as i32);
+                if let Some(mut tf) = em.get_mut::<Transform>() {
+                    tf.translation.x = p.x;
+                    tf.translation.y = p.y;
+                    tf.translation.z = crate::actor::depth_z(-p.y);
+                }
+            }
+        }
+    }
     use bevy::ecs::system::RunSystemOnce;
     if let Err(e) = world.run_system_once(setup_world) {
         tracing::error!("🗺️ 换图重建失败: {}", e);
@@ -695,9 +747,9 @@ mod tests {
         assert!(
             matches!(
                 *world.resource::<NextState<AppState>>(),
-                NextState::Pending(AppState::Login)
+                NextState::PendingIfNeq(AppState::Login)
             ),
-            "地图加载失败应退回登录"
+            "地图加载失败应退回登录（set_if_neq → PendingIfNeq）"
         );
         // 失败分支不得再 spawn 重复相机（唯一地图相机由 Startup spawn_camera 创建）
         assert_eq!(
@@ -723,6 +775,183 @@ mod tests {
             world.resource::<ChunkStream>().last_cam_chunk,
             Some((3, 3)),
             "同图不应重置流式游标"
+        );
+    }
+
+    /// S2 幽灵回归：换图重建必须连旧图的网络实体一起清掉（NPC/怪物/远端玩家/
+    /// 地面物品/金币：带 NetObjectId、非本地玩家）。同态换图不经过 OnExit(Game)，
+    /// despawn_local_player 不会跑；修复前重建只清地图块/灯光，旧 NetObjectId
+    /// 实体在新图同 object_id 实体到达前一直可见成幽灵（本测试修复前红：
+    /// NetObjectId 计数 = 1）。注意 Without<LocalPlayer> 是唯一防线而非双保险：
+    /// 本地玩家同时带 LocalPlayer 和 NetObjectId（spawn_local_player_with，
+    /// actor/spawn_helpers.rs:177-178），故本测试的玩家实体两者都挂——误删
+    /// 排除条件本测试即红。
+    #[test]
+    fn rebuild_despawns_old_map_net_entities() {
+        use crate::actor::{LocalPlayer, NetObjectId};
+
+        let mut world = world_with_old_map("old_map", Some("__missing_map_for_rebuild_test__"));
+        let ghost_npc = world.spawn(NetObjectId(1001)).id();
+        let ghost_remote = world.spawn(NetObjectId(1002)).id();
+        // 本地玩家同时挂 LocalPlayer + NetObjectId（真实结构，见 spawn_local_player_with）
+        let player = world.spawn((LocalPlayer, NetObjectId(1000))).id();
+
+        map_rebuild_system(&mut world);
+
+        assert_eq!(
+            world
+                .query_filtered::<Entity, (With<NetObjectId>, Without<LocalPlayer>)>()
+                .iter(&world)
+                .count(),
+            0,
+            "换图重建后旧图 NetObjectId 实体应清零（幽灵实体）"
+        );
+        assert!(
+            world.get_entity(ghost_npc).is_err() && world.get_entity(ghost_remote).is_err(),
+            "旧图 NPC/远端玩家应被清理"
+        );
+        assert!(
+            world.get_entity(player).is_ok(),
+            "本地玩家不应被换图清理误伤"
+        );
+    }
+
+    /// 2b 回归：换图重建必须清掉本地玩家未走完的 LocalMove/MoveTween 并按
+    /// player_spawn 落位（对齐 C# MapChanged 直设 CurrentLocation 语义）。
+    /// 修复前：移动组件原样保留、Transform 停留旧图位置——旧路径在新图继续走，
+    /// 且 LocalMove 非空会抑制 apply_self_position 的 UserLocation 校正（本测试红）。
+    #[test]
+    fn rebuild_clears_local_move_and_repositions_player() {
+        use crate::actor::LocalPlayer;
+        use crate::game::movement::{tile_to_world, LocalMove, MoveTween};
+        use mir2_shared::enums::MirAction;
+
+        let mut world = world_with_old_map("old_map", Some("__missing_map_for_rebuild_test__"));
+        world.resource_mut::<GameData>().player_spawn = Some((10.0, 20.0, 3));
+        let player = world
+            .spawn((
+                LocalPlayer,
+                Transform::from_xyz(1.0, 2.0, 3.0),
+                LocalMove {
+                    path: std::collections::VecDeque::from([(11, 21), (12, 22)]),
+                    step_timer_ms: 42.0,
+                    run: true,
+                    last: Some((10, 20)),
+                    step_origin: Some((9, 19)),
+                    turn_acc: 1.0,
+                },
+                MoveTween {
+                    from: Vec2::ZERO,
+                    to: Vec2::ONE,
+                    t: 0.5,
+                    dur: 0.1,
+                    action: MirAction::Walking,
+                    dir: 2,
+                },
+            ))
+            .id();
+
+        map_rebuild_system(&mut world);
+
+        let e = world.entity(player);
+        assert!(
+            e.get::<LocalMove>().is_none(),
+            "换图后 LocalMove 必须清除（旧路径不得带入新图）"
+        );
+        assert!(
+            e.get::<MoveTween>().is_none(),
+            "换图后 MoveTween 必须清除"
+        );
+        let p = tile_to_world(10, 20);
+        let tf = e.get::<Transform>().expect("本地玩家应有 Transform");
+        assert_eq!(
+            tf.translation,
+            Vec3::new(p.x, p.y, crate::actor::depth_z(-p.y)),
+            "换图后应按 player_spawn 落位（C# MapChanged 直设 CurrentLocation）"
+        );
+    }
+
+    /// 复核严重项回归：换图帧（desired_map 变更）与新图 NetObject 消息同帧到达时，
+    /// 网络对象生成链（ActorPlugin）必须排在 map_rebuild_system 之后——否则刚生成的
+    /// 新图 NPC 会被重建的幽灵清理整批 despawn，服务端不会重发 → 新图 NPC 永久缺失。
+    /// 走真实插件（MapRenderPlugin + ActorPlugin）+ 完整 Update 调度；撤掉
+    /// actor/mod.rs 的 .after(map_rebuild_system) 排序锁后本测试红。
+    #[test]
+    fn same_frame_net_object_survives_map_rebuild() {
+        use crate::actor::{ActorPlugin, NetObjectId, Npc};
+        use crate::map_renderer::MapRenderPlugin;
+        use crate::network::{NetObject, NetObjectRemoved, SessionState};
+
+        let mut app = App::new();
+        app.add_plugins((
+            MinimalPlugins,
+            bevy::asset::AssetPlugin::default(),
+            bevy::state::app::StatesPlugin,
+        ));
+        app.init_state::<AppState>();
+        app.add_plugins((MapRenderPlugin, ActorPlugin));
+        // spawn_net_objects_when_ready / setup_world 参数资源（无窗口/渲染最小集）
+        app.insert_resource(Assets::<Image>::default());
+        app.insert_resource(Assets::<Mesh>::default());
+        app.insert_resource(Assets::<Font>::default());
+        app.insert_resource(Assets::<bevy::audio::AudioSource>::default());
+        let mut libs = Libraries::new("__no_data_dir_for_test__");
+        libs.initialized = true; // 跳过 ensure_initialized 磁盘扫描
+        app.insert_resource(GameLibraries(libs));
+        app.init_resource::<crate::ui::sprite_ui::UiImageCache>();
+        app.init_resource::<crate::ui::sprite_ui::UiFont>();
+        app.init_resource::<crate::game::sound::SoundBank>();
+        app.init_resource::<SessionState>();
+        app.init_resource::<AuthFeedback>();
+        app.add_message::<NetObject>();
+        app.add_message::<NetObjectRemoved>();
+        // 其余在役 Update 系统的参数资源（bevy 0.19 缺资源参数直接 panic）
+        app.add_message::<crate::network::server_event::ServerEvent>();
+        app.insert_resource(ButtonInput::<KeyCode>::default());
+        app.init_resource::<crate::game::input_gate::TextInputGate>();
+        app.init_resource::<crate::control::CursorProbe>();
+        app.init_resource::<crate::ui::tooltip::TooltipState>();
+        // chunk_stream_system 需要（正常由 setup_world 成功路径创建；测试地图加载必失败）
+        app.insert_resource(crate::map_renderer::MapLightTexture(Handle::default()));
+        // 首次进图必然加载失败（地图文件不存在）→ M4 失败分支，避免真实 Data 依赖
+        app.insert_resource(GameData {
+            desired_map: Some("__missing_first_map__".to_string()),
+            ..GameData::default()
+        });
+
+        // 直接置 Game 态（不走真实 OnEnter 迁移：setup_world 的 M4 失败分支会
+        // 请求回登录，bevy_state 0.19 同帧链式应用迁移，Update 时已不在 Game）。
+        // 本测试只需要 in_state(Game) 门控为真 + map_rebuild_system 真实跑起来。
+        app.world_mut().insert_resource(State::new(AppState::Game));
+
+        // 同帧：换图（desired_map 与已加载地图不一致）+ 一条新图 NPC 消息
+        {
+            let mut gd = app.world_mut().resource_mut::<GameData>();
+            gd.map = Some(LoadedMap {
+                name: "old_map".to_string(),
+                width: 1,
+                height: 1,
+                doors: vec![vec![0]],
+                walkable: vec![vec![true]],
+            });
+            gd.desired_map = Some("__missing_new_map__".to_string());
+        }
+        app.world_mut().write_message(NetObject::Npc {
+            object_id: 9001,
+            name: "同帧NPC".to_string(),
+            image: 0,
+            location_x: 0,
+            location_y: 0,
+            direction: 0,
+        });
+        app.update();
+
+        let mut q = app.world_mut().query_filtered::<&NetObjectId, With<Npc>>();
+        let ids: Vec<u32> = q.iter(app.world()).map(|id| id.0).collect();
+        assert_eq!(
+            ids,
+            vec![9001],
+            "同帧换图 + NetObject::Npc：NPC 必须存活（生成链须排在换图重建之后）"
         );
     }
 

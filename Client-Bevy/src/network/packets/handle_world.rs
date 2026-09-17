@@ -96,10 +96,14 @@ pub(crate) fn handle_world(
                 game_data.player_spawn =
                     Some((p.location_x as f32, p.location_y as f32, p.direction));
                 server_events.write(ServerEvent::WeatherChanged { code: p.weather });
-                // 游戏内收到时 set(Game) 是同态 no-op（OnEnter 不会重跑）：
-                // 换图重建由 map_renderer::map_rebuild_system 侦测 desired_map
-                // 与已加载地图名不一致后清旧世界重建（B1）
-                next.set(AppState::Game);
+                // 游戏内收到时必须用 set_if_neq：Bevy 0.19 的 NextState::set 对同态
+                // 也会真实重跑 OnExit+OnEnter（bevy_state 0.19.1 实测；只有
+                // set_if_neq 才是同态 no-op），同态 set(Game) 会触发 OnExit(Game)
+                // 的 despawn_local_player 清掉本地玩家与全部 NetObjectId——过门即消失。
+                // set_if_neq 下同态不写 Pending，换图重建由 map_renderer::
+                // map_rebuild_system 侦测 desired_map 与已加载地图名不一致后
+                // 清旧世界重建（B1）
+                next.set_if_neq(AppState::Game);
             }
         }
         x if x == ServerPacketIds::NewMapInfo as i16 => {
@@ -693,4 +697,178 @@ pub(crate) fn handle_world(
         _ => {}
     }
     handled
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::game::player_control::ControlState;
+    use crate::ui::login::AuthFeedback;
+    use bevy::ecs::system::RunSystemOnce;
+    use mir2_shared::packets::base::serialize_packet;
+    use mir2_shared::packets::server::map::MapChanged;
+
+    /// OnExit/OnEnter(Game) 触发计数（断言同态 MapChanged 不重跑状态钩子）
+    #[derive(Resource, Default)]
+    struct GameHookCount {
+        exits: u32,
+        enters: u32,
+    }
+
+    fn count_exit(mut c: ResMut<GameHookCount>) {
+        c.exits += 1;
+    }
+    fn count_enter(mut c: ResMut<GameHookCount>) {
+        c.enters += 1;
+    }
+
+    /// 生产同构驱动系统：把原始包喂给 handle_world（与 network_system 的分发路径同参数）
+    #[allow(clippy::too_many_arguments)]
+    fn drive_packet(
+        payload: In<Vec<u8>>,
+        mut net: ResMut<NetConnection>,
+        mut session: ResMut<SessionState>,
+        mut auth: ResMut<AuthFeedback>,
+        mut game_data: ResMut<GameData>,
+        mut net_objects: MessageWriter<NetObject>,
+        mut net_removals: MessageWriter<NetObjectRemoved>,
+        mut motions: MessageWriter<NetMotion>,
+        mut combat_evt: MessageWriter<CombatEvent>,
+        mut effects: MessageWriter<PendingEffect>,
+        mut server_events: MessageWriter<ServerEvent>,
+        mut control: ResMut<ControlState>,
+        mut next: ResMut<NextState<AppState>>,
+    ) {
+        handle_world(
+            &mut net,
+            &mut session,
+            &mut auth,
+            &mut game_data,
+            &mut net_objects,
+            &mut net_removals,
+            &mut motions,
+            &mut combat_evt,
+            &mut effects,
+            &mut server_events,
+            &mut control,
+            &mut next,
+            &payload,
+        );
+    }
+
+    fn map_changed_payload(file_name: &str) -> Vec<u8> {
+        let mut buf = Vec::new();
+        serialize_packet(
+            &mut buf,
+            &MapChanged {
+                map_index: 1,
+                file_name: file_name.to_string(),
+                title: String::new(),
+                minimap: 0,
+                big_map: 0,
+                lights: 0,
+                location_x: 5,
+                location_y: 6,
+                direction: 0,
+                map_dark_light: 0,
+                music: 0,
+                weather: 0,
+            },
+        )
+        .expect("序列化 MapChanged");
+        buf
+    }
+
+    /// 状态钩子计数测试脚手架：真实状态机 + OnEnter/OnExit(Game) 计数
+    fn hook_count_app() -> App {
+        let mut app = App::new();
+        // App::new 只有 MainSchedulePlugin，状态迁移需要显式 StatesPlugin
+        app.add_plugins(bevy::state::app::StatesPlugin);
+        app.init_state::<AppState>();
+        app.add_message::<NetObject>();
+        app.add_message::<NetObjectRemoved>();
+        app.add_message::<NetMotion>();
+        app.add_message::<CombatEvent>();
+        app.add_message::<PendingEffect>();
+        app.add_message::<ServerEvent>();
+        app.insert_resource(NetConnection::default());
+        app.init_resource::<SessionState>();
+        app.init_resource::<AuthFeedback>();
+        app.init_resource::<GameData>();
+        app.init_resource::<ControlState>();
+        app.init_resource::<GameHookCount>();
+        app.add_systems(OnExit(AppState::Game), count_exit);
+        app.add_systems(OnEnter(AppState::Game), count_enter);
+        app
+    }
+
+    /// 阻断回归：游戏内收到 MapChanged（过门换图）不得触发 OnExit/OnEnter(Game)。
+    /// Bevy 0.19 同态 NextState::set 非 no-op（bevy_state 0.19.1 实测）——修复前
+    /// next.set(Game) 会真实重跑 OnExit(Game) 的 despawn_local_player，本地玩家
+    /// 与全部 NetObjectId 被清，而服务端换图不补发自身 ObjectPlayer → 过门即消失。
+    /// 修复后 set_if_neq 同态不写 Pending，换图重建由 map_rebuild_system 消费
+    /// desired_map 完成（修复前本测试红：exits=1、enters=2）。
+    #[test]
+    fn in_game_map_changed_does_not_rerun_state_hooks() {
+        let mut app = hook_count_app();
+        // 进入 Game（Intro → Game）
+        app.world_mut()
+            .resource_mut::<NextState<AppState>>()
+            .set(AppState::Game);
+        app.update();
+        assert_eq!(
+            *app.world().resource::<State<AppState>>().get(),
+            AppState::Game
+        );
+        assert_eq!(app.world().resource::<GameHookCount>().enters, 1);
+
+        // 游戏内收到 MapChanged（换图/过门，含同图重发）
+        let payload = map_changed_payload("other_map");
+        app.world_mut()
+            .run_system_once_with(drive_packet, payload)
+            .expect("驱动 MapChanged");
+        app.update();
+
+        let count = app.world().resource::<GameHookCount>();
+        assert_eq!(
+            (count.exits, count.enters),
+            (0, 1),
+            "游戏内 MapChanged 不得重跑 OnExit/OnEnter(Game)（同态 set 非 no-op，必须用 set_if_neq）"
+        );
+        assert_eq!(
+            *app.world().resource::<State<AppState>>().get(),
+            AppState::Game,
+            "状态应保持在 Game"
+        );
+        assert_eq!(
+            app.world().resource::<GameData>().desired_map.as_deref(),
+            Some("other_map"),
+            "desired_map 应交给 map_rebuild_system 消费"
+        );
+    }
+
+    /// 正向用例：登录/选角阶段收到 MapChanged（StartGame 后首图）仍是真实迁移
+    /// Login → Game，OnEnter 正常触发（set_if_neq 不影响异态迁移）。
+    #[test]
+    fn map_changed_from_login_still_enters_game() {
+        let mut app = hook_count_app();
+        app.world_mut()
+            .resource_mut::<NextState<AppState>>()
+            .set(AppState::Login);
+        app.update();
+
+        let payload = map_changed_payload("first_map");
+        app.world_mut()
+            .run_system_once_with(drive_packet, payload)
+            .expect("驱动 MapChanged");
+        app.update();
+
+        assert_eq!(
+            *app.world().resource::<State<AppState>>().get(),
+            AppState::Game,
+            "Login→Game 真实迁移应照常发生"
+        );
+        let count = app.world().resource::<GameHookCount>();
+        assert_eq!((count.exits, count.enters), (0, 1));
+    }
 }

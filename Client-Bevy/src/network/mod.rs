@@ -445,13 +445,16 @@ pub(crate) fn network_system(
                     net.to_server = None;
                     net.tcp_events = None;
                     // S3：断线主动切回登录场景——此前 AppState 留在 Game，重连成功后
-                    // 自动 StartGame → MapChanged 的同态 next.set(Game) 是 no-op，
-                    // OnEnter 不重跑、世界不重建，断线前的远端玩家/地面物品成幽灵。
+                    // 自动 StartGame → MapChanged 只写 desired_map，OnEnter 不重跑、
+                    // 世界不重建，断线前的远端玩家/地面物品成幽灵。
                     // 切回 Login 触发 OnExit(Game) 全量清理（地图块/灯光/角色/对话框），
-                    // 重连入图时 set(Game) 才是真正的状态迁移，世界彻底重建。
+                    // 重连入图时 Login→Game 才是真正的状态迁移，世界彻底重建。
                     // 取舍：玩家会看到登录界面一闪（好过重连后满屏幽灵实体）；
                     // 与服务端主动 Disconnect 包（handle_login.rs）同一路径。
-                    next.set(AppState::Login);
+                    // set_if_neq：登录/选角界面断线时同态 set(Login) 会真实重跑
+                    // OnExit(Login)+OnEnter(Login)（Bevy 0.19 同态 set 非 no-op），
+                    // 重建登录 UI、丢掉输入中的账号密码；只有 Game→Login 才需要迁移。
+                    (*next).set_if_neq(AppState::Login);
                     if net.auto_reconnect {
                         net.reconnecting = true;
                         net.reconnect_delay = 2.0;
@@ -524,8 +527,9 @@ pub(crate) fn network_system(
         net.to_server = None;
         net.from_server = None;
         // S3：同 TCP 断线分支——切回登录场景让 OnExit(Game) 全量清理世界，
-        // 重连入图时世界彻底重建，避免断线前远端对象成幽灵（详见 TCP 分支注释）
-        next.set(AppState::Login);
+        // 重连入图时世界彻底重建，避免断线前远端对象成幽灵（详见 TCP 分支注释）；
+        // set_if_neq 避免登录/选角界面断线时同态迁移重建登录 UI
+        (*next).set_if_neq(AppState::Login);
         if net.auto_reconnect {
             net.reconnecting = true;
             net.reconnect_delay = 2.0;
@@ -534,5 +538,134 @@ pub(crate) fn network_system(
         } else {
             auth.login_error = Some("与服务器断开连接（mock）".to_string());
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bevy::ecs::system::RunSystemOnce;
+    use mir2_shared::packets::base::serialize_packet;
+    use mir2_shared::packets::server::map::MapChanged;
+
+    /// 挂齐 network_system 全部参数依赖的最小 App（6 条消息总线 + 资源）。
+    fn net_app() -> App {
+        let mut app = App::new();
+        app.add_message::<NetObject>();
+        app.add_message::<NetObjectRemoved>();
+        app.add_message::<NetMotion>();
+        app.add_message::<CombatEvent>();
+        app.add_message::<PendingEffect>();
+        app.add_message::<ServerEvent>();
+        app.init_resource::<SessionState>();
+        app.init_resource::<AuthFeedback>();
+        app.init_resource::<GameData>();
+        app.init_resource::<ControlState>();
+        app.insert_resource(NextState::<AppState>::default());
+        app.insert_resource(Time::<()>::default());
+        app.insert_resource(NetServerAddr("127.0.0.1:7000".to_string()));
+        app
+    }
+
+    fn map_changed_payload(file_name: &str) -> Vec<u8> {
+        let mut buf = Vec::new();
+        serialize_packet(
+            &mut buf,
+            &MapChanged {
+                map_index: 1,
+                file_name: file_name.to_string(),
+                title: String::new(),
+                minimap: 0,
+                big_map: 0,
+                lights: 0,
+                location_x: 5,
+                location_y: 6,
+                direction: 0,
+                map_dark_light: 0,
+                music: 0,
+                weather: 0,
+            },
+        )
+        .expect("序列化 MapChanged");
+        buf
+    }
+
+    /// 断线覆盖断言（TCP/Mock 两路径共用）：同帧 MapChanged 之后断线必须赢。
+    fn assert_disconnect_wins(app: &App) {
+        assert!(
+            matches!(
+                *app.world().resource::<NextState<AppState>>(),
+                NextState::PendingIfNeq(AppState::Login)
+            ),
+            "断线必须覆盖同帧 MapChanged 的 Pending(Game)，否则卡在 Game 态满屏幽灵"
+        );
+        assert!(
+            app.world().resource::<NetConnection>().disconnected.is_some(),
+            "断线原因应已记录"
+        );
+        assert_eq!(
+            app.world().resource::<GameData>().desired_map.as_deref(),
+            Some("other_map"),
+            "MapChanged 仍应正常落 desired_map（重连入图时按新图重建）"
+        );
+    }
+
+    /// Pending 覆盖顺序回归（真实 TCP 路径）：同一帧内 MapChanged 包与
+    /// Disconnected 事件竞争同一个 NextState 时，断线必须赢——否则
+    /// PendingIfNeq(Game) 覆盖 PendingIfNeq(Login)，断线被换图掩盖、
+    /// 客户端卡在 Game 态（OnExit(Game) 不触发，旧世界/远端实体全成幽灵）。
+    /// network_system 按通道顺序处理事件，断线事件排在其前的包之后生效
+    /// （后写覆盖先写）。红检：临时删除 TCP 断线分支的 set_if_neq(Login)，
+    /// 本测试即红（NextState 停在 PendingIfNeq(Game)）。
+    #[test]
+    fn disconnect_overrides_same_frame_map_changed() {
+        let mut app = net_app();
+        let (tx, rx) = crossbeam_channel::unbounded();
+        tx.send(tcp::TcpEvent::Packet(map_changed_payload("other_map")))
+            .unwrap();
+        tx.send(tcp::TcpEvent::Disconnected {
+            reason: "test-drop".to_string(),
+        })
+        .unwrap();
+        let conn = NetConnection {
+            mode: NetworkMode::Real,
+            state: NetState::InGame,
+            tcp_events: Some(rx),
+            ..Default::default()
+        };
+        app.insert_resource(conn);
+
+        app.world_mut()
+            .run_system_once(network_system)
+            .expect("驱动 network_system");
+
+        assert_disconnect_wins(&app);
+    }
+
+    /// Pending 覆盖顺序回归（Mock 路径）：与 TCP 同语义——mock 通道里
+    /// MapChanged 帧送达后通道关闭，mock_disconnected 分支在包循环之后执行，
+    /// 断线同样必须覆盖同帧换图。红检：临时删除 mock 断线分支的
+    /// set_if_neq(Login)，本测试即红。
+    #[test]
+    fn mock_disconnect_overrides_same_frame_map_changed() {
+        let mut app = net_app();
+        let (tx, rx) = crossbeam_channel::bounded::<Vec<u8>>(16);
+        let mut frame = Vec::new();
+        codec::encode(&map_changed_payload("other_map"), &mut frame);
+        tx.send(frame).unwrap();
+        drop(tx); // 关闭通道 → 包消费完后 mock_disconnected
+        let conn = NetConnection {
+            mode: NetworkMode::Mock,
+            state: NetState::InGame,
+            from_server: Some(rx),
+            ..Default::default()
+        };
+        app.insert_resource(conn);
+
+        app.world_mut()
+            .run_system_once(network_system)
+            .expect("驱动 network_system");
+
+        assert_disconnect_wins(&app);
     }
 }

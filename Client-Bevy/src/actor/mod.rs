@@ -58,6 +58,12 @@ impl Plugin for ActorPlugin {
             )
                 .chain()
                 .after(crate::network::network_system)
+                // 复核严重项：与 map_rebuild_system（&mut World 独占系统）同帧竞序——
+                // 换图帧 desired_map 变更与新图 NetObject 消息同帧到达时，若本链先跑，
+                // 刚生成的新图 NPC/怪物会被换图重建的幽灵清理整批 despawn（服务端不会
+                // 重发，新图 NPC 永久缺失）。此前正确性仅靠插件注册顺序（Bevy 不保证），
+                // .after 锁死「先清旧图、后建新图」方向。
+                .after(crate::map_renderer::map_rebuild_system)
                 .run_if(in_state(crate::scenes::AppState::Game)),
         );
         app.add_systems(

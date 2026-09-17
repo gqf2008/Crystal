@@ -860,36 +860,98 @@ mod tests {
         assert_eq!(q.iter(&world).count(), 0);
     }
 
-    /// logout 测试脚手架：装满「登出前」状态的世界
+    /// 离开 Game 清理测试脚手架：真实状态机 + OnExit 挂法与生产一致
+    /// （StatesPlugin + init_state + OnExit(AppState::Game)，与插件注册同配置）
     fn logout_test_app() -> App {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins);
+        // App::new 只有 MainSchedulePlugin，状态迁移需要显式 StatesPlugin
+        app.add_plugins(bevy::state::app::StatesPlugin);
+        app.init_state::<AppState>();
         app.init_resource::<DialogManager>();
         app.init_resource::<crate::network::SessionState>();
-        app.insert_resource(crate::network::NetConnection::default());
         app.init_resource::<mentor::MentorState>();
         app.init_resource::<relationship::RelationshipState>();
         app.init_resource::<trade::TradeState>();
+        app.init_resource::<roll::RollState>();
+        app.init_resource::<fishing::FishingState>();
+        app.init_resource::<memo::MemoState>();
+        app.init_resource::<npc::NpcDialogState>();
+        app.init_resource::<npc_goods::NpcGoodsState>();
         app.init_resource::<inventory::InvDropConfirm>();
         app.init_resource::<market::MarketConfirm>();
         app.init_resource::<npc::NpcInputState>();
         app.init_resource::<input_box::InputBoxState>();
-        app.add_message::<crate::network::server_event::ServerEvent>();
-        app.add_systems(Update, logout_server_events);
+        app.add_systems(OnExit(AppState::Game), clear_dialog_session_on_exit);
         app
     }
 
-    /// 把世界弄脏成「登出前」：对话框栈 + 全部孤儿弹窗驱动状态
+    /// 进入 Game 场景（Intro → Game）
+    fn enter_game(app: &mut App) {
+        app.world_mut()
+            .resource_mut::<NextState<AppState>>()
+            .set(AppState::Game);
+        app.update();
+        assert_eq!(
+            *app.world().resource::<State<AppState>>().get(),
+            AppState::Game
+        );
+    }
+
+    /// 把世界弄脏成「离开 Game 前」：对话框栈 + 会话状态 + 全部孤儿弹窗/状态驱动资源
     fn dirty_logout_state(app: &mut App) {
         app.world_mut()
             .resource_mut::<DialogManager>()
             .open(DialogKind::Trade);
+        {
+            let mut session = app
+                .world_mut()
+                .resource_mut::<crate::network::SessionState>();
+            session.self_position = Some((10, 20, 0));
+            session.local_player_id = Some(42);
+            session.selected_index = Some(1);
+        }
         app.world_mut().resource_mut::<mentor::MentorState>().invite =
             Some(("师父".to_string(), 40));
         app.world_mut()
             .resource_mut::<relationship::RelationshipState>()
             .invite = Some("恋人".to_string());
-        app.world_mut().resource_mut::<trade::TradeState>().invite = Some("商人".to_string());
+        {
+            // TradeState 全字段弄脏：visible/物品/发起者任一残留都会让交易窗
+            // 带旧物品幽灵重开（对抗复核 severe-3）
+            let mut trade = app.world_mut().resource_mut::<trade::TradeState>();
+            trade.visible = true;
+            trade.invite = Some("商人".to_string());
+            trade.is_initiator = true;
+            trade.my_gold = 100;
+            trade.my_locked = true;
+            trade.my_items[0] = Some(trade::TradeItem {
+                uid: 1,
+                item_index: 2,
+                name: "木剑".to_string(),
+                image: 3,
+                count: 1,
+            });
+            trade.their_items[0] = Some(trade::TradeItem {
+                uid: 4,
+                item_index: 5,
+                name: "布衣".to_string(),
+                image: 6,
+                count: 1,
+            });
+        }
+        {
+            let mut roll = app.world_mut().resource_mut::<roll::RollState>();
+            roll.visible = true;
+            roll.result = 5;
+        }
+        app.world_mut().resource_mut::<fishing::FishingState>().fishing = true;
+        app.world_mut().resource_mut::<memo::MemoState>().open = true;
+        app.world_mut()
+            .resource_mut::<npc::NpcDialogState>()
+            .visible = true;
+        app.world_mut()
+            .resource_mut::<npc_goods::NpcGoodsState>()
+            .visible = true;
         app.world_mut()
             .resource_mut::<inventory::InvDropConfirm>()
             .visible = true;
@@ -908,6 +970,15 @@ mod tests {
             w.resource::<DialogManager>().open.is_empty(),
             "{ctx}: 对话框栈应清空"
         );
+        {
+            let session = w.resource::<crate::network::SessionState>();
+            assert!(
+                session.self_position.is_none()
+                    && session.local_player_id.is_none()
+                    && session.selected_index.is_none(),
+                "{ctx}: SessionState 应复位"
+            );
+        }
         assert!(
             w.resource::<mentor::MentorState>().invite.is_none(),
             "{ctx}: MentorState.invite 应复位"
@@ -918,9 +989,41 @@ mod tests {
                 .is_none(),
             "{ctx}: RelationshipState.invite 应复位"
         );
+        {
+            let trade = w.resource::<trade::TradeState>();
+            assert!(
+                !trade.visible
+                    && trade.invite.is_none()
+                    && !trade.is_initiator
+                    && trade.my_gold == 0
+                    && !trade.my_locked
+                    && trade.my_items.iter().all(|i| i.is_none())
+                    && trade.their_items.iter().all(|i| i.is_none()),
+                "{ctx}: TradeState 应整体复位（防交易窗带旧物品幽灵重开）"
+            );
+        }
+        {
+            let roll = w.resource::<roll::RollState>();
+            assert!(
+                !roll.visible && roll.result == 0,
+                "{ctx}: RollState 应整体复位"
+            );
+        }
         assert!(
-            w.resource::<trade::TradeState>().invite.is_none(),
-            "{ctx}: TradeState.invite 应复位"
+            !w.resource::<fishing::FishingState>().fishing,
+            "{ctx}: FishingState 应复位"
+        );
+        assert!(
+            !w.resource::<memo::MemoState>().open,
+            "{ctx}: MemoState 应复位"
+        );
+        assert!(
+            !w.resource::<npc::NpcDialogState>().visible,
+            "{ctx}: NpcDialogState 应复位"
+        );
+        assert!(
+            !w.resource::<npc_goods::NpcGoodsState>().visible,
+            "{ctx}: NpcGoodsState 应复位"
         );
         assert!(
             !w.resource::<inventory::InvDropConfirm>().visible,
@@ -940,37 +1043,36 @@ mod tests {
         );
     }
 
-    /// S1 回归：登出成功 → 对话框栈清空 + 孤儿弹窗驱动状态复位
+    /// #182 回归：登出离开 Game（Game → Select）→ 对话框栈清空 + 会话/孤儿弹窗/
+    /// 状态驱动资源全部复位。走真实状态迁移，不再靠轮询 ServerEvent。
     #[test]
-    fn logout_clears_dialogs_and_orphan_popup_states() {
+    fn exit_game_to_select_clears_dialogs_and_orphan_popup_states() {
         let mut app = logout_test_app();
+        enter_game(&mut app);
         dirty_logout_state(&mut app);
         app.world_mut()
-            .write_message(crate::network::server_event::ServerEvent::LogOutSuccess);
+            .resource_mut::<NextState<AppState>>()
+            .set(AppState::Select);
         app.update();
-        assert_dialog_state_clean(&app, "LogOutSuccess");
+        assert_dialog_state_clean(&app, "Game→Select 登出");
     }
 
-    /// M6 回归：TCP 断线走自动重连（`reconnecting` 上升沿）→ 对话框同样全清；
-    /// 且只在上升沿触发一次（重连成功后再次断线能再次触发）。
+    /// M6 回归：断线回登录（Game → Login）同样全清——OnExit 钩子在状态迁移帧
+    /// 执行，无旧实现「logout_server_events 与 network_system 无排序、run_if
+    /// 挡住重连窗口」的时序孔。且再次进出 Game 能再次触发（非一次性）。
     #[test]
-    fn disconnect_reconnect_edge_clears_dialogs() {
+    fn exit_game_to_login_disconnect_clears_dialogs() {
         let mut app = logout_test_app();
+        enter_game(&mut app);
         dirty_logout_state(&mut app);
         app.world_mut()
-            .resource_mut::<crate::network::NetConnection>()
-            .reconnecting = true;
+            .resource_mut::<NextState<AppState>>()
+            .set(AppState::Login);
         app.update();
-        assert_dialog_state_clean(&app, "断线上升沿");
+        assert_dialog_state_clean(&app, "Game→Login 断线");
 
-        // 持续 reconnecting（重试中）不重复清，也不 panic
-        app.update();
-
-        // 重连成功（reconnecting=false）后对话框可再开
-        app.world_mut()
-            .resource_mut::<crate::network::NetConnection>()
-            .reconnecting = false;
-        app.update();
+        // 重进 Game 对话框可再开（不被误清），再次离开再次全清
+        enter_game(&mut app);
         app.world_mut()
             .resource_mut::<DialogManager>()
             .open(DialogKind::Trade);
@@ -979,13 +1081,11 @@ mod tests {
             app.world()
                 .resource::<DialogManager>()
                 .is_open(DialogKind::Trade),
-            "重连成功后对话框可正常打开（不被误清）"
+            "重进 Game 后对话框可正常打开"
         );
-
-        // 再次断线 → 再次全清
         app.world_mut()
-            .resource_mut::<crate::network::NetConnection>()
-            .reconnecting = true;
+            .resource_mut::<NextState<AppState>>()
+            .set(AppState::Login);
         app.update();
         assert!(
             app.world().resource::<DialogManager>().open.is_empty(),
@@ -1342,10 +1442,12 @@ impl Plugin for DialogsPlugin {
                 .chain()
                 .run_if(in_state(AppState::Game)),
         );
-        // #182 登出：清理对话框与会话状态
+        // #182 登出 / M6 断线 / #289 ReturnToLogin：离开 Game 时统一清理对话框与会话
+        // 状态。挂 OnExit 与实体清理同帧同语义——三条离开路径（登出回 Select、
+        // ReturnToLogin/断线回 Login）都经过状态迁移，无轮询上升沿的排序时序孔
         app.add_systems(
-            Update,
-            logout_server_events.run_if(in_state(AppState::Game)),
+            OnExit(AppState::Game),
+            clear_dialog_session_on_exit,
         );
         app.add_systems(
             Update,
@@ -1485,11 +1587,30 @@ impl Plugin for DialogsPlugin {
 /// 登出/断线共用清理：清空对话框栈 + 复位孤儿弹窗（邀请/确认/输入框）驱动状态。
 /// 资源跨 Game 状态存活——不复位则登出重进/断线重连后，旧邀请与旧确认框随新 spawn
 /// 再次显示（8 月实机「一堆 UI 堆屏幕」堆积 bug 的状态层根因）。
+///
+/// 「state → sync_dialog_state」驱动资源复位清单（凡跨 Game 存活、每帧把自身
+/// visible/open 同步回 DialogManager 的资源，漏复位 = 幽灵窗带旧数据重开）：
+/// - TradeState（trade.rs 每帧 sync Trade/GuestTrade）：整体 default——visible/
+///   my_items/their_items/is_initiator 任一残留都会让交易窗带旧物品重开、
+///   点击往死会话发包；
+/// - RollState（roll.rs 每帧 sync Roll）：整体 default；
+/// - FishingState（fishing.rs 每帧 sync FishingStatus）：整体 default；
+/// - MemoState（memo.rs 每帧 sync Memo）：整体 default；
+/// - NpcDialogState（npc.rs 每帧 sync Npc）：整体 default；
+/// - NpcGoodsState（npc_goods.rs 每帧 sync NpcGoods）：整体 default；
+/// - InputBoxState（input_box.rs 每帧 sync InputBox）：open=false + purpose=None。
+/// 新增「state → sync_dialog_state」驱动资源时必须加入本清单。
+#[allow(clippy::too_many_arguments)]
 fn clear_dialog_session(
     mgr: &mut DialogManager,
     mentor: &mut mentor::MentorState,
     relationship: &mut relationship::RelationshipState,
     trade: &mut trade::TradeState,
+    roll: &mut roll::RollState,
+    fishing: &mut fishing::FishingState,
+    memo: &mut memo::MemoState,
+    npc_dialog: &mut npc::NpcDialogState,
+    npc_goods: &mut npc_goods::NpcGoodsState,
     inv_confirm: &mut inventory::InvDropConfirm,
     market_confirm: &mut market::MarketConfirm,
     npc_input: &mut npc::NpcInputState,
@@ -1498,7 +1619,12 @@ fn clear_dialog_session(
     mgr.open.clear();
     mentor.invite = None;
     relationship.invite = None;
-    trade.invite = None;
+    *trade = trade::TradeState::default();
+    *roll = roll::RollState::default();
+    *fishing = fishing::FishingState::default();
+    *memo = memo::MemoState::default();
+    *npc_dialog = npc::NpcDialogState::default();
+    *npc_goods = npc_goods::NpcGoodsState::default();
     *inv_confirm = inventory::InvDropConfirm::default();
     *market_confirm = market::MarketConfirm::default();
     *npc_input = npc::NpcInputState::default();
@@ -1506,74 +1632,45 @@ fn clear_dialog_session(
     input_box.purpose = input_box::InputPurpose::None;
 }
 
-/// #182 登出成功：清理对话框与会话状态（返回选角前）
-/// M6 补充：TCP 断线走自动重连路径时（`NetConnection.reconnecting` 上升沿）同样
-/// 全清对话框——否则断线瞬间打开的对话框与孤儿弹窗状态原样保留，重连后新旧叠加。
+/// 离开 Game（主动登出 / 服务端 ReturnToLogin / TCP 或 Mock 断线回登录）统一清理
+/// 对话框与会话状态。挂 OnExit 而非轮询上升沿：旧实现 logout_server_events 靠
+/// `net.reconnecting` 上升沿 + run_if(in_state(Game))，与 network_system 无排序——
+/// 断线帧若它先跑则永远观测不到上升沿（下一帧已切 Login 被 run_if 挡掉），
+/// 清理静默跳过。OnExit 与实体清理同帧同语义，三条离开路径必经，无时序孔。
 #[allow(clippy::too_many_arguments)]
-fn logout_server_events(
-    mut events: MessageReader<crate::network::server_event::ServerEvent>,
+fn clear_dialog_session_on_exit(
     mut mgr: ResMut<DialogManager>,
     mut session: ResMut<crate::network::SessionState>,
-    net: Res<crate::network::NetConnection>,
-    mut was_reconnecting: Local<bool>,
     mut mentor: ResMut<mentor::MentorState>,
     mut relationship: ResMut<relationship::RelationshipState>,
     mut trade: ResMut<trade::TradeState>,
+    mut roll: ResMut<roll::RollState>,
+    mut fishing: ResMut<fishing::FishingState>,
+    mut memo: ResMut<memo::MemoState>,
+    mut npc_dialog: ResMut<npc::NpcDialogState>,
+    mut npc_goods: ResMut<npc_goods::NpcGoodsState>,
     mut inv_confirm: ResMut<inventory::InvDropConfirm>,
     mut market_confirm: ResMut<market::MarketConfirm>,
     mut npc_input: ResMut<npc::NpcInputState>,
     mut input_box: ResMut<input_box::InputBoxState>,
 ) {
-    use crate::network::server_event::ServerEvent;
-    for ev in events.read() {
-        if let ServerEvent::LogOutSuccess = ev {
-            clear_dialog_session(
-                &mut mgr,
-                &mut mentor,
-                &mut relationship,
-                &mut trade,
-                &mut inv_confirm,
-                &mut market_confirm,
-                &mut npc_input,
-                &mut input_box,
-            );
-            session.self_position = None;
-            session.local_player_id = None;
-            session.selected_index = None;
-            tracing::info!("🧹 登出：已清理对话框/会话");
-        }
-        if let ServerEvent::ReturnToLogin = ev {
-            // #289：服务端要求返回登录界面，同样清理对话框/会话
-            clear_dialog_session(
-                &mut mgr,
-                &mut mentor,
-                &mut relationship,
-                &mut trade,
-                &mut inv_confirm,
-                &mut market_confirm,
-                &mut npc_input,
-                &mut input_box,
-            );
-            session.self_position = None;
-            session.local_player_id = None;
-            session.selected_index = None;
-            tracing::info!("🧹 返回登录：已清理对话框/会话");
-        }
-    }
-    // M6：断线自动重连（`network_system` 置 `reconnecting = true`）上升沿全清对话框
-    let disconnect_edge = net.reconnecting && !*was_reconnecting;
-    *was_reconnecting = net.reconnecting;
-    if disconnect_edge {
-        clear_dialog_session(
-            &mut mgr,
-            &mut mentor,
-            &mut relationship,
-            &mut trade,
-            &mut inv_confirm,
-            &mut market_confirm,
-            &mut npc_input,
-            &mut input_box,
-        );
-        tracing::info!("🧹 断线重连：已清理对话框");
-    }
+    clear_dialog_session(
+        &mut mgr,
+        &mut mentor,
+        &mut relationship,
+        &mut trade,
+        &mut roll,
+        &mut fishing,
+        &mut memo,
+        &mut npc_dialog,
+        &mut npc_goods,
+        &mut inv_confirm,
+        &mut market_confirm,
+        &mut npc_input,
+        &mut input_box,
+    );
+    session.self_position = None;
+    session.local_player_id = None;
+    session.selected_index = None;
+    tracing::info!("🧹 离开 Game：已清理对话框/会话");
 }

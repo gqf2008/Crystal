@@ -34,7 +34,8 @@ mod chunks_build;
 use camera::{camera_control, camera_follow_system, map_layer_toggle_system, spawn_camera};
 use chunks::{chunk_stream_system, spawn_front_chunk};
 pub use chunks_build::{build_chunk_rgba, make_image};
-use chunks_build::{cleanup_map_world, map_rebuild_system, setup_world};
+pub(crate) use chunks_build::map_rebuild_system;
+use chunks_build::{cleanup_map_world, setup_world};
 
 /// 瓦片尺寸（与 macroquad 版一致）
 pub const TILE_WIDTH: f32 = 48.0;
@@ -271,7 +272,10 @@ impl Plugin for MapRenderPlugin {
         // 此前只有流式卸载，OnExit 无清理，重进游戏时旧块/灯光/大图全部残留叠加
         app.add_systems(OnExit(crate::scenes::AppState::Game), cleanup_map_world);
         // B1：游戏内收到 MapChanged 时 desired_map 变更 → 清旧世界并原地重建
-        // （同态 next.set(Game) 是 no-op，OnEnter 不会重跑，必须靠本系统消费 desired_map）
+        // （游戏内 MapChanged 走 next.set_if_neq(Game)，同态不写 Pending，
+        // OnEnter 不会重跑，必须靠本系统消费 desired_map）
+        // 排序锁（复核严重项）：actor/mod.rs 的网络对象生成链以 .after(本系统) 显式排序——
+        // 同帧换图 + 新图 NetObject 到达时先清旧图、后建新图，防止新图 NPC 被幽灵清理误删
         app.add_systems(
             Update,
             map_rebuild_system.run_if(in_state(crate::scenes::AppState::Game)),
