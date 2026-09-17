@@ -32,6 +32,12 @@ type SendChannel = mpsc::Sender<Vec<u8>>;
 /// 慢读踢线语义不变（积满 16384 条≈1.6MB 仍未 drain 才踢）。
 const SESSION_SEND_CAPACITY: usize = 16384;
 
+/// GateActor kameo mailbox 容量（main.rs 建 actor 时使用）。
+/// 容量下限锚定实机进图洪峰（2026-09-17 冒烟实测）：大图进图单次洪峰
+/// ~2000 包/会话，1024 会把正常客户端的对象包静默丢弃（隐形怪物/NPC）；
+/// 65536 覆盖 ~30 会话同时进图洪峰且内存上限 ~6MB。
+pub const GATE_MAILBOX_CAPACITY: usize = 65536;
+
 /// ShutdownAll 逐会话清理的整体超时（通知已 fire-and-forget，正常即时完成；
 /// 超时仅兜底防回归，超时后后台清理任务继续跑）
 const SHUTDOWN_ALL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
@@ -5916,6 +5922,18 @@ mod tests {
             SESSION_SEND_CAPACITY >= 8192,
             "SESSION_SEND_CAPACITY={} 小于进图洪峰下限 8192：大图进图会误踢正常客户端",
             SESSION_SEND_CAPACITY
+        );
+    }
+
+    /// 红绿回归（进图洪峰丢包）：GATE_MAILBOX_CAPACITY 必须 ≥ 32768。
+    /// world→gate 的 tell+try_send 洪峰（~2000 包/会话）溢出即静默丢对象包
+    ///（隐形怪物/NPC）；32768 覆盖 ~15 会话同时进图，实际取 65536。
+    #[test]
+    fn gate_mailbox_capacity_absorbs_concurrent_entry_bursts() {
+        assert!(
+            GATE_MAILBOX_CAPACITY >= 32768,
+            "GATE_MAILBOX_CAPACITY={} 小于并发进图洪峰下限 32768：对象包会被静默丢弃",
+            GATE_MAILBOX_CAPACITY
         );
     }
 
