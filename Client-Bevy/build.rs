@@ -74,7 +74,9 @@ fn emit_links(install: &Path) {
 }
 
 fn emit_dirs(install: &Path) {
-    // 运行时 libpinyin 数据/配置目录
+    // 运行时 libpinyin 数据/配置目录。
+    // 注意：env! 固化的是构建机绝对路径，仅作开发回退；运行时解析在
+    // src/ui/pinyin_ime.rs（exe 相对 libpinyin/{data,conf} 优先，此处路径垫底）。
     println!("cargo:rustc-env=LIBPINYIN_DIR={}", install.display());
     println!(
         "cargo:rustc-env=LIBPINYIN_DATA_DIR={}",
