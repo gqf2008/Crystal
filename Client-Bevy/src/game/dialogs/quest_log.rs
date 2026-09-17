@@ -23,8 +23,8 @@ use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
 use crate::ui::sprite_ui::{shared_cjk_font, UiCjkFont, UiFont};
 use crate::ui::theme::{
-    load_lib_image, spawn_container, spawn_icon_button, spawn_image, spawn_label,
-    spawn_label_plain, spawn_panel,
+    load_lib_image, spawn_close_button, spawn_container, spawn_icon_button, spawn_image,
+    spawn_label, spawn_label_plain, spawn_panel,
 };
 use mir2_shared::data::client_data::ClientQuestInfo;
 use mir2_shared::data::shared_data::QuestItemReward;
@@ -34,6 +34,8 @@ use mir2_shared::data::shared_data::QuestItemReward;
 pub const DIARY_PANEL: (LibraryName, usize) = (LibraryName::Prguse, 961);
 pub const DIARY_SIZE: (f32, f32) = (316.0, 466.0);
 pub const DIARY_POS: (f32, f32) = (192.0, 60.0);
+/// 关闭键 `Prguse2[360..362]` @(289,3)（日志 `QuestDialogs.cs:243` / 详情 `:611`，无 `Size` → 原生 24x21）
+pub const CLOSE_POS: (f32, f32) = (289.0, 3.0);
 /// C# `QuestDetailDialog.Index = 960` @ `(ScreenWidth/2 + 20, 60)` = (532,60)
 pub const DETAIL_PANEL: (LibraryName, usize) = (LibraryName::Prguse, 960);
 pub const DETAIL_POS: (f32, f32) = (532.0, 60.0);
@@ -762,12 +764,10 @@ fn spawn_quest_log(
             spawn_image(p, h, 18.0, 9.0, iw, ih, 8);
         }
         // 关闭 Prguse2[360-362] @(289,3)
-        if let (Some(n), Some(h), Some(pr)) = (
-            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 360),
-            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 361),
-            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 362),
-        ) {
-            spawn_icon_button(p, n, h, pr, 289.0, 3.0, 20.0, 20.0, 10).insert(QuestLogClose);
+        if let Some(mut btn) =
+            spawn_close_button(p, &mut libs, &mut images, CLOSE_POS.0, CLOSE_POS.1, 10)
+        {
+            btn.insert(QuestLogClose);
         }
         // 底部关闭 Title[193/194/195] @(200,436)
         if let (Some(n), Some(h), Some(pr)) = (
@@ -1185,12 +1185,10 @@ fn spawn_quest_detail(
             spawn_image(p, h, 18.0, 9.0, iw, ih, 8);
         }
         // 关闭键 Prguse2[360/361/362] @(289,3)（24x21）
-        if let (Some(n), Some(h), Some(pr)) = (
-            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 360),
-            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 361),
-            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 362),
-        ) {
-            spawn_icon_button(p, n, h, pr, 289.0, 3.0, 24.0, 21.0, 10).insert(QuestDetailClose);
+        if let Some(mut btn) =
+            spawn_close_button(p, &mut libs, &mut images, CLOSE_POS.0, CLOSE_POS.1, 10)
+        {
+            btn.insert(QuestDetailClose);
         }
         // ===== 消息区（C# `QuestMessage`，`:528-536`）=====
         // 上滚 Prguse2[197/198/199] @(293,33)（C# 显式 Size=(16,14)）

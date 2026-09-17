@@ -4538,3 +4538,77 @@ fn every_dialog_kind_has_alignment_coverage() {
     }
     println!("  ✓ 48 个 DialogKind 全部有对齐断言登记（且登记名在源码中真实存在）");
 }
+
+/// 批57 扫尾：16 窗关闭钮统一对齐 C# `Prguse2[360..362]`——无 `Size` → 原生 24x21，
+/// 坐标逐窗对 C# 出处。绑定各窗**实现常量**（`CLOSE_POS`/`CLOSE_REL` 与
+/// `theme::CLOSE_BTN_SIZE`，即 `spawn_close_button` 实际用的值）：实现回退
+/// 20x20 或改错坐标即红。
+#[test]
+fn close_buttons_native_aligned() {
+    use client_bevy::game::dialogs as d;
+    use client_bevy::ui::theme;
+    require_assets!("close_buttons_native_aligned");
+    let mut libs = Libs::new();
+
+    // 尺寸：三帧原生尺寸 == helper 实现常量（C# 各窗均不设 Size → art 24x21）
+    for idx in [360usize, 361, 362] {
+        let (w, h) = libs.size(LibraryName::Prguse2, idx);
+        assert_eq!(
+            (w, h),
+            theme::CLOSE_BTN_SIZE,
+            "[尺寸] 关闭钮应取 Prguse2[{idx}] 原生尺寸，不得压成 20x20"
+        );
+    }
+
+    // 坐标：逐窗绑定实现常量 vs C# 出处值
+    let cases: [(&str, (f32, f32), (f32, f32)); 17] = [
+        // C# `MailDialogs.cs:79` Size.Width-24（MAIL_W=312 → 288）
+        ("邮件", d::mail::CLOSE_POS, (288.0, 3.0)),
+        // C# `RelationshipDialog.cs:42`
+        ("姻缘", d::relationship::CLOSE_POS, (260.0, 3.0)),
+        // C# `FriendDialog.cs:124`（曾为 206 → 错位 31px）
+        ("好友", d::friend::CLOSE_POS, (237.0, 3.0)),
+        // C# `GroupDialog.cs:61`
+        ("组队", d::group::CLOSE_POS, (206.0, 3.0)),
+        // C# `MentorDialog.cs:43`
+        ("师徒", d::mentor::CLOSE_POS, (219.0, 3.0)),
+        // C# `NoticeDialog.cs:58`
+        ("公告", d::notice::CLOSE_REL, (289.0, 3.0)),
+        // C# `QuestDialogs.cs:243`（日志）/`:611`（详情）
+        ("任务日志", d::quest_log::CLOSE_POS, (289.0, 3.0)),
+        // C# `NPCDialogs.cs:140`
+        ("NPC对话", d::npc::CLOSE_POS, (413.0, 3.0)),
+        // C# `NPCDialogs.cs:1114`
+        ("NPC商店", d::npc_goods::CLOSE_POS, (217.0, 3.0)),
+        // C# `InspectDialog`（`MainDialogs.cs:2210`）
+        ("观察", d::inspect::CLOSE_POS, (241.0, 3.0)),
+        // C# `CharacterDialog.cs:194`
+        ("角色", d::character::CLOSE_POS, (241.0, 3.0)),
+        // C# `InventoryDialog.cs:105`
+        ("背包", d::inventory::CLOSE_POS, (289.0, 3.0)),
+        // C# `HeroDialogs.cs:36`
+        ("英雄背包", d::hero_inventory::CLOSE_POS, (299.0, 2.0)),
+        // C# `GameShopDialog.cs:71`
+        ("游戏商城", d::game_shop::CLOSE_POS, (671.0, 4.0)),
+        // C# `MirAmountBox.cs:42`
+        ("数量框", d::amount_box::CLOSE_POS, (180.0, 3.0)),
+        // C# `FishingDialog.cs:48`（曾为 176 → 偏 1px）
+        ("钓鱼", d::fishing::CLOSE_POS, (175.0, 3.0)),
+        // C# `KeyboardLayoutDialog.cs:57`（曾为 16x14 压图）
+        ("键位设置", d::keyboard_layout::CLOSE_POS, (489.0, 3.0)),
+    ];
+    for (name, actual, expected) in cases {
+        assert_eq!(
+            actual, expected,
+            "[坐标] {name}窗关闭钮实现常量应等于 C# 出处值 {expected:?}"
+        );
+    }
+    // 钓鱼状态窗：C# `FishingDialog.cs:211`
+    assert_eq!(
+        d::fishing::STATUS_CLOSE_POS,
+        (216.0, 4.0),
+        "[坐标] 钓鱼状态窗关闭钮 @(216,4)"
+    );
+
+    println!("  ✓ 17 窗关闭钮统一 Prguse2[360..362] 原生 24x21，坐标逐窗对齐 C#");
+}

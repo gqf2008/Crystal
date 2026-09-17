@@ -253,6 +253,41 @@ pub fn spawn_icon_button<'a>(
     ))
 }
 
+/// C# 标准关闭钮 `Prguse2[360..362]` 原生尺寸：各对话框均不设 `Size`
+/// （如 `FriendDialog.cs:120-129`）→ 取 art 24x21。Bevy 侧曾统一自造 20x20，
+/// `abs_node` 把 24x21 的图压进 20x20 节点。
+pub const CLOSE_BTN_SIZE: (f32, f32) = (24.0, 21.0);
+
+/// 子节点：C# 标准关闭钮 `Prguse2[360/361/362]`，节点尺寸跟随精灵原生尺寸
+/// （[`CLOSE_BTN_SIZE`]），调用方只需给位置。帧缺失（资产未装）时返回 `None`。
+pub fn spawn_close_button<'a>(
+    parent: &'a mut ChildSpawnerCommands,
+    libs: &mut GameLibraries,
+    images: &mut Assets<Image>,
+    x: f32,
+    y: f32,
+    z: i32,
+) -> Option<EntityCommands<'a>> {
+    let (Some(n), Some(h), Some(pr)) = (
+        load_lib_image(libs, images, LibraryName::Prguse2, 360),
+        load_lib_image(libs, images, LibraryName::Prguse2, 361),
+        load_lib_image(libs, images, LibraryName::Prguse2, 362),
+    ) else {
+        return None;
+    };
+    Some(spawn_icon_button(
+        parent,
+        n,
+        h,
+        pr,
+        x,
+        y,
+        CLOSE_BTN_SIZE.0,
+        CLOSE_BTN_SIZE.1,
+        z,
+    ))
+}
+
 /// 子节点：水平居中文本（cx=中心 x，width=排版宽度，`Justify::Center`），**默认带描边**
 /// （理由同 [`spawn_label`]）。
 pub fn spawn_label_center<'a>(

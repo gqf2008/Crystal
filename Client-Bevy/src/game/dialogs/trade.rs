@@ -24,7 +24,7 @@ use bevy::sprite::Anchor;
 use crate::actor::LocalPlayer;
 use crate::game::dialogs::amount_box::{AmountBoxResult, AmountBoxState};
 use crate::game::dialogs::inventory::{inv_slot_at, InvItem, InventoryOrigin, InventoryShiftRight};
-use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
+use crate::game::dialogs::{AlwaysVisible, DialogKind, DialogManager, DialogRoot};
 use crate::game::player_state::{Gold, Inventory};
 use crate::map_renderer::GameLibraries;
 use crate::network::NetConnection;
@@ -363,7 +363,7 @@ fn spawn_trade(
         }
     });
 
-    // ---- 邀请框（MirMessageBox YesNo：Prguse[360] 原生 456x190 居中，模态不可拖 → 无 DialogRoot）----
+    // ---- 邀请框（MirMessageBox YesNo：Prguse[360] 原生 456x190 居中）----
     let Some(ih) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 360) else {
         return;
     };
@@ -376,9 +376,13 @@ fn spawn_trade(
         INVITE_H,
         45,
     );
-    commands
-        .entity(inv)
-        .insert((TradeInviteWidget, Visibility::Hidden));
+    commands.entity(inv).insert((
+        DialogRoot(DialogKind::Trade),
+        // 独立弹窗不随 Trade 开关门控；挂 DialogRoot 仅为 OnExit 时随交易窗口一起清理
+        AlwaysVisible,
+        TradeInviteWidget,
+        Visibility::Hidden,
+    ));
     commands.entity(inv).with_children(|ip| {
         // C# MirMessageBox 文本为 MirLabel（默认描边）
         crate::ui::outlined_text::spawn_outlined_label(

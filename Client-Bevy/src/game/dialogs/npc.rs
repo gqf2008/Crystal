@@ -15,19 +15,16 @@
 
 use bevy::prelude::*;
 
-use crate::game::dialogs::text_input::{
-    TextInputDisplay, TextInputField, TextInputRect, TextInputState, TextInputSubmit,
-};
 use crate::game::dialogs::{DialogKind, DialogRoot};
 use crate::map_renderer::GameLibraries;
 use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
 use crate::ui::outlined_text::spawn_outlined_label;
-use crate::ui::sprite_ui::{shared_cjk_font, UiCjkFont, UiFont};
+use crate::ui::sprite_ui::{shared_cjk_font, UiCjkFont};
 use crate::ui::theme::{
-    load_lib_image, spawn_animated_icon_button, spawn_container, spawn_icon_button, spawn_label,
-    spawn_panel, spawn_scroll_bar_ui, UiScrollList,
+    load_lib_image, spawn_animated_icon_button, spawn_close_button, spawn_panel,
+    spawn_scroll_bar_ui, UiScrollList,
 };
 
 /// #2892 批B：面板精灵与 C# 原生尺寸/原点（C# `NPCDialog.Index = 995; Library = Libraries.Prguse`，
@@ -37,6 +34,8 @@ pub const PANEL: (LibraryName, usize) = (LibraryName::Prguse, 384);
 /// 面板尺寸（Prguse[384] 实测 440x224）
 pub const PANEL_W: f32 = 440.0;
 pub const PANEL_H: f32 = 224.0;
+/// 关闭键 `Prguse2[360..362]` @(413,3)（`NPCDialogs.cs:139-140`，无 `Size` → 原生 24x21）
+pub const CLOSE_POS: (f32, f32) = (413.0, 3.0);
 
 /// NPC 对话框状态（网络写入）
 #[derive(Resource, Default)]
@@ -85,20 +84,14 @@ pub struct NpcQuest;
 const NPC_LINE_FONT_PX: f32 = 13.0;
 
 /// #272 NPC 输入状态（S.NPCRequestInput）
+/// UI 已迁标准 `MirInputBox`（`input_box.rs`，`InputPurpose::NpcConfirm`）；
+/// 本资源只记录「最近一次 NPC 输入请求」供自动化探针（auto/world.rs）断言。
 #[derive(Resource, Default)]
 pub struct NpcInputState {
     pub npc_id: u32,
     pub page_name: String,
     pub active: bool,
 }
-
-/// #272 NPC 输入覆盖层根
-#[derive(Component)]
-pub struct NpcInputRoot;
-
-/// #272 NPC 输入确定按钮
-#[derive(Component)]
-pub struct NpcInputOk;
 
 pub struct NpcDialogPlugin;
 
@@ -119,7 +112,7 @@ impl Plugin for NpcDialogPlugin {
             Update,
             (
                 npc_dialog_server_events,
-                npc_input_overlay,
+                npc_input_state_system,
                 npc_ui_system,
                 crate::ui::outlined_text::sync_outline_ui_system,
             )
@@ -176,12 +169,10 @@ fn spawn_npc_dialog(
         // 滚动条（轨道 + 滑块，UiScrollThumb 子节点）
         spawn_scroll_bar_ui(p, (420.0, 34.0, 4.0, 144.0), 8);
         // 关闭按钮 Prguse2[360-362] @ (413,3)
-        if let (Some(n), Some(h), Some(pr)) = (
-            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 360),
-            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 361),
-            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 362),
-        ) {
-            spawn_icon_button(p, n, h, pr, 413.0, 3.0, 20.0, 20.0, 9).insert(NpcClose);
+        if let Some(mut btn) =
+            spawn_close_button(p, &mut libs, &mut images, CLOSE_POS.0, CLOSE_POS.1, 9)
+        {
+            btn.insert(NpcClose);
         }
         // 任务按钮（#90 续：MirAnimatedButton，C# NPCDialog QuestButton
         // Title[530..539] 10 帧 130ms 循环 + 悬停 284 / 按下 286，点击切换任务日志）
@@ -659,22 +650,10 @@ fn npc_dialog_server_events(
     }
 }
 
-/// #272：NPC 输入覆盖层——S.NPCRequestInput → 弹输入框；确定/Enter → C.NPCConfirmInput
-#[allow(clippy::too_many_arguments)]
-fn npc_input_overlay(
-    mut commands: Commands,
-    mut libs: ResMut<GameLibraries>,
-    mut images: ResMut<Assets<Image>>,
-    mut fonts: ResMut<Assets<Font>>,
-    mut ui_font: ResMut<UiFont>,
-    net: Res<NetConnection>,
+/// #272：S.NPCRequestInput → 记录请求（UI 走标准 `MirInputBox`，见 `input_box.rs`）
+fn npc_input_state_system(
     mut state: ResMut<NpcInputState>,
-    mut text_state: ResMut<TextInputState>,
     mut events: MessageReader<crate::network::server_event::ServerEvent>,
-    mut submits: MessageReader<TextInputSubmit>,
-    ok_btns: Query<(Entity, &Interaction), With<NpcInputOk>>,
-    mut roots: Query<&mut Visibility, With<NpcInputRoot>>,
-    mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
 ) {
     use crate::network::server_event::ServerEvent;
 
@@ -683,125 +662,8 @@ fn npc_input_overlay(
             state.npc_id = *npc_id;
             state.page_name = page_name.clone();
             state.active = true;
-            text_state.texts.resize(1, String::new());
-            text_state.texts[0].clear();
-            text_state.active = Some(0);
-            if roots.iter_mut().count() == 0 {
-                spawn_npc_input_overlay(
-                    &mut commands,
-                    &mut libs,
-                    &mut images,
-                    &mut fonts,
-                    &mut ui_font,
-                    page_name,
-                );
-            }
-            for mut vis in roots.iter_mut() {
-                *vis = Visibility::Visible;
-            }
-            tracing::info!("⌨️ [NPC] 输入框打开 npc={} page={}", npc_id, page_name);
         }
     }
-
-    let submitted = submits.read().any(|s| s.0 == 0);
-    // bevy_ui Interaction 边沿（C# MirInputBox OKButton Click；Enter 同路径）
-    let ok_clicked = ok_btns.iter().any(|(e, inter)| {
-        let was = prev_inter.insert(e, *inter);
-        *inter == Interaction::Pressed && was != Some(Interaction::Pressed)
-    });
-    if state.active && (submitted || ok_clicked) {
-        let value = text_state.texts.first().cloned().unwrap_or_default();
-        net.send_packet(&mir2_shared::packets::client::npc::NPCConfirmInput {
-            npc_id: state.npc_id,
-            page_name: state.page_name.clone(),
-            value,
-        });
-        tracing::info!(
-            "⌨️ [NPC] 提交输入 -> npc={} page={}",
-            state.npc_id,
-            state.page_name
-        );
-        state.active = false;
-        text_state.active = None;
-        for mut vis in roots.iter_mut() {
-            *vis = Visibility::Hidden;
-        }
-    }
-}
-
-/// 生成输入覆盖层（面板 + 提示 + 输入框 + 确定）
-fn spawn_npc_input_overlay(
-    commands: &mut Commands,
-    libs: &mut GameLibraries,
-    images: &mut Assets<Image>,
-    fonts: &mut Assets<Font>,
-    ui_font: &mut UiFont,
-    page_name: &str,
-) {
-    libs.0.ensure_initialized();
-    if !ui_font.0.is_strong() {
-        ui_font.0 = crate::ui::sprite_ui::load_ui_font(fonts);
-    }
-    let font = ui_font.0.clone();
-
-    // 面板 Prguse[170]（实测 244x207）@ (280,80)，z 高于 NPC 主面板
-    let Some(bg) = load_lib_image(libs, images, LibraryName::Prguse, 170) else {
-        return;
-    };
-    let root = spawn_panel(commands, bg, 280.0, 80.0, 244.0, 207.0, 40);
-    commands
-        .entity(root)
-        .insert((NpcInputRoot, Visibility::Hidden));
-
-    commands.entity(root).with_children(|p| {
-        // 提示（C# CaptionLabel @(25,25) 语义）
-        spawn_outlined_label(
-            p,
-            font.clone(),
-            &format!("请输入（{}）:", page_name),
-            20.0,
-            20.0,
-            14.0,
-            Color::WHITE,
-            10,
-        );
-        // 输入框：容器（背景）+ TextInputDisplay 子 Text；TextInputRect 为屏幕坐标
-        // （面板原点 (280,80) + 相对 (20,50) = (300,130)）
-        spawn_container(p, 20.0, 50.0, 200.0, 22.0, 10)
-            .insert((
-                BackgroundColor(Color::srgba(0.2, 0.2, 0.25, 0.9)),
-                TextInputField(0),
-                TextInputRect(300.0, 130.0, 200.0, 22.0),
-            ))
-            .with_children(|ic| {
-                ic.spawn((
-                    Node {
-                        position_type: PositionType::Absolute,
-                        left: Val::Px(4.0),
-                        top: Val::Px(2.0),
-                        ..default()
-                    },
-                    Text::new(String::new()),
-                    TextFont {
-                        font: FontSource::Handle(font.clone()),
-                        font_size: FontSize::Px(13.0),
-                        ..default()
-                    },
-                    TextColor(Color::WHITE),
-                    ZIndex(11),
-                    TextInputDisplay(0),
-                ));
-            });
-        // 确定（C# MirInputBox OKButton Title[200-202] @(60,123)；本实现沿用
-        // 原 Prguse2[360-362] 三帧，落在面板内而非原越界的 (560,175)）
-        if let (Some(n), Some(h), Some(pr)) = (
-            load_lib_image(libs, images, LibraryName::Prguse2, 360),
-            load_lib_image(libs, images, LibraryName::Prguse2, 361),
-            load_lib_image(libs, images, LibraryName::Prguse2, 362),
-        ) {
-            spawn_icon_button(p, n, h, pr, 60.0, 123.0, 50.0, 22.0, 11).insert(NpcInputOk);
-        }
-    });
 }
 
 #[cfg(test)]

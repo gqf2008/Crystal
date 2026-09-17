@@ -17,8 +17,12 @@ use crate::scenes::AppState;
 use crate::ui::pinyin_ime::PinyinIme;
 use crate::ui::sprite_ui::{shared_cjk_font, UiCjkFont, UiFont};
 use crate::ui::theme::{
-    load_lib_image, spawn_icon_button, spawn_label, spawn_label_plain, spawn_panel,
+    load_lib_image, spawn_close_button, spawn_icon_button, spawn_label, spawn_label_plain,
+    spawn_panel,
 };
+
+/// 关闭键 `Prguse2[360..362]` @(180,3)（C# `MirAmountBox.cs:38-46`，无 `Size` → 原生 24x21）
+pub const CLOSE_POS: (f32, f32) = (180.0, 3.0);
 
 /// 数量输入结果事件（OK 时携带数量）
 #[derive(Message, Debug)]
@@ -246,12 +250,10 @@ fn spawn_amount_box(
             spawn_icon_button(p, n, h, pr, 110.0, 76.0, 76.0, 25.0, 10).insert(AmountCancel);
         }
         // 关闭 Prguse2[360/361/362]（C# (180,3)）
-        if let (Some(n), Some(h), Some(pr)) = (
-            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 360),
-            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 361),
-            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 362),
-        ) {
-            spawn_icon_button(p, n, h, pr, 180.0, 3.0, 20.0, 20.0, 10).insert(AmountClose);
+        if let Some(mut btn) =
+            spawn_close_button(p, &mut libs, &mut images, CLOSE_POS.0, CLOSE_POS.1, 10)
+        {
+            btn.insert(AmountClose);
         }
     });
 }

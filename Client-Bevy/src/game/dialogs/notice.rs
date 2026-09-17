@@ -22,7 +22,7 @@ use crate::scenes::AppState;
 use crate::ui::sprite_ui::{shared_cjk_font, UiCjkFont, UiFont};
 use crate::ui::text_markup::{est_text_width, known_color, wrap_text};
 use crate::ui::theme::{
-    load_lib_image, spawn_icon_button, spawn_label, spawn_label_center, spawn_panel,
+    load_lib_image, spawn_close_button, spawn_icon_button, spawn_label, spawn_panel,
 };
 
 /// #2892 批B：面板精灵（C# `NoticeDialog.Index = 961; Library = Libraries.Prguse`）
@@ -208,17 +208,14 @@ fn spawn_notice(
             9,
         )
         .insert(NoticeTitle);
-        // Close / Ok / Up / Down（图标按钮）
-        let buttons: [(NoticeBtnKind, LibraryName, usize, usize, usize, f32, f32); 4] = [
-            (
-                NoticeBtnKind::Close,
-                LibraryName::Prguse2,
-                360,
-                361,
-                362,
-                CLOSE_REL.0,
-                CLOSE_REL.1,
-            ),
+        // Close Prguse2[360/361/362] @(289,3)（C# `NoticeDialog.cs:58`，无 Size → 原生 24x21）
+        if let Some(mut btn) =
+            spawn_close_button(p, &mut libs, &mut images, CLOSE_REL.0, CLOSE_REL.1, 10)
+        {
+            btn.insert(NoticeBtn(NoticeBtnKind::Close));
+        }
+        // Ok / Up / Down（图标按钮）
+        let buttons: [(NoticeBtnKind, LibraryName, usize, usize, usize, f32, f32); 3] = [
             (
                 NoticeBtnKind::Ok,
                 LibraryName::Title,

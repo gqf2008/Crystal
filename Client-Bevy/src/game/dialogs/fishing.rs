@@ -19,8 +19,8 @@ use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
 use crate::ui::sprite_ui::{shared_cjk_font, UiCjkFont, UiFont};
 use crate::ui::theme::{
-    load_lib_image, spawn_animated_icon_button, spawn_container, spawn_icon_button, spawn_image,
-    spawn_label, spawn_label_center, spawn_panel,
+    load_lib_image, spawn_animated_icon_button, spawn_close_button, spawn_container,
+    spawn_icon_button, spawn_image, spawn_label, spawn_label_center, spawn_panel,
 };
 
 /// #2892 批B：面板精灵与 C# 原生尺寸（C# `FishingDialog.Index = 1340; Location = Center`）
@@ -31,6 +31,11 @@ pub const STATUS_PANEL: (LibraryName, usize) = (LibraryName::Prguse, 1341);
 pub const STATUS_SIZE: (f32, f32) = (244.0, 128.0);
 pub const STATUS_X: f32 = 390.0;
 pub const STATUS_Y: f32 = 300.0;
+/// 关闭键 `Prguse2[360..362]` @(175,3)（`FishingDialog.cs:44-48`，无 `Size` → 原生 24x21）；
+/// 曾错作 (176,3) → 偏右 1px
+pub const CLOSE_POS: (f32, f32) = (175.0, 3.0);
+/// 状态窗关闭键 `Prguse2[360..362]` @(216,4)（`FishingDialog.cs:207-216`）
+pub const STATUS_CLOSE_POS: (f32, f32) = (216.0, 4.0);
 
 /// 钓鱼状态（`S.FishingUpdate` 写入）
 /// #2892：字段对齐 C# `S.FishingUpdate`（`ObjectID + Fishing + ProgressPercent + ChancePercent + FoundFish`）
@@ -267,13 +272,15 @@ fn spawn_fishing(
                 }
             }
             // 关闭 `Prguse2[360/361/362]` @(216,4) 24x21
-            if let (Some(n), Some(h), Some(pr)) = (
-                load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 360),
-                load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 361),
-                load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 362),
+            if let Some(mut btn) = spawn_close_button(
+                p,
+                &mut libs,
+                &mut images,
+                STATUS_CLOSE_POS.0,
+                STATUS_CLOSE_POS.1,
+                10,
             ) {
-                spawn_icon_button(p, n, h, pr, 216.0, 4.0, 24.0, 21.0, 10)
-                    .insert(FishingStatusClose);
+                btn.insert(FishingStatusClose);
             }
             // 抛竿 `FishButton`：禁用帧 `Title[149]`；可抛时 10 帧动画 + 按下帧 `142` @(47,95)
             if let Some(disabled) = load_lib_image(&mut libs, &mut images, LibraryName::Title, 149)
@@ -324,14 +331,11 @@ fn spawn_fishing(
     }
 
     commands.entity(panel).with_children(|p| {
-        // 关闭 Prguse2[360/361/362]：旧 sprite 在 rel(220,3) 悬空面板外（200 宽），
-        // 移到面板右上角 (176,3)
-        if let (Some(n), Some(h), Some(pr)) = (
-            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 360),
-            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 361),
-            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 362),
-        ) {
-            spawn_icon_button(p, n, h, pr, 176.0, 3.0, 20.0, 20.0, 10).insert(FishingClose);
+        // 关闭 Prguse2[360/361/362] @ CLOSE_POS（C# `FishingDialog.cs:48`）
+        if let Some(mut btn) =
+            spawn_close_button(p, &mut libs, &mut images, CLOSE_POS.0, CLOSE_POS.1, 10)
+        {
+            btn.insert(FishingClose);
         }
         // 钓具槽（C# FishingDialog Grid：Hook/Float/Bait/Finder/Reel，34x30）
         for (i, (rx, ry)) in GEAR_POS.iter().enumerate() {

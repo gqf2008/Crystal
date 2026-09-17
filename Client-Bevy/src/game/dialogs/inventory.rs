@@ -13,7 +13,7 @@ use bevy::prelude::*;
 use crate::actor::LocalPlayer;
 use crate::game::chat::{ChatChannel, ChatState};
 use crate::game::dialogs::amount_box::{AmountBoxResult, AmountBoxState};
-use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
+use crate::game::dialogs::{AlwaysVisible, DialogKind, DialogManager, DialogRoot};
 use crate::game::player_state::{Gold, Inventory, Loadout, StatusFlags};
 use crate::game::sets::GameSet;
 use crate::game::sound::{play_sound_cached, SoundBank, SoundCache};
@@ -25,8 +25,8 @@ use mir2_shared::enums::MirGridType;
 
 use crate::ui::sprite_ui::{shared_cjk_font, UiCjkFont, UiFont};
 use crate::ui::theme::{
-    load_lib_image, spawn_icon_button, spawn_image, spawn_item_cell_ui, spawn_label, spawn_panel,
-    UiItemCellData,
+    load_lib_image, spawn_close_button, spawn_icon_button, spawn_image, spawn_item_cell_ui,
+    spawn_label, spawn_panel, UiItemCellData,
 };
 
 /// 背包物品条目（网络 UserInformation 写入）
@@ -180,6 +180,8 @@ pub struct InvUiState {
 /// 旧值 (182,217) 误把 WeightBar 的**局部**坐标当对话框原点（InventoryDialog.cs:37）。
 pub const DIALOG_X: f32 = 0.0;
 pub const DIALOG_Y: f32 = 0.0;
+/// 关闭键 `Prguse2[360..362]` @(289,3)（`InventoryDialog.cs:104-105`，无 `Size` → 原生 24x21）
+pub const CLOSE_POS: (f32, f32) = (289.0, 3.0);
 /// 金币文本对话框相对坐标（C# InventoryDialog.cs:137 GoldLabel (40,212) 111x14）
 pub const GOLD_TEXT_X: f32 = 40.0;
 pub const GOLD_TEXT_Y: f32 = 212.0;
@@ -634,13 +636,10 @@ fn spawn_inventory_dialog(
             }
         }
         // 关闭按钮（Prguse2 360/361/362）@(289,3)
-        if let (Some(n), Some(h), Some(pr)) = (
-            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 360),
-            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 361),
-            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 362),
-        ) {
-            spawn_icon_button(p, n, h, pr, 289.0, 3.0, 20.0, 20.0, 8)
-                .insert((InvCloseBtn, DialogWidget));
+        if let Some(mut btn) =
+            spawn_close_button(p, &mut libs, &mut images, CLOSE_POS.0, CLOSE_POS.1, 8)
+        {
+            btn.insert((InvCloseBtn, DialogWidget));
         }
         // 金币/负重文本
         spawn_label(
@@ -1962,9 +1961,13 @@ fn spawn_inv_confirm(
         return;
     };
     let panel = spawn_panel(&mut commands, h, bx, by, 456.0, 190.0, 45);
-    commands
-        .entity(panel)
-        .insert((InvConfirmWidget, Visibility::Hidden));
+    commands.entity(panel).insert((
+        DialogRoot(DialogKind::Inventory),
+        // 独立弹窗不随 Inventory 开关门控；挂 DialogRoot 仅为 OnExit 时随背包窗口一起清理
+        AlwaysVisible,
+        InvConfirmWidget,
+        Visibility::Hidden,
+    ));
     commands.entity(panel).with_children(|p| {
         spawn_label(p, &cjk, "", 35.0, 35.0, 12.0, Color::WHITE, 9)
             .insert((InvConfirmWidget, InvConfirmText));

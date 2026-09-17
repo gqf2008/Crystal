@@ -18,8 +18,9 @@ use crate::scenes::AppState;
 use crate::ui::gray::UiGray;
 use crate::ui::sprite_ui::{shared_cjk_font, UiCjkFont, UiFont};
 use crate::ui::theme::{
-    load_lib_image, spawn_container, spawn_icon_button, spawn_image, spawn_item_cell_ui,
-    spawn_label, spawn_panel, spawn_scroll_bar_ui, UiItemCellData, UiScrollList,
+    load_lib_image, spawn_close_button, spawn_container, spawn_icon_button, spawn_image,
+    spawn_item_cell_ui, spawn_label, spawn_panel, spawn_scroll_bar_ui, UiItemCellData,
+    UiScrollList,
 };
 
 /// 邮件列表条目
@@ -95,6 +96,8 @@ const MAIL_H: f32 = 444.0;
 /// #2892 批B：列表面板精灵（C# `MailListDialog.Index = 670; Library = Libraries.Title`）
 pub const PANEL: (LibraryName, usize) = (LibraryName::Title, 670);
 pub const PANEL_SIZE: (f32, f32) = (MAIL_W, MAIL_H);
+/// 关闭键 `Prguse2[360..362]` @ (`Size.Width`-24, 3)（`MailDialogs.cs:78-79`，无 `Size` → 原生 24x21）
+pub const CLOSE_POS: (f32, f32) = (MAIL_W - 24.0, 3.0);
 const MAIL_SCREEN_W: f32 = 1024.0;
 const MAIL_VISIBLE_ROWS: usize = 10;
 const MAIL_ROW_H: f32 = 33.0;
@@ -667,12 +670,10 @@ fn spawn_mail(
         spawn_label(p, &cjk, "发件人", 47.0, 38.0, 12.0, Color::WHITE, 9);
         spawn_label(p, &cjk, "信息", 181.0, 38.0, 12.0, Color::WHITE, 9);
         // C# CloseButton @ (W-24, 3)。
-        if let (Some(n), Some(h), Some(pr)) = (
-            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 360),
-            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 361),
-            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 362),
-        ) {
-            spawn_icon_button(p, n, h, pr, MAIL_W - 24.0, 3.0, 20.0, 20.0, 10).insert(MailClose);
+        if let Some(mut btn) =
+            spawn_close_button(p, &mut libs, &mut images, CLOSE_POS.0, CLOSE_POS.1, 10)
+        {
+            btn.insert(MailClose);
         }
         // C# 10 行 @ 55 + 33*i；行点击由 mail_ui_system 按同一常量命中。
         for i in 0..MAIL_VISIBLE_ROWS {
