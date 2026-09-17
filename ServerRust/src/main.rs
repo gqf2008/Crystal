@@ -71,8 +71,10 @@ async fn async_main() -> anyhow::Result<()> {
 
     // GateActor 先启动
     // #23：有界 mailbox——客户端消息洪峰时 ask 自然背压、tell 显式失败，
-    // 无界队列会把洪峰变成内存 DoS
-    let gate_ref = GateActor::spawn_with_mailbox((), mailbox::bounded(1024));
+    // 无界队列会把洪峰变成内存 DoS。容量 65536 锚定 2026-09-17 实机冒烟：
+    // 大图进图单次洪峰 ~2000 包/会话，1024 会把正常客户端的对象包静默丢弃
+    //（隐形怪物/NPC），65536 覆盖 ~30 会话同时进图洪峰且内存上限 ~6MB。
+    let gate_ref = GateActor::spawn_with_mailbox((), mailbox::bounded(65536));
     info!("GateActor spawned");
 
     // Phase 1.1: 把 cfg.network.max_connections 传给 GateActor(防止资源耗尽)
