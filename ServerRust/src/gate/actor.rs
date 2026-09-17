@@ -21,8 +21,11 @@ use crate::util::wire::build_packet_bytes;
 /// 会话 ID
 pub type SessionId = u64;
 
-/// 发送到客户端的数据通道
-type SendChannel = mpsc::UnboundedSender<Vec<u8>>;
+/// 发送到客户端的数据通道（有界：慢读客户端广播堆积即踢线，防内存 DoS，#23）
+type SendChannel = mpsc::Sender<Vec<u8>>;
+
+/// 每会话待发队列容量；积满说明客户端慢读/不读，直接踢线
+const SESSION_SEND_CAPACITY: usize = 1024;
 
 /// GateActor 状态
 pub struct GateActor {
@@ -30,6 +33,9 @@ pub struct GateActor {
     sessions: HashMap<SessionId, SendChannel>,
     /// 会话关联的用户名（登录成功后设置）
     session_usernames: HashMap<SessionId, String>,
+    /// 登录返回 RequirePasswordChange（S.Login Result=5）的会话 → 账号名：
+    /// 仅这些会话允许未登录态改密，且只能改该账号（#11 爆破面收敛 + 强制改密流程保留）
+    pending_password_change: HashMap<SessionId, String>,
     /// 会话关联的客户端 IP（C# MirConnection.IPAddress）
     session_ips: HashMap<SessionId, String>,
     /// 被封禁 IP -> 解封时间（unix 秒；C# Envir.IPBlocks）
@@ -53,6 +59,7 @@ impl GateActor {
         Self {
             sessions: HashMap::new(),
             session_usernames: HashMap::new(),
+            pending_password_change: HashMap::new(),
             session_ips: HashMap::new(),
             ip_blocks: HashMap::new(),
             ip_character_creations: HashMap::new(),
@@ -74,6 +81,33 @@ impl GateActor {
 
     pub fn set_social_ref(&mut self, social_ref: ActorRef<crate::actors::social::SocialActor>) {
         self.social_ref = Some(social_ref);
+    }
+
+    /// 会话终止清理：移除发送通道/用户名/IP 映射，通知 AccountActor 登出
+    /// （is_online 置 false，否则旧账号永远「已在线」无法重登），
+    /// 并按需通知 WorldActor 玩家下线（触发落库）。
+    /// TCP 断连 / 优雅 Disconnect / LogOut / 慢读踢线 / ShutdownAll 共用。
+    async fn terminate_session(&mut self, session_id: SessionId, notify_world: bool) {
+        self.sessions.remove(&session_id);
+        self.session_ips.remove(&session_id);
+        self.pending_password_change.remove(&session_id);
+        let logged_out_username = self.session_usernames.remove(&session_id);
+        let account_ref = self.account_ref.clone();
+        let world_ref = self.world_ref.clone();
+        if let Some(username) = logged_out_username {
+            if let Some(account_ref) = account_ref {
+                let _ = account_ref
+                    .ask(crate::actors::account::LogoutRequest { username })
+                    .await;
+            }
+        }
+        if notify_world {
+            if let Some(world_ref) = world_ref {
+                let _ = world_ref
+                    .ask(crate::actors::world::PlayerDisconnected { session_id })
+                    .await;
+            }
+        }
     }
 }
 
@@ -115,8 +149,8 @@ pub async fn run_gate_listener(addr: String, actor_ref: ActorRef<GateActor>) -> 
         let sid = session_id;
         session_id += 1;
 
-        // 为每个会话创建发送通道
-        let (tx, mut rx) = mpsc::unbounded_channel::<Vec<u8>>();
+        // 为每个会话创建发送通道（有界，容量见 SESSION_SEND_CAPACITY）
+        let (tx, mut rx) = mpsc::channel::<Vec<u8>>(SESSION_SEND_CAPACITY);
 
         // 注册会话到 GateActor
         let _ = actor_ref
@@ -248,6 +282,27 @@ pub struct SetSocialRef {
     pub social_ref: ActorRef<crate::actors::social::SocialActor>,
 }
 
+/// 会话状态探针：查询会话注册/登录态（诊断与集成回归测试用，只读）
+pub struct TestProbeSession {
+    pub session_id: SessionId,
+}
+
+impl Message<TestProbeSession> for GateActor {
+    /// (会话已注册, 已登录)
+    type Reply = (bool, bool);
+
+    async fn handle(
+        &mut self,
+        msg: TestProbeSession,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        (
+            self.sessions.contains_key(&msg.session_id),
+            self.session_usernames.contains_key(&msg.session_id),
+        )
+    }
+}
+
 // ============================================================
 // Handler 实现
 // ============================================================
@@ -340,23 +395,26 @@ impl Message<ClearIpBlocks> for GateActor {
 impl Message<ShutdownAll> for GateActor {
     type Reply = usize;
 
-    async fn handle(&mut self, _msg: ShutdownAll, ctx: &mut Context<Self, Self::Reply>) -> usize {
+    async fn handle(&mut self, _msg: ShutdownAll, _ctx: &mut Context<Self, Self::Reply>) -> usize {
         let count = self.sessions.len();
         info!("ShutdownAll: disconnecting {} active sessions", count);
         let session_ids: Vec<u64> = self.sessions.keys().cloned().collect();
+        let disconnect_data = crate::util::wire::build_packet_bytes(
+            mir2_shared::enums::ServerPacketIds::Disconnect as i16,
+            // C# S.Disconnect.Reason：0=Server Closing（1 字节）
+            &[0u8],
+        );
         for sid in &session_ids {
-            let disconnect_data = crate::util::wire::build_packet_bytes(
-                mir2_shared::enums::ServerPacketIds::Disconnect as i16,
-                // C# S.Disconnect.Reason：0=Server Closing（1 字节）
-                &[0u8],
-            );
-            let _ = ctx
-                .actor_ref()
-                .tell(SendToClient {
-                    session_id: *sid,
-                    data: disconnect_data,
-                })
-                .await;
+            // 直接塞进会话发送通道（不能走 SendToClient 自转发：下方随即移除会话，
+            // mailbox 里的 SendToClient 处理时会找不到通道）
+            if let Some(tx) = self.sessions.get(sid) {
+                let _ = tx.try_send(disconnect_data.clone());
+            }
+        }
+        // #22：主动逐会话触发 PlayerDisconnected 落库 + 账号下线，
+        // 不等客户端 Disconnect 回包（客户端 5 秒内不回即丢档）
+        for sid in session_ids {
+            self.terminate_session(sid, true).await;
         }
         count
     }
@@ -565,7 +623,7 @@ impl Message<ClientData> for GateActor {
                 handle_keep_alive(&gate_ref, msg.session_id).await;
             }
             x if x == ClientPacketIds::LogOut as i16 => {
-                // LogOut - 通知 WorldActor 清理并断开
+                // LogOut - 通知 WorldActor 清理并落库（C# MirConnection.LogOut → StopGame）
                 if let Some(world_ref) = &self.world_ref {
                     let _ = world_ref
                         .ask(crate::actors::world::PlayerLogOut {
@@ -573,27 +631,17 @@ impl Message<ClientData> for GateActor {
                         })
                         .await;
                 }
+                // #19：对齐断连路径的账号清理——清 session_usernames 并通知
+                // AccountActor 置离线；否则 is_online 永卡 true，重登被拒
+                // （AccountActor::login 拒绝在线账号）。连接本身保留，
+                // 客户端需重新 Login 后再 StartGame。
+                // （WorldActor 侧已由 PlayerLogOut 落库，不再重复 PlayerDisconnected）
+                self.terminate_session(msg.session_id, false).await;
             }
             x if x == ClientPacketIds::Disconnect as i16 => {
                 debug!("Client disconnect request from session {}", msg.session_id);
-                // Forward to WorldActor for immediate player cleanup
-                if let Some(world_ref) = &self.world_ref {
-                    let _ = world_ref
-                        .ask(crate::actors::world::PlayerDisconnected {
-                            session_id: msg.session_id,
-                        })
-                        .await;
-                }
-                self.sessions.remove(&msg.session_id);
-                let logged_out_username = self.session_usernames.get(&msg.session_id).cloned();
-                self.session_usernames.remove(&msg.session_id);
-                if let Some(username) = logged_out_username {
-                    if let Some(account_ref) = &self.account_ref {
-                        let _ = account_ref
-                            .ask(crate::actors::account::LogoutRequest { username })
-                            .await;
-                    }
-                }
+                // Forward to WorldActor for immediate player cleanup + 账号/会话清理
+                self.terminate_session(msg.session_id, true).await;
             }
             x if x == ClientPacketIds::Chat as i16 => {
                 // Chat - 解析并广播 (Phase 1.3: 输入验证)
@@ -733,6 +781,20 @@ impl Message<ClientData> for GateActor {
             }
             // 账号管理
             x if x == ClientPacketIds::NewCharacter as i16 => {
+                // #10：未登录（无 session_usernames 映射）直接拒绝并断开——
+                // 否则旧代码会以角色名冒充账号名建角（unwrap_or_else(|| name.clone())）
+                if !self.session_usernames.contains_key(&msg.session_id) {
+                    warn!(
+                        "NewCharacter rejected: session {} not logged in, disconnecting",
+                        msg.session_id
+                    );
+                    let data = build_packet_bytes(ServerPacketIds::Disconnect as i16, &[0u8]);
+                    if let Some(tx) = self.sessions.get(&msg.session_id) {
+                        let _ = tx.try_send(data);
+                    }
+                    self.terminate_session(msg.session_id, false).await;
+                    return;
+                }
                 // C# Envir.NewCharacter IP 防刷：封禁 IP / 每小时 >4 次 → 封 24h
                 let now = gate_unix_now_secs();
                 let ip = self
@@ -786,6 +848,8 @@ impl Message<ClientData> for GateActor {
                     ctx.actor_ref(),
                     &self.social_ref,
                     &self.account_ref,
+                    &self.session_usernames,
+                    &self.pending_password_change,
                     msg.session_id,
                     payload,
                 )
@@ -1189,18 +1253,38 @@ impl Message<SendToClient> for GateActor {
         msg: SendToClient,
         _ctx: &mut Context<Self, Self::Reply>,
     ) -> Self::Reply {
-        if let Some(tx) = self.sessions.get(&msg.session_id) {
-            debug!(
-                "SendToClient: session={} bytes={}",
-                msg.session_id,
-                msg.data.len()
-            );
-            let _ = tx.send(msg.data);
-        } else {
+        let Some(tx) = self.sessions.get(&msg.session_id) else {
             warn!(
                 "Attempted to send to non-existent session {}",
                 msg.session_id
             );
+            return;
+        };
+        debug!(
+            "SendToClient: session={} bytes={}",
+            msg.session_id,
+            msg.data.len()
+        );
+        let bytes = msg.data.len();
+        // #23：有界通道 + try_send——慢读/不读客户端积压超限即踢线，
+        // 不能用 send().await 阻塞 GateActor 邮箱（一人慢读拖死全服广播）
+        match tx.try_send(msg.data) {
+            Ok(()) => {}
+            Err(mpsc::error::TrySendError::Full(_)) => {
+                warn!(
+                    "Session {} send buffer full ({} bytes dropped): kicking slow reader",
+                    msg.session_id, bytes
+                );
+                self.terminate_session(msg.session_id, true).await;
+            }
+            Err(mpsc::error::TrySendError::Closed(_)) => {
+                // 写端任务已退出（连接实际已断），按断连清理
+                debug!(
+                    "Session {} send channel closed, cleaning up",
+                    msg.session_id
+                );
+                self.terminate_session(msg.session_id, true).await;
+            }
         }
     }
 }
@@ -1217,26 +1301,9 @@ impl Message<ClientDisconnected> for GateActor {
         if !self.sessions.contains_key(&msg.session_id) {
             return;
         }
-        self.sessions.remove(&msg.session_id);
-        let logged_out_username = self.session_usernames.get(&msg.session_id).cloned();
-        self.session_usernames.remove(&msg.session_id);
         debug!("Session {} disconnected (TCP close)", msg.session_id);
-        if let Some(username) = logged_out_username {
-            if let Some(account_ref) = &self.account_ref {
-                let _ = account_ref
-                    .ask(crate::actors::account::LogoutRequest { username })
-                    .await;
-            }
-        }
-
-        // 通知 WorldActor 清理玩家状态
-        if let Some(world_ref) = &self.world_ref {
-            let _ = world_ref
-                .ask(crate::actors::world::PlayerDisconnected {
-                    session_id: msg.session_id,
-                })
-                .await;
-        }
+        // 账号登出 + WorldActor 玩家清理（落库）
+        self.terminate_session(msg.session_id, true).await;
     }
 }
 
@@ -1252,6 +1319,8 @@ impl Message<LoginResult> for GateActor {
             // 记录 session 关联的用户名（用于 ChangePassword 等）
             self.session_usernames
                 .insert(msg.session_id, msg.username.clone());
+            // 登录成功，强制改密待办随之失效
+            self.pending_password_change.remove(&msg.session_id);
 
             // LoginSuccess: 角色列表（用 SharedRust 序列化，保证与客户端解析一致）
             let characters: Vec<mir2_shared::data::client_data::SelectInfo> = msg
@@ -1290,6 +1359,10 @@ impl Message<LoginResult> for GateActor {
                 .await;
         } else if msg.require_password_change {
             // C#：RequirePasswordChange=true → S.Login { Result = 5 }
+            // #11：登记该会话的强制改密待办——允许此会话未登录态改密（仅此账号），
+            // 否则 #11 的登录态门禁会把强制改密流程一并堵死
+            self.pending_password_change
+                .insert(msg.session_id, msg.username.clone());
             let response_data = build_packet_bytes(ServerPacketIds::Login as i16, &[5u8]);
             let gate_ref = ctx.actor_ref().clone();
             let _ = gate_ref
@@ -1869,25 +1942,36 @@ fn forward_repair_item(
         .try_send();
 }
 
-/// RangeAttack: [dir: u8][x: i32][y: i32][target_id: u32][tx: i32][ty: i32]
+/// RangeAttack: [dir: u8][x: i32][y: i32][target_id: u32][tx: i32][ty: i32] = 21 字节
+/// 解析成功返回 (dir, target_id, target_x, target_y)；长度不足返回 None（不 panic）
+pub fn parse_range_attack_payload(payload: &[u8]) -> Option<(u8, u32, i32, i32)> {
+    // 阻断6：协议全长 21 字节（1+4+4+4+4+4），旧检查 <19 导致 19/20 字节载荷
+    // 在 payload[17..21] 处越界 panic
+    if payload.len() < 21 {
+        return None;
+    }
+    let dir = payload[0];
+    let target_id = u32::from_le_bytes(payload[9..13].try_into().ok()?);
+    let target_x = i32::from_le_bytes(payload[13..17].try_into().ok()?);
+    let target_y = i32::from_le_bytes(payload[17..21].try_into().ok()?);
+    Some((dir, target_id, target_x, target_y))
+}
+
 fn forward_range_attack(
     world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>,
     session_id: SessionId,
     payload: &[u8],
 ) {
-    if payload.len() < 19 {
+    let Some((dir, target_id, target_x, target_y)) = parse_range_attack_payload(payload)
+    else {
         return;
-    }
+    };
     let world_ref = match world_ref {
         Some(w) => w,
         None => {
             return;
         }
     };
-    let dir = payload[0];
-    let target_id = u32::from_le_bytes(payload[9..13].try_into().unwrap_or([0; 4]));
-    let target_x = i32::from_le_bytes(payload[13..17].try_into().unwrap_or([0; 4]));
-    let target_y = i32::from_le_bytes(payload[17..21].try_into().unwrap_or([0; 4]));
     debug!(
         "RangeAttack: session={} dir={} target={} pos=({}, {})",
         session_id, dir, target_id, target_x, target_y
@@ -2352,6 +2436,8 @@ async fn forward_change_password(
     gate_ref: &ActorRef<GateActor>,
     social_ref: &Option<ActorRef<crate::actors::social::SocialActor>>,
     account_ref: &Option<ActorRef<crate::actors::account::AccountActor>>,
+    session_usernames: &HashMap<SessionId, String>,
+    pending_password_change: &HashMap<SessionId, String>,
     session_id: SessionId,
     payload: &[u8],
 ) {
@@ -2367,6 +2453,23 @@ async fn forward_change_password(
             return;
         }
     };
+
+    // #11：登录态才受理（对齐 C# MirConnection.ChangePassword 的 Stage 检查），
+    // 防止任意连接爆破他人账号旧密码（Result=5 构成口令预言机）。
+    // 唯一例外：登录返回 Result=5（RequirePasswordChange）的会话，
+    // 允许未登录态改密、且只能改登记的账号。
+    let authorized = session_usernames.contains_key(&session_id)
+        || pending_password_change
+            .get(&session_id)
+            .map(|u| u == &account_id)
+            .unwrap_or(false);
+    if !authorized {
+        warn!(
+            "ChangePassword rejected: session {} not logged in (account={})",
+            session_id, account_id
+        );
+        return;
+    }
 
     let send_result = |result: u8| async move {
         let packet = mir2_shared::packets::server::login::ChangePassword { result };
@@ -2604,10 +2707,15 @@ async fn forward_new_character(
         "NewCharacter: session={} name={} class={} gender={} hair={}",
         session_id, name, class, gender, hair
     );
-    let account_username = session_usernames
-        .get(&session_id)
-        .cloned()
-        .unwrap_or_else(|| name.clone());
+    // #10：未登录会话不得建角（match 臂已拦截并断连，此处纵深防御），
+    // 绝不允许用角色名冒充账号名
+    let Some(account_username) = session_usernames.get(&session_id).cloned() else {
+        warn!(
+            "NewCharacter rejected: no account mapping for session={}",
+            session_id
+        );
+        return;
+    };
     let req = crate::actors::world::NewCharacterRequest {
         session_id,
         name,

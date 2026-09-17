@@ -70,7 +70,9 @@ async fn async_main() -> anyhow::Result<()> {
     info!("Spawning actors...");
 
     // GateActor 先启动
-    let gate_ref = GateActor::spawn_with_mailbox((), mailbox::unbounded());
+    // #23：有界 mailbox——客户端消息洪峰时 ask 自然背压、tell 显式失败，
+    // 无界队列会把洪峰变成内存 DoS
+    let gate_ref = GateActor::spawn_with_mailbox((), mailbox::bounded(1024));
     info!("GateActor spawned");
 
     // Phase 1.1: 把 cfg.network.max_connections 传给 GateActor(防止资源耗尽)
@@ -185,9 +187,32 @@ async fn async_main() -> anyhow::Result<()> {
     let mail_ini = crystal_server::util::ini::load_mail_settings(&configs_dir);
     let marriage_ini = crystal_server::util::ini::load_marriage_settings(&configs_dir);
     let mentor_ini = crystal_server::util::ini::load_mentor_settings(&configs_dir);
+    // #20：SocialActor 的 NoGroup 地图校验与交易 DontTrade 绑定校验读
+    // config.map_infos/item_infos——此前接空表且无写入点，校验形同虚设。
+    // 与 WorldActor 同源（DB map_infos/item_infos 表）预载真实数据。
+    let social_map_infos: HashMap<i32, db::MapInfo> = match db::load_map_infos(&db_pool).await {
+        Ok(list) => {
+            info!("SocialActor: loaded {} map infos", list.len());
+            list.into_iter().map(|m| (m.index, m)).collect()
+        }
+        Err(e) => {
+            warn!("SocialActor: failed to load map_infos: {}", e);
+            HashMap::new()
+        }
+    };
+    let social_item_infos: HashMap<i32, db::ItemInfo> = match db::load_item_infos(&db_pool).await {
+        Ok(list) => {
+            info!("SocialActor: loaded {} item infos", list.len());
+            list.into_iter().map(|i| (i.index, i)).collect()
+        }
+        Err(e) => {
+            warn!("SocialActor: failed to load item_infos: {}", e);
+            HashMap::new()
+        }
+    };
     let mut social_config = SocialActorConfig {
-        map_infos: Arc::new(RwLock::new(HashMap::<i32, db::MapInfo>::new())),
-        item_infos: Arc::new(RwLock::new(HashMap::<i32, db::ItemInfo>::new())),
+        map_infos: Arc::new(RwLock::new(social_map_infos)),
+        item_infos: Arc::new(RwLock::new(social_item_infos)),
         guild_creation_cost_gold: cfg.social.guild_creation_cost_gold,
         wedding_ring_recall_enabled: cfg.social.wedding_ring_recall_enabled,
         guild_required_level: cfg.social.guild_required_level,
@@ -391,10 +416,11 @@ async fn async_main() -> anyhow::Result<()> {
     }
     info!("Shutdown signal received, initiating graceful shutdown...");
 
-    // Phase 2.2: 优雅关机 — 断开所有 session 触发自动保存
+    // Phase 2.2: 优雅关机 — ShutdownAll 已主动逐会话触发 PlayerDisconnected 落库
+    // + 账号下线（#22 不再依赖客户端 Disconnect 回包）
     if let Ok(count) = gate_ref.ask(ShutdownAll).await {
         info!(
-            "Disconnect packets sent to {} sessions, waiting 5s for saves...",
+            "ShutdownAll: {} sessions disconnected and saved, settling 5s...",
             count
         );
     }

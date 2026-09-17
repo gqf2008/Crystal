@@ -15,17 +15,17 @@ use crate::util::wire::build_packet_bytes;
 // ============================================================
 
 type GateActorRef = kameo::actor::ActorRef<GateActor>;
-type RxChannel = tokio::sync::mpsc::UnboundedReceiver<Vec<u8>>;
+type RxChannel = tokio::sync::mpsc::Receiver<Vec<u8>>;
 
 async fn setup_gate_and_session(
     session_id: u64,
 ) -> (
     GateActorRef,
-    tokio::sync::mpsc::UnboundedSender<Vec<u8>>,
+    tokio::sync::mpsc::Sender<Vec<u8>>,
     RxChannel,
 ) {
     let gate_ref = GateActor::spawn(());
-    let (tx, rx) = mpsc::unbounded_channel::<Vec<u8>>();
+    let (tx, rx) = mpsc::channel::<Vec<u8>>(1024);
     let _ = gate_ref
         .ask(SessionCreated {
             session_id,
@@ -1896,8 +1896,8 @@ fn e2e_two_sessions_concurrent_start() {
     rt.block_on(async {
         // 单个 gate + 两个 session
         let gate_ref = GateActor::spawn(());
-        let (tx5, mut rx5) = mpsc::unbounded_channel::<Vec<u8>>();
-        let (tx6, mut rx6) = mpsc::unbounded_channel::<Vec<u8>>();
+        let (tx5, mut rx5) = mpsc::channel::<Vec<u8>>(1024);
+        let (tx6, mut rx6) = mpsc::channel::<Vec<u8>>(1024);
         let _ = gate_ref
             .ask(SessionCreated {
                 session_id: 5,
@@ -2282,8 +2282,8 @@ fn e2e_observe_mirrors_target_turn() {
     rt.block_on(async {
         // 目标(11) / 观察者(12) 共用一个 gate
         let gate_ref = GateActor::spawn(());
-        let (tx11, mut rx11) = mpsc::unbounded_channel::<Vec<u8>>();
-        let (tx12, mut rx12) = mpsc::unbounded_channel::<Vec<u8>>();
+        let (tx11, mut rx11) = mpsc::channel::<Vec<u8>>(1024);
+        let (tx12, mut rx12) = mpsc::channel::<Vec<u8>>(1024);
         for (sid, tx) in [(11u64, tx11), (12u64, tx12)] {
             let _ = gate_ref
                 .ask(SessionCreated {
