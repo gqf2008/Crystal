@@ -6245,16 +6245,18 @@ impl Message<ChatRequest> for WorldActor {
                     let x = parts.get(1).and_then(|s| s.parse::<i32>().ok());
                     let y = parts.get(2).and_then(|s| s.parse::<i32>().ok());
                     if let (Some(x), Some(y)) = (x, y) {
-                        let _ = record
-                            .actor_ref
-                            .ask(crate::actors::player::SetPlayerPosition {
-                                x,
-                                y,
-                                direction: 4,
-                                map_index: None,
-                                is_mounted: None,
-                            })
-                            .await;
+                        // 走统一传送核心：同图只发 UserLocation。裸 SetPlayerPosition
+                        // 只改服务端坐标不下发，客户端位置脱同步且断线会把传送后
+                        // 坐标落库（2026-09-17 实机冒烟实测，红检 e2e_at_move_chat_*）。
+                        super::map_sync::teleport_core(
+                            self,
+                            msg.session_id,
+                            state.map_index,
+                            x,
+                            y,
+                            4,
+                        )
+                        .await;
                         send_system_message(
                             &self.gate_ref,
                             msg.session_id,

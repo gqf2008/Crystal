@@ -1135,6 +1135,86 @@ mod tests {
     /// 红检：teleport_core 若退化为无条件发 MapChanged（teleport_player 旧行为）
     /// → 同图传送后 2s 内收到 MapChanged，断言 FAILED。
     #[test]
+    /// @move 聊天指令（session.rs MOVE 分支）同图传送也必须走 teleport_core
+    /// 下发 UserLocation——否则服务端坐标已改、客户端不知情，位置脱同步且
+    /// 断线存档会把传送后坐标落库（2026-09-17 实机冒烟：GM @move 100 100 后
+    /// 收到"已传送至"系统消息但客户端坐标不变）。
+    /// 红检：MOVE 分支改回裸 SetPlayerPosition → 无 UserLocation → FAILED。
+    #[test]
+    fn e2e_at_move_chat_same_map_sends_user_location() {
+        let rt = tokio::runtime::Builder::new_multi_thread()
+            .thread_stack_size(8 * 1024 * 1024)
+            .enable_time()
+            .build()
+            .unwrap();
+        rt.block_on(async {
+            let gate_ref = GateActor::spawn(());
+            let session_id = 86u64;
+            let (tx, mut rx) = mpsc::channel::<Vec<u8>>(1024);
+            let _ = gate_ref
+                .ask(SessionCreated {
+                    session_id,
+                    sender: tx.clone(),
+                    ip: "127.0.0.1".to_string(),
+                })
+                .await;
+            let _tx = tx;
+            let db_pool = db::init_db_pool("sqlite::memory:").await.expect("init_db");
+            let account_ref = AccountActor::spawn((gate_ref.clone(), db_pool.clone()));
+            let _ = gate_ref.ask(SetAccountRef { account_ref }).await;
+            login(&gate_ref, session_id, &mut rx, "mapsyncmv").await;
+            seed_two_maps(&db_pool).await;
+            let world_ref = spawn_world(&gate_ref, &db_pool).await;
+
+            new_character(&gate_ref, session_id, &mut rx, "MvChatChar").await;
+            // GM 权限（@move 门槛）在账号列 admin_account；StartGame 加载时读
+            sqlx::query("UPDATE accounts SET admin_account = 1 WHERE username = 'mapsyncmv'")
+                .execute(&db_pool)
+                .await
+                .expect("grant gm");
+            sqlx::query(
+                "UPDATE characters SET map_index = 0, x = 15, y = 15 WHERE name = 'MvChatChar'",
+            )
+            .execute(&db_pool)
+            .await
+            .expect("place character");
+            start_game(&gate_ref, session_id, &mut rx).await;
+
+            // 排空登录/进图期间的存量包（含可能的 MapChanged/UserLocation）
+            let drain_deadline = tokio::time::Instant::now() + Duration::from_millis(1500);
+            while tokio::time::Instant::now() < drain_deadline {
+                let remaining = drain_deadline - tokio::time::Instant::now();
+                let _ = tokio::time::timeout(remaining, rx.recv()).await;
+            }
+
+            // 聊天发 @move 18 18（同图）：dotnet string + linked_items 计数 0
+            let mut body = Vec::new();
+            let _ = mir2_shared::binary::write_dotnet_string(&mut body, "@move 18 18");
+            body.extend_from_slice(&0i32.to_le_bytes());
+            let _ = gate_ref
+                .ask(ClientData {
+                    session_id,
+                    data: build_packet_bytes(
+                        mir2_shared::enums::ClientPacketIds::Chat as i16,
+                        &body,
+                    ),
+                })
+                .await;
+
+            assert!(
+                wait_opcode_body(
+                    &mut rx,
+                    mir2_shared::enums::ServerPacketIds::UserLocation as i16,
+                    5
+                )
+                .await
+                .is_some(),
+                "@move 同图传送必须发 UserLocation（否则客户端坐标脱同步）"
+            );
+            let _ = world_ref;
+        });
+    }
+
     fn e2e_teleport_message_same_map_sends_only_user_location() {
         let rt = tokio::runtime::Builder::new_multi_thread()
             .thread_stack_size(8 * 1024 * 1024)
