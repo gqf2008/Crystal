@@ -8,7 +8,7 @@ use kameo::message::Message;
 use kameo::prelude::Context;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tracing::{debug, info, warn};
+use tracing::{debug, error, info, warn};
 
 use crate::actors::group::{Group, GroupMember};
 use crate::actors::guild::{Guild, GuildRank};
@@ -1198,26 +1198,45 @@ impl Message<NpcGroupRecall> for SocialActor {
             }
             if let Some(mem_record) = self.players.get(&member.session_id) {
                 if let Ok(Some(mem_state)) = mem_record.ask(GetPlayerState).await {
-                    let _ = mem_record
-                        .ask(SetPlayerPosition {
-                            x: target_x,
-                            y: target_y,
-                            direction: mem_state.direction,
-                            map_index: Some(target_map),
-                            is_mounted: None,
-                        })
-                        .await;
-                    let mut body = Vec::new();
-                    body.extend_from_slice(&target_x.to_le_bytes());
-                    body.extend_from_slice(&target_y.to_le_bytes());
-                    body.push(mem_state.direction);
-                    let _ = self
-                        .gate_ref
-                        .tell(SendToClient {
-                            session_id: member.session_id,
-                            data: build_packet_bytes(ServerPacketIds::UserLocation as i16, &body),
-                        })
-                        .await;
+                    // 统一传送入口（world TeleportPlayerWithResync）：跨图补
+                    // MapChanged/MapInformation + resync 全量重发新图对象——旧路径只发
+                    // UserLocation，跨图召回客户端不换图不重建、双向失同步（落图空图）。
+                    if let Some(world) = &self.world_ref {
+                        let _ = world
+                            .ask(crate::actors::world::TeleportPlayerWithResync {
+                                session_id: member.session_id,
+                                map_index: target_map,
+                                x: target_x,
+                                y: target_y,
+                                direction: mem_state.direction,
+                            })
+                            .await;
+                    } else {
+                        warn!("SocialActor.world_ref 未接线，组队召回降级旧路径（跨图不重发新图对象）");
+                        let _ = mem_record
+                            .ask(SetPlayerPosition {
+                                x: target_x,
+                                y: target_y,
+                                direction: mem_state.direction,
+                                map_index: Some(target_map),
+                                is_mounted: None,
+                            })
+                            .await;
+                        let mut body = Vec::new();
+                        body.extend_from_slice(&target_x.to_le_bytes());
+                        body.extend_from_slice(&target_y.to_le_bytes());
+                        body.push(mem_state.direction);
+                        let _ = self
+                            .gate_ref
+                            .tell(SendToClient {
+                                session_id: member.session_id,
+                                data: build_packet_bytes(
+                                    ServerPacketIds::UserLocation as i16,
+                                    &body,
+                                ),
+                            })
+                            .try_send();
+                    }
                     debug!(
                         "NPC GROUPRECALL: {} recalled to ({},{}) map {}",
                         mem_state.name, target_x, target_y, target_map
@@ -1680,29 +1699,58 @@ impl SocialActor {
 
     /// 交易中止统一归还：双方托管在会话里的物品/金币退回本人
     /// （C# TradeCancel PlayerObject.cs:10889-10957——物品放回背包、背包满 GainItemMail、
-    /// 金币 GainGold 退回）。玩家离线或背包放不下的转离线邮件（market 退款同款 insert_mail）。
-    async fn return_trade_items(&mut self, trade: &TradeSession) {
+    /// 金币 GainGold 退回）。玩家离线或背包放不下的转邮件（在线感知：market deliver_system_mail 同款）。
+    /// `unrecovered`：结算失败时已交付但未能从收方收回的托管 uid——收方已持有该件，
+    /// 归还清单必须剔除（否则收方一份、原主再退一份 = 复制）。
+    /// `unrecovered_gold`：session_id → 该方托管金币中已交付但未能从收方扣回的金额——
+    /// 收方已花掉，退款必须扣减（否则收方花了、原主又全额退 = 净铸金币）。
+    async fn return_trade_items(
+        &mut self,
+        trade: &TradeSession,
+        unrecovered: &HashSet<u64>,
+        unrecovered_gold: &HashMap<u64, u64>,
+    ) {
         for side in [&trade.side_a, &trade.side_b] {
             let online = self.players.get(&side.session_id).cloned();
             let mut mail_gold = 0u64;
             let mut mail_items: Vec<mir2_shared::data::item::UserItem> = Vec::new();
 
-            // 金币退回：TryAddGold 全额不到账即失败（防截顶吞金），失败转邮件
-            if side.gold > 0 {
+            // 金币退回：与物品同一套「追回多少退多少」语义——先扣减未追回部分（防净铸），
+            // 再 TryAddGold 全额不到账即失败（防截顶吞金），失败转邮件
+            let withheld = unrecovered_gold
+                .get(&side.session_id)
+                .copied()
+                .unwrap_or(0);
+            let refundable = side.gold.saturating_sub(withheld);
+            if withheld > 0 {
+                error!(
+                    "交易归还扣减未追回金币（收方已花掉，防净铸）: side={} escrow={} withheld={} refundable={}",
+                    side.name, side.gold, withheld, refundable
+                );
+            }
+            if refundable > 0 {
                 let refunded = match &online {
                     Some(rec) => rec
-                        .ask(crate::actors::player::TryAddGold { amount: side.gold })
+                        .ask(crate::actors::player::TryAddGold { amount: refundable })
                         .await
                         .unwrap_or(false),
                     None => false,
                 };
                 if !refunded {
-                    mail_gold = side.gold;
+                    mail_gold = refundable;
                 }
             }
 
             // 物品退回：背包放不下或玩家离线转邮件
             for entry in &side.items {
+                // 已交付未收回的托管件：收方已持有，剔除防双份
+                if unrecovered.contains(&entry.uid) {
+                    error!(
+                        "交易归还剔除已交付未收回物品（防复制）: side={} uid={}",
+                        side.name, entry.uid
+                    );
+                    continue;
+                }
                 let Some(item) = entry.item_data.clone() else {
                     continue;
                 };
@@ -1710,7 +1758,9 @@ impl SocialActor {
                     Some(rec) => rec
                         .ask(AddItemToInventory { item: item.clone() })
                         .await
-                        .unwrap_or(false),
+                        .ok()
+                        .flatten()
+                        .is_some(),
                     None => false,
                 };
                 if !returned {
@@ -1720,19 +1770,176 @@ impl SocialActor {
 
             if mail_gold > 0 || !mail_items.is_empty() {
                 for mail in build_trade_return_mails(&side.name, mail_gold, mail_items) {
-                    if let Err(e) = db::insert_mail(&self.db_pool, &side.name, &mail).await {
-                        warn!(
-                            "交易归还邮件落库失败: {} -> {} gold={} items={}: {}",
-                            mail.sender_name,
-                            side.name,
-                            mail.gold,
-                            mail.items.len(),
-                            e
-                        );
-                    }
+                    self.deliver_trade_return_mail(
+                        online.as_ref(),
+                        side.session_id,
+                        &side.name,
+                        &mail,
+                    )
+                    .await;
                 }
             }
         }
+    }
+
+    /// 在线感知投递交易归还邮件（对齐 market.rs deliver_system_mail）：
+    /// 收件人在线 → AddMail 进内存邮箱（阻断8：在线玩家直接 insert_mail 会被
+    /// save_mail DELETE 重写抹掉 → 归还物蒸发）；ask 失败或离线才 insert_mail；
+    /// insert_mail 再失败 error! 告警（邮件内含托管金/物品，只 warn = 静默蒸发）。
+    async fn deliver_trade_return_mail(
+        &self,
+        online: Option<&ActorRef<PlayerActor>>,
+        session_id: u64,
+        receiver_name: &str,
+        mail: &crate::actors::mail::MailMessage,
+    ) {
+        if let Some(rec) = online {
+            if rec
+                .ask(crate::actors::player::AddMail { mail: mail.clone() })
+                .await
+                .is_ok()
+            {
+                send_mail_received_packet(&self.gate_ref, session_id, mail);
+                send_system_message(&self.gate_ref, session_id, "你收到了一封新邮件");
+                return;
+            }
+            // 会话恰在查找后断开：落到离线落库
+        }
+        if let Err(e) = db::insert_mail(&self.db_pool, receiver_name, mail).await {
+            error!(
+                "交易归还邮件投递失败（内存邮箱与落库均失败，托管物蒸发）: {} -> {} gold={} items={}: {}",
+                mail.sender_name,
+                receiver_name,
+                mail.gold,
+                mail.items.len(),
+                e
+            );
+        }
+    }
+
+    /// TradeAddGold 扣款后会话消失的统一退款出口：先 TryAddGold 原额退回
+    /// （刚扣的款加回不可能溢出，仅玩家 actor 异常/极端并发才会失败）。
+    /// 失败不得 let _ 吞掉——error! 审计 + 交易归还邮件兜底
+    /// （build_trade_return_mails + deliver_trade_return_mail 复用，
+    /// 与取消/断线归还同通道，防托管金蒸发）。
+    /// 返回是否直接退款成功（false = 已转邮件兜底/兜底亦失败仅 error!）。
+    async fn refund_deducted_trade_gold(
+        &self,
+        record: &ActorRef<PlayerActor>,
+        session_id: u64,
+        amount: u64,
+    ) -> bool {
+        let refunded = record
+            .ask(crate::actors::player::TryAddGold { amount })
+            .await
+            .unwrap_or(false);
+        if refunded {
+            return true;
+        }
+        error!(
+            "TradeAddGold 会话消失退款失败（session={} amount={}），转交易归还邮件兜底",
+            session_id, amount
+        );
+        let name = record
+            .ask(GetPlayerState)
+            .await
+            .ok()
+            .flatten()
+            .map(|s| s.name);
+        let Some(name) = name else {
+            error!(
+                "TradeAddGold 退款兜底失败：无法获取玩家名（session={} amount={}），托管金待人工核查",
+                session_id, amount
+            );
+            return false;
+        };
+        for mail in build_trade_return_mails(&name, amount, vec![]) {
+            self.deliver_trade_return_mail(Some(record), session_id, &name, &mail)
+                .await;
+        }
+        false
+    }
+
+    /// 交易结算失败回滚：从收方收回已交付的金币/物品。
+    /// 物品按【交付时 AddItemToInventory 返回的真实入包 uid + 交付数量】收回
+    /// （add_item 空格放置会重发 uid、堆叠合并会并入收方已有栈——按托管 uid 收回恒落空；
+    /// 按数量扣减而非整栈移除，不误收收方合并前自有的同类物品）。
+    /// 收回失败（收方已消耗/转移/掉线）的托管 uid 记入 unrecovered，
+    /// 由 return_trade_items 从归还清单剔除（收方保留该件，不得再退原主，杜绝双份）。
+    /// 金币与物品同一套「追回多少退多少」语义：返回未能扣回的金币金额，
+    /// 由调用方按【原主 session_id】记入 unrecovered_gold，return_trade_items 退款时扣减
+    /// （收方已花掉，原主再全额退 = 净铸金币）。
+    async fn recall_delivered_trade(
+        &self,
+        session_id: u64,
+        got_gold: u64,
+        got_items: &[(u64, u64, u16)], // (托管 uid, 实际入包 uid, 交付数量)
+        unrecovered: &mut HashSet<u64>,
+    ) -> u64 {
+        let rec = self.players.get(&session_id).cloned();
+        let mut unrecovered_gold = 0u64;
+        if got_gold > 0 {
+            let deducted = match &rec {
+                Some(r) => r
+                    .ask(DeductGold { amount: got_gold })
+                    .await
+                    .unwrap_or(false),
+                None => false,
+            };
+            if !deducted {
+                // 收方已消费/掉线：金币无法扣回，计未追回——原主退款必须扣减该额（防净铸）
+                error!(
+                    "execute_trade 回滚扣回金币失败（收方已消费/离线，原主退款将扣减该额防净铸） session={} amount={}",
+                    session_id, got_gold
+                );
+                unrecovered_gold = got_gold;
+            }
+        }
+        match &rec {
+            Some(r) => {
+                for (escrow_uid, real_uid, count) in got_items {
+                    let removed = r
+                        .ask(crate::actors::player::RemoveItemFromInventoryCount {
+                            unique_id: *real_uid,
+                            count: *count,
+                        })
+                        .await
+                        .ok()
+                        .flatten();
+                    match removed {
+                        // 全额收回：交付副本已销毁，托管件可正常退还原主
+                        Some(item) if item.count >= *count => {}
+                        // 部分收回：收方已消耗差额，全额退还原主 = 复制差额，
+                        // 整件计 unrecovered 从归还清单剔除（保守不铸，差额留审计）
+                        Some(item) => {
+                            error!(
+                                "execute_trade 回滚部分收回物品（差额计未收回，归还清单剔除防复制差额） session={} escrow_uid={} real_uid={} 交付={} 实收={}",
+                                session_id, escrow_uid, real_uid, count, item.count
+                            );
+                            unrecovered.insert(*escrow_uid);
+                        }
+                        None => {
+                            error!(
+                                "execute_trade 回滚收回物品失败（收方保留该件，归还清单剔除防双份） session={} escrow_uid={} real_uid={} count={}",
+                                session_id, escrow_uid, real_uid, count
+                            );
+                            unrecovered.insert(*escrow_uid);
+                        }
+                    }
+                }
+            }
+            None => {
+                // 收方已掉线：无法收回，全部按未收回处理（其背包随档保留，归还清单剔除）
+                for (escrow_uid, real_uid, count) in got_items {
+                    error!(
+                        "execute_trade 回滚时收方已离线（收方保留该件，归还清单剔除防双份） session={} escrow_uid={} real_uid={} count={}",
+                        session_id, escrow_uid, real_uid, count
+                    );
+                    unrecovered.insert(*escrow_uid);
+                }
+            }
+        }
+        unrecovered_gold
     }
 
     /// 发送好友列表
@@ -1819,7 +2026,7 @@ impl SocialActor {
                     session_id,
                     data: body,
                 })
-                .await;
+                .try_send();
         }
     }
 
@@ -1852,7 +2059,7 @@ impl SocialActor {
                     session_id,
                     data: body,
                 })
-                .await;
+                .try_send();
         }
     }
 
@@ -2092,7 +2299,8 @@ impl SocialActor {
         if !recheck_ok {
             // 先移除会话防重入，再把双方托管物品/金币归还本人（背包满/离线转邮件）
             self.active_trades.remove(&trade_data.side_a.session_id);
-            self.return_trade_items(&trade_data).await;
+            self.return_trade_items(&trade_data, &HashSet::new(), &HashMap::new())
+                .await;
             send_system_message(&self.gate_ref, s1, "距离过远或状态异常，交易已取消");
             send_system_message(&self.gate_ref, s2, "距离过远或状态异常，交易已取消");
             send_trade_cancel_packet(&self.gate_ref, s1);
@@ -2148,7 +2356,8 @@ impl SocialActor {
 
         if !a_can_receive {
             self.active_trades.remove(&trade_data.side_a.session_id);
-            self.return_trade_items(&trade_data).await;
+            self.return_trade_items(&trade_data, &HashSet::new(), &HashMap::new())
+                .await;
             send_system_message(
                 &self.gate_ref,
                 s1,
@@ -2162,7 +2371,8 @@ impl SocialActor {
         }
         if !b_can_receive {
             self.active_trades.remove(&trade_data.side_a.session_id);
-            self.return_trade_items(&trade_data).await;
+            self.return_trade_items(&trade_data, &HashSet::new(), &HashMap::new())
+                .await;
             send_system_message(
                 &self.gate_ref,
                 s2,
@@ -2178,10 +2388,13 @@ impl SocialActor {
         // === 原子交付 ===
         // 金币/物品在放入交易栏时已托管进会话（TradeAddGold 即时扣款、TradeAddItem 即从背包移除），
         // 此处只做交付。任一步失败整体中止：已交付部分收回，与剩余托管一并归还双方。
+        // 注意：交付必须记录 AddItemToInventory 返回的【真实入包 uid】——add_item 空格放置
+        // 会重发 uid、堆叠合并会并入收方已有栈，按托管 uid 收回恒落空（收方留一份、
+        // 原主再退一份 = 复制）。
         let mut a_got_gold = 0u64;
-        let mut a_got_items: Vec<u64> = Vec::new();
+        let mut a_got_items: Vec<(u64, u64, u16)> = Vec::new(); // (托管 uid, 真实入包 uid, 交付数量)
         let mut b_got_gold = 0u64;
-        let mut b_got_items: Vec<u64> = Vec::new();
+        let mut b_got_items: Vec<(u64, u64, u16)> = Vec::new();
         let mut transfer_failed = false;
 
         // B 的金币/物品 → A
@@ -2206,8 +2419,9 @@ impl SocialActor {
                 let Some(data) = item.item_data.clone() else {
                     continue;
                 };
+                let count = data.count;
                 match rec.ask(AddItemToInventory { item: data }).await {
-                    Ok(true) => a_got_items.push(item.uid),
+                    Ok(Some(real_uid)) => a_got_items.push((item.uid, real_uid, count)),
                     _ => {
                         transfer_failed = true;
                         break 'give_a;
@@ -2239,8 +2453,9 @@ impl SocialActor {
                     let Some(data) = item.item_data.clone() else {
                         continue;
                     };
+                    let count = data.count;
                     match rec.ask(AddItemToInventory { item: data }).await {
-                        Ok(true) => b_got_items.push(item.uid),
+                        Ok(Some(real_uid)) => b_got_items.push((item.uid, real_uid, count)),
                         _ => {
                             transfer_failed = true;
                             break 'give_b;
@@ -2251,55 +2466,28 @@ impl SocialActor {
         }
 
         if transfer_failed {
-            // 收回已交付部分：金币扣回、物品从收方背包移除（销毁交付副本），
+            // 收回已交付部分：金币扣回、物品按真实入包 uid + 交付数量从收方背包收回
+            // （销毁交付副本）；收不回的托管 uid 记入 unrecovered，归还清单剔除防双份。
             // 原托管清单（trade_data，交付前克隆）完整保留，据此统一归还双方。
-            if a_got_gold > 0 {
-                if let Some(rec) = self.players.get(&s1) {
-                    if !rec
-                        .ask(DeductGold { amount: a_got_gold })
-                        .await
-                        .unwrap_or(false)
-                    {
-                        warn!(
-                            "execute_trade 回滚扣回金币失败 session={} amount={}",
-                            s1, a_got_gold
-                        );
-                    }
-                }
+            let mut unrecovered: HashSet<u64> = HashSet::new();
+            // 未追回金币按【原主 session_id】归集：A 未吐出的是 B 托管的金币，扣减 B 的退款
+            let mut unrecovered_gold: HashMap<u64, u64> = HashMap::new();
+            let lost = self
+                .recall_delivered_trade(s1, a_got_gold, &a_got_items, &mut unrecovered)
+                .await;
+            if lost > 0 {
+                unrecovered_gold.insert(s2, lost);
             }
-            if b_got_gold > 0 {
-                if let Some(rec) = self.players.get(&s2) {
-                    if !rec
-                        .ask(DeductGold { amount: b_got_gold })
-                        .await
-                        .unwrap_or(false)
-                    {
-                        warn!(
-                            "execute_trade 回滚扣回金币失败 session={} amount={}",
-                            s2, b_got_gold
-                        );
-                    }
-                }
-            }
-            if let Some(rec) = self.players.get(&s1) {
-                for uid in &a_got_items {
-                    match rec.ask(RemoveItemFromInventory { unique_id: *uid }).await {
-                        Ok(Some(_)) => {}
-                        _ => warn!("execute_trade 回滚收回物品失败 session={} uid={}", s1, uid),
-                    }
-                }
-            }
-            if let Some(rec) = self.players.get(&s2) {
-                for uid in &b_got_items {
-                    match rec.ask(RemoveItemFromInventory { unique_id: *uid }).await {
-                        Ok(Some(_)) => {}
-                        _ => warn!("execute_trade 回滚收回物品失败 session={} uid={}", s2, uid),
-                    }
-                }
+            let lost = self
+                .recall_delivered_trade(s2, b_got_gold, &b_got_items, &mut unrecovered)
+                .await;
+            if lost > 0 {
+                unrecovered_gold.insert(s1, lost);
             }
 
             self.active_trades.remove(&trade_data.side_a.session_id);
-            self.return_trade_items(&trade_data).await;
+            self.return_trade_items(&trade_data, &unrecovered, &unrecovered_gold)
+                .await;
             send_system_message(&self.gate_ref, s1, "交易结算失败，已取消并退回双方物品金币");
             send_system_message(&self.gate_ref, s2, "交易结算失败，已取消并退回双方物品金币");
             send_trade_cancel_packet(&self.gate_ref, s1);
@@ -2460,26 +2648,45 @@ impl SocialActor {
                         );
                         continue;
                     }
-                    let _ = mem_record
-                        .ask(SetPlayerPosition {
-                            x: target_x,
-                            y: target_y,
-                            direction: mem_state.direction,
-                            map_index: Some(target_map),
-                            is_mounted: None,
-                        })
-                        .await;
-                    let mut body = Vec::new();
-                    body.extend_from_slice(&target_x.to_le_bytes());
-                    body.extend_from_slice(&target_y.to_le_bytes());
-                    body.push(mem_state.direction);
-                    let _ = self
-                        .gate_ref
-                        .tell(SendToClient {
-                            session_id: member.session_id,
-                            data: build_packet_bytes(ServerPacketIds::UserLocation as i16, &body),
-                        })
-                        .await;
+                    // 统一传送入口（world TeleportPlayerWithResync）：跨图补
+                    // MapChanged/MapInformation + resync 全量重发新图对象——旧路径只发
+                    // UserLocation，跨图召回客户端不换图不重建、双向失同步（落图空图）。
+                    if let Some(world) = &self.world_ref {
+                        let _ = world
+                            .ask(crate::actors::world::TeleportPlayerWithResync {
+                                session_id: member.session_id,
+                                map_index: target_map,
+                                x: target_x,
+                                y: target_y,
+                                direction: mem_state.direction,
+                            })
+                            .await;
+                    } else {
+                        warn!("SocialActor.world_ref 未接线，组队召回降级旧路径（跨图不重发新图对象）");
+                        let _ = mem_record
+                            .ask(SetPlayerPosition {
+                                x: target_x,
+                                y: target_y,
+                                direction: mem_state.direction,
+                                map_index: Some(target_map),
+                                is_mounted: None,
+                            })
+                            .await;
+                        let mut body = Vec::new();
+                        body.extend_from_slice(&target_x.to_le_bytes());
+                        body.extend_from_slice(&target_y.to_le_bytes());
+                        body.push(mem_state.direction);
+                        let _ = self
+                            .gate_ref
+                            .tell(SendToClient {
+                                session_id: member.session_id,
+                                data: build_packet_bytes(
+                                    ServerPacketIds::UserLocation as i16,
+                                    &body,
+                                ),
+                            })
+                            .try_send();
+                    }
                     debug!(
                         "GROUPRECALL: {} recalled to ({}, {}) on map {}",
                         mem_state.name, target_x, target_y, target_map
@@ -2588,29 +2795,44 @@ impl SocialActor {
                                 last_recall_time: now_ms + 60_000,
                             })
                             .await;
-                        let _ = mem_record
-                            .ask(SetPlayerPosition {
-                                x: target_x,
-                                y: target_y,
-                                direction: mem_state.direction,
-                                map_index: Some(target_map),
-                                is_mounted: None,
-                            })
-                            .await;
-                        let mut body = Vec::new();
-                        body.extend_from_slice(&target_x.to_le_bytes());
-                        body.extend_from_slice(&target_y.to_le_bytes());
-                        body.push(mem_state.direction);
-                        let _ = self
-                            .gate_ref
-                            .tell(SendToClient {
-                                session_id: member.session_id,
-                                data: build_packet_bytes(
-                                    ServerPacketIds::UserLocation as i16,
-                                    &body,
-                                ),
-                            })
-                            .await;
+                        // 统一传送入口（world TeleportPlayerWithResync）：跨图补
+                        // MapChanged/MapInformation + resync 全量重发新图对象
+                        if let Some(world) = &self.world_ref {
+                            let _ = world
+                                .ask(crate::actors::world::TeleportPlayerWithResync {
+                                    session_id: member.session_id,
+                                    map_index: target_map,
+                                    x: target_x,
+                                    y: target_y,
+                                    direction: mem_state.direction,
+                                })
+                                .await;
+                        } else {
+                            warn!("SocialActor.world_ref 未接线，RECALLMEMBER 降级旧路径（跨图不重发新图对象）");
+                            let _ = mem_record
+                                .ask(SetPlayerPosition {
+                                    x: target_x,
+                                    y: target_y,
+                                    direction: mem_state.direction,
+                                    map_index: Some(target_map),
+                                    is_mounted: None,
+                                })
+                                .await;
+                            let mut body = Vec::new();
+                            body.extend_from_slice(&target_x.to_le_bytes());
+                            body.extend_from_slice(&target_y.to_le_bytes());
+                            body.push(mem_state.direction);
+                            let _ = self
+                                .gate_ref
+                                .tell(SendToClient {
+                                    session_id: member.session_id,
+                                    data: build_packet_bytes(
+                                        ServerPacketIds::UserLocation as i16,
+                                        &body,
+                                    ),
+                                })
+                                .try_send();
+                        }
                         debug!(
                             "RECALLMEMBER: {} recalled to ({}, {})",
                             mem_state.name, target_x, target_y
@@ -2781,26 +3003,44 @@ impl SocialActor {
                     // Front = 发起者当前位置前方一格
                     let front_x = target_x + player_dir_x(state.direction);
                     let front_y = target_y + player_dir_y(state.direction);
-                    let _ = other_record
-                        .ask(SetPlayerPosition {
-                            x: front_x,
-                            y: front_y,
-                            direction: other_state.direction,
-                            map_index: Some(target_map),
-                            is_mounted: None,
-                        })
-                        .await;
-                    let mut body = Vec::new();
-                    body.extend_from_slice(&front_x.to_le_bytes());
-                    body.extend_from_slice(&front_y.to_le_bytes());
-                    body.push(other_state.direction);
-                    let _ = self
-                        .gate_ref
-                        .tell(SendToClient {
-                            session_id: *other_session,
-                            data: build_packet_bytes(ServerPacketIds::UserLocation as i16, &body),
-                        })
-                        .await;
+                    // 统一传送入口（world TeleportPlayerWithResync）：跨图补
+                    // MapChanged/MapInformation + resync 全量重发新图对象
+                    if let Some(world) = &self.world_ref {
+                        let _ = world
+                            .ask(crate::actors::world::TeleportPlayerWithResync {
+                                session_id: *other_session,
+                                map_index: target_map,
+                                x: front_x,
+                                y: front_y,
+                                direction: other_state.direction,
+                            })
+                            .await;
+                    } else {
+                        warn!("SocialActor.world_ref 未接线，配偶召回降级旧路径（跨图不重发新图对象）");
+                        let _ = other_record
+                            .ask(SetPlayerPosition {
+                                x: front_x,
+                                y: front_y,
+                                direction: other_state.direction,
+                                map_index: Some(target_map),
+                                is_mounted: None,
+                            })
+                            .await;
+                        let mut body = Vec::new();
+                        body.extend_from_slice(&front_x.to_le_bytes());
+                        body.extend_from_slice(&front_y.to_le_bytes());
+                        body.push(other_state.direction);
+                        let _ = self
+                            .gate_ref
+                            .tell(SendToClient {
+                                session_id: *other_session,
+                                data: build_packet_bytes(
+                                    ServerPacketIds::UserLocation as i16,
+                                    &body,
+                                ),
+                            })
+                            .try_send();
+                    }
                     debug!(
                         "RECALL: {} recalled {} to ({}, {})",
                         state.name, spouse_name, front_x, front_y
@@ -3247,7 +3487,7 @@ impl Message<SocialPlayerLeft> for SocialActor {
                 send_trade_cancel_packet(&self.gate_ref, partner);
                 send_trade_close_packet(&self.gate_ref, partner);
             }
-            self.return_trade_items(trade).await;
+            self.return_trade_items(trade, &HashSet::new(), &HashMap::new()).await;
         }
 
         // 清理邀请
@@ -3890,39 +4130,46 @@ impl Message<TradeAddGold> for SocialActor {
         }
 
         // 托管进会话；会话在扣款间隙消失（对方取消/断线）→ 立即退回本次扣款
-        {
-            let trade = match self.find_trade_mut(msg.session_id) {
-                Some(t) => t,
-                None => {
-                    let _ = record
-                        .ask(crate::actors::player::TryAddGold {
-                            amount: msg.amount as u64,
-                        })
-                        .await;
-                    send_system_message(&self.gate_ref, msg.session_id, "交易已取消，金币已退回");
-                    return;
-                }
-            };
-            let side = match trade.side_of_mut(msg.session_id) {
-                Some(s) => s,
-                None => {
-                    let _ = record
-                        .ask(crate::actors::player::TryAddGold {
-                            amount: msg.amount as u64,
-                        })
-                        .await;
-                    return;
-                }
-            };
-            side.gold += msg.amount as u64;
-            side.unlock();
+        let escrowed = match self.find_trade_mut(msg.session_id) {
+            Some(trade) => match trade.side_of_mut(msg.session_id) {
+                Some(side) => {
+                    side.gold += msg.amount as u64;
+                    side.unlock();
 
-            // 对方看到**累计总额**（C# :10759 S.TradeGold{Amount=TradeGoldAmount}）
-            let total = side.gold;
-            let other_session = trade.other_session(msg.session_id);
-            if let Some(other) = other_session {
-                send_trade_gold_update_packet(&self.gate_ref, other, msg.session_id, total);
-            }
+                    // 对方看到**累计总额**（C# :10759 S.TradeGold{Amount=TradeGoldAmount}）
+                    let total = side.gold;
+                    let other_session = trade.other_session(msg.session_id);
+                    if let Some(other) = other_session {
+                        send_trade_gold_update_packet(
+                            &self.gate_ref,
+                            other,
+                            msg.session_id,
+                            total,
+                        );
+                    }
+                    true
+                }
+                None => false,
+            },
+            None => false,
+        };
+        if !escrowed {
+            // 会话/侧在扣款间隙消失：退回本次扣款。TryAddGold 结果必须检查——
+            // false（玩家 actor 异常/极端溢出）时 let _ 吞掉 = 扣款静默蒸发；
+            // refund_deducted_trade_gold 内 error! 审计 + 交易归还邮件兜底
+            let direct = self
+                .refund_deducted_trade_gold(&record, msg.session_id, msg.amount as u64)
+                .await;
+            send_system_message(
+                &self.gate_ref,
+                msg.session_id,
+                if direct {
+                    "交易已取消，金币已退回"
+                } else {
+                    "交易已取消，金币将通过邮件返还"
+                },
+            );
+            return;
         }
     }
 }
@@ -3970,7 +4217,7 @@ impl Message<TradeCancel> for SocialActor {
         let (s1, s2) = trade.participant_sessions();
         // 先移除会话防重入，再归还双方托管物品/金币（C# TradeCancel：背包满 GainItemMail）
         self.active_trades.remove(&trade.side_a.session_id);
-        self.return_trade_items(&trade).await;
+        self.return_trade_items(&trade, &HashSet::new(), &HashMap::new()).await;
 
         // 通知双方关窗
         send_trade_cancel_packet(&self.gate_ref, s1);
@@ -4142,11 +4389,37 @@ impl Message<TradeRemoveItem> for SocialActor {
         // 归还背包（整叠/拆分部分均回 item_data，避免物品销毁）
         if let Some(item_data) = removed.and_then(|ti| ti.item_data) {
             let ok = record
-                .ask(AddItemToInventory { item: item_data })
+                .ask(AddItemToInventory {
+                    item: item_data.clone(),
+                })
                 .await
-                .unwrap_or(false);
+                .ok()
+                .flatten()
+                .is_some();
             if !ok {
-                debug!("TradeRemoveItem: 归还背包失败 session={}", msg.session_id);
+                // 背包满归还失败：与 return_trade_items 相同的在线感知邮件兜底（仅 debug! = 物品蒸发）
+                let name = record
+                    .ask(GetPlayerState)
+                    .await
+                    .ok()
+                    .flatten()
+                    .map(|s| s.name)
+                    .unwrap_or_default();
+                if name.is_empty() {
+                    error!(
+                        "TradeRemoveItem: 归还背包失败且无法获取玩家名 session={} uid={}，物品蒸发",
+                        msg.session_id, msg.unique_id
+                    );
+                } else {
+                    warn!(
+                        "TradeRemoveItem: 归还背包失败（背包满），转归还邮件 session={} uid={}",
+                        msg.session_id, msg.unique_id
+                    );
+                    for mail in build_trade_return_mails(&name, 0, vec![item_data]) {
+                        self.deliver_trade_return_mail(Some(&record), msg.session_id, &name, &mail)
+                            .await;
+                    }
+                }
             }
         }
 
@@ -5808,7 +6081,9 @@ impl Message<GuildStorageItemChangeRequest> for SocialActor {
                                 item: item_data.clone(),
                             })
                             .await
-                            .unwrap_or(false);
+                            .ok()
+                            .flatten()
+                            .is_some();
                         if added {
                             send_system_message(&self.gate_ref, msg.session_id, "物品已取出");
                             // #295：实时通知（C# S.GuildStorageItemChange type=1 取出）
@@ -6885,7 +7160,7 @@ impl SocialActor {
                 session_id,
                 data: packet.clone(),
             })
-            .await;
+            .try_send();
         for (sid, other) in &self.players {
             if *sid == session_id {
                 continue;
@@ -6898,7 +7173,7 @@ impl SocialActor {
                             session_id: *sid,
                             data: packet.clone(),
                         })
-                        .await;
+                        .try_send();
                 }
             }
         }
@@ -6911,7 +7186,7 @@ mod tests {
         apply_guild_war_mirror, facing_each_other, front_tile, leader_leave_outcome,
         LeaderLeaveOutcome, SocialActor, SocialActorConfig,
     };
-    use std::collections::HashMap;
+    use std::collections::{HashMap, HashSet};
 
     #[test]
     fn leader_leave_outcome_matches_csharp_deletemember() {
@@ -7229,7 +7504,9 @@ mod tests {
             trade.side_b.add_item(uid, 0, 1, Some(mk(uid)));
         }
 
-        social.return_trade_items(&trade).await;
+        social
+            .return_trade_items(&trade, &HashSet::new(), &HashMap::new())
+            .await;
 
         // Alice：1 封邮件，gold=500，物品 1 件（uid=42）
         let rows: Vec<(i64, String)> = sqlx::query_as(
@@ -7259,5 +7536,518 @@ mod tests {
         let second: serde_json::Value = serde_json::from_str(&rows[1].1).unwrap();
         assert_eq!(first.as_array().unwrap().len(), 5);
         assert_eq!(second.as_array().unwrap().len(), 1);
+    }
+
+    // ============================================================
+    // 交易 uid 正确性 / 在线感知归还 回归测试（PR #2943 对抗复核）
+    // ============================================================
+
+    /// 交易测试栈：PlayerActor 的 spawn 依赖 world_ref，需拉起最小
+    /// WorldActor（内存库、空目录）；SocialActor::spawn 仅为满足 WorldActorArgs
+    async fn spawn_trade_test_stack() -> (
+        crate::db::DbPool,
+        kameo::actor::ActorRef<crate::gate::actor::GateActor>,
+        kameo::actor::ActorRef<crate::actors::world::WorldActor>,
+    ) {
+        use kameo::actor::Spawn;
+        let db_pool = crate::db::init_db_pool("sqlite::memory:")
+            .await
+            .expect("init_db");
+        let gate_ref = crate::gate::actor::GateActor::spawn(());
+        let social_ref = SocialActor::spawn(super::SocialActorArgs {
+            gate_ref: gate_ref.clone(),
+            db_pool: db_pool.clone(),
+            config: SocialActorConfig::default(),
+        });
+        let world_ref =
+            crate::actors::world::WorldActor::spawn(crate::actors::world::WorldActorArgs {
+                tick_interval_ms: 1000,
+                gate_ref: gate_ref.clone(),
+                map_dir: std::path::PathBuf::from("."),
+                spawn_dir: None,
+                quest_dir: std::path::PathBuf::from("."),
+                npc_script_dir: std::path::PathBuf::from("."),
+                db_pool: db_pool.clone(),
+                social_ref,
+                conquest_cfg: crate::util::config::ConquestConfig::default(),
+                rested_cfg: crate::util::config::RestedConfig::default(),
+                pvp_cfg: crate::util::config::PvpConfig::default(),
+                health_regen_weight: 10,
+                mana_regen_weight: 10,
+                goods_hide_added_stats: true,
+                goods_on: true,
+                goods_max_stored: 15,
+                goods_buy_back_time_minutes: 60,
+                goods_buy_back_max_stored: 20,
+                safe_zone_healing: false,
+                archive_inactive_after_months: 12,
+                monster_recall_enabled: true,
+                monster_recall_range: 12,
+                monster_recall_cooldown_ms: 5000,
+                exp_mob_level_difference: true,
+                refine_cfg: crate::util::config::RefineConfig::default(),
+                replace_wedring_cost: 125,
+                lover_exp_bonus: 5,
+                mentor_exp_boost: 10,
+                mentor_damage_boost: 10,
+                mentor_skill_boost: true,
+                mentee_exp_bank: 1,
+                orbs_exp_list: Vec::new(),
+                orbs_dmg_list: Vec::new(),
+                orbs_def_list: Vec::new(),
+                awakening_cfg: Default::default(),
+                gem_cfg: Default::default(),
+                hero_exp_list: Vec::new(),
+                setup_cfg: Default::default(),
+                drop_rate: 1.0,
+                exp_rate: 1.0,
+                experience_list: Vec::new(),
+                item_timeout_ticks: 300,
+                max_drop_gold: 2000,
+                drop_gold: true,
+                rarity_cfg: crate::util::config::RarityConfig::default(),
+                notice_path: "Notice.txt".to_string(),
+                death_exp_penalty_percent: 0,
+                movement_pacing_ms: 0,
+                fishing_cfg: crate::util::ini::FishingConfig::default(),
+                random_item_stats: Vec::new(),
+                guild_buff_infos: Vec::new(),
+            });
+        (db_pool, gate_ref, world_ref)
+    }
+
+    fn social_with_players(
+        players: HashMap<u64, kameo::actor::ActorRef<crate::actors::player::PlayerActor>>,
+        gate_ref: kameo::actor::ActorRef<crate::gate::actor::GateActor>,
+        db_pool: crate::db::DbPool,
+    ) -> SocialActor {
+        SocialActor {
+            players,
+            groups: HashMap::new(),
+            next_group_id: 1,
+            group_invites: HashMap::new(),
+            active_trades: HashMap::new(),
+            trade_invites: HashMap::new(),
+            last_trade_request: HashMap::new(),
+            last_group_invite: HashMap::new(),
+            guilds: HashMap::new(),
+            pending_guild_invites: HashMap::new(),
+            guild_wars: HashMap::new(),
+            pending_marriage_invites: HashMap::new(),
+            pending_mentor_invites: HashMap::new(),
+            gate_ref,
+            world_ref: None,
+            db_pool,
+            config: SocialActorConfig::default(),
+        }
+    }
+
+    fn mk_trade_item(uid: u64, item_index: i32, count: u16) -> mir2_shared::data::item::UserItem {
+        let mut it = mir2_shared::data::item::UserItem::default();
+        it.unique_id = uid;
+        it.item_index = item_index;
+        it.count = count;
+        it
+    }
+
+    /// 阻断1 回归：结算回滚必须按【交付时返回的真实入包 uid + 交付数量】收回——
+    /// 按托管 uid 收回恒落空（add_item 空格放置重发 uid / 堆叠合并并入收方已有栈），
+    /// 落空后收方留一份、return_trade_items 再退原主一份 = 复制
+    #[tokio::test]
+    async fn trade_rollback_recall_uses_real_bag_uid() {
+        use kameo::actor::Spawn;
+        let (db_pool, gate_ref, world_ref) = spawn_trade_test_stack().await;
+        let alice = crate::actors::player::PlayerActor::spawn((
+            1u32,
+            "Alice".to_string(),
+            1u64,
+            1u16,
+            gate_ref.clone(),
+            world_ref.clone(),
+            0u8,
+            0u8,
+            false,
+        ));
+
+        // 交付：托管 uid 的物品进 Alice 背包，返回真实入包 uid
+        // （托管 uid 取 u64::MAX 附近值，避免与全局原子计数器 NEXT_UID(从1递增) 碰撞）
+        const ESCROW_UID: u64 = u64::MAX - 5001;
+        let real_uid = alice
+            .ask(crate::actors::player::AddItemToInventory {
+                item: mk_trade_item(ESCROW_UID, 5, 1),
+            })
+            .await
+            .expect("ask")
+            .expect("交付成功");
+        assert_ne!(real_uid, ESCROW_UID, "空格放置重发 uid（bug 根因）");
+
+        let mut players = HashMap::new();
+        players.insert(1u64, alice.clone());
+        let social = social_with_players(players, gate_ref.clone(), db_pool.clone());
+
+        // 修复前行为对照：按托管 uid 收回 → 落空，记 unrecovered，物品仍在包里
+        let mut unrecovered = std::collections::HashSet::new();
+        social
+            .recall_delivered_trade(1, 0, &[(ESCROW_UID, ESCROW_UID, 1)], &mut unrecovered)
+            .await;
+        assert!(unrecovered.contains(&ESCROW_UID), "按托管 uid 收回必落空");
+        let st = alice
+            .ask(crate::actors::player::GetPlayerState)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(
+            st.inventory.get_item(real_uid).is_some(),
+            "落空后物品仍在收方包里"
+        );
+
+        // 修复后：按真实 uid 收回 → 成功，unrecovered 为空，物品消失
+        let mut unrecovered2 = std::collections::HashSet::new();
+        social
+            .recall_delivered_trade(1, 0, &[(ESCROW_UID, real_uid, 1)], &mut unrecovered2)
+            .await;
+        assert!(unrecovered2.is_empty(), "按真实 uid 收回应成功");
+        let st = alice
+            .ask(crate::actors::player::GetPlayerState)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(
+            st.inventory.get_item(real_uid).is_none(),
+            "按真实 uid 收回后物品应消失"
+        );
+
+        // 堆叠合并场景：交付并入收方已有栈，按【数量】收回不误收收方自有部分
+        let mut base = mk_trade_item(u64::MAX - 900, 666, 15);
+        base.info = Some(mir2_shared::data::item::ItemInfo {
+            index: 666,
+            stack_size: 20,
+            ..Default::default()
+        });
+        let stack_uid = alice
+            .ask(crate::actors::player::AddItemToInventory { item: base })
+            .await
+            .unwrap()
+            .unwrap();
+        let mut delivered = mk_trade_item(77, 666, 3);
+        delivered.info = Some(mir2_shared::data::item::ItemInfo {
+            index: 666,
+            stack_size: 20,
+            ..Default::default()
+        });
+        let merged_uid = alice
+            .ask(crate::actors::player::AddItemToInventory { item: delivered })
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(merged_uid, stack_uid, "合并入栈返回目标栈 uid");
+        let mut unrecovered3 = std::collections::HashSet::new();
+        social
+            .recall_delivered_trade(1, 0, &[(77, merged_uid, 3)], &mut unrecovered3)
+            .await;
+        assert!(unrecovered3.is_empty());
+        let st = alice
+            .ask(crate::actors::player::GetPlayerState)
+            .await
+            .unwrap()
+            .unwrap();
+        let stack = st.inventory.get_item(stack_uid).expect("栈保留");
+        assert_eq!(stack.count, 15, "只收回交付的 3 件，收方自有 15 件不动");
+    }
+
+    /// 阻断2 回归：在线玩家归还（背包满/金币封顶）必须走 AddMail 内存邮箱，
+    /// 不得直接 insert_mail（save_mail DELETE 重写会抹掉 → 托管物蒸发）
+    #[tokio::test]
+    async fn return_trade_items_online_player_goes_to_memory_mailbox() {
+        use crate::actors::trade::TradeSession;
+        use kameo::actor::Spawn;
+        let (db_pool, gate_ref, world_ref) = spawn_trade_test_stack().await;
+        let alice = crate::actors::player::PlayerActor::spawn((
+            1u32,
+            "Alice".to_string(),
+            1u64,
+            1u16,
+            gate_ref.clone(),
+            world_ref.clone(),
+            0u8,
+            0u8,
+            false,
+        ));
+        // 背包填满（各占一格不合并）+ 金币封顶 → 归还只能转邮件
+        for i in 0..crate::actors::inventory::BACKPACK_SIZE {
+            let mut it = mir2_shared::data::item::UserItem::default();
+            it.item_index = 1000 + i as i32;
+            it.count = 1;
+            let r = alice
+                .ask(crate::actors::player::AddItemToInventory { item: it })
+                .await
+                .unwrap();
+            assert!(r.is_some(), "填包第 {} 格应成功", i);
+        }
+        assert!(alice
+            .ask(crate::actors::player::AddGold {
+                amount: u32::MAX as u64,
+            })
+            .await
+            .unwrap());
+
+        let mut players = HashMap::new();
+        players.insert(1u64, alice.clone());
+        let mut social = social_with_players(players, gate_ref.clone(), db_pool.clone());
+
+        let mut trade = TradeSession::new(1, "Alice".into(), 2, "Bob".into());
+        trade.side_a.gold = 500;
+        trade.side_a.add_item(42, 0, 1, Some(mk_trade_item(42, 7, 1)));
+        social
+            .return_trade_items(&trade, &std::collections::HashSet::new(), &HashMap::new())
+            .await;
+
+        // 在线：进内存邮箱（gold=500 挂首封 + 物品 1 件），DB 不得有记录
+        let st = alice
+            .ask(crate::actors::player::GetPlayerState)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(st.mailbox.inbox.len(), 1, "归还应进内存邮箱");
+        assert_eq!(st.mailbox.inbox[0].gold, 500);
+        assert_eq!(st.mailbox.inbox[0].items.len(), 1);
+        let rows: Vec<(i64,)> = sqlx::query_as("SELECT gold FROM mail WHERE character_name = ?")
+            .bind("Alice")
+            .fetch_all(&db_pool)
+            .await
+            .expect("query mail");
+        assert!(rows.is_empty(), "在线玩家不得落库（save_mail 重写会抹掉）");
+    }
+
+    /// 阻断1 回归（防双份）：结算失败时已交付未收回的托管件从归还清单剔除——
+    /// 收方已持有该件，再退原主即复制
+    #[tokio::test]
+    async fn return_trade_items_excludes_unrecovered_delivered() {
+        use crate::actors::trade::TradeSession;
+        use kameo::actor::Spawn;
+        let db_pool = crate::db::init_db_pool("sqlite::memory:")
+            .await
+            .expect("init_db");
+        let gate_ref = crate::gate::actor::GateActor::spawn(());
+        // 双方离线 → 归还只能落库，便于断言
+        let mut social = social_with_players(HashMap::new(), gate_ref, db_pool.clone());
+
+        let mut trade = TradeSession::new(1, "Alice".into(), 2, "Bob".into());
+        trade.side_a.add_item(42, 0, 1, Some(mk_trade_item(42, 5, 1)));
+        trade.side_a.add_item(43, 1, 1, Some(mk_trade_item(43, 6, 1)));
+        let mut unrecovered = std::collections::HashSet::new();
+        unrecovered.insert(42u64); // uid=42 已交付给 Bob 且未收回
+        social
+            .return_trade_items(&trade, &unrecovered, &HashMap::new())
+            .await;
+
+        let rows: Vec<(String,)> =
+            sqlx::query_as("SELECT items_json FROM mail WHERE character_name = ?")
+                .bind("Alice")
+                .fetch_all(&db_pool)
+                .await
+                .expect("query alice mail");
+        assert_eq!(rows.len(), 1, "只有未交付的 uid=43 应退还");
+        let items: serde_json::Value = serde_json::from_str(&rows[0].0).unwrap();
+        let arr = items.as_array().unwrap();
+        assert_eq!(arr.len(), 1);
+        assert_eq!(
+            arr[0]["unique_id"].as_u64(),
+            Some(43),
+            "已交付未收回的 uid=42 不得再退（防双份）"
+        );
+    }
+
+    /// execute_trade 正常路径：双方在线面对面，物品/金币互换成功且会话清除
+    #[tokio::test]
+    async fn execute_trade_swaps_items_and_gold() {
+        use crate::actors::trade::TradeSession;
+        use kameo::actor::Spawn;
+        let (db_pool, gate_ref, world_ref) = spawn_trade_test_stack().await;
+        let alice = crate::actors::player::PlayerActor::spawn((
+            1u32,
+            "Alice".to_string(),
+            1u64,
+            1u16,
+            gate_ref.clone(),
+            world_ref.clone(),
+            0u8,
+            0u8,
+            false,
+        ));
+        let bob = crate::actors::player::PlayerActor::spawn((
+            2u32,
+            "Bob".to_string(),
+            2u64,
+            1u16,
+            gate_ref.clone(),
+            world_ref.clone(),
+            0u8,
+            0u8,
+            false,
+        ));
+        // 面对面（execute_trade 复检：同图 ≤16 格 + FacingEachOther）
+        alice
+            .ask(crate::actors::player::SetPlayerPosition {
+                x: 330,
+                y: 330,
+                direction: 2, // Right，朝 Bob
+                map_index: None,
+                is_mounted: None,
+            })
+            .await
+            .unwrap();
+        bob
+            .ask(crate::actors::player::SetPlayerPosition {
+                x: 331,
+                y: 330,
+                direction: 6, // Left，朝 Alice
+                map_index: None,
+                is_mounted: None,
+            })
+            .await
+            .unwrap();
+
+        let mut players = HashMap::new();
+        players.insert(1u64, alice.clone());
+        players.insert(2u64, bob.clone());
+        let mut social = social_with_players(players, gate_ref.clone(), db_pool.clone());
+
+        let mut trade = TradeSession::new(1, "Alice".into(), 2, "Bob".into());
+        trade.side_a.gold = 100;
+        trade.side_a.add_item(42, 0, 1, Some(mk_trade_item(42, 5, 1)));
+        trade.side_b.add_item(43, 0, 1, Some(mk_trade_item(43, 6, 1)));
+        social.active_trades.insert(1u64, trade);
+
+        social.execute_trade(1).await;
+
+        let a = alice
+            .ask(crate::actors::player::GetPlayerState)
+            .await
+            .unwrap()
+            .unwrap();
+        let b = bob
+            .ask(crate::actors::player::GetPlayerState)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(a.inventory.count_item_by_index(6), 1, "Alice 应收到 Bob 的物品");
+        assert_eq!(a.inventory.count_item_by_index(5), 0, "Alice 的物品已交付");
+        assert_eq!(b.inventory.count_item_by_index(5), 1, "Bob 应收到 Alice 的物品");
+        assert_eq!(b.inventory.gold, 100, "Alice 托管的 100 金应付给 Bob");
+        assert_eq!(a.inventory.gold, 0);
+        assert!(social.active_trades.is_empty(), "会话应清除");
+        // 无中止 → 双方邮箱不得有归还邮件
+        assert!(a.mailbox.inbox.is_empty());
+        assert!(b.mailbox.inbox.is_empty());
+    }
+
+    /// 复核回归（金币净铸洞）：交付金币已被收方花光、回滚扣回失败时，
+    /// 原主退款必须扣减未追回部分——否则收方花了、原主又全额退 = 净铸金币
+    #[tokio::test]
+    async fn trade_rollback_unrecovered_gold_not_refunded() {
+        use crate::actors::trade::TradeSession;
+        use kameo::actor::Spawn;
+        let (db_pool, gate_ref, world_ref) = spawn_trade_test_stack().await;
+        let alice = crate::actors::player::PlayerActor::spawn((
+            1u32,
+            "Alice".to_string(),
+            1u64,
+            1u16,
+            gate_ref.clone(),
+            world_ref.clone(),
+            0u8,
+            0u8,
+            false,
+        ));
+        // Alice 收到交付的 1000 金后已花光（余额 0）→ 回滚 DeductGold 必失败
+        assert!(alice
+            .ask(crate::actors::player::AddGold { amount: 1000 })
+            .await
+            .unwrap());
+        assert!(alice
+            .ask(crate::actors::player::DeductGold { amount: 1000 })
+            .await
+            .unwrap());
+
+        let mut players = HashMap::new();
+        players.insert(1u64, alice.clone());
+        let mut social = social_with_players(players, gate_ref.clone(), db_pool.clone());
+
+        // Bob（离线 → 退款落库便于断言）托管的 1000 金已交付给 Alice
+        let mut trade = TradeSession::new(1, "Alice".into(), 2, "Bob".into());
+        trade.side_b.gold = 1000;
+
+        let mut unrecovered = std::collections::HashSet::new();
+        let lost_gold = social
+            .recall_delivered_trade(1, 1000, &[], &mut unrecovered)
+            .await;
+        assert_eq!(lost_gold, 1000, "扣回失败的 1000 金必须计为未追回");
+        let mut unrecovered_gold: HashMap<u64, u64> = HashMap::new();
+        // 未追回的是 Bob 的金币（交付给了 Alice）→ 扣减 Bob 的退款
+        unrecovered_gold.insert(2u64, lost_gold);
+        social
+            .return_trade_items(&trade, &unrecovered, &unrecovered_gold)
+            .await;
+
+        // Bob 实退必须为 0：未追回部分再退即净铸
+        let rows: Vec<(i64,)> = sqlx::query_as("SELECT gold FROM mail WHERE character_name = ?")
+            .bind("Bob")
+            .fetch_all(&db_pool)
+            .await
+            .expect("query bob mail");
+        let total: i64 = rows.iter().map(|r| r.0).sum();
+        assert_eq!(total, 0, "未追回的金币不得再退原主（防净铸）");
+    }
+
+    /// 复核回归（物品部分回收）：RemoveItemFromInventoryCount 实收数量 < 交付数量时，
+    /// 差额必须计入 unrecovered（收方已消耗差额，全额退还原主 = 复制差额）
+    #[tokio::test]
+    async fn trade_rollback_partial_recall_counted_unrecovered() {
+        use kameo::actor::Spawn;
+        let (db_pool, gate_ref, world_ref) = spawn_trade_test_stack().await;
+        let alice = crate::actors::player::PlayerActor::spawn((
+            1u32,
+            "Alice".to_string(),
+            1u64,
+            1u16,
+            gate_ref.clone(),
+            world_ref.clone(),
+            0u8,
+            0u8,
+            false,
+        ));
+        // 交付 5 件，收方消耗 2 件后栈上只剩 3 件
+        const ESCROW_UID: u64 = u64::MAX - 7001;
+        let real_uid = alice
+            .ask(crate::actors::player::AddItemToInventory {
+                item: mk_trade_item(ESCROW_UID, 5, 3),
+            })
+            .await
+            .expect("ask")
+            .expect("交付成功");
+
+        let mut players = HashMap::new();
+        players.insert(1u64, alice.clone());
+        let social = social_with_players(players, gate_ref.clone(), db_pool.clone());
+
+        let mut unrecovered = std::collections::HashSet::new();
+        social
+            .recall_delivered_trade(1, 0, &[(ESCROW_UID, real_uid, 5)], &mut unrecovered)
+            .await;
+        assert!(
+            unrecovered.contains(&ESCROW_UID),
+            "实收 3 < 交付 5，差额必须计 unrecovered（防全额退款复制差额）"
+        );
+        // 实收的 3 件已销毁（从收方背包移除）
+        let st = alice
+            .ask(crate::actors::player::GetPlayerState)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(
+            st.inventory.get_item(real_uid).is_none(),
+            "实收部分应从收方背包移除"
+        );
     }
 }

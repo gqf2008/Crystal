@@ -1760,16 +1760,14 @@ async fn exec_action(
                     send_system_message(&world.gate_ref, session_id, "你已经有行会了");
                 } else {
                     let body = Vec::new();
-                    let _ = world
-                        .gate_ref
-                        .tell(SendToClient {
-                            session_id,
-                            data: build_packet_bytes(
-                                mir2_shared::enums::ServerPacketIds::GuildNameRequest as i16,
-                                &body,
-                            ),
-                        })
-                        .await;
+                    try_send_to_client(
+                        &world.gate_ref,
+                        session_id,
+                        build_packet_bytes(
+                            mir2_shared::enums::ServerPacketIds::GuildNameRequest as i16,
+                            &body,
+                        ),
+                    );
                 }
             }
         }
@@ -2292,13 +2290,7 @@ async fn exec_action(
             )
             .is_ok()
             {
-                let _ = world
-                    .gate_ref
-                    .tell(SendToClient {
-                        session_id,
-                        data: body,
-                    })
-                    .await;
+                try_send_to_client(&world.gate_ref, session_id, body);
             }
             info!(
                 "NPC {}: ROLL type={} result={} page={} auto={}",
@@ -2758,13 +2750,7 @@ async fn exec_action(
             )
             .is_ok()
             {
-                let _ = world
-                    .gate_ref
-                    .tell(SendToClient {
-                        session_id,
-                        data: body,
-                    })
-                    .await;
+                try_send_to_client(&world.gate_ref, session_id, body);
                 debug!("NPC PLAYSOUND: id={}", sound_id);
             }
         }
@@ -2779,13 +2765,7 @@ async fn exec_action(
             )
             .is_ok()
             {
-                let _ = world
-                    .gate_ref
-                    .tell(SendToClient {
-                        session_id,
-                        data: body,
-                    })
-                    .await;
+                try_send_to_client(&world.gate_ref, session_id, body);
                 debug!("NPC OPENBROWSER: {}", url);
             }
         }
@@ -2981,13 +2961,7 @@ async fn exec_action(
                 )
                 .is_ok()
                 {
-                    let _ = world
-                        .gate_ref
-                        .tell(SendToClient {
-                            session_id,
-                            data: body,
-                        })
-                        .await;
+                    try_send_to_client(&world.gate_ref, session_id, body);
                 }
             }
             debug!(
@@ -3012,13 +2986,7 @@ async fn exec_action(
             )
             .is_ok()
             {
-                let _ = world
-                    .gate_ref
-                    .tell(SendToClient {
-                        session_id,
-                        data: body,
-                    })
-                    .await;
+                try_send_to_client(&world.gate_ref, session_id, body);
             }
             debug!("NPC EXPIRETIMER: key={}", key);
         }
@@ -4173,13 +4141,7 @@ pub(crate) async fn apply_map_entry_rules(world: &mut WorldActor, session_id: u6
         let mut body = Vec::new();
         if packet.write_body(&mut body).is_ok() {
             for sid in world.players.keys() {
-                let _ = world
-                    .gate_ref
-                    .tell(SendToClient {
-                        session_id: *sid,
-                        data: body.clone(),
-                    })
-                    .await;
+                try_send_to_client(&world.gate_ref, *sid, body.clone());
             }
         }
         debug!("MapEntryRules: session={} dismounted (NoMount)", session_id);
@@ -4195,6 +4157,23 @@ pub(crate) async fn apply_map_entry_rules(world: &mut WorldActor, session_id: u6
             })
             .await;
         debug!("MapEntryRules: session={} left group (NoGroup)", session_id);
+    }
+}
+
+/// 下行发包统一 try_send（gate 有界邮箱 1024：tell(SendToClient).await 内联阻塞等空位，
+/// 与 gate 处理器内联 ask world 构成环形等待死锁；邮箱满丢包 warn 留痕，
+/// 由 gate 会话通道积满踢线路径兜底）。
+fn try_send_to_client(gate_ref: &ActorRef<GateActor>, session_id: u64, data: Vec<u8>) {
+    if let Err(e) = gate_ref
+        .tell(SendToClient { session_id, data })
+        .try_send()
+    {
+        warn!(
+            "gate mailbox full: SendToClient dropped (session={} opcode={:?} err={})",
+            session_id,
+            dropped_send_opcode(&e),
+            e
+        );
     }
 }
 
@@ -4249,55 +4228,10 @@ pub(crate) async fn teleport_player(
         }
     }
 
-    let dest_file = dest_mi.file_name.clone();
-    let dest_title = dest_mi.title.clone();
-    let _ = world.get_or_load_map(&dest_file, map_index);
-
-    if let Some(record) = world.players.get(&session_id) {
-        let _ = record
-            .actor_ref
-            .ask(SetPlayerPosition {
-                x,
-                y,
-                direction: 4,
-                map_index: Some(map_index),
-                is_mounted: None,
-            })
-            .await;
-        let map_pkt =
-            build_map_changed_packet(map_index, &dest_file, &dest_title, x, y, 4, Some(&dest_mi));
-        let _ = world
-            .gate_ref
-            .tell(SendToClient {
-                session_id,
-                data: map_pkt,
-            })
-            .await;
-        // C# GetMapInfo：换图补发 MapInformation
-        let map_info =
-            super::build_map_information_packet(map_index, &dest_file, &dest_title, Some(&dest_mi));
-        let _ = world
-            .gate_ref
-            .tell(SendToClient {
-                session_id,
-                data: map_info,
-            })
-            .await;
-        let mut body = Vec::new();
-        body.extend_from_slice(&x.to_le_bytes());
-        body.extend_from_slice(&y.to_le_bytes());
-        body.push(4u8);
-        let _ = world
-            .gate_ref
-            .tell(SendToClient {
-                session_id,
-                data: build_packet_bytes(
-                    mir2_shared::enums::ServerPacketIds::UserLocation as i16,
-                    &body,
-                ),
-            })
-            .await;
-    }
+    // 统一传送核心（map_sync::teleport_core）：SetPlayerPosition + 跨图
+    // MapChanged/MapInformation/UserLocation + resync 全量重发新图对象（同图仅 UserLocation）。
+    // 无地图配置的兜底改坐标在 teleport_core 内处理，此处 dest 已存在。
+    super::map_sync::teleport_core(world, session_id, map_index, x, y, 4).await;
     // C# ApplyMapEntryRules：传送后应用地图进入规则（NoGroup/NoPets/NoIntelligentCreatures/NoHero）
     apply_map_entry_rules(world, session_id).await;
 }
