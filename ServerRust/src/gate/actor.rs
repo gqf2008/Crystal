@@ -25,7 +25,12 @@ pub type SessionId = u64;
 type SendChannel = mpsc::Sender<Vec<u8>>;
 
 /// 每会话待发队列容量；积满说明客户端慢读/不读，直接踢线
-const SESSION_SEND_CAPACITY: usize = 1024;
+///
+/// 容量下限锚定实机进图洪峰（2026-09-17 冒烟实测）：比奇一类大图进图时
+/// 服务端一次性下发 ~2000 包（43 NPC + ~1900 怪物 + 地物/门/互见），
+/// 1024 在 localhost 都有 ~50% 概率积满误踢正常客户端。16384 留 8 倍余量；
+/// 慢读踢线语义不变（积满 16384 条≈1.6MB 仍未 drain 才踢）。
+const SESSION_SEND_CAPACITY: usize = 16384;
 
 /// ShutdownAll 逐会话清理的整体超时（通知已 fire-and-forget，正常即时完成；
 /// 超时仅兜底防回归，超时后后台清理任务继续跑）
@@ -5900,6 +5905,20 @@ fn forward_purchase_guild_territory(
 
 #[cfg(test)]
 mod tests {
+    /// 红绿回归（进图洪峰踢线）：SESSION_SEND_CAPACITY 必须 ≥ 8192。
+    /// 2026-09-17 实机冒烟：比奇大图进图单次洪峰 ~2000 包/会话（43 NPC +
+    /// ~1900 怪物 + 地物/门/互见），1024 容量在 localhost 都有 ~50% 概率
+    /// 积满触发 "kicking slow reader" 误踢正常客户端。8192 是下限锚，
+    /// 实际取 16384 留 8 倍余量。
+    #[test]
+    fn session_send_capacity_absorbs_map_entry_burst() {
+        assert!(
+            SESSION_SEND_CAPACITY >= 8192,
+            "SESSION_SEND_CAPACITY={} 小于进图洪峰下限 8192：大图进图会误踢正常客户端",
+            SESSION_SEND_CAPACITY
+        );
+    }
+
     use super::*;
 
     /// 7-bit encoded length + UTF-8 bytes
