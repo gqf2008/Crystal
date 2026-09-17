@@ -21,7 +21,7 @@ impl Message<RequestUserNameMsg> for WorldActor {
                         let mut body = Vec::new();
                         body.extend_from_slice(&msg.object_id.to_le_bytes());
                         crate::util::wire::write_dotnet_string(&mut body, &state.name);
-                        let _ = self
+                        if let Err(e) = self
                             .gate_ref
                             .tell(SendToClient {
                                 session_id: msg.session_id,
@@ -30,7 +30,15 @@ impl Message<RequestUserNameMsg> for WorldActor {
                                     &body,
                                 ),
                             })
-                            .await;
+                            .try_send()
+                        {
+                            warn!(
+                                "gate mailbox full: SendToClient dropped (session={} opcode={:?} err={})",
+                                msg.session_id,
+                                super::dropped_send_opcode(&e),
+                                e
+                            );
+                        }
                         return;
                     }
                 }
@@ -42,7 +50,7 @@ impl Message<RequestUserNameMsg> for WorldActor {
             let mut body = Vec::new();
             body.extend_from_slice(&msg.object_id.to_le_bytes());
             crate::util::wire::write_dotnet_string(&mut body, &name);
-            let _ = self
+            if let Err(e) = self
                 .gate_ref
                 .tell(SendToClient {
                     session_id: msg.session_id,
@@ -51,7 +59,15 @@ impl Message<RequestUserNameMsg> for WorldActor {
                         &body,
                     ),
                 })
-                .await;
+                .try_send()
+            {
+                warn!(
+                    "gate mailbox full: SendToClient dropped (session={} opcode={:?} err={})",
+                    msg.session_id,
+                    super::dropped_send_opcode(&e),
+                    e
+                );
+            }
         }
     }
 }
@@ -97,7 +113,7 @@ impl Message<RequestChatItemMsg> for WorldActor {
             let mut body = Vec::new();
             body.extend_from_slice(&msg.unique_id.to_le_bytes());
             crate::util::wire::write_dotnet_string(&mut body, &stats_str);
-            let _ = self
+            if let Err(e) = self
                 .gate_ref
                 .tell(SendToClient {
                     session_id: msg.session_id,
@@ -106,7 +122,15 @@ impl Message<RequestChatItemMsg> for WorldActor {
                         &body,
                     ),
                 })
-                .await;
+                .try_send()
+            {
+                warn!(
+                    "gate mailbox full: SendToClient dropped (session={} opcode={:?} err={})",
+                    msg.session_id,
+                    super::dropped_send_opcode(&e),
+                    e
+                );
+            }
         }
     }
 }
@@ -159,13 +183,21 @@ impl Message<AcceptReincarnationRequest> for WorldActor {
         // Revive the dead player at half HP
         let _ = record.actor_ref.ask(ReviveAtHalfHp).await;
         // #222：与 TownRevive 同款收尾——S.Revived 清除客户端死亡态 + ObjectRevived 广播
-        let _ = self
+        if let Err(e) = self
             .gate_ref
             .tell(crate::gate::actor::SendToClient {
                 session_id: msg.session_id,
                 data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::Revived as i16, &[]),
             })
-            .await;
+            .try_send()
+        {
+            warn!(
+                "gate mailbox full: SendToClient dropped (session={} opcode={:?} err={})",
+                msg.session_id,
+                super::dropped_send_opcode(&e),
+                e
+            );
+        }
         let mut obj_body = Vec::new();
         obj_body.extend_from_slice(&state.object_id.to_le_bytes());
         obj_body.push(1u8); // effect
@@ -174,13 +206,21 @@ impl Message<AcceptReincarnationRequest> for WorldActor {
             &obj_body,
         );
         for sid in self.players.keys() {
-            let _ = self
+            if let Err(e) = self
                 .gate_ref
                 .tell(crate::gate::actor::SendToClient {
                     session_id: *sid,
                     data: revived_packet.clone(),
                 })
-                .await;
+                .try_send()
+            {
+                warn!(
+                    "gate mailbox full: SendToClient dropped (session={} opcode={:?} err={})",
+                    *sid,
+                    super::dropped_send_opcode(&e),
+                    e
+                );
+            }
         }
         // 从死亡队列移除（避免自动复活覆盖）
         self.player_death_queue.remove(&msg.session_id);
@@ -588,13 +628,21 @@ impl WorldActor {
         for (sid, rec) in &self.players {
             if let Ok(Some(s)) = rec.actor_ref.ask(GetPlayerState).await {
                 if s.guild_name.as_deref() == Some(guild_name) {
-                    let _ = self
+                    if let Err(e) = self
                         .gate_ref
                         .tell(SendToClient {
                             session_id: *sid,
                             data: data.clone(),
                         })
-                        .await;
+                        .try_send()
+                    {
+                        warn!(
+                            "gate mailbox full: SendToClient dropped (session={} opcode={:?} err={})",
+                            *sid,
+                            super::dropped_send_opcode(&e),
+                            e
+                        );
+                    }
                 }
             }
         }
@@ -712,7 +760,7 @@ impl WorldActor {
             .write_body(&mut std::io::Cursor::new(&mut body))
             .is_ok()
         {
-            let _ = self
+            if let Err(e) = self
                 .gate_ref
                 .tell(SendToClient {
                     session_id,
@@ -721,7 +769,15 @@ impl WorldActor {
                         &body,
                     ),
                 })
-                .await;
+                .try_send()
+            {
+                warn!(
+                    "gate mailbox full: SendToClient dropped (session={} opcode={:?} err={})",
+                    session_id,
+                    super::dropped_send_opcode(&e),
+                    e
+                );
+            }
         }
     }
 }

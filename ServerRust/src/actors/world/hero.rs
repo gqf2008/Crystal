@@ -563,7 +563,7 @@ impl Message<IntelligentCreaturePickup> for WorldActor {
             // 将物品添加到玩家背包
             let mut picked_up = false;
             if let Some(rec) = self.players.get(&msg.session_id) {
-                if let Ok(true) = rec
+                if let Ok(Some(_)) = rec
                     .actor_ref
                     .ask(AddItemToInventory {
                         item: item.item.clone(),
@@ -602,13 +602,21 @@ impl Message<IntelligentCreaturePickup> for WorldActor {
                 for (sid, rec) in &self.players {
                     if let Ok(Some(s)) = rec.actor_ref.ask(GetPlayerState).await {
                         if s.map_index == state.map_index {
-                            let _ = self
+                            if let Err(e) = self
                                 .gate_ref
                                 .tell(SendToClient {
                                     session_id: *sid,
                                     data: remove_packet.clone(),
                                 })
-                                .await;
+                                .try_send()
+                            {
+                                warn!(
+                                    "gate mailbox full: SendToClient dropped (session={} opcode={:?} err={})",
+                                    *sid,
+                                    super::dropped_send_opcode(&e),
+                                    e
+                                );
+                            }
                         }
                     }
                 }
@@ -2784,7 +2792,7 @@ impl WorldActor {
             };
             let mut body = Vec::new();
             if packet.write_body(&mut body).is_ok() {
-                let _ = self
+                if let Err(e) = self
                     .gate_ref
                     .tell(SendToClient {
                         session_id: snap.session_id,
@@ -2793,7 +2801,15 @@ impl WorldActor {
                             &body,
                         ),
                     })
-                    .await;
+                    .try_send()
+                {
+                    warn!(
+                        "gate mailbox full: SendToClient dropped (session={} opcode={:?} err={})",
+                        snap.session_id,
+                        super::dropped_send_opcode(&e),
+                        e
+                    );
+                }
             }
             if let Some(ai) = self.hero_ai_states.get_mut(&snap.session_id) {
                 ai.last_sent_hp = hp;
@@ -2827,13 +2843,21 @@ impl WorldActor {
                     for (sid, other) in &self.players {
                         if let Ok(Some(os)) = other.actor_ref.ask(GetPlayerState).await {
                             if os.map_index == owner_map {
-                                let _ = self
+                                if let Err(e) = self
                                     .gate_ref
                                     .tell(SendToClient {
                                         session_id: *sid,
                                         data: data.clone(),
                                     })
-                                    .await;
+                                    .try_send()
+                                {
+                                    warn!(
+                                        "gate mailbox full: SendToClient dropped (session={} opcode={:?} err={})",
+                                        *sid,
+                                        super::dropped_send_opcode(&e),
+                                        e
+                                    );
+                                }
                             }
                         }
                     }
@@ -2855,13 +2879,21 @@ impl WorldActor {
                         &omana_body,
                     );
                     // C# 只发主人（Owner.Enqueue）
-                    let _ = self
+                    if let Err(e) = self
                         .gate_ref
                         .tell(SendToClient {
                             session_id: snap.session_id,
                             data,
                         })
-                        .await;
+                        .try_send()
+                    {
+                        warn!(
+                            "gate mailbox full: SendToClient dropped (session={} opcode={:?} err={})",
+                            snap.session_id,
+                            super::dropped_send_opcode(&e),
+                            e
+                        );
+                    }
                 }
             }
             debug!("Hero HP changed: session={} hp={}", snap.session_id, hp);
@@ -2897,13 +2929,21 @@ impl WorldActor {
             for (sid, other) in &self.players {
                 if let Ok(Some(os)) = other.actor_ref.ask(GetPlayerState).await {
                     if os.map_index == owner_map {
-                        let _ = self
+                        if let Err(e) = self
                             .gate_ref
                             .tell(SendToClient {
                                 session_id: *sid,
                                 data: walk_packet.clone(),
                             })
-                            .await;
+                            .try_send()
+                        {
+                            warn!(
+                                "gate mailbox full: SendToClient dropped (session={} opcode={:?} err={})",
+                                *sid,
+                                super::dropped_send_opcode(&e),
+                                e
+                            );
+                        }
                     }
                 }
             }
@@ -3083,7 +3123,7 @@ impl WorldActor {
                         };
                         let mut md_body = Vec::new();
                         if md.write_body(&mut md_body).is_ok() {
-                            let _ = self
+                            if let Err(e) = self
                                 .gate_ref
                                 .tell(SendToClient {
                                     session_id: *session_id,
@@ -3092,7 +3132,15 @@ impl WorldActor {
                                         &md_body,
                                     ),
                                 })
-                                .await;
+                                .try_send()
+                            {
+                                warn!(
+                                    "gate mailbox full: SendToClient dropped (session={} opcode={:?} err={})",
+                                    *session_id,
+                                    super::dropped_send_opcode(&e),
+                                    e
+                                );
+                            }
                         }
                     }
                     let leveled = mir2_shared::packets::server::magic::MagicLeveled {
@@ -3103,7 +3151,7 @@ impl WorldActor {
                     };
                     let mut body = Vec::new();
                     if leveled.write_body(&mut body).is_ok() {
-                        let _ = self
+                        if let Err(e) = self
                             .gate_ref
                             .tell(SendToClient {
                                 session_id: *session_id,
@@ -3112,7 +3160,15 @@ impl WorldActor {
                                     &body,
                                 ),
                             })
-                            .await;
+                            .try_send()
+                        {
+                            warn!(
+                                "gate mailbox full: SendToClient dropped (session={} opcode={:?} err={})",
+                                *session_id,
+                                super::dropped_send_opcode(&e),
+                                e
+                            );
+                        }
                     }
                     debug!("Hero magic leveled: spell={:?} -> Lv.{}", spell_enum, level);
                 }
@@ -3233,13 +3289,21 @@ impl WorldActor {
             for (sid, r) in &self.players {
                 if let Ok(Some(os)) = r.actor_ref.ask(GetPlayerState).await {
                     if os.map_index == m_map {
-                        let _ = self
+                        if let Err(e) = self
                             .gate_ref
                             .tell(SendToClient {
                                 session_id: *sid,
                                 data: pkt.clone(),
                             })
-                            .await;
+                            .try_send()
+                        {
+                            warn!(
+                                "gate mailbox full: SendToClient dropped (session={} opcode={:?} err={})",
+                                *sid,
+                                super::dropped_send_opcode(&e),
+                                e
+                            );
+                        }
                     }
                 }
             }
@@ -3419,7 +3483,7 @@ impl WorldActor {
         let packet = mir2_shared::packets::server::combat::HeroHealthChanged { hp: 0, mp: 0 };
         let mut body = Vec::new();
         if packet.write_body(&mut body).is_ok() {
-            let _ = self
+            if let Err(e) = self
                 .gate_ref
                 .tell(SendToClient {
                     session_id,
@@ -3428,7 +3492,15 @@ impl WorldActor {
                         &body,
                     ),
                 })
-                .await;
+                .try_send()
+            {
+                warn!(
+                    "gate mailbox full: SendToClient dropped (session={} opcode={:?} err={})",
+                    session_id,
+                    super::dropped_send_opcode(&e),
+                    e
+                );
+            }
         }
         send_system_message(
             &self.gate_ref,
@@ -3490,7 +3562,7 @@ impl WorldActor {
         let pkt = mir2_shared::packets::server::experience::GainHeroExperience { amount };
         let mut body = Vec::new();
         if pkt.write_body(&mut body).is_ok() {
-            let _ = self
+            if let Err(e) = self
                 .gate_ref
                 .tell(SendToClient {
                     session_id,
@@ -3499,7 +3571,15 @@ impl WorldActor {
                         &body,
                     ),
                 })
-                .await;
+                .try_send()
+            {
+                warn!(
+                    "gate mailbox full: SendToClient dropped (session={} opcode={:?} err={})",
+                    session_id,
+                    super::dropped_send_opcode(&e),
+                    e
+                );
+            }
         }
         if leveled {
             // S.HeroLevelChanged（C# Hero.LevelUp → Owner.Enqueue）
@@ -3510,7 +3590,7 @@ impl WorldActor {
             };
             let mut lvl_body = Vec::new();
             if lvl_pkt.write_body(&mut lvl_body).is_ok() {
-                let _ = self
+                if let Err(e) = self
                     .gate_ref
                     .tell(SendToClient {
                         session_id,
@@ -3519,7 +3599,15 @@ impl WorldActor {
                             &lvl_body,
                         ),
                     })
-                    .await;
+                    .try_send()
+                {
+                    warn!(
+                        "gate mailbox full: SendToClient dropped (session={} opcode={:?} err={})",
+                        session_id,
+                        super::dropped_send_opcode(&e),
+                        e
+                    );
+                }
             }
             // DB 持久化等级
             let db_heroes: Vec<db::DbHero> = self.db_heroes_snapshot(session_id);
@@ -4338,13 +4426,21 @@ impl WorldActor {
         for (sid, other) in &self.players {
             if let Ok(Some(os)) = other.actor_ref.ask(GetPlayerState).await {
                 if os.map_index == owner_map {
-                    let _ = self
+                    if let Err(e) = self
                         .gate_ref
                         .tell(SendToClient {
                             session_id: *sid,
                             data: packet.clone(),
                         })
-                        .await;
+                        .try_send()
+                    {
+                        warn!(
+                            "gate mailbox full: SendToClient dropped (session={} opcode={:?} err={})",
+                            *sid,
+                            super::dropped_send_opcode(&e),
+                            e
+                        );
+                    }
                 }
             }
         }
@@ -4377,24 +4473,40 @@ impl WorldActor {
                 Some(map) => {
                     if let Ok(Some(os)) = other.actor_ref.ask(GetPlayerState).await {
                         if os.map_index == map {
-                            let _ = self
+                            if let Err(e) = self
                                 .gate_ref
                                 .tell(SendToClient {
                                     session_id: *sid,
                                     data: packet.clone(),
                                 })
-                                .await;
+                                .try_send()
+                            {
+                                warn!(
+                                    "gate mailbox full: SendToClient dropped (session={} opcode={:?} err={})",
+                                    *sid,
+                                    super::dropped_send_opcode(&e),
+                                    e
+                                );
+                            }
                         }
                     }
                 }
                 None => {
-                    let _ = self
+                    if let Err(e) = self
                         .gate_ref
                         .tell(SendToClient {
                             session_id: *sid,
                             data: packet.clone(),
                         })
-                        .await;
+                        .try_send()
+                    {
+                        warn!(
+                            "gate mailbox full: SendToClient dropped (session={} opcode={:?} err={})",
+                            *sid,
+                            super::dropped_send_opcode(&e),
+                            e
+                        );
+                    }
                 }
             }
         }

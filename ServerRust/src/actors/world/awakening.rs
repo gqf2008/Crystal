@@ -25,7 +25,15 @@ impl WorldActor {
             opcode as i16,
             &crate::actors::refine::refine_slot_ack_body(from, to, success),
         );
-        let _ = self.gate_ref.tell(SendToClient { session_id, data }).await;
+        if let Err(e) = self.gate_ref.tell(SendToClient { session_id, data }).try_send()
+        {
+            warn!(
+                "gate mailbox full: SendToClient dropped (session={} opcode={:?} err={})",
+                session_id,
+                super::dropped_send_opcode(&e),
+                e
+            );
+        }
     }
 
     /// 存入精炼物品/材料的实际逻辑（C# DepositRefineItem）；确认包由调用方统一发
@@ -464,7 +472,7 @@ impl Message<RefineItemRequest> for WorldActor {
         // C# RefineItem（:12703）：开始时发 S.RefineItem { UniqueID }
         let mut rb = Vec::new();
         rb.extend_from_slice(&deposited.unique_id.to_le_bytes());
-        let _ = self
+        if let Err(_) = self
             .gate_ref
             .tell(SendToClient {
                 session_id: msg.session_id,
@@ -473,7 +481,10 @@ impl Message<RefineItemRequest> for WorldActor {
                     &rb,
                 ),
             })
-            .await;
+            .try_send()
+        {
+            warn!("gate mailbox full: SendToClient dropped (session={} packet=RefineItem)", msg.session_id);
+        }
 
         send_system_message(&self.gate_ref, msg.session_id, "精炼已开始，请稍后查看");
         debug!("RefineItem: {} uid={}", state.name, msg.unique_id);
@@ -527,13 +538,21 @@ impl Message<CheckRefineRequest> for WorldActor {
                             )
                             .is_ok()
                             {
-                                let _ = self
+                                if let Err(e) = self
                                     .gate_ref
                                     .tell(SendToClient {
                                         session_id: msg.session_id,
                                         data: body,
                                     })
-                                    .await;
+                                    .try_send()
+                                {
+                                    warn!(
+                                        "gate mailbox full: SendToClient dropped (session={} opcode={:?} err={})",
+                                        msg.session_id,
+                                        super::dropped_send_opcode(&e),
+                                        e
+                                    );
+                                }
                             }
                         }
                         send_system_message(&self.gate_ref, msg.session_id, "精炼成功！请取回物品");
@@ -549,7 +568,7 @@ impl Message<CheckRefineRequest> for WorldActor {
                             .unwrap_or(msg.unique_id);
                         let _ = log.cancel();
                         let _ = record.actor_ref.ask(SetRefineLog { refine_log: log }).await;
-                        let _ = self
+                        if let Err(_) = self
                             .gate_ref
                             .tell(SendToClient {
                                 session_id: msg.session_id,
@@ -558,7 +577,10 @@ impl Message<CheckRefineRequest> for WorldActor {
                                     &destroyed_uid.to_le_bytes(),
                                 ),
                             })
-                            .await;
+                            .try_send()
+                        {
+                            warn!("gate mailbox full: SendToClient dropped (session={} packet=RefineItem)", msg.session_id);
+                        }
                         send_system_message(&self.gate_ref, msg.session_id, "精炼失败，物品已粉碎");
                         debug!("CheckRefine: {} destroyed", state.name);
                     }
@@ -693,7 +715,7 @@ impl Message<AwakeningNeedMaterialsRequest> for WorldActor {
             warn!("Failed to serialize AwakeningNeedMaterials: {}", e);
             return;
         }
-        let _ = self
+        if self
             .gate_ref
             .tell(SendToClient {
                 session_id: msg.session_id,
@@ -702,7 +724,11 @@ impl Message<AwakeningNeedMaterialsRequest> for WorldActor {
                     &body,
                 ),
             })
-            .await;
+            .try_send()
+            .is_err()
+        {
+            warn!("gate mailbox full: SendToClient dropped (session={} packet=AwakeningNeedMaterials)", msg.session_id);
+        }
     }
 }
 
@@ -729,7 +755,7 @@ impl Message<AwakeningLockedItemRequest> for WorldActor {
             warn!("Failed to serialize AwakeningLockedItem: {}", e);
             return;
         }
-        let _ = self
+        if self
             .gate_ref
             .tell(SendToClient {
                 session_id: msg.session_id,
@@ -738,7 +764,11 @@ impl Message<AwakeningLockedItemRequest> for WorldActor {
                     &body,
                 ),
             })
-            .await;
+            .try_send()
+            .is_err()
+        {
+            warn!("gate mailbox full: SendToClient dropped (session={} packet=AwakeningLockedItem)", msg.session_id);
+        }
     }
 }
 
@@ -805,13 +835,21 @@ impl WorldActor {
         for (sid, r) in &self.players {
             if let Ok(Some(os)) = r.actor_ref.ask(GetPlayerState).await {
                 if os.map_index == map_index {
-                    let _ = self
+                    if let Err(e) = self
                         .gate_ref
                         .tell(SendToClient {
                             session_id: *sid,
                             data: data.clone(),
                         })
-                        .await;
+                        .try_send()
+                    {
+                        warn!(
+                            "gate mailbox full: SendToClient dropped (session={} opcode={:?} err={})",
+                            *sid,
+                            super::dropped_send_opcode(&e),
+                            e
+                        );
+                    }
                 }
             }
         }
@@ -1416,7 +1454,7 @@ impl WorldActor {
                 let pkt = mir2_shared::packets::server::item::RefreshItem { item: snapshot };
                 let mut body = Vec::new();
                 if pkt.write_body(&mut body).is_ok() {
-                    let _ = self
+                    if self
                         .gate_ref
                         .tell(SendToClient {
                             session_id,
@@ -1425,7 +1463,11 @@ impl WorldActor {
                                 &body,
                             ),
                         })
-                        .await;
+                        .try_send()
+                        .is_err()
+                    {
+                        warn!("gate mailbox full: SendToClient dropped (session={} packet=RefreshItem)", session_id);
+                    }
                 }
                 send_system_message(
                     &self.gate_ref,
