@@ -170,8 +170,20 @@ struct PendingClick {
     pos: Vec2,
     drag_to: Option<Vec2>,
     phase: u8,
-    reply: Sender<String>,
+    /// 完成/失败路径 take() 发送；Option 配合 Drop 兜底（见 impl Drop）
+    reply: Option<Sender<String>>,
     reply_hits: Vec<String>,
+}
+
+/// #2956：任何丢弃路径（被新 click 覆盖、资源被移除）都给调用方一条终态回执——
+/// 否则 RPC 侧 2s 超时拿到 `{}`，与「成功但无 hits」无法区分。
+/// 回执通道 bounded(1) 且正常路径已 take()，try_send 永不阻塞游戏线程。
+impl Drop for PendingClick {
+    fn drop(&mut self) {
+        if let Some(tx) = self.reply.take() {
+            let _ = tx.try_send(json!({"ok": false, "error": "busy"}).to_string());
+        }
+    }
 }
 
 /// 悬停用的光标位置：探针优先，其次真实窗口光标（纯函数便于单测）。
@@ -277,8 +289,16 @@ impl Plugin for ControlPlugin {
             Update,
             apply_control_commands.run_if(in_state(AppState::Game)),
         );
+        // #2956：非 Game 态到达的命令立即回错排空——否则滞留 channel，
+        // 进 Game 后对已完全不同的场景按旧坐标补点
+        app.add_systems(
+            First,
+            drain_control_outside_game.run_if(bevy::prelude::not(in_state(AppState::Game))),
+        );
         // 合成点击驱动：First 调度，抢在 PreUpdate picking/input 消费前写消息；
-        // 不加 run_if——资源不在即空转（登录界面也可点）
+        // 不加 run_if——资源不在即空转。注意 #2956：非 Game 态的新 click 命令在
+        // First 就被 drain_control_outside_game 回 not in game 排空，到不了这里；
+        // 本系统跨状态存活的只有「Game 内创建、状态切换时在途」的 click。
         app.add_systems(First, drive_pending_click);
         // diag_closebtn：exclusive inspect（组件清单含写入者特征 marker）
         app.add_systems(First, diag_closebtn_inspect.after(drive_pending_click));
@@ -939,6 +959,35 @@ pub fn vis_batch_watch_post(
     tracing::warn!("👁[Batch] {} changes: {:?}", batch.len(), batch);
 }
 
+/// #2956：非 Game 态排空控制队列——带回执的命令立即回 `not in game`，
+/// 无回执的静默丢弃。否则命令滞留 channel，进 Game 后对已完全不同的场景补执行
+/// （典型：登录态发的 click 进图后按旧坐标点到别的窗口上）。
+fn drain_control_outside_game(control: Res<ControlRx>) {
+    while let Ok(cmd) = control.0.try_recv() {
+        if let Some(reply) = control_reply(&cmd) {
+            let _ = reply.try_send(json!({"ok": false, "error": "not in game"}).to_string());
+        }
+    }
+}
+
+/// 取命令携带的回执通道（所有带 reply 的变体统一在此枚举；无回执变体返回 None）
+fn control_reply(cmd: &ControlCommand) -> Option<&Sender<String>> {
+    match cmd {
+        ControlCommand::GetState { reply }
+        | ControlCommand::GetDialogs { reply }
+        | ControlCommand::GetVisible { reply }
+        | ControlCommand::Nearby { reply }
+        | ControlCommand::Cursor { reply, .. }
+        | ControlCommand::PlayerMenu { reply, .. }
+        | ControlCommand::QuestDetail { reply, .. }
+        | ControlCommand::CharPage { reply, .. }
+        | ControlCommand::ChatSize { reply, .. }
+        | ControlCommand::Click { reply, .. }
+        | ControlCommand::DialogRect { reply, .. } => Some(reply),
+        _ => None,
+    }
+}
+
 fn drive_pending_click(world: &mut World) {
     let Some(mut pending) = world.remove_resource::<PendingClick>() else {
         return;
@@ -948,9 +997,9 @@ fn drive_pending_click(world: &mut World) {
         let (e, w) = q.single(world).ok()?;
         Some((e, w.scale_factor()))
     })() else {
-        let _ = pending
-            .reply
-            .send(json!({"ok": false, "error": "no window"}).to_string());
+        if let Some(tx) = pending.reply.take() {
+            let _ = tx.send(json!({"ok": false, "error": "no window"}).to_string());
+        }
         return;
     };
     let set_cursor = |world: &mut World, pos: Vec2| {
@@ -1071,9 +1120,16 @@ fn drive_pending_click(world: &mut World) {
                 loc(pending.drag_to.unwrap_or(pending.pos)),
                 PointerAction::Release(PointerButton::Primary),
             ));
-            let _ = pending
-                .reply
-                .send(json!({"ok": true, "hits": pending.reply_hits}).to_string());
+            // Drop 类型不能移出字段——hits 先 take 出来再组回执
+            let hits = std::mem::take(&mut pending.reply_hits);
+            if let Some(tx) = pending.reply.take() {
+                let _ = tx.send(json!({"ok": true, "hits": hits}).to_string());
+            }
+            // #2956：点击完成撤掉探针——否则悬停系统（Hint/NPC 行悬停）永久读到
+            // 陈旧点击点，真实玩家光标被旁路；drag 场景探针也不应停在 press 点
+            if let Some(mut probe) = world.get_resource_mut::<CursorProbe>() {
+                probe.pos = None;
+            }
             return; // 完成：资源已移除，不再回插
         }
     }
@@ -1300,13 +1356,15 @@ fn apply_control_commands(
                 drag_to,
                 reply,
             } => {
-                // 悬停系统同步看到探针光标；逐帧注入交给 First 调度的 drive_pending_click
+                // 悬停系统同步看到探针光标；逐帧注入交给 First 调度的 drive_pending_click。
+                // #2956：覆盖在途 PendingClick 由其 Drop 兜底回 busy（含同帧两条 click
+                // 经 commands 延迟插入相互覆盖的情形），调用方不再静默超时。
                 cursor_probe.pos = Some(pos);
                 commands.insert_resource(PendingClick {
                     pos,
                     drag_to,
                     phase: 0,
-                    reply,
+                    reply: Some(reply),
                     reply_hits: Vec::new(),
                 });
             }
@@ -1535,6 +1593,105 @@ fn apply_control_commands(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #2956：被覆盖的 click 必须收到终态回执（busy），而非让调用方 2s 超时拿 `{}`。
+    /// 覆盖路径 = 第二条 click 经 commands.insert_resource 替换在途资源 → 旧值 Drop。
+    #[test]
+    fn pending_click_overwrite_replies_busy() {
+        let mut world = World::new();
+        let (tx1, rx1) = bounded::<String>(1);
+        let (tx2, _rx2) = bounded::<String>(1);
+        let mk = |tx: Sender<String>| PendingClick {
+            pos: Vec2::ZERO,
+            drag_to: None,
+            phase: 0,
+            reply: Some(tx),
+            reply_hits: Vec::new(),
+        };
+        world.insert_resource(mk(tx1));
+        world.insert_resource(mk(tx2)); // 覆盖：旧 click 的调用方必须拿到终态回执
+        let s = rx1
+            .recv_timeout(std::time::Duration::from_millis(200))
+            .expect("被覆盖的 click 应收到 busy 回执");
+        assert!(s.contains("busy"), "回执应含 busy: {s}");
+    }
+
+    /// #2956：click 完成后 (a) 恰好一条 ok 回执（Drop 不再补 busy 造成协议串行）；
+    /// (b) CursorProbe 撤掉——悬停系统回到真实光标，不再永久读陈旧点击点。
+    #[test]
+    fn drive_pending_click_finish_replies_once_and_clears_probe() {
+        let mut app = App::new();
+        app.add_message::<PointerInput>();
+        app.add_message::<MouseButtonInput>();
+        app.world_mut().spawn((Window::default(), PrimaryWindow));
+        app.world_mut().insert_resource(CursorProbe {
+            pos: Some(Vec2::new(10.0, 20.0)),
+        });
+        let (tx, rx) = bounded::<String>(1);
+        app.world_mut().insert_resource(PendingClick {
+            pos: Vec2::new(10.0, 20.0),
+            drag_to: None,
+            phase: 3, // 直接进完成帧：释放 + 回执 + 探针清理
+            reply: Some(tx),
+            reply_hits: vec!["btn".to_string()],
+        });
+        drive_pending_click(app.world_mut());
+        assert_eq!(
+            app.world().resource::<CursorProbe>().pos,
+            None,
+            "点击完成后探针应撤掉（None = 用真实光标）"
+        );
+        let s = rx
+            .recv_timeout(std::time::Duration::from_millis(200))
+            .expect("完成应回 ok");
+        assert!(s.contains("\"ok\":true"), "回执应 ok: {s}");
+        assert!(
+            rx.try_recv().is_err(),
+            "同一次 click 不得有第二条回执（Drop 串行污染）"
+        );
+    }
+
+    /// #2956：非 Game 态命令立即回 not in game 并排空——不得滞留到进 Game 后补执行。
+    #[test]
+    fn drain_outside_game_replies_not_in_game_and_empties_queue() {
+        use bevy::ecs::system::RunSystemOnce;
+        let (cmd_tx, cmd_rx) = bounded::<ControlCommand>(64);
+        let (rtx1, rrx1) = bounded::<String>(1);
+        let (rtx2, rrx2) = bounded::<String>(1);
+        cmd_tx
+            .send(ControlCommand::Click {
+                pos: Vec2::ZERO,
+                drag_to: None,
+                reply: rtx1,
+            })
+            .unwrap();
+        cmd_tx
+            .send(ControlCommand::GetState { reply: rtx2 })
+            .unwrap();
+        // 无回执变体：静默丢弃，不 panic
+        cmd_tx
+            .send(ControlCommand::Move {
+                dx: 1,
+                dy: 0,
+                run: false,
+            })
+            .unwrap();
+        let mut world = World::new();
+        world.insert_resource(ControlRx(cmd_rx));
+        world
+            .run_system_once(drain_control_outside_game)
+            .expect("drain 应成功");
+        for (name, rx) in [("click", &rrx1), ("state", &rrx2)] {
+            let s = rx
+                .recv_timeout(std::time::Duration::from_millis(200))
+                .unwrap_or_else(|_| panic!("{name} 应收到 not in game 回执"));
+            assert!(s.contains("not in game"), "{name} 回执: {s}");
+        }
+        assert!(
+            world.resource::<ControlRx>().0.try_recv().is_err(),
+            "队列应已排空"
+        );
+    }
 
     /// #2767：悬停光标解析——探针优先（自动化环境无真实光标），否则用窗口光标；
     /// 两者都无 → `None`（悬停系统据此早退）。

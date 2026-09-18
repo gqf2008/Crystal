@@ -910,7 +910,7 @@ fn storage_page_system(
 /// 显示/隐藏 + 物品图标渲染 + 选中高亮 + 关闭
 #[allow(clippy::type_complexity)]
 fn storage_ui_system(
-    state: Res<StorageState>,
+    mut state: ResMut<StorageState>,
     mut mgr: ResMut<DialogManager>,
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
@@ -978,6 +978,9 @@ fn storage_ui_system(
     // 关闭按钮
     for (e, inter, close) in &buttons {
         if edge(e, inter, &mut prev_inter) && close.is_some() {
+            // #2956：双闸门同步清——只 mgr.close 会留 (visible=true, mgr=closed)
+            // 失配态，此后 RPC `dialog storage toggle` 永远无法再开窗
+            state.visible = false;
             mgr.close(DialogKind::Storage);
         }
     }
@@ -1614,6 +1617,49 @@ fn storage_grid_sync_system(
 
 #[cfg(test)]
 mod tests {
+    /// #2956 回归：物理关闭钮必须**双闸门同步清**（state.visible + mgr）——
+    /// 只 `mgr.close` 会留 (visible=true, mgr=closed) 失配态，
+    /// 此后 RPC `dialog storage toggle` 永远无法再开窗（只能 open 恢复）。
+    #[test]
+    fn storage_close_click_clears_both_gates() {
+        use bevy::ecs::system::RunSystemOnce;
+        let mut world = bevy::prelude::World::new();
+        world.insert_resource(crate::map_renderer::GameLibraries(
+            crate::resources::libraries::Libraries::new(
+                crate::resources::libraries::resolve_data_path(),
+            ),
+        ));
+        world.insert_resource(bevy::prelude::Assets::<bevy::prelude::Image>::default());
+        world.insert_resource(crate::ui::sprite_ui::UiImageCache::default());
+        world.init_resource::<super::StorageState>();
+        world.init_resource::<crate::game::dialogs::DialogManager>();
+        // 预置开态：双闸门都真
+        world.resource_mut::<super::StorageState>().visible = true;
+        world
+            .resource_mut::<crate::game::dialogs::DialogManager>()
+            .open(crate::game::dialogs::DialogKind::Storage);
+        // 假关闭钮：满足 buttons 查询 (Interaction, Option<StorageClose>) + With<StorageWidget>
+        world.spawn((
+            super::StorageWidget,
+            super::StorageClose,
+            bevy::prelude::Interaction::Pressed,
+            bevy::prelude::Visibility::Visible,
+        ));
+        world
+            .run_system_once(super::storage_ui_system)
+            .expect("storage_ui_system 应运行");
+        assert!(
+            !world.resource::<super::StorageState>().visible,
+            "点 X 后 state.visible 应为 false（否则与 mgr 失配，toggle 永久失效）"
+        );
+        assert!(
+            !world
+                .resource::<crate::game::dialogs::DialogManager>()
+                .is_open(crate::game::dialogs::DialogKind::Storage),
+            "点 X 后 mgr 应为 closed"
+        );
+    }
+
     /// 交互 sweep 复现：RPC/服务端打开仓库（`state.visible=true` + `mgr.is_open`）
     /// 后，根必须翻 Visible——否则 `dialog_rect` 永远报「close button not found」。
     #[test]
