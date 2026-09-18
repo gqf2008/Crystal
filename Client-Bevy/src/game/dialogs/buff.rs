@@ -711,7 +711,13 @@ fn buff_ui_system(
             Option<&BuffIcon>,
             Option<&mut crate::ui::tooltip::UiHint>,
         ),
-        (Without<BuffExpand>, Without<BuffCount>),
+        (
+            // 必须限定 Buff 面板/图标——裸 Without 会匹配全 app 的 Visibility+Node+ImageNode
+            // 实体（同 #2954 char_skill 的踩法）：写入虽按标记分发，仍是每帧全表扫描+调度串行
+            Or<(With<BuffPanel>, With<BuffIcon>)>,
+            Without<BuffExpand>,
+            Without<BuffCount>,
+        ),
     >,
     mut count_label: Query<
         (&mut Visibility, &mut Text),
@@ -954,6 +960,45 @@ pub(crate) fn buff_server_events(
 
 #[cfg(test)]
 mod tests {
+    /// 表征（#2954 同类防护）：`panels` 查询限定 Buff 面板/图标后，
+    /// 无标记实体不得被 buff_ui_system 触碰；BuffPanel 仍被正常驱动。
+    #[test]
+    fn buff_ui_system_does_not_stomp_unrelated_widgets() {
+        use bevy::prelude::*;
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.init_resource::<super::BuffState>();
+        app.init_resource::<super::BuffAssets>();
+        app.init_resource::<crate::control::CursorProbe>();
+        app.add_systems(Update, super::buff_ui_system);
+
+        // 无窗口 → cursor None → hovered=false；无 buff → panel 目标 Hidden
+        let decoy = app
+            .world_mut()
+            .spawn((Visibility::Visible, Node::default(), ImageNode::default()))
+            .id();
+        let panel = app
+            .world_mut()
+            .spawn((
+                Visibility::Visible,
+                Node::default(),
+                ImageNode::default(),
+                super::BuffPanel,
+            ))
+            .id();
+        app.update();
+        assert_eq!(
+            app.world().entity(decoy).get::<Visibility>().unwrap(),
+            &Visibility::Visible,
+            "无标记实体不得被 buff_ui_system 触碰"
+        );
+        assert_eq!(
+            app.world().entity(panel).get::<Visibility>().unwrap(),
+            &Visibility::Hidden,
+            "BuffPanel 仍应被驱动（无 buff 无悬停 → Hidden）"
+        );
+    }
+
     use super::*;
 
     fn entry(tag: u8, ms: u32, values: Vec<i32>) -> BuffEntry {

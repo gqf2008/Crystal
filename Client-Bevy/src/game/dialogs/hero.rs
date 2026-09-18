@@ -395,23 +395,36 @@ fn hero_manage_system(
     chat: Res<crate::game::chat::ChatState>,
     input: Res<crate::game::dialogs::text_input::TextInputState>,
     avatars: Res<HeroAvatarImages>,
-    mut q: Query<(
-        Entity,
-        // 面板/图片（spawn_panel、spawn_image）没有 Interaction（只有 Button 才有），
-        // 故取 Option：显隐/换图要覆盖它们，点击只在 Some 时判定
-        Option<&Interaction>,
-        &mut Visibility,
-        &mut Node,
-        &mut ImageNode,
-        Option<&mut crate::ui::tooltip::UiHint>,
-        Option<&HeroManageWidget>,
-        Option<&HeroManageClose>,
-        Option<&HeroManageSlot>,
-        Option<&HeroManageCurrent>,
-        Option<&HeroManageConfirm>,
-        Option<&HeroManageConfirmYes>,
-        Option<&HeroManageConfirmNo>,
-    )>,
+    mut q: Query<
+        (
+            Entity,
+            // 面板/图片（spawn_panel、spawn_image）没有 Interaction（只有 Button 才有），
+            // 故取 Option：显隐/换图要覆盖它们，点击只在 Some 时判定
+            Option<&Interaction>,
+            &mut Visibility,
+            &mut Node,
+            &mut ImageNode,
+            Option<&mut crate::ui::tooltip::UiHint>,
+            Option<&HeroManageWidget>,
+            Option<&HeroManageClose>,
+            Option<&HeroManageSlot>,
+            Option<&HeroManageCurrent>,
+            Option<&HeroManageConfirm>,
+            Option<&HeroManageConfirmYes>,
+            Option<&HeroManageConfirmNo>,
+        ),
+        // 写入全部按标记分发，但裸查询仍匹配全 app 实体（每帧全表扫描+调度串行）——
+        // 限定管理窗部件（同 #2954 char_skill 的踩法）
+        Or<(
+            With<HeroManageWidget>,
+            With<HeroManageClose>,
+            With<HeroManageSlot>,
+            With<HeroManageCurrent>,
+            With<HeroManageConfirm>,
+            With<HeroManageConfirmYes>,
+            With<HeroManageConfirmNo>,
+        )>,
+    >,
     mut confirm_text: Query<&mut Text, With<HeroManageConfirmText>>,
     mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
 ) {
@@ -848,6 +861,63 @@ fn autopot_text(hp: u8, mp: u8) -> String {
 
 #[cfg(test)]
 mod tests {
+    /// 表征（#2954 同类防护）：hero_manage_system 的宽查询限定管理窗部件后，
+    /// 无标记实体不得被触碰；HeroManageWidget 显隐仍跟随 managing。
+    #[test]
+    fn hero_manage_system_does_not_stomp_unrelated_widgets() {
+        use bevy::prelude::*;
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.init_resource::<super::HeroState>();
+        app.insert_resource(crate::network::NetConnection::default());
+        app.init_resource::<crate::game::chat::ChatState>();
+        app.init_resource::<crate::game::dialogs::text_input::TextInputState>();
+        app.init_resource::<super::HeroAvatarImages>();
+        app.init_resource::<ButtonInput<KeyCode>>();
+        app.add_systems(Update, super::hero_manage_system);
+
+        let decoy = app
+            .world_mut()
+            .spawn((Visibility::Visible, Node::default(), ImageNode::default()))
+            .id();
+        let widget = app
+            .world_mut()
+            .spawn((
+                Visibility::Hidden,
+                Node::default(),
+                ImageNode::default(),
+                super::HeroManageWidget,
+            ))
+            .id();
+
+        // managing=false → widget Hidden，decoy 不动
+        app.update();
+        assert_eq!(
+            app.world().entity(decoy).get::<Visibility>().unwrap(),
+            &Visibility::Visible,
+            "无标记实体不得被 hero_manage_system 触碰"
+        );
+        assert_eq!(
+            app.world().entity(widget).get::<Visibility>().unwrap(),
+            &Visibility::Hidden,
+            "managing=false → widget Hidden"
+        );
+
+        // managing=true → widget Visible，decoy 仍不动
+        app.world_mut().resource_mut::<super::HeroState>().managing = true;
+        app.update();
+        assert_eq!(
+            app.world().entity(widget).get::<Visibility>().unwrap(),
+            &Visibility::Visible,
+            "managing=true → widget Visible"
+        );
+        assert_eq!(
+            app.world().entity(decoy).get::<Visibility>().unwrap(),
+            &Visibility::Visible,
+            "无标记实体在开窗路径下仍不得被触碰"
+        );
+    }
+
     use super::{
         behaviour_hint, behaviour_name, hero_manage_confirm_text, hero_manage_hint,
         hero_manage_system, hero_server_events, hero_slot_origin, HeroAvatarImages,
