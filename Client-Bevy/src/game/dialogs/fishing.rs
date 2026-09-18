@@ -363,15 +363,27 @@ fn fishing_ui_system(
     esc_btn: Query<(Entity, &Interaction), With<FishingEscButton>>,
     // #2892：单个 `Visibility` 查询按标记分发（多个同写 `Visibility` 的查询需要两两 `Without`，
     // 每加一个按钮就要补一圈过滤器，容易漏成运行期 B0001）
-    mut vis_q: Query<(
-        &mut Visibility,
-        Option<&FishingWidget>,
-        Option<&FishingStatusRoot>,
-        Option<&FishingCast>,
-        Option<&FishingCastDisabled>,
-        Option<&FishingAutocastBox>,
-        Option<&FishingEscTick>,
-    )>,
+    mut vis_q: Query<
+        (
+            &mut Visibility,
+            Option<&FishingWidget>,
+            Option<&FishingStatusRoot>,
+            Option<&FishingCast>,
+            Option<&FishingCastDisabled>,
+            Option<&FishingAutocastBox>,
+            Option<&FishingEscTick>,
+        ),
+        // 分发虽按标记 continue，裸查询仍匹配全 world 的 Visibility 实体（含 2D 场景精灵——
+        // 每帧全表扫描+调度串行；同 #2954 char_skill 的踩法）
+        Or<(
+            With<FishingWidget>,
+            With<FishingStatusRoot>,
+            With<FishingCast>,
+            With<FishingCastDisabled>,
+            With<FishingAutocastBox>,
+            With<FishingEscTick>,
+        )>,
+    >,
     // C# `ChanceLabel` @(14,62) 216x12
     mut chance: Query<&mut Text, With<FishingChanceLabel>>,
     // 两条 `BeforeDraw` 自绘的裁绘宽度（C# `FishingDialog.cs:347-374`）
@@ -608,6 +620,54 @@ fn fishing_server_events(
 
 #[cfg(test)]
 mod tests {
+    /// 表征（#2954 同类防护）：`vis_q` 限定钓鱼部件后，无标记实体不得被
+    /// fishing_ui_system 触碰；FishingWidget 显隐仍跟随主窗开关。
+    #[test]
+    fn fishing_ui_system_does_not_stomp_unrelated_visibility() {
+        use bevy::prelude::*;
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.init_resource::<crate::game::dialogs::DialogManager>();
+        app.init_resource::<super::FishingState>();
+        app.insert_resource(crate::network::NetConnection::default());
+        app.add_systems(Update, super::fishing_ui_system);
+
+        let decoy = app.world_mut().spawn(Visibility::Visible).id();
+        let widget = app
+            .world_mut()
+            .spawn((Visibility::Hidden, super::FishingWidget))
+            .id();
+
+        // 主窗未开 → widget Hidden，decoy 不动
+        app.update();
+        assert_eq!(
+            app.world().entity(decoy).get::<Visibility>().unwrap(),
+            &Visibility::Visible,
+            "无标记实体不得被 fishing_ui_system 触碰"
+        );
+        assert_eq!(
+            app.world().entity(widget).get::<Visibility>().unwrap(),
+            &Visibility::Hidden,
+            "主窗未开 → widget Hidden"
+        );
+
+        // 主窗开 → widget Visible，decoy 仍不动
+        app.world_mut()
+            .resource_mut::<crate::game::dialogs::DialogManager>()
+            .open(crate::game::dialogs::DialogKind::Fishing);
+        app.update();
+        assert_eq!(
+            app.world().entity(widget).get::<Visibility>().unwrap(),
+            &Visibility::Visible,
+            "主窗开 → widget Visible"
+        );
+        assert_eq!(
+            app.world().entity(decoy).get::<Visibility>().unwrap(),
+            &Visibility::Visible,
+            "无标记实体在开窗路径下仍不得被触碰"
+        );
+    }
+
     use super::*;
 
     /// #2892：两条 `BeforeDraw` 条的裁绘宽度（C# `FishingDialog.cs:353/367`：

@@ -1494,38 +1494,71 @@ fn creature_action_system(
     net: Res<NetConnection>,
     mut input: ResMut<TextInputState>,
     mut submit: MessageReader<TextInputSubmit>,
-    mut buttons: Query<(
-        Entity,
-        &Interaction,
-        &mut ImageNode,
-        &mut ImageButton,
-        Option<&mut CreatureSummonFrames>,
-        Has<CreatureRenameBtn>,
-        Has<CreatureDismissBtn>,
-        Has<CreatureSummonBtn>,
-        Has<CreatureReleaseBtn>,
-        Has<CreatureAutoBtn>,
-        Has<CreatureSemiBtn>,
-        Has<CreatureOptionsBtn>,
-        Has<CreatureRenameOk>,
-        Has<CreatureReleaseOk>,
-    )>,
-    // #1299：Bevy B0001——两个 &mut Visibility Query 冲突，用 ParamSet 顺序访问（#1298 合并后启动 panic）
-    mut vis: ParamSet<(
-        Query<(
-            &mut Visibility,
+    mut buttons: Query<
+        (
+            Entity,
+            &Interaction,
+            &mut ImageNode,
+            &mut ImageButton,
+            Option<&mut CreatureSummonFrames>,
+            Has<CreatureRenameBtn>,
             Has<CreatureDismissBtn>,
             Has<CreatureSummonBtn>,
+            Has<CreatureReleaseBtn>,
             Has<CreatureAutoBtn>,
             Has<CreatureSemiBtn>,
-        )>,
-        Query<(
-            &mut Visibility,
-            Has<CreatureRenameInput>,
-            Has<CreatureReleaseInput>,
+            Has<CreatureOptionsBtn>,
             Has<CreatureRenameOk>,
             Has<CreatureReleaseOk>,
+        ),
+        // 循环体对每个匹配按钮无条件写 node.color=WHITE——裸查询会踩全 app 的
+        // ImageButton（同 #2954 char_skill 的踩法）；SummonFrames 恒与 SummonBtn 同挂
+        Or<(
+            With<CreatureRenameBtn>,
+            With<CreatureDismissBtn>,
+            With<CreatureSummonBtn>,
+            With<CreatureReleaseBtn>,
+            With<CreatureAutoBtn>,
+            With<CreatureSemiBtn>,
+            With<CreatureOptionsBtn>,
+            With<CreatureRenameOk>,
+            With<CreatureReleaseOk>,
+            With<CreatureSummonFrames>,
         )>,
+    >,
+    // #1299：Bevy B0001——两个 &mut Visibility Query 冲突，用 ParamSet 顺序访问（#1298 合并后启动 panic）
+    mut vis: ParamSet<(
+        Query<
+            (
+                &mut Visibility,
+                Has<CreatureDismissBtn>,
+                Has<CreatureSummonBtn>,
+                Has<CreatureAutoBtn>,
+                Has<CreatureSemiBtn>,
+            ),
+            // 裸查询匹配全 world 的 Visibility 实体（同 #2954 char_skill 的踩法）
+            Or<(
+                With<CreatureDismissBtn>,
+                With<CreatureSummonBtn>,
+                With<CreatureAutoBtn>,
+                With<CreatureSemiBtn>,
+            )>,
+        >,
+        Query<
+            (
+                &mut Visibility,
+                Has<CreatureRenameInput>,
+                Has<CreatureReleaseInput>,
+                Has<CreatureRenameOk>,
+                Has<CreatureReleaseOk>,
+            ),
+            Or<(
+                With<CreatureRenameInput>,
+                With<CreatureReleaseInput>,
+                With<CreatureRenameOk>,
+                With<CreatureReleaseOk>,
+            )>,
+        >,
     )>,
     mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
 ) {
@@ -2112,6 +2145,68 @@ fn creature_server_events(
 
 #[cfg(test)]
 mod tests {
+    /// 表征（#2954 同类防护）：creature_action_system 的 buttons/vis 查询限定
+    /// 宠物部件后，无标记按钮的 `node.color` 与 Visibility 均不得被触碰；
+    /// CreatureRenameInput 显隐仍跟随 rename_open。
+    #[test]
+    fn creature_action_system_does_not_stomp_unrelated_widgets() {
+        use bevy::prelude::*;
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.init_resource::<super::CreatureState>();
+        app.insert_resource(crate::network::NetConnection::default());
+        app.init_resource::<crate::game::dialogs::text_input::TextInputState>();
+        app.add_message::<crate::game::dialogs::text_input::TextInputSubmit>();
+        app.add_systems(Update, super::creature_action_system);
+
+        // 无标记按钮：非白 color + Visible——两个维度都不得被踩
+        let tint = Color::srgb(0.5, 0.5, 0.5);
+        let mut decoy_node = ImageNode::default();
+        decoy_node.color = tint;
+        let decoy = app
+            .world_mut()
+            .spawn((
+                Button,
+                Interaction::None,
+                Node::default(),
+                decoy_node,
+                crate::ui::theme::ImageButton {
+                    normal: Handle::default(),
+                    hover: Handle::default(),
+                    pressed: Handle::default(),
+                },
+                Visibility::Visible,
+            ))
+            .id();
+        let rename_input = app
+            .world_mut()
+            .spawn((Visibility::Hidden, super::CreatureRenameInput))
+            .id();
+
+        app.world_mut()
+            .resource_mut::<super::CreatureState>()
+            .rename_open = true;
+        app.update();
+        assert_eq!(
+            app.world().entity(decoy).get::<Visibility>().unwrap(),
+            &Visibility::Visible,
+            "无标记按钮 Visibility 不得被 creature_action_system 触碰"
+        );
+        assert_eq!(
+            app.world().entity(decoy).get::<ImageNode>().unwrap().color,
+            tint,
+            "无标记按钮 node.color 不得被改写成 WHITE"
+        );
+        assert_eq!(
+            app.world()
+                .entity(rename_input)
+                .get::<Visibility>()
+                .unwrap(),
+            &Visibility::Visible,
+            "rename_open=true → CreatureRenameInput Visible"
+        );
+    }
+
     use super::*;
 
     /// #2736：C# `RefreshUI()` 的 `Enabled` 语义——未选中宠物时全部按钮禁用（但保持可见），
