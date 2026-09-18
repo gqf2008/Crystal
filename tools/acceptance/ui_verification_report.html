@@ -1,0 +1,316 @@
+<title>UI 窗口验证报告</title>
+<style>
+:root {
+  --ground: #f7f6f2;
+  --surface: #ffffff;
+  --ink: #1c2430;
+  --ink-soft: #4a5568;
+  --ink-faint: #8a94a3;
+  --line: #e2e0d8;
+  --accent: #0f766e;
+  --accent-soft: #e6f4f2;
+  --pass: #15803d;
+  --pass-soft: #e8f5ec;
+  --fail: #b91c1c;
+  --fail-soft: #fbeaea;
+  --warn: #b45309;
+  --warn-soft: #faf0e3;
+  --code-ground: #22272e;
+  --code-ink: #d6dde6;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --ground: #14181f;
+    --surface: #1c222b;
+    --ink: #e4e9f0;
+    --ink-soft: #a8b3c1;
+    --ink-faint: #6b7684;
+    --line: #2e3641;
+    --accent: #2dd4bf;
+    --accent-soft: #12312e;
+    --pass: #4ade80;
+    --pass-soft: #14291c;
+    --fail: #f87171;
+    --fail-soft: #331715;
+    --warn: #fbbf24;
+    --warn-soft: #2f2612;
+    --code-ground: #0d1117;
+    --code-ink: #c9d4e0;
+  }
+}
+:root[data-theme="dark"] {
+  --ground: #14181f;
+  --surface: #1c222b;
+  --ink: #e4e9f0;
+  --ink-soft: #a8b3c1;
+  --ink-faint: #6b7684;
+  --line: #2e3641;
+  --accent: #2dd4bf;
+  --accent-soft: #12312e;
+  --pass: #4ade80;
+  --pass-soft: #14291c;
+  --fail: #f87171;
+  --fail-soft: #331715;
+  --warn: #fbbf24;
+  --warn-soft: #2f2612;
+  --code-ground: #0d1117;
+  --code-ink: #c9d4e0;
+}
+body {
+  background: var(--ground);
+  color: var(--ink);
+  font-family: "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+  font-size: 15px;
+  line-height: 1.65;
+  padding-inline: max(16px, 4vw);
+  padding-block: 24px 64px;
+}
+main { max-width: 1080px; margin-inline: auto; }
+h1 { font-size: 1.9rem; margin-block: 0 4px; text-wrap: balance; }
+h2 {
+  font-size: 1.25rem; margin-block: 2.2em 0.6em;
+  padding-bottom: 6px; border-bottom: 2px solid var(--accent);
+}
+h3 { font-size: 1.05rem; margin-block: 1.6em 0.4em; }
+.meta { color: var(--ink-soft); font-size: 0.88rem; margin-block: 0 8px; }
+.meta code { font-size: 0.85em; }
+code {
+  background: var(--accent-soft); color: var(--accent);
+  padding: 1px 5px; border-radius: 4px; font-size: 0.88em;
+  font-family: "Cascadia Code", Consolas, monospace;
+}
+.tablewrap { overflow-x: auto; margin-block: 12px; }
+table { border-collapse: collapse; width: 100%; font-size: 0.9rem; }
+th, td { border: 1px solid var(--line); padding: 7px 10px; text-align: left; vertical-align: top; }
+th { background: var(--surface); font-weight: 600; white-space: nowrap; }
+tbody tr:nth-child(even) { background: color-mix(in srgb, var(--surface) 55%, var(--ground)); }
+.tag {
+  display: inline-block; padding: 1px 9px; border-radius: 999px;
+  font-size: 0.8rem; font-weight: 600; white-space: nowrap;
+}
+.tag.pass { background: var(--pass-soft); color: var(--pass); }
+.tag.fail { background: var(--fail-soft); color: var(--fail); }
+.tag.warn { background: var(--warn-soft); color: var(--warn); }
+.tag.info { background: var(--accent-soft); color: var(--accent); }
+.summary-cards { display: flex; flex-wrap: wrap; gap: 12px; margin-block: 18px; }
+.card {
+  background: var(--surface); border: 1px solid var(--line);
+  border-radius: 10px; padding: 14px 20px; min-width: 150px; flex: 1;
+}
+.card .num { font-size: 1.9rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+.card .lbl { color: var(--ink-soft); font-size: 0.85rem; }
+.card.good .num { color: var(--pass); }
+.card.warn .num { color: var(--warn); }
+.card.info .num { color: var(--accent); }
+figure { margin-block: 16px; }
+figure img {
+  max-width: 100%; border: 1px solid var(--line); border-radius: 8px;
+  background: #000;
+}
+figcaption { color: var(--ink-faint); font-size: 0.83rem; margin-top: 6px; }
+.shot-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; }
+.shot-grid figure { margin: 0; }
+.shot-grid a { text-decoration: none; color: inherit; }
+.shot-grid img { display: block; aspect-ratio: 4/3; object-fit: cover; object-position: top left; width: 100%; }
+.shot-grid .cap { font-size: 0.8rem; color: var(--ink-soft); padding-top: 4px; }
+.callout {
+  border-left: 4px solid var(--accent); background: var(--accent-soft);
+  padding: 10px 16px; border-radius: 0 8px 8px 0; margin-block: 14px;
+}
+.callout.warn { border-color: var(--warn); background: var(--warn-soft); }
+.callout.fail { border-color: var(--fail); background: var(--fail-soft); }
+ol.tight, ul.tight { padding-left: 1.4em; }
+ol.tight li, ul.tight li { margin-block: 4px; }
+.cmp { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+@media (max-width: 640px) { .cmp { grid-template-columns: 1fr; } }
+footer { margin-top: 48px; color: var(--ink-faint); font-size: 0.82rem; border-top: 1px solid var(--line); padding-top: 12px; }
+</style>
+
+<main>
+<h1>UI 交互窗口完整测试验证报告</h1>
+<p class="meta">2026-09-18 · 第一轮：开/关/渲染；第二轮：交互级（§9）· master @ <code>b9356911</code>（含 #2949~#2954）+ PR #2955 交互能力 · ServerRust release + Client-Bevy debug · 账号 <code>test / bevychar</code> @ BichonProvince</p>
+
+<div class="summary-cards">
+  <div class="card info"><div class="num">48</div><div class="lbl">DialogKind 全覆盖</div></div>
+  <div class="card good"><div class="num">40/40</div><div class="lbl">RPC 巡回开/关断言通过</div></div>
+  <div class="card good"><div class="num">40/40</div><div class="lbl">交互级：点 X 关全闭环 + 拖动</div></div>
+  <div class="card good"><div class="num">5</div><div class="lbl">状态驱动窗（机制确认 + 2 实机验证）</div></div>
+  <div class="card warn"><div class="num">3</div><div class="lbl">刻意无 RPC（业务流程驱动）</div></div>
+  <div class="card good"><div class="num">628/818</div><div class="lbl">客户端/服务端测试门禁全绿</div></div>
+</div>
+
+<div class="callout">
+<strong>总结论：</strong>全部 48 个交互窗口逐一验证——40 个 RPC 巡回开/关/截图断言全过，5 个状态驱动窗机制走读确认（NPC 对话、英雄管理经实机/状态路径验证通过），3 个为刻意无 RPC 的业务流程窗。第一巡<strong>发现并修复 1 个真实缺陷</strong>（NPC 对话文本区全黑，PR #2952，已实机复验）。<strong>第二轮交互级验证（§9）</strong>：40/40 窗「点 X 关」全闭环 + 拖动位移精确 + NPC/hero_manage X 点击通过——又揪出并修复 6 个真实交互缺陷（#2953/#2954/#2955，全部红→绿含回归测试）。
+</div>
+
+<h2>1. 验证方法</h2>
+<div class="tablewrap"><table>
+<thead><tr><th>方法</th><th>覆盖</th><th>说明</th></tr></thead>
+<tbody>
+<tr><td><strong>A. control RPC 巡回</strong></td><td>45 个 RPC 可映射窗口</td><td><code>ui_sweep.ps1</code>：逐窗口 <code>dialog open</code> → <code>dialogs</code> 断言在列 → 截图 → <code>dialog close</code> → 断言消失；原始数据 <code>ui_sweep_results.json</code></td></tr>
+<tr><td><strong>B. 实机业务流程</strong></td><td>NPC 对话 / 英雄管理</td><td><code>@move</code> 走位 + <code>npc_call [@MAIN]</code> 走真实服务端脚本；<code>hero_manage</code> 走 <code>HeroState.managing</code> 状态路径</td></tr>
+<tr><td><strong>C. 截图像素巡检</strong></td><td>全部 52 张</td><td>颜色多样性扫描 + 关键窗口人工目检</td></tr>
+</tbody></table></div>
+<p>关键探针区分：<code>dialogs</code> 列出 DialogManager.open（RPC 驱动窗）；<code>visible</code> 列出实际可见的 DialogRoot——<strong>状态驱动窗必须用 <code>visible</code> 断言</strong>（hero_manage 不在 DialogManager 但确实可见）。</p>
+
+<h2>2. A 类：RPC 巡回验证（40 窗口，全过）</h2>
+<p>每窗口完成 open 断言 → 截图 → close 断言，<strong>关闭后无一泄漏</strong>。点击缩略图查看原图：</p>
+<div class="shot-grid" id="grid-a"></div>
+
+<h2>3. B 类：状态驱动窗（5）</h2>
+<p>这些窗口由业务状态驱动，<code>sync_dialog_state</code>（dialogs/mod.rs:271）每帧用状态覆写 DialogManager——RPC open 被下帧还原是<strong>设计行为，不是 bug</strong>。</p>
+<div class="tablewrap"><table>
+<thead><tr><th>窗口</th><th>驱动状态</th><th>验证方式</th><th>结论</th></tr></thead>
+<tbody>
+<tr><td><code>npc</code> NPC 对话</td><td>NpcDialogState.visible</td><td>实机全流程：@move 到铁匠相邻格 → npc_call [@MAIN] → 服务端下发 1 行 → dialogs=[Minimap,Npc] → 截图</td><td><span class="tag pass">通过</span> 发现并修复 #2952</td></tr>
+<tr><td><code>hero_manage</code> 英雄管理</td><td>HeroState.managing</td><td>RPC 切状态 → visible 断言含 HeroManage → 截图 → close 后消失</td><td><span class="tag pass">通过</span></td></tr>
+<tr><td><code>trade</code> 交易</td><td>trade 会话</td><td>机制代码走读确认；真实流程需双账号</td><td><span class="tag warn">缺口</span></td></tr>
+<tr><td><code>npc_goods</code> NPC 商店</td><td>NPC 商品状态</td><td>窗口本体已经实机打开（修前截图证明面板渲染）；商品列表复验列入跟进</td><td><span class="tag warn">部分</span></td></tr>
+<tr><td><code>roll</code> 掷点</td><td>组队掉落掷点</td><td>机制代码走读确认；真实流程需组队掉落</td><td><span class="tag warn">缺口</span></td></tr>
+</tbody></table></div>
+
+<h2>4. C 类：刻意无 RPC 映射（3）</h2>
+<p><code>has_rpc_mapping</code>（control.rs:639）显式排除并带注释：均**只能**由真实业务流程驱动。</p>
+<div class="tablewrap"><table>
+<thead><tr><th>窗口</th><th>驱动方式</th><th>补验条件</th></tr></thead>
+<tbody>
+<tr><td><code>GuestTrade</code> 对方交易窗</td><td>网络 trade 会话与 Trade 成对显隐</td><td>双账号同图互发起交易</td></tr>
+<tr><td><code>Memo</code> 好友备注</td><td>好友窗「备注」动作（C# MemoDialog.Show()）</td><td>好友列表非空后点备注</td></tr>
+<tr><td><code>FishingStatus</code> 钓鱼状态</td><td>钓鱼流程驱动，与 Fishing 成对显隐</td><td>钓具 + 水边实钓</td></tr>
+</tbody></table></div>
+<p>RPC 别名验证：<code>hero_skill</code>→HeroEquipment、<code>npc_drop</code>→Npc、<code>trust_merchant</code>→Market 均正常（截图 ui_alias_*.png）。</p>
+
+<h2>5. 发现并已修复的缺陷</h2>
+<h3>5.1 NPC 对话文本区全黑（PR #2952，已合并并实机复验）</h3>
+<ol class="tight">
+<li><strong>现象</strong>：铁匠对话窗能开、服务端已下发（日志 <code>🧙 NPC 对话: 1 行</code>），文本区全黑。修复前文本区像素：主色 (14,12,11) 占 98.5%，全区域仅 162 种颜色（纯底板）。</li>
+<li><strong>根因</strong>：<code>npc_ui_system</code> 行渲染查询以 <code>With&lt;NpcDialogWidget&gt;</code> 过滤，而 8 个行实体在 f6bbef83（bevy_ui 迁移）丢了该标记 → 查询恒空 → 文字永不写入。窗口显隐走面板根，故「能开但无字」。</li>
+<li><strong>修复</strong>：行实体 spawn 补标记（1 行结构性修复）+ 回归测试 <code>npc_line_entities_carry_dialog_widget_marker</code>（红检：去掉标记 FAILED；绿检：恢复通过）。</li>
+<li><strong>审查</strong>：独立审查通过——根因链经 git 历史证实，全部同类实体（滚动条/关闭钮/任务钮/叠加标签）的标记-查询对应关系逐一核对无误命中。</li>
+<li><strong>实机复验</strong>：同流程重跑，文本区 532 种颜色（+370 = 文字字形像素），截图可见「Merchant_Smith: 你想说什么？」。</li>
+</ol>
+<div class="cmp">
+<figure><img src="shots/ui_npc_real.png" alt="修复前：NPC 对话窗文本区全黑"><figcaption>修复前 ui_npc_real.png：窗口开、数据到、文本区全黑</figcaption></figure>
+<figure><img src="shots/npc_text_fixed.png" alt="修复后：NPC 文字正常渲染"><figcaption>修复后 npc_text_fixed.png：「Merchant_Smith: 你想说什么？」正常渲染</figcaption></figure>
+</div>
+
+<h3>5.2 本链条此前修复（本次巡回确认无复发）</h3>
+<div class="tablewrap"><table>
+<thead><tr><th>PR</th><th>缺陷</th><th>本次确认</th></tr></thead>
+<tbody>
+<tr><td>#2949</td><td>腰带空槽被强制显示为白色占位块</td><td>巡回截图底部腰带槽为深色空槽 <span class="tag pass">无复发</span></td></tr>
+<tr><td>#2950+#2951</td><td>登录进图误下发 S.ManageHeroes → 英雄管理窗自开</td><td>巡回基线 dialogs=[Minimap]，无自开 <span class="tag pass">无复发</span></td></tr>
+</tbody></table></div>
+
+<figure><img src="shots/ui_hero_manage_live.png" alt="英雄管理窗"><figcaption>hero_manage 状态路径验证：8 英雄槽渲染正常（空=该账号无英雄，符合预期）；上方同时可见修复后的 NPC 对话文字</figcaption></figure>
+
+<h2>6. 覆盖缺口（如实记录）</h2>
+<div class="tablewrap"><table>
+<thead><tr><th>缺口</th><th>原因</th><th>建议补验方式</th></tr></thead>
+<tbody>
+<tr><td>trade / GuestTrade 真实交易</td><td>需双账号同图互发起</td><td>开两个客户端实例走交易会话</td></tr>
+<tr><td>roll 掷点窗</td><td>需组队+掉落触发</td><td>双账号组队击杀掉落</td></tr>
+<tr><td>npc_goods 商品列表实机复验</td><td>修前已证明窗口可开；修复后未重走商店流程</td><td>npc_call 进商店页签截图</td></tr>
+<tr><td>Memo 备注窗</td><td>需好友流程驱动</td><td>加好友后点备注</td></tr>
+<tr><td>FishingStatus 钓鱼状态窗</td><td>需钓鱼流程驱动</td><td>钓具+水边实钓</td></tr>
+<tr><td>各窗口内部控件（页签/输入/复选/下拉）</td><td>第二轮已覆盖「点 X 关」+ 拖动（§9）；内部控件未逐项</td><td>按优先级逐窗做控件级验收</td></tr>
+</tbody></table></div>
+
+<h2>7. 门禁与证据</h2>
+<div class="tablewrap"><table>
+<thead><tr><th>门禁</th><th>结果</th></tr></thead>
+<tbody>
+<tr><td>Client-Bevy cargo test --lib</td><td><span class="tag pass">628 passed / 0 failed</span>（#2952 + #2955 回归测试）</td></tr>
+<tr><td>交互巡回 ui_interact_sweep.ps1</td><td><span class="tag pass">40/40 关闭钮点击通过</span> + 拖动 + NPC/hero_manage X 点击全过</td></tr>
+<tr><td>ServerRust 全量</td><td><span class="tag pass">818 + 11 + 2 + 6 全绿</span></td></tr>
+<tr><td>rustfmt（改动文件，edition 2021）</td><td><span class="tag pass">通过</span></td></tr>
+</tbody></table></div>
+<ul class="tight">
+<li><code>tools/acceptance/ui_sweep.ps1</code> — 45 窗口自动巡回脚本（可重跑）</li>
+<li><code>tools/acceptance/ui_interact_sweep.ps1</code> — <strong>交互级巡回</strong>（click/dialog_rect；可重跑）</li>
+<li><code>tools/acceptance/ui_interact_results.json</code> — 交互巡回原始断言数据</li>
+<li><code>tools/acceptance/ui_sweep_results.json</code> — 巡回原始断言数据</li>
+<li><code>tools/acceptance/npc_text_verify.ps1</code> — NPC 实机验证脚本（可重跑）</li>
+<li><code>shots/ui_*.png</code>（48 张）— 45 窗口 + 3 别名截图；<code>ui_npc_real.png</code>/<code>npc_text_fixed.png</code> 修复前后对比；<code>ui_hero_manage_live.png</code> 英雄管理验证</li>
+</ul>
+
+<h2>8. 过程纠偏记录（本次踩坑）</h2>
+<ol class="tight">
+<li><code>nearby</code> RPC 返回字段是 <code>entities</code> 不是 <code>npcs</code>——脚本首轮误读字段报「找不到铁匠」。</li>
+<li><code>npc_call</code> 的 key 必须与服务端脚本节名大小写一致（<code>[@MAIN]</code>），不匹配则服务端静默忽略。</li>
+<li><code>chat</code> RPC 参数名是 <code>message</code> 不是 <code>text</code>——参数错时返回 missing message，@move 根本没发出去。</li>
+<li>服务端 CallNPC 有曼哈顿距离 ≤2 校验（npc.rs）——必须 @move 到相邻格再呼叫。</li>
+<li>客户端 Start-Process 启动必须带 <code>D:\toolchains\msys64\ucrt64\bin</code> 进 PATH，缺运行时 DLL 进程秒退且无日志（与火绒拦截表象相同，注意区分）。</li>
+</ol>
+
+<h2>9. 交互级验证（D 类）—— 第二轮</h2>
+<p>第一轮回答「能开、能关、渲染正确」。追问「交互验证了吗」后，第二轮回答：<strong>真的用合成鼠标点窗口右上角 X，窗口会关吗？拖动会动吗？</strong></p>
+<h3>9.1 方法与能力（PR #2955 入库）</h3>
+<div class="tablewrap"><table>
+<thead><tr><th>control RPC</th><th>语义</th></tr></thead>
+<tbody>
+<tr><td><code>click {x,y,drag_to?}</code></td><td>合成点击/拖拽：PendingClick 分阶段注入（cursor → PointerInput Move/Press/Release + MouseButtonInput），与 ui_picking 同一坐标系；回报 hover 命中栈</td></tr>
+<tr><td><code>dialog_rect {kind}</code></td><td>按 CloseButton 标记沿 ChildOf 上溯到 Visible 的 DialogRoot，返回关闭钮布局后中心（点击点）+ 根面板矩形</td></tr>
+<tr><td><code>diag_closebtn</code></td><td>全 CloseButton 组件清单 + 按需帧窗门控的 vis/on_insert 诊断</td></tr>
+</tbody></table></div>
+<p><code>CloseButton</code> 纯标记由 <code>spawn_close_button</code> 统一挂，18+ 对话框接入（dura_status 的 DialogRoot 挂在钮自身走特例）。</p>
+<h3>9.2 结果</h3>
+<ul class="tight">
+<li><strong>40/40</strong> 窗 kind「点 X 关」闭环（6 个设计无钮窗——menu/minimap/buff/refine/timer/chat_notice——走 RPC 往返）</li>
+<li><strong>拖动</strong>：inventory 按 (40,216) 拖到 (100,256)，根矩形精确 +60/+40（🖱️ 拖动对话框 Inventory）</li>
+<li><strong>NPC 实机会话</strong>：传送+呼叫 → 窗开 → 点 X 关（3 次重试防抖）</li>
+<li><strong>hero_manage</strong> 状态窗 X 点击闭环</li>
+</ul>
+<h3>9.3 本轮发现并已修复的缺陷（4+2，全部红→绿含回归测试）</h3>
+<div class="tablewrap"><table>
+<thead><tr><th>#</th><th>缺陷</th><th>修复</th><th>PR</th></tr></thead>
+<tbody>
+<tr><td>1</td><td>背包扩容钮命中区覆盖关闭钮左缘，吞 X 点击</td><td>收窄至精灵自然尺寸 48×25</td><td>#2953</td></tr>
+<tr><td>2</td><td>char_skill_system 裸 Without 查询每帧把全 app 按钮压 Hidden（开窗期间所有 X 不可点）</td><td>补 Or&lt;With&lt;CharSkillRow/Next/Back&gt;&gt; 约束</td><td>#2954</td></tr>
+<tr><td>3</td><td>input_box 根显隐从未有系统写入——服务端发起的输入框永不显示</td><td>ui_system 补 InputBoxRoot 显隐 wiring；测试 root_visibility_follows_open_state</td><td>#2955</td></tr>
+<tr><td>4</td><td>NPC Hide 级联每帧强清联动窗——服务端/RCP 开的仓库等被立即再关</td><td>改「可见→不可见」边沿触发；测试 npc_cascade_closes_linked_panels_only_on_fall_edge</td><td>#2955</td></tr>
+<tr><td>5</td><td>storage 关闭钮缺 StorageWidget——buttons 查询永不命中，点 X 无效</td><td>补挂标记；测试 storage_close_button_matches_buttons_query</td><td>#2955</td></tr>
+<tr><td>6</td><td>hero_manage 关闭钮缺 CloseButton 标记（hero_equipment 已挂、hero 漏挂）</td><td>补挂</td><td>#2955</td></tr>
+</tbody></table></div>
+<h3>9.4 诊断产物（debug 门控，常态不刷日志）</h3>
+<ul class="tight">
+<li>closebtn 组件清单 dump（<code>diag_closebtn</code>）</li>
+<li><code>on_insert</code> Visibility 回溯钩子（抓「谁把关闭钮压 Hidden」）</li>
+<li>Changed-Visibility Pre/Post watch（VisBatchWatch(N) 帧窗门控）</li>
+</ul>
+
+<footer>Generated with Claude Code · Claude Opus 5 (1M context) · 2026-09-18</footer>
+</main>
+
+<script>
+const KINDS = [
+  ["inventory","背包"],["character","角色"],["quest_log","任务日记"],["settings","设置"],
+  ["menu","菜单"],["game_shop","游戏商城"],["minimap","小地图"],["group","组队"],
+  ["friend","好友"],["inspect","观察"],["guild","行会"],["mail","邮件"],
+  ["ranking","排行"],["mentor","师徒"],["relationship","关系"],["mount","坐骑"],
+  ["report","举报"],["hero_inventory","英雄背包"],["hero_equipment","英雄装备"],["creature","宝宝/生物"],
+  ["item_rental","物品出租"],["guild_territory","行会领地"],["help","帮助"],["notice","公告"],
+  ["buff","Buff 栏"],["fishing","钓鱼"],["socket","镶嵌"],["refine","精炼"],
+  ["craft","打造"],["dura_status","耐久状态"],["npc_awake","NPC 觉醒"],["timer","计时器"],
+  ["keyboard_layout","键位设置"],["big_map","大地图"],["chat_notice","聊天通知"],["market","寄售行"],
+  ["storage","仓库"],["item_rental_browse","已租出浏览"],["quest_detail","任务详情"],["input_box","输入框"]
+];
+const grid = document.getElementById("grid-a");
+for (const [kind, label] of KINDS) {
+  const fig = document.createElement("figure");
+  const a = document.createElement("a");
+  a.href = "shots/ui_" + kind + ".png";
+  a.target = "_blank";
+  const img = document.createElement("img");
+  img.src = "shots/ui_" + kind + ".png";
+  img.alt = label;
+  img.loading = "lazy";
+  const cap = document.createElement("div");
+  cap.className = "cap";
+  cap.textContent = label + "（" + kind + "）";
+  a.appendChild(img);
+  fig.appendChild(a);
+  fig.appendChild(cap);
+  grid.appendChild(fig);
+}
+</script>
