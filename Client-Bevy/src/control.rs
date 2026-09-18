@@ -296,7 +296,9 @@ impl Plugin for ControlPlugin {
             drain_control_outside_game.run_if(bevy::prelude::not(in_state(AppState::Game))),
         );
         // 合成点击驱动：First 调度，抢在 PreUpdate picking/input 消费前写消息；
-        // 不加 run_if——资源不在即空转（登录界面也可点）
+        // 不加 run_if——资源不在即空转。注意 #2956：非 Game 态的新 click 命令在
+        // First 就被 drain_control_outside_game 回 not in game 排空，到不了这里；
+        // 本系统跨状态存活的只有「Game 内创建、状态切换时在途」的 click。
         app.add_systems(First, drive_pending_click);
         // diag_closebtn：exclusive inspect（组件清单含写入者特征 marker）
         app.add_systems(First, diag_closebtn_inspect.after(drive_pending_click));
