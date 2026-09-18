@@ -1,6 +1,7 @@
 // ============================================================================
 // control.rs 客户端内置控制接口（TCP JSON-RPC，供 MCP/agent 控制玩家）
-// 监听 127.0.0.1:9000，每行一条 JSON-RPC。
+// 监听 127.0.0.1:<端口>（--control-port 可配，默认 9000；双客户端并行验证时各用一端口），
+// 每行一条 JSON-RPC。
 //   move {dx,dy,run}     相对玩家瓦片偏移移动（dx/dy 为瓦片数）
 //   screenshot {path}    保存当前帧截图
 //   state {}             返回玩家位置/朝向
@@ -276,6 +277,29 @@ struct ControlQueries<'w, 's> {
     >,
 }
 
+/// 控制端口默认值（--control-port 未指定或非法时回退）
+const DEFAULT_CONTROL_PORT: u16 = 9000;
+
+/// 解析 --control-port <u16>：合法值用之；缺省/非法（非数字、超范围、缺参数）
+/// warn 并回退 9000。纯函数便于单测；跟随仓库分散 env::args 解析风格
+/// （比照 network/mod.rs resolve_net_mode、auto/navigation.rs --e2e-user）。
+fn parse_control_port(args: &[String]) -> u16 {
+    let Some(i) = args.iter().position(|a| a == "--control-port") else {
+        return DEFAULT_CONTROL_PORT;
+    };
+    let Some(raw) = args.get(i + 1) else {
+        tracing::warn!("[control] --control-port 缺参数，回退 {DEFAULT_CONTROL_PORT}");
+        return DEFAULT_CONTROL_PORT;
+    };
+    match raw.parse::<u16>() {
+        Ok(port) => port,
+        Err(_) => {
+            tracing::warn!("[control] --control-port 非法值 {raw:?}，回退 {DEFAULT_CONTROL_PORT}");
+            DEFAULT_CONTROL_PORT
+        }
+    }
+}
+
 pub struct ControlPlugin;
 
 impl Plugin for ControlPlugin {
@@ -284,7 +308,8 @@ impl Plugin for ControlPlugin {
         app.insert_resource(ControlRx(rx));
         // #2767：光标探针（悬停类系统的自动化入口）
         app.init_resource::<CursorProbe>();
-        std::thread::spawn(move || control_listener(tx));
+        let port = parse_control_port(&std::env::args().collect::<Vec<_>>());
+        std::thread::spawn(move || control_listener(tx, port));
         app.add_systems(
             Update,
             apply_control_commands.run_if(in_state(AppState::Game)),
@@ -332,15 +357,16 @@ impl Plugin for ControlPlugin {
     }
 }
 
-fn control_listener(tx: Sender<ControlCommand>) {
-    let listener = match TcpListener::bind("127.0.0.1:9000") {
+fn control_listener(tx: Sender<ControlCommand>, port: u16) {
+    let addr = format!("127.0.0.1:{port}");
+    let listener = match TcpListener::bind(&addr) {
         Ok(l) => l,
         Err(e) => {
-            tracing::warn!("[control] 绑定 9000 失败: {e}");
+            tracing::warn!("[control] 绑定 {addr} 失败: {e}");
             return;
         }
     };
-    tracing::info!("[control] 监听 127.0.0.1:9000");
+    tracing::info!("[control] 监听 {addr}");
     for stream in listener.incoming() {
         let Ok(stream) = stream else { continue };
         let tx = tx.clone();
@@ -1791,5 +1817,44 @@ mod tests {
             parse_dialog_kind("Inventory").is_none(),
             "snake_case 小写约定"
         );
+    }
+
+    /// --control-port 未指定：回退默认 9000（含参数表里根本没有该 flag）。
+    #[test]
+    fn parse_control_port_defaults_to_9000() {
+        let args: Vec<String> = vec!["client_bevy".into()];
+        assert_eq!(parse_control_port(&args), 9000);
+        let args: Vec<String> = vec!["client_bevy".into(), "--real-net".into()];
+        assert_eq!(parse_control_port(&args), 9000);
+    }
+
+    /// --control-port 指定合法 u16：用之（双客户端并行各听一端口的前置）。
+    #[test]
+    fn parse_control_port_uses_given_value() {
+        let args: Vec<String> = vec!["client_bevy".into(), "--control-port".into(), "9001".into()];
+        assert_eq!(parse_control_port(&args), 9001);
+    }
+
+    /// --control-port 非法值（非数字/超范围/缺参数）：warn 并回退 9000。
+    #[test]
+    fn parse_control_port_invalid_falls_back_to_9000() {
+        for bad in ["abc", "65536", "-1", "9.5", "", "--real-net"] {
+            let args: Vec<String> =
+                vec!["client_bevy".into(), "--control-port".into(), bad.into()];
+            assert_eq!(parse_control_port(&args), 9000, "非法值 {bad:?} 应回退 9000");
+        }
+        // flag 在末尾、值缺失：同样回退
+        let args: Vec<String> = vec!["client_bevy".into(), "--control-port".into()];
+        assert_eq!(parse_control_port(&args), 9000);
+    }
+
+    /// --control-port 边界：0 与 65535 均为合法 u16，照常接受。
+    #[test]
+    fn parse_control_port_accepts_boundary_values() {
+        for (raw, want) in [("0", 0u16), ("65535", 65535u16)] {
+            let args: Vec<String> =
+                vec!["client_bevy".into(), "--control-port".into(), raw.into()];
+            assert_eq!(parse_control_port(&args), want, "边界值 {raw} 应接受");
+        }
     }
 }
