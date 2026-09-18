@@ -85,8 +85,9 @@ foreach ($k in $kinds) {
 }
 
 # ---- 拖动测试：inventory 面板空白区拖动 (60,40) ----
-# 按点避开控件行：inventory 页签 x 6..218、关闭钮 x 289+——按 (rx+260, ry+15)
-# 落在 Title[196] 背景空白区（按钮场景拖动才起拖：C# MirDialog 空白区 BudDrag）
+# 按点避开控件：inventory 页签 x 6..218、扩容钮 x 235..283、关闭钮 x 289+、
+# 网格行 4 止于 y=201、删除钮 (291,212)——按 (rx+40, ry+216) 落在面板左下空白带
+# （按钮场景拖动才起拖：C# MirDialog 空白区 BudDrag）
 Write-Host '--- 拖动测试: inventory ---'
 Rpc 'dialog' @{ kind = 'inventory'; action = 'open' } | Out-Null
 Start-Sleep -Milliseconds 800

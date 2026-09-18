@@ -218,7 +218,7 @@ control RPC（127.0.0.1:9000）：`dialog {kind,action}` / `dialogs`（列 Dialo
 | 3 | **input_box 根显隐从未有系统写入**——服务端发起（公会取名/宣战/NPC 输入）的输入框永不显示 | ui_system 补 `InputBoxRoot` 显隐 wiring；测试 `root_visibility_follows_open_state` | #2955 |
 | 4 | **NPC Hide 级联每帧强清**联动窗——任何 NPC 窗未开时刻，服务端/RPC 开的仓库/出售/商品窗都被立即再关 | 改「可见→不可见」边沿触发；测试 `npc_cascade_closes_linked_panels_only_on_fall_edge` | #2955 |
 | 5 | **storage 关闭钮缺 `StorageWidget`**——buttons 查询域 `With<StorageWidget>` 永不命中，实机点 X 无效 | 补挂标记；测试 `storage_close_button_matches_buttons_query` | #2955 |
-| 6 | hero_manage 关闭钮缺 `CloseButton` 标记（hero_equipment 已挂、hero 漏挂） | 补挂 | #2955 |
+| 6 | hero_manage 关闭钮缺 `CloseButton` 标记（hero_equipment 亦同批补挂） | 补挂 | #2955 |
 
 ### 9.4 诊断产物（debug 门控，常态不刷日志）
 
