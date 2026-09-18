@@ -21,7 +21,8 @@ use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
 use crate::ui::sprite_ui::{shared_cjk_font, UiCjkFont};
 use crate::ui::theme::{
-    load_lib_image, spawn_icon_button, spawn_label, spawn_label_center, spawn_panel, ImageButton,
+    load_lib_image, spawn_icon_button, spawn_label, spawn_label_center, spawn_panel, CloseButton,
+    ImageButton,
 };
 
 /// #2892：面板几何对齐 C# `RankingDialog.cs:37-46`——
@@ -315,7 +316,7 @@ fn spawn_ranking(
                 CLOSE_SIZE.1,
                 10,
             )
-            .insert(RankingClose);
+            .insert((RankingClose, CloseButton));
         }
         // 页签 6 个（构造顺序 All/Tao/War/Wiz/Sin/Arch，`SelectRank` 映射见 `TAB_RANK`）。
         // Hint 文案逐项取 C# `RankingDialog.cs:65/89/101/77/113/125`。

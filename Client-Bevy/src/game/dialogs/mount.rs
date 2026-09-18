@@ -16,7 +16,7 @@ use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
 use crate::ui::sprite_ui::{shared_cjk_font, UiCjkFont, UiFont};
 use crate::ui::theme::{
-    load_lib_image, spawn_container, spawn_icon_button, spawn_label, spawn_panel,
+    load_lib_image, spawn_container, spawn_icon_button, spawn_label, spawn_panel, CloseButton,
 };
 
 /// #2892 批B：面板精灵与 C# 原生尺寸/坐标（C# `MountDialog.Index = 167; Location = (10,30)`；
@@ -126,7 +126,8 @@ fn spawn_mount(
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 361),
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 362),
         ) {
-            spawn_icon_button(p, n, h, pr, 297.0, 3.0, 24.0, 21.0, 10).insert(MountClose);
+            spawn_icon_button(p, n, h, pr, 297.0, 3.0, 24.0, 21.0, 10)
+                .insert((MountClose, CloseButton));
         }
         if let (Some(n), Some(h), Some(pr)) = (
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 257),

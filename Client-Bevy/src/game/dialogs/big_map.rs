@@ -26,6 +26,7 @@ use crate::ui::outlined_text::spawn_outlined_label;
 use crate::ui::sprite_ui::{UiCjkFont, UiFont};
 use crate::ui::theme::{
     load_lib_image, spawn_container, spawn_icon_button, spawn_image, spawn_label, spawn_panel,
+    CloseButton,
 };
 
 /// #2892 批B：面板精灵（C# `BigMapDialog.Index = 820; Library = Libraries.Title; Location = Center`）
@@ -218,7 +219,7 @@ fn spawn_big_map(
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 362),
         ) {
             spawn_icon_button(p, n, h, pr, pw - 25.0, 3.0, 24.0, 21.0, 8)
-                .insert(BigMapBtn(BigMapBtnKind::Close));
+                .insert((BigMapBtn(BigMapBtnKind::Close), CloseButton));
         }
         // 视口背景（深色底）
         spawn_container(p, VIEW_X, VIEW_Y, VIEW_W, VIEW_H, 0)

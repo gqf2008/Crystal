@@ -562,13 +562,10 @@ pub(crate) fn map_rebuild_system(world: &mut World) {
     // 给本地玩家同时挂 LocalPlayer 和 NetObjectId，误删 Without<LocalPlayer>
     // 排除条件换图即删玩家（过滤器写法对齐 actor::despawn_local_player 的清理面）。
     {
-        let mut q = world.query_filtered::<
-            Entity,
-            (
-                With<crate::actor::NetObjectId>,
-                Without<crate::actor::LocalPlayer>,
-            ),
-        >();
+        let mut q = world.query_filtered::<Entity, (
+            With<crate::actor::NetObjectId>,
+            Without<crate::actor::LocalPlayer>,
+        )>();
         let ghosts: Vec<Entity> = q.iter(world).collect();
         for e in ghosts {
             let _ = world.despawn(e);
@@ -858,10 +855,7 @@ mod tests {
             e.get::<LocalMove>().is_none(),
             "换图后 LocalMove 必须清除（旧路径不得带入新图）"
         );
-        assert!(
-            e.get::<MoveTween>().is_none(),
-            "换图后 MoveTween 必须清除"
-        );
+        assert!(e.get::<MoveTween>().is_none(), "换图后 MoveTween 必须清除");
         let p = tile_to_world(10, 20);
         let tf = e.get::<Transform>().expect("本地玩家应有 Transform");
         assert_eq!(

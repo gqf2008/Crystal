@@ -3508,12 +3508,7 @@ mod tests {
     fn add_button_hit_area_must_not_overlap_close_button() {
         use crate::ui::theme::CLOSE_BTN_SIZE;
         let add = (235.0, 5.0, ADD_BTN_W, ADD_BTN_H);
-        let cls = (
-            CLOSE_POS.0,
-            CLOSE_POS.1,
-            CLOSE_BTN_SIZE.0,
-            CLOSE_BTN_SIZE.1,
-        );
+        let cls = (CLOSE_POS.0, CLOSE_POS.1, CLOSE_BTN_SIZE.0, CLOSE_BTN_SIZE.1);
         let overlap_x = add.0 < cls.0 + cls.2 && cls.0 < add.0 + add.2;
         let overlap_y = add.1 < cls.1 + cls.3 && cls.1 < add.1 + add.3;
         assert!(

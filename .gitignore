@@ -377,7 +377,13 @@ FodyWeavers.xsd
 
 
 # 开发调试产物（截图/辅助脚本）
-/tools/
+/tools/*
+# 例外：上线准入的实机交互验证脚本（40 窗点击巡回 + NPC/hero/manage 验证）要点纳入管理
+!tools/acceptance/
+/tools/acceptance/*
+!tools/acceptance/ui_interact_sweep.ps1
+!tools/acceptance/UI_VERIFICATION_REPORT.md
+!tools/acceptance/ui_verification_report.html
 
 # 客户端运行时本地设置（游戏自写自读，不入库；两个客户端都按进程 CWD 相对路径写，
 # 故用不带前导斜杠的模式覆盖任意启动目录）

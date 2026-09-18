@@ -24,7 +24,7 @@ use crate::scenes::AppState;
 use crate::ui::sprite_ui::{shared_cjk_font, UiCjkFont, UiFont};
 use crate::ui::theme::{
     load_lib_image, spawn_container, spawn_icon_button, spawn_image, spawn_label,
-    spawn_label_center, spawn_panel, ImageButton,
+    spawn_label_center, spawn_panel, CloseButton, ImageButton,
 };
 
 /// 宠物条目
@@ -672,7 +672,8 @@ fn spawn_creature(
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 361),
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 362),
         ) {
-            spawn_icon_button(p, n, h, pr, 427.0, 3.0, 24.0, 21.0, 10).insert(CreatureClose);
+            spawn_icon_button(p, n, h, pr, 427.0, 3.0, 24.0, 21.0, 10)
+                .insert((CreatureClose, CloseButton));
         }
         // C# 三行信息（`CreatureInfo`/`CreatureInfo1`/`CreatureInfo2`，@19,161/176/191）
         for (i, y) in [(0u8, 161.0), (1, 176.0), (2, 191.0)] {

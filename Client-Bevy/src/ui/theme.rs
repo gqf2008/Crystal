@@ -253,6 +253,10 @@ pub fn spawn_icon_button<'a>(
     ))
 }
 
+/// 标准关闭钮标记（全 UI 交互验证：dialog_rect RPC 按它定位关闭钮中心）
+#[derive(bevy::prelude::Component)]
+pub struct CloseButton;
+
 /// C# 标准关闭钮 `Prguse2[360..362]` 原生尺寸：各对话框均不设 `Size`
 /// （如 `FriendDialog.cs:120-129`）→ 取 art 24x21。Bevy 侧曾统一自造 20x20，
 /// `abs_node` 把 24x21 的图压进 20x20 节点。
@@ -275,7 +279,7 @@ pub fn spawn_close_button<'a>(
     ) else {
         return None;
     };
-    Some(spawn_icon_button(
+    let mut ec = spawn_icon_button(
         parent,
         n,
         h,
@@ -285,7 +289,9 @@ pub fn spawn_close_button<'a>(
         CLOSE_BTN_SIZE.0,
         CLOSE_BTN_SIZE.1,
         z,
-    ))
+    );
+    ec.insert(CloseButton);
+    Some(ec)
 }
 
 /// 子节点：水平居中文本（cx=中心 x，width=排版宽度，`Justify::Center`），**默认带描边**

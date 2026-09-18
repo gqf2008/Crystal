@@ -356,7 +356,9 @@ fn hero_belt_ui_system(
     let (dx, dy) = drag.offset(crate::game::dialogs::window_drag::DragWindow::HeroBelt);
     let (px, py) = (px + dx, py + dy);
 
-    for (e, mut node, _, mut img, inter, mut btn, bg, overlay, slot, num, rot, cls, ..) in &mut items {
+    for (e, mut node, _, mut img, inter, mut btn, bg, overlay, slot, num, rot, cls, ..) in
+        &mut items
+    {
         if bg.is_some() {
             if let Some(h) = load_lib_image(
                 &mut libs,

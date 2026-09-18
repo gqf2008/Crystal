@@ -20,7 +20,7 @@ use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
 use crate::ui::sprite_ui::UiFont;
 use crate::ui::theme::{
-    load_lib_image, spawn_icon_button, spawn_item_cell_ui, spawn_panel, UiItemCellData,
+    load_lib_image, spawn_icon_button, spawn_item_cell_ui, spawn_panel, CloseButton, UiItemCellData,
 };
 
 /// C# `CharacterDialog(HeroEquipment, hero)`：`Index = 504; Library = Libraries.Title;
@@ -158,7 +158,7 @@ fn spawn_hero_equipment(
         ) {
             // C# 无 `Size` → art 24x21（此前 20x20 是自造尺寸）
             spawn_icon_button(p, n, h, pr, CLOSE_REL.0, CLOSE_REL.1, 24.0, 21.0, 10)
-                .insert(HeroEquipClose);
+                .insert((HeroEquipClose, CloseButton));
         }
     });
 }

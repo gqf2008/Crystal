@@ -33,8 +33,8 @@ mod chunks_build;
 
 use camera::{camera_control, camera_follow_system, map_layer_toggle_system, spawn_camera};
 use chunks::{chunk_stream_system, spawn_front_chunk};
-pub use chunks_build::{build_chunk_rgba, make_image};
 pub(crate) use chunks_build::map_rebuild_system;
+pub use chunks_build::{build_chunk_rgba, make_image};
 use chunks_build::{cleanup_map_world, setup_world};
 
 /// 瓦片尺寸（与 macroquad 版一致）

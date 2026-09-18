@@ -25,7 +25,7 @@ use crate::scenes::AppState;
 use crate::ui::sprite_ui::{shared_cjk_font, UiCjkFont, UiFont};
 use crate::ui::theme::{
     load_lib_image, spawn_icon_button, spawn_image, spawn_label, spawn_label_center, spawn_panel,
-    ImageButton,
+    CloseButton, ImageButton,
 };
 
 /// #2892 批B：面板精灵与 C# 原生尺寸（C# `HelpDialog.Index = 920; Library = Libraries.Prguse`）
@@ -249,7 +249,11 @@ fn spawn_help(
                 load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, h),
                 load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, pr),
             ) {
-                spawn_icon_button(p, nh, hh, ph, rx, ry, 16.0, 16.0, 10).insert(HelpBtn(kind));
+                let mut ec = spawn_icon_button(p, nh, hh, ph, rx, ry, 16.0, 16.0, 10);
+                ec.insert(HelpBtn(kind));
+                if matches!(kind, HelpBtnKind::Close) {
+                    ec.insert(CloseButton);
+                }
             }
         }
         // 页标题（居中 @(268,54) 242x30）

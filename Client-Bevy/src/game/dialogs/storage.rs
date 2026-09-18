@@ -28,7 +28,7 @@ use crate::scenes::AppState;
 use crate::ui::sprite_ui::{shared_cjk_font, UiCjkFont, UiFont};
 use crate::ui::theme::{
     load_lib_image, spawn_container, spawn_icon_button, spawn_image, spawn_item_cell_ui_root,
-    spawn_label, spawn_panel, ImageButton, UiItemCell, UiItemCellData, UiItemCellIcon,
+    spawn_label, spawn_panel, CloseButton, ImageButton, UiItemCell, UiItemCellData, UiItemCellIcon,
 };
 
 /// #2892 批B：面板精灵与 C# 原生尺寸（C# `StorageDialog.Index = 586; Library = Libraries.Prguse`）
@@ -417,8 +417,13 @@ fn spawn_storage_dialog(
                 CLOSE_SPRITES[2].1,
             ),
         ) {
-            spawn_icon_button(p, n, h, pr, CLOSE_POS.0, CLOSE_POS.1, 24.0, 21.0, 10)
-                .insert(StorageClose);
+            // StorageClose 判定查询带 `With<StorageWidget>`——必须同时挂，
+            // 否则 ui_system 的关闭分支永不命中（交互 sweep closed=NO 根因）
+            spawn_icon_button(p, n, h, pr, CLOSE_POS.0, CLOSE_POS.1, 24.0, 21.0, 10).insert((
+                StorageWidget,
+                StorageClose,
+                CloseButton,
+            ));
         }
         // 两行提示（C# `RentalLabel` @(40,322) / `StoragePasswordLabel` @(40,304)）
         spawn_label(
@@ -1609,6 +1614,107 @@ fn storage_grid_sync_system(
 
 #[cfg(test)]
 mod tests {
+    /// 交互 sweep 复现：RPC/服务端打开仓库（`state.visible=true` + `mgr.is_open`）
+    /// 后，根必须翻 Visible——否则 `dialog_rect` 永远报「close button not found」。
+    #[test]
+    fn storage_root_visible_when_gate_true() {
+        use bevy::ecs::system::RunSystemOnce;
+        if !crate::resources::libraries::data_assets_present() {
+            eprintln!("skip storage_root_visible_when_gate_true: 无 Data 资产");
+            return;
+        }
+        let mut world = bevy::prelude::World::new();
+        world.insert_resource(crate::map_renderer::GameLibraries(
+            crate::resources::libraries::Libraries::new(
+                crate::resources::libraries::resolve_data_path(),
+            ),
+        ));
+        world.insert_resource(bevy::prelude::Assets::<bevy::prelude::Image>::default());
+        world.insert_resource(crate::ui::sprite_ui::UiImageCache::default());
+        world.init_resource::<super::StorageState>();
+        world.init_resource::<crate::game::dialogs::DialogManager>();
+        let root = world
+            .spawn((
+                super::StorageWidget,
+                crate::game::dialogs::DialogRoot(crate::game::dialogs::DialogKind::Storage),
+                bevy::prelude::Visibility::Hidden,
+            ))
+            .id();
+        // 关栈 + visible=true → 仍 Hidden；open + visible=true → Visible
+        let gate = |world: &mut bevy::prelude::World, open: bool, visible: bool| {
+            {
+                let mut mgr = world.resource_mut::<crate::game::dialogs::DialogManager>();
+                if open {
+                    mgr.open(crate::game::dialogs::DialogKind::Storage);
+                } else {
+                    mgr.close(crate::game::dialogs::DialogKind::Storage);
+                }
+            }
+            world.resource_mut::<super::StorageState>().visible = visible;
+            world
+                .run_system_once(super::storage_ui_system)
+                .expect("storage_ui_system 应运行")
+        };
+        let vis = |world: &bevy::prelude::World| {
+            *world
+                .entity(root)
+                .get::<bevy::prelude::Visibility>()
+                .unwrap()
+        };
+
+        gate(&mut world, false, true);
+        assert_eq!(
+            vis(&world),
+            bevy::prelude::Visibility::Hidden,
+            "仅 visible=true 但栈未开 → 应 Hidden"
+        );
+
+        gate(&mut world, true, true);
+        assert_eq!(
+            vis(&world),
+            bevy::prelude::Visibility::Visible,
+            "RPC open 路径（visible+栈都真）→ 应 Visible"
+        );
+    }
+
+    /// 回归（交互 sweep `storage closed=NO`）：仓库关闭钮必须满足
+    /// `storage_ui_system.buttons` 查询的 `With<StorageWidget>` 过滤——
+    /// 修复后 spawn 处同时挂 `(StorageWidget, StorageClose, CloseButton)`，
+    /// 否则点击进入不了关闭分支。
+    #[test]
+    fn storage_close_button_matches_buttons_query() {
+        use crate::game::dialogs::storage::StorageClose;
+        if !crate::resources::libraries::data_assets_present() {
+            eprintln!("skip: 无 Data 资产");
+            return;
+        }
+        let mut world = bevy::prelude::World::new();
+        world.insert_resource(crate::map_renderer::GameLibraries(
+            crate::resources::libraries::Libraries::new(
+                crate::resources::libraries::resolve_data_path(),
+            ),
+        ));
+        world.insert_resource(bevy::prelude::Assets::<bevy::prelude::Image>::default());
+        world.insert_resource(bevy::prelude::Assets::<bevy::prelude::Font>::default());
+        world.insert_resource(crate::ui::sprite_ui::UiCjkFont::default());
+        world.insert_resource(crate::ui::sprite_ui::UiFont::default());
+        use bevy::ecs::system::RunSystemOnce;
+        world
+            .run_system_once(super::spawn_storage_dialog)
+            .expect("spawn_storage_dialog 应成功");
+
+        let mut qd =
+            world.query_filtered::<bevy::prelude::Entity, super::With<super::StorageClose>>();
+        let close_ents: Vec<bevy::prelude::Entity> = qd.iter(&world).collect();
+        assert_eq!(close_ents.len(), 1, "spawn 应恰有一个仓库关闭钮");
+        for e in close_ents {
+            assert!(
+                world.entity(e).contains::<super::StorageWidget>(),
+                "StorageClose（{e:?}）必须带 StorageWidget，否则 buttons 查询永不命中"
+            );
+        }
+    }
+
     /// #2825 单元①：C# `StorageDialog` 未设 `Movable`（`NPCDialogs.cs:2798` → 默认 false）→
     /// 面板/密码面板/解锁面板/格子等**所有** `DialogRoot(DialogKind::Storage)` 都要 `NotDraggable`
     #[test]

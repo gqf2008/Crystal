@@ -790,11 +790,7 @@ fn char_skill_system(
         (
             // 必须限定技能行/翻页钮——裸 Without 会匹配全 app 所有 Visibility+Interaction
             // 实体，开窗期间把别的按钮（含本窗页签/关闭钮）每帧压 Hidden（实机交互验证发现）
-            Or<(
-                With<CharSkillRow>,
-                With<CharSkillNext>,
-                With<CharSkillBack>,
-            )>,
+            Or<(With<CharSkillRow>, With<CharSkillNext>, With<CharSkillBack>)>,
             Without<CharSkillRowChild>,
             Without<CharSkillText>,
             Without<CharSkillIcon>,

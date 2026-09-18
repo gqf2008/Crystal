@@ -26,7 +26,7 @@ use crate::scenes::AppState;
 use crate::ui::sprite_ui::{shared_cjk_font, UiCjkFont, UiFont};
 use crate::ui::theme::{
     load_lib_image, spawn_container, spawn_dropdown_ui, spawn_icon_button, spawn_image,
-    spawn_label, spawn_panel, spawn_scroll_bar_ui, UiDropDown, UiScrollList,
+    spawn_label, spawn_panel, spawn_scroll_bar_ui, CloseButton, UiDropDown, UiScrollList,
 };
 
 /// #2892 批B：面板精灵（C# `GuildDialog.Index = 180; Library = Libraries.Prguse`；实测 590x432）
@@ -712,7 +712,7 @@ fn spawn_guild(
                 CLOSE_SIZE.1,
                 9,
             )
-            .insert(GuildBtn(GuildBtnKind::Close));
+            .insert((GuildBtn(GuildBtnKind::Close), CloseButton));
         }
     });
 

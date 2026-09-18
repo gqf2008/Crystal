@@ -944,7 +944,9 @@ mod tests {
             roll.visible = true;
             roll.result = 5;
         }
-        app.world_mut().resource_mut::<fishing::FishingState>().fishing = true;
+        app.world_mut()
+            .resource_mut::<fishing::FishingState>()
+            .fishing = true;
         app.world_mut().resource_mut::<memo::MemoState>().open = true;
         app.world_mut()
             .resource_mut::<npc::NpcDialogState>()
@@ -1124,7 +1126,7 @@ pub struct DialogZ {
 
 /// 根面板 Node 矩形（屏幕坐标：根面板是 UI 根的子节点，left/top 即绝对坐标）。
 /// bevy_ui 对话框根面板均显式设置 Px 尺寸；非 Px 回退 0（防御）。
-fn node_rect(node: &Node) -> (f32, f32, f32, f32) {
+pub(crate) fn node_rect(node: &Node) -> (f32, f32, f32, f32) {
     let x = match node.left {
         Val::Px(v) => v,
         _ => 0.0,
@@ -1445,10 +1447,7 @@ impl Plugin for DialogsPlugin {
         // #182 登出 / M6 断线 / #289 ReturnToLogin：离开 Game 时统一清理对话框与会话
         // 状态。挂 OnExit 与实体清理同帧同语义——三条离开路径（登出回 Select、
         // ReturnToLogin/断线回 Login）都经过状态迁移，无轮询上升沿的排序时序孔
-        app.add_systems(
-            OnExit(AppState::Game),
-            clear_dialog_session_on_exit,
-        );
+        app.add_systems(OnExit(AppState::Game), clear_dialog_session_on_exit);
         app.add_systems(
             Update,
             crate::ui::scroll_list::scroll_list_system.run_if(in_state(AppState::Game)),

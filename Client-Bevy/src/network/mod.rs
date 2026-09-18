@@ -600,7 +600,10 @@ mod tests {
             "断线必须覆盖同帧 MapChanged 的 Pending(Game)，否则卡在 Game 态满屏幽灵"
         );
         assert!(
-            app.world().resource::<NetConnection>().disconnected.is_some(),
+            app.world()
+                .resource::<NetConnection>()
+                .disconnected
+                .is_some(),
             "断线原因应已记录"
         );
         assert_eq!(

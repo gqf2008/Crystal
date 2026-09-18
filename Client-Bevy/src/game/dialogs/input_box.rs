@@ -29,7 +29,7 @@ use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
 use crate::ui::sprite_ui::{shared_cjk_font, UiCjkFont};
-use crate::ui::theme::{load_lib_image, spawn_icon_button, spawn_label, spawn_panel};
+use crate::ui::theme::{load_lib_image, spawn_icon_button, spawn_label, spawn_panel, CloseButton};
 
 /// 面板 `Prguse[660]`（原生 288x156）
 pub const PANEL_INDEX: usize = 660;
@@ -195,7 +195,7 @@ fn spawn_input_box(
             load_lib_image(&mut libs, &mut images, LibraryName::Title, CANCEL_FRAMES.2),
         ) {
             spawn_icon_button(p, n, h, pr, CANCEL_POS.0, CANCEL_POS.1, 76.0, 25.0, 10)
-                .insert(InputBoxCancel);
+                .insert((InputBoxCancel, CloseButton));
         }
     });
 }
@@ -270,11 +270,24 @@ fn input_box_ui_system(
     ok: Query<&Interaction, (With<InputBoxOk>, Without<InputBoxCancel>)>,
     cancel: Query<&Interaction, (With<InputBoxCancel>, Without<InputBoxOk>)>,
     mut captions: Query<&mut Text, With<InputBoxCaption>>,
+    mut roots: Query<&mut Visibility, With<InputBoxRoot>>,
     mut submits: MessageReader<TextInputSubmit>,
     mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
 ) {
     // 状态 → 管理栈（Modal：打开即屏蔽世界输入；C# `MirInputBox.Modal = true`）
     sync_dialog_state(&mut mgr, DialogKind::InputBox, state.open);
+    // 根显隐跟随业务状态（hero_manage 等状态驱动窗的既有做法）：spawn 置 Hidden，
+    // `enforce_dialog_visibility` 只隐藏非 open 根，从不恢复——没有这里，输入框永远不可见。
+    let want = if state.open {
+        Visibility::Visible
+    } else {
+        Visibility::Hidden
+    };
+    for mut vis in &mut roots {
+        if *vis != want {
+            *vis = want;
+        }
+    }
     if !state.open {
         return;
     }
@@ -413,6 +426,34 @@ mod tests {
         state.texts = vec![String::new(); INPUT_FIELD_ID + 1];
         state.texts[INPUT_FIELD_ID] = text.to_string();
         app.insert_resource(state);
+    }
+
+    /// 回归（交互 sweep 发现）：`InputBoxRoot` 显隐必须跟随 `state.open`——
+    /// 修复前没有任何系统写根 `Visibility`，根恒 Hidden，服务端发起与 RPC
+    /// 打开都拿不到可见可点的窗口（其余状态驱动窗如 hero_manage 均有此类 wiring）。
+    #[test]
+    fn root_visibility_follows_open_state() {
+        let mut app = app_with_ui_system();
+        let root = app
+            .world_mut()
+            .spawn((InputBoxRoot, Visibility::Hidden))
+            .id();
+
+        app.world_mut().resource_mut::<InputBoxState>().open = true;
+        app.update();
+        assert_eq!(
+            app.world().entity(root).get::<Visibility>().unwrap(),
+            &Visibility::Visible,
+            "open=true 时根应 Visible"
+        );
+
+        app.world_mut().resource_mut::<InputBoxState>().open = false;
+        app.update();
+        assert_eq!(
+            app.world().entity(root).get::<Visibility>().unwrap(),
+            &Visibility::Hidden,
+            "open=false 时根应 Hidden"
+        );
     }
 
     /// C# `GameScene.cs:5784-5802`：`S.GuildRequestWar` → 输入框 → OK → `C.GuildWarReturn`

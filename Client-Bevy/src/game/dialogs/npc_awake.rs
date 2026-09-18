@@ -19,7 +19,7 @@ use crate::scenes::AppState;
 use crate::ui::sprite_ui::{shared_cjk_font, UiCjkFont, UiFont};
 use crate::ui::theme::{
     load_lib_image, spawn_container, spawn_dropdown_ui, spawn_icon_button, spawn_image,
-    spawn_label, spawn_panel, UiDropDown,
+    spawn_label, spawn_panel, CloseButton, UiDropDown,
 };
 
 /// #2892 批B：面板精灵与 C# 原生尺寸（C# `NPCAwakeDialog.Index = 710; Library = Libraries.Title`）
@@ -166,7 +166,8 @@ fn spawn_npc_awake(
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 361),
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 362),
         ) {
-            spawn_icon_button(p, n, h, pr, 284.0, 4.0, 24.0, 21.0, 10).insert(NpcAwakeClose);
+            spawn_icon_button(p, n, h, pr, 284.0, 4.0, 24.0, 21.0, 10)
+                .insert((NpcAwakeClose, CloseButton));
         }
         // 升级按钮 Title[712/713/714]（C# (115,391)）
         if let (Some(n), Some(h), Some(pr)) = (
