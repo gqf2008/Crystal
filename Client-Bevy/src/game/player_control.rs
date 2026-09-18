@@ -218,6 +218,9 @@ struct UiLockState<'w> {
     dialog: Res<'w, crate::game::dialogs::DialogManager>,
     skill_bar: Res<'w, crate::game::skills::SkillBarState>,
     skill_bar_opt: Res<'w, crate::game::dialogs::option::OptionState>,
+    drag: Res<'w, crate::game::dialogs::window_drag::WindowDragState>,
+    quest_track: Res<'w, crate::game::dialogs::quest_tracking::QuestTrackingState>,
+    quest_log: Res<'w, crate::game::dialogs::quest_log::QuestLogState>,
 }
 
 /// 选中物品/数量框/丢弃确认/快捷键分配均为模态交互；右击和按住移动也必须让路。
@@ -244,6 +247,34 @@ impl UiLockState<'_> {
     fn over_visible_skill_bar(&self, screen: Vec2) -> bool {
         self.skill_bar_opt.skill_bar && over_skill_bar(screen, &self.skill_bar)
     }
+
+    /// 光标是否落在**可拖浮动面板**上（WindowDragState 腰带 + 任务追踪小窗）。
+    /// 这些面板不是 `DialogManager` 对话框，`blocks_world_click` 不覆盖；
+    /// 拖离底部常驻区后，落在其上的点击/按住会穿透成寻路/移动（2026-09-18 实机报告）。
+    fn over_drag_window(&self, screen: Vec2) -> bool {
+        if self.drag.over_window(screen) {
+            return true;
+        }
+        // 任务追踪小窗（自管拖动，不走 WindowDragState）——显隐与渲染系统同源
+        self.quest_track.panel_visible(&self.quest_log)
+            && over_quest_tracking_panel(screen, &self.quest_track)
+    }
+
+    /// 任一浮动面板正在拖动（按住移动闸：拖窗超过 0.2s 不得转成按住移动）
+    fn drag_in_progress(&self) -> bool {
+        self.drag.dragging().is_some() || self.quest_track.drag_offset.is_some()
+    }
+}
+
+/// 任务追踪小窗区域（C# QuestTrackingDialog 是对话框控件：落在其上的鼠标事件被控件吃掉）
+fn over_quest_tracking_panel(
+    screen: Vec2,
+    state: &crate::game::dialogs::quest_tracking::QuestTrackingState,
+) -> bool {
+    screen.x >= state.pos.0
+        && screen.x <= state.pos.0 + crate::game::dialogs::quest_tracking::PANEL_W
+        && screen.y >= state.pos.1
+        && screen.y <= state.pos.1 + crate::game::dialogs::quest_tracking::PANEL_H
 }
 
 /// 修饰键检测（C# CMain.Alt：采集）
@@ -317,11 +348,13 @@ fn right_click_move_system(
     });
     // #1830：窗口类对话框打开时不寻路移动（小地图除外）
     // #2487：技能栏控件吃掉落在其上的右键（C# 对话框 Hidden 时不吃）
+    // 可拖浮动面板（腰带/任务追踪）同样吃掉落在其上的右键，不透传地图
     if !mouse.just_pressed(MouseButton::Right)
         || over_ui
         || over_main_dialog(cursor_logical)
         || over_chat_panel(cursor_logical)
         || ui.over_visible_skill_bar(cursor_logical)
+        || ui.over_drag_window(cursor_logical)
         || ui.blocks_world_click()
     {
         return;
@@ -426,13 +459,15 @@ fn left_click_interact_system(
     let world_logical = screen_to_world(cursor_logical, cam_tf, window);
     // （选中物品/数量框/确认框打开时不处理世界点击——丢弃流程由背包系统接管；
     //  #1830：窗口类对话框打开时也不处理世界点击，小地图除外；
-    //  #2487：技能栏控件吃掉落在其上的点击，不透传地图）
+    //  #2487：技能栏控件吃掉落在其上的点击，不透传地图；
+    //  可拖浮动面板（腰带/任务追踪）同样吃掉落在其上的点击）
     if !mouse.just_pressed(MouseButton::Left)
         || ui.locked()
         || over_ui
         || over_main_dialog(cursor_logical)
         || over_chat_panel(cursor_logical)
         || ui.over_visible_skill_bar(cursor_logical)
+        || ui.over_drag_window(cursor_logical)
         || ui.blocks_world_click()
     {
         return;
@@ -903,12 +938,25 @@ fn hold_move_system(
     ui: UiLockState,
 ) {
     // dead/fishing/paralysis 门由 .run_if(player_input_enabled) 承担；
-    // #1830：窗口类对话框打开时不按住移动（小地图除外）
-    if ui.blocks_world_click() {
+    // #1830：窗口类对话框打开时不按住移动（小地图除外）；
+    // 浮动面板拖动进行中（腰带/任务追踪）——拖窗按住超 0.2s 不得转成按住移动
+    if ui.blocks_world_click() || ui.drag_in_progress() {
         return;
     }
     let Some(map) = &game_data.map else { return };
     let Ok(window) = windows.single() else { return };
+    // 与点击系统同闸：HUD 常驻区/技能栏/可拖浮动面板上的按住不得穿透成移动
+    // （此前只查 blocks_world_click——在底部 HUD 或拖离常驻区的腰带上按住，人会走）
+    let Some(cursor_logical) = window.cursor_position() else {
+        return;
+    };
+    if over_main_dialog(cursor_logical)
+        || over_chat_panel(cursor_logical)
+        || ui.over_visible_skill_bar(cursor_logical)
+        || ui.over_drag_window(cursor_logical)
+    {
+        return;
+    }
     let Some(cursor) = window.physical_cursor_position() else {
         return;
     };
@@ -1808,5 +1856,68 @@ mod tests {
             anchor,
             Vec2::new(100.0 + 200.0, 200.0 + 200.0)
         ));
+    }
+
+    /// 拖拽穿透修复（2026-09-18 实机报告）：任务追踪小窗矩形命中判定——
+    /// 面板被拖到任意位置后，落在其上的点击必须被闸门吃掉
+    #[test]
+    fn over_quest_tracking_panel_follows_dragged_pos() {
+        use crate::game::dialogs::quest_tracking::{PANEL_H, PANEL_W, QuestTrackingState};
+        let mut state = QuestTrackingState::default();
+        state.pos = (0.0, 100.0);
+        // 默认位命中（含边界）
+        assert!(over_quest_tracking_panel(Vec2::new(0.0, 100.0), &state));
+        assert!(over_quest_tracking_panel(
+            Vec2::new(PANEL_W, 100.0 + PANEL_H),
+            &state
+        ));
+        // 面板外不命中
+        assert!(!over_quest_tracking_panel(
+            Vec2::new(PANEL_W + 1.0, 100.0),
+            &state
+        ));
+        assert!(!over_quest_tracking_panel(
+            Vec2::new(0.0, 100.0 + PANEL_H + 1.0),
+            &state
+        ));
+        // 拖到屏幕中央后：原位不再命中，新位置命中
+        state.pos = (400.0, 300.0);
+        assert!(!over_quest_tracking_panel(Vec2::new(10.0, 110.0), &state));
+        assert!(over_quest_tracking_panel(Vec2::new(450.0, 350.0), &state));
+    }
+
+    /// 任务追踪面板显隐判定（点击闸门与渲染系统共用）：追踪 ∩ 日志 非空才显示——
+    /// 面板隐藏时其矩形区域不得拦截世界点击
+    #[test]
+    fn quest_tracking_panel_visible_matches_render_rule() {
+        use crate::game::dialogs::quest_log::{QuestEntry, QuestLogState};
+        use crate::game::dialogs::quest_tracking::QuestTrackingState;
+        let mut track = QuestTrackingState::default();
+        let mut log = QuestLogState::default();
+        // 无追踪 → 隐藏
+        assert!(!track.panel_visible(&log));
+        // 有追踪但日志中无此任务（已完成移除）→ 隐藏
+        track.tracked.push(7);
+        assert!(!track.panel_visible(&log));
+        // 日志含被追踪任务 → 显示
+        log.quests.push(QuestEntry {
+            id: 7,
+            ..Default::default()
+        });
+        assert!(track.panel_visible(&log));
+        // 日志只有其它任务 → 仍隐藏
+        track.tracked.push(9);
+        log.quests.clear();
+        log.quests.push(QuestEntry {
+            id: 9,
+            ..Default::default()
+        });
+        assert!(track.panel_visible(&log), "9 被追踪且在日志 → 显示");
+        log.quests.clear();
+        log.quests.push(QuestEntry {
+            id: 1,
+            ..Default::default()
+        });
+        assert!(!track.panel_visible(&log), "7/9 均不在日志 → 隐藏");
     }
 }
