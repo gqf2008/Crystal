@@ -18,7 +18,9 @@ use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
 use crate::ui::sprite_ui::{shared_cjk_font, UiCjkFont, UiFont};
-use crate::ui::theme::{load_lib_image, spawn_icon_button, spawn_image, spawn_label, spawn_panel};
+use crate::ui::theme::{
+    load_lib_image, spawn_icon_button, spawn_image, spawn_label, spawn_panel, CloseButton,
+};
 
 /// #2892 批B：C# `ItemRentalDialog` 面板与子控件精灵（`ItemRentalDialog.cs:16-105`）
 pub const PANEL: (LibraryName, usize) = (LibraryName::Prguse3, 1);
@@ -224,7 +226,7 @@ fn spawn_item_rental_browse(
             ),
         ) {
             spawn_icon_button(p, n, h, pr, CLOSE_POS.0, CLOSE_POS.1, 24.0, 21.0, 10)
-                .insert(ItemRentalBrowseClose);
+                .insert((ItemRentalBrowseClose, CloseButton));
         }
         // 3 行 × 3 列标签（C# `ItemRow`）
         for row in 0..RENTAL_ROWS {

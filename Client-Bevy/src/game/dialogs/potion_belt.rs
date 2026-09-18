@@ -642,9 +642,9 @@ mod tests {
             app.insert_resource(Time::<()>::default());
             app.init_resource::<ButtonInput<MouseButton>>();
             app.init_resource::<crate::game::dialogs::window_drag::WindowDragState>();
-            app.insert_resource(GameLibraries(
-                crate::resources::libraries::Libraries::new("Data"),
-            ));
+            app.insert_resource(GameLibraries(crate::resources::libraries::Libraries::new(
+                "Data",
+            )));
             app.insert_resource(Assets::<Image>::default());
 
             // 槽位容器 + 白色占位图标（Hidden）+ 空计数（Hidden）：模拟刚生成、无物品

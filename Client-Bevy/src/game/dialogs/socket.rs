@@ -15,7 +15,7 @@ use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
 use crate::map_renderer::GameLibraries;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
-use crate::ui::theme::{load_lib_image, spawn_icon_button, spawn_image, ImageButton};
+use crate::ui::theme::{load_lib_image, spawn_icon_button, spawn_image, CloseButton, ImageButton};
 
 /// #2892 批B：面板精灵（C# `SocketDialog.Index = 20; Library = Libraries.Prguse3`）
 pub const PANEL: (LibraryName, usize) = (LibraryName::Prguse3, 20);
@@ -127,7 +127,8 @@ fn spawn_socket(
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 361),
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 362),
         ) {
-            spawn_icon_button(p, n, h, pr, pw - 23.0, 3.0, 24.0, 21.0, 10).insert(SocketClose);
+            spawn_icon_button(p, n, h, pr, pw - 23.0, 3.0, 24.0, 21.0, 10)
+                .insert((SocketClose, CloseButton));
         }
         // 12 个镶嵌格（6x2；C# x*36+23+x, y*33+15+y；白图占位，ui_system 换宝石图）
         let white = images.add(crate::map_renderer::make_image(

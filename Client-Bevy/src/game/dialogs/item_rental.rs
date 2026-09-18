@@ -39,8 +39,8 @@ use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
 use crate::ui::sprite_ui::{shared_cjk_font, ui_image, UiCjkFont, UiFont, UiImageCache};
 use crate::ui::theme::{
-    load_lib_image, spawn_icon_button, spawn_item_cell_ui, spawn_label, spawn_panel, ImageButton,
-    UiItemCellData, UiItemCellIcon,
+    load_lib_image, spawn_icon_button, spawn_item_cell_ui, spawn_label, spawn_panel, CloseButton,
+    ImageButton, UiItemCellData, UiItemCellIcon,
 };
 
 /// Prguse[238] 面板帧（C# 四窗同源）
@@ -538,7 +538,7 @@ fn spawn_close(p: &mut ChildSpawnerCommands, libs: &mut GameLibraries, images: &
         load_lib_image(libs, images, LibraryName::Prguse2, 362),
     ) {
         spawn_icon_button(p, n, h, pr, CLOSE_POS.0, CLOSE_POS.1, 24.0, 21.0, 10)
-            .insert(ItemRentalClose);
+            .insert((ItemRentalClose, CloseButton));
     }
 }
 

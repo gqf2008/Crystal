@@ -237,6 +237,8 @@ fn npc_ui_system(
     mouse: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window>,
     close: Query<(Entity, &Interaction), With<NpcClose>>,
+    // cascade 边沿状态：只在「可见→不可见」那一帧触发（实机交互 sweep 修正）
+    mut npc_prev_visible: Local<bool>,
     mut quest_btns: Query<
         (Entity, &Interaction, &mut Visibility),
         (With<NpcQuest>, Without<NpcDialogWidget>),
@@ -293,19 +295,26 @@ fn npc_ui_system(
         }
     }
     if !npc.visible {
-        // C# 语义：NPC 对话框关闭时联动隐藏商店/出售/仓库面板
-        if npc_goods.visible {
-            npc_goods.visible = false;
+        // C# 语义：`NPCDialog.Hide()` 级联只在「可见→不可见」那一帧发生
+        // （C# `if (NPCDialog.Visible) NPCDialog.Hide();` 是边沿语义）——
+        // 修复前是每帧强清：服务端事件/RPC 打开的仓库会被立刻再关掉
+        // （交互 sweep `storage FAIL: 找不到标准关闭钮` 的根因）。
+        if *npc_prev_visible {
+            if npc_goods.visible {
+                npc_goods.visible = false;
+            }
+            if sell_panel.visible {
+                sell_panel.visible = false;
+            }
+            if storage.visible {
+                storage.visible = false;
+                mgr.close(crate::game::dialogs::DialogKind::Storage);
+            }
         }
-        if sell_panel.visible {
-            sell_panel.visible = false;
-        }
-        if storage.visible {
-            storage.visible = false;
-            mgr.close(crate::game::dialogs::DialogKind::Storage);
-        }
+        *npc_prev_visible = false;
         return;
     }
+    *npc_prev_visible = true;
 
     // 关闭（bevy_ui Interaction 边沿）
     for (e, inter) in &close {
@@ -676,6 +685,76 @@ fn npc_input_state_system(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bevy::prelude::{App, MinimalPlugins, Window};
+
+    /// 回归（交互 sweep FAIL_NO_BTN 根因）：`NPCDialog.Hide()` 级联须只在
+    /// 「可见→不可见」那一帧触发——修复前每帧强清，RPC/服务端打开的仓库/出售/商品
+    /// 永远立关，且与 `dialog_rect` 交互验证不可达。
+    #[test]
+    fn npc_cascade_closes_linked_panels_only_on_fall_edge() {
+        use crate::game::dialogs::{DialogKind, DialogManager};
+        use crate::network::NetConnection;
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.init_resource::<NpcDialogState>();
+        app.init_resource::<crate::game::dialogs::npc_goods::NpcGoodsState>();
+        app.init_resource::<crate::game::dialogs::sell_panel::SellPanelState>();
+        app.init_resource::<crate::game::dialogs::storage::StorageState>();
+        app.init_resource::<DialogManager>();
+        app.insert_resource(NetConnection::default());
+        app.insert_resource(bevy::input::ButtonInput::<bevy::input::mouse::MouseButton>::default());
+        app.world_mut().spawn(Window::default());
+        app.add_systems(Update, npc_ui_system);
+
+        // NPC 窗开着 → 联动窗不受清
+        app.world_mut().resource_mut::<NpcDialogState>().visible = true;
+        app.update();
+        app.world_mut()
+            .resource_mut::<crate::game::dialogs::storage::StorageState>()
+            .visible = true;
+        app.world_mut()
+            .resource_mut::<DialogManager>()
+            .open(DialogKind::Storage);
+        app.update();
+        assert!(
+            app.world()
+                .resource::<crate::game::dialogs::storage::StorageState>()
+                .visible,
+            "NPC 开窗状态下不得清联动窗"
+        );
+
+        // NPC 关 —— 这一帧级联清仓库
+        app.world_mut().resource_mut::<NpcDialogState>().visible = false;
+        app.update();
+        assert!(
+            !app.world()
+                .resource::<crate::game::dialogs::storage::StorageState>()
+                .visible,
+            "NPC 关的那帧应级联清仓库"
+        );
+
+        // 再开仓库（模拟 RPC/服务端发起）必须留开——各帧不再强清
+        app.world_mut()
+            .resource_mut::<crate::game::dialogs::storage::StorageState>()
+            .visible = true;
+        app.world_mut()
+            .resource_mut::<DialogManager>()
+            .open(DialogKind::Storage);
+        app.update();
+        assert!(
+            app.world()
+                .resource::<crate::game::dialogs::storage::StorageState>()
+                .visible,
+            "级联只限边沿帧——重开的仓库必须留开"
+        );
+        assert!(
+            app.world()
+                .resource::<DialogManager>()
+                .is_open(DialogKind::Storage),
+            "重开应停留在管理栈"
+        );
+    }
 
     /// 行实体 spawn 必须带 NpcDialogWidget（2026-09-18 实机黑窗根因）：
     /// npc_ui_system 的行渲染查询以 With<NpcDialogWidget> 过滤，缺标记则

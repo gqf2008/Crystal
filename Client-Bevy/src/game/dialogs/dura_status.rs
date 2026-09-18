@@ -16,7 +16,7 @@ use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot, NotDraggable};
 use crate::map_renderer::GameLibraries;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
-use crate::ui::theme::{load_lib_image, spawn_image, spawn_panel, ImageButton};
+use crate::ui::theme::{load_lib_image, spawn_image, spawn_panel, CloseButton, ImageButton};
 
 /// #2892 批B：C# `CharacterDuraPanel`（`MainDialogs.cs:3947-3968`）——面板 `Prguse[2105]` 64x85
 /// @ `(ScreenWidth - 61, 200)` = (963,200)；内层两层同尺寸同位置：
@@ -230,6 +230,7 @@ fn spawn_dura_status(
                 pressed: pr,
             },
             DuraToggleBtn,
+            CloseButton,
             // #2775：C# `MainDialogs.cs:3923` DuraPanel.Character.Hint（中文「耐久面板」）
             crate::ui::tooltip::UiHint {
                 text: "耐久面板".to_string(),

@@ -14,7 +14,9 @@ use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
 use crate::ui::sprite_ui::{shared_cjk_font, UiCjkFont, UiFont};
-use crate::ui::theme::{load_lib_image, spawn_icon_button, spawn_image, spawn_label, spawn_panel};
+use crate::ui::theme::{
+    load_lib_image, spawn_icon_button, spawn_image, spawn_label, spawn_panel, CloseButton,
+};
 
 /// #2892 批B：管理窗面板精灵与 C# 原生尺寸/坐标（C# `HeroManageDialog.Index = 1688; Location = (350,350)`）
 pub const MANAGE_PANEL: (LibraryName, usize) = (LibraryName::Prguse, 1688);
@@ -273,7 +275,8 @@ fn spawn_hero_manage(
                 load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 361),
                 load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 362),
             ) {
-                spawn_icon_button(p, n, h, pr, 328.0, 4.0, 24.0, 21.0, 10).insert(HeroManageClose);
+                spawn_icon_button(p, n, h, pr, 328.0, 4.0, 24.0, 21.0, 10)
+                    .insert((HeroManageClose, CloseButton));
             }
             // 当前英雄头像 @(15,61)（C# `SetCurrentHero`：Info 落地再 +5,+5）
             if let Some(frame) = empty_frame.clone() {

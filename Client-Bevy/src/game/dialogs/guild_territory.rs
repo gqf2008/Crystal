@@ -25,7 +25,9 @@ use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
 use crate::ui::sprite_ui::{shared_cjk_font, UiCjkFont, UiFont};
-use crate::ui::theme::{load_lib_image, spawn_icon_button, spawn_image, spawn_label, spawn_panel};
+use crate::ui::theme::{
+    load_lib_image, spawn_icon_button, spawn_image, spawn_label, spawn_panel, CloseButton,
+};
 
 // ---------------------------------------------------------------------------
 // C# 几何常量（`GuildTerritoryDialog .cs:89-215`）
@@ -284,6 +286,7 @@ fn spawn_guild_territory(
             )
             .insert((
                 GuildTerritoryClose,
+                CloseButton,
                 crate::ui::tooltip::UiHint {
                     text: "退出".to_string(),
                 },

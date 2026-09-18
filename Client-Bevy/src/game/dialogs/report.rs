@@ -19,7 +19,7 @@ use crate::scenes::AppState;
 use crate::ui::sprite_ui::{shared_cjk_font, UiCjkFont, UiFont};
 use crate::ui::theme::{
     load_lib_image, spawn_container, spawn_dropdown_ui, spawn_icon_button, spawn_label,
-    spawn_panel, UiDropDown,
+    spawn_panel, CloseButton, UiDropDown,
 };
 
 /// C# `ReportDialog`（`Client/MirScenes/Dialogs/ReportDialog.cs:15-16`）：`Index = 1633; Library = Libraries.Prguse`
@@ -121,7 +121,7 @@ fn spawn_report(
         ) {
             // C# 无 `Size` → art 24x21（此前 20x20 是自造尺寸）
             spawn_icon_button(p, n, h, pr, CLOSE_REL.0, CLOSE_REL.1, 24.0, 21.0, 10)
-                .insert(ReportClose);
+                .insert((ReportClose, CloseButton));
         }
         // 类型下拉（C# ReportType @(12,35)，170x14）
         spawn_dropdown_ui(

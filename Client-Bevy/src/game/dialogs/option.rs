@@ -17,7 +17,7 @@ use crate::scenes::AppState;
 use crate::ui::sprite_ui::UiFont;
 use crate::ui::theme::{
     load_lib_image, spawn_container, spawn_icon_button, spawn_image, spawn_label, spawn_panel,
-    ImageButton,
+    CloseButton, ImageButton,
 };
 
 /// 设置状态（对应 C# Settings，纯本地）
@@ -478,7 +478,7 @@ fn spawn_option(
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 362),
         ) {
             spawn_icon_button(p, n, h, pr, CLOSE_REL.0, CLOSE_REL.1, 24.0, 21.0, 10)
-                .insert(OptionClose);
+                .insert((OptionClose, CloseButton));
         }
         // 8 组开/关按钮（On at (159,y)，Off at (201,y)，36x17）
         for (kind, lib, y, on_btn, off_btn) in TOGGLE_ROWS {

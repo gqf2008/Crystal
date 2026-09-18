@@ -33,7 +33,7 @@ use crate::scenes::AppState;
 use crate::ui::outlined_text::spawn_outlined_label_center;
 use crate::ui::sprite_ui::UiFont;
 use crate::ui::theme::{
-    load_lib_image, spawn_icon_button, spawn_item_cell_ui, spawn_panel, ImageButton,
+    load_lib_image, spawn_icon_button, spawn_item_cell_ui, spawn_panel, CloseButton, ImageButton,
     UiItemCellData, UiItemCellIcon,
 };
 
@@ -282,7 +282,8 @@ fn spawn_trade(
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 361),
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 362),
         ) {
-            spawn_icon_button(p, n, h, pr, CLOSE_DX, 3.0, 24.0, 21.0, 10).insert(TradeClose);
+            spawn_icon_button(p, n, h, pr, CLOSE_DX, 3.0, 24.0, 21.0, 10)
+                .insert((TradeClose, CloseButton));
         }
         // 名字标签（框内居中）。子实体不显式 Hidden：随面板根级联显隐——旧版
         // 每个子实体都挂 TradeWidget 由 widgets blast 逐个刷（Sprite 树无级联），

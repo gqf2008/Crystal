@@ -28,7 +28,7 @@ use crate::ui::gray::UiGray;
 use crate::ui::sprite_ui::{shared_cjk_font, ui_image, UiCjkFont, UiFont, UiImageCache};
 use crate::ui::theme::{
     load_lib_image, spawn_container, spawn_icon_button, spawn_item_cell_ui, spawn_label,
-    spawn_label_center, spawn_panel, spawn_scroll_bar_ui, ImageButton, UiItemCellData,
+    spawn_label_center, spawn_panel, spawn_scroll_bar_ui, CloseButton, ImageButton, UiItemCellData,
     UiItemCellIcon, UiScrollList,
 };
 
@@ -918,7 +918,7 @@ fn spawn_market(
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 362),
         ) {
             spawn_icon_button(p, n, h, pr, TM_CLOSE.0, TM_CLOSE.1, 24.0, 21.0, 10)
-                .insert(MarketClose);
+                .insert((MarketClose, CloseButton));
         }
         // C# 四个页签（Title[789/788]、[791/790]、[817/816]、[819/818]）
         for (name, x, y, normal, pressed) in TM_TABS {

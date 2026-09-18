@@ -24,8 +24,13 @@ use std::io::{BufRead, BufReader, Write};
 use std::net::TcpListener;
 
 use bevy::ecs::system::SystemParam;
+use bevy::input::mouse::MouseButtonInput;
+use bevy::input::ButtonState;
+use bevy::picking::hover::HoverMap;
+use bevy::picking::pointer::{Location, PointerAction, PointerButton, PointerId, PointerInput};
 use bevy::prelude::*;
 use bevy::render::view::screenshot::{save_to_disk, Screenshot};
+use bevy::window::PrimaryWindow;
 use crossbeam_channel::{bounded, Receiver, Sender};
 use serde_json::{json, Value};
 
@@ -120,6 +125,21 @@ enum ControlCommand {
         size: usize,
         reply: Sender<String>,
     },
+    /// 合成鼠标点击（全 UI 交互验证）：Move→Press→(可选 drag_to Move)→Release
+    /// 四帧注入，PointerInput（bevy_ui Interaction 按钮链路）+ MouseButtonInput
+    /// （ButtonInput<MouseButton> 拖动链路）+ 窗口光标位置三通道同步注入
+    Click {
+        pos: Vec2,
+        drag_to: Option<Vec2>,
+        reply: Sender<String>,
+    },
+    /// 返回指定对话框根面板的屏幕矩形（逻辑坐标），供 click 计算点击点
+    DialogRect {
+        kind: DialogKind,
+        reply: Sender<String>,
+    },
+    /// 诊断：inspect 全部 CloseButton 实体的组件清单（抓 Visibility 改写者）
+    DiagCloseBtn,
 }
 
 /// dialog 命令的动作（#2586）
@@ -132,11 +152,26 @@ enum DialogAction {
 #[derive(Resource)]
 struct ControlRx(Receiver<ControlCommand>);
 
+/// diag_closebtn RPC 的一次性触发标记（exclusive 系统消费后移除）
+#[derive(Resource)]
+struct DiagCloseBtnReq;
+
 /// #2767 光标探针：自动化环境（无焦点/共享桌面）里 `Window::cursor_position()` 不可用，
 /// 悬停类系统改读这里注入的视口坐标；`None` = 用真实光标。
 #[derive(Resource, Default)]
 pub struct CursorProbe {
     pub pos: Option<Vec2>,
+}
+
+/// click RPC 的逐帧注入状态机：`drive_pending_click`（First 调度）每帧推进一步，
+/// 保证消息在 PreUpdate 的 picking/input 消费前落位（同帧生效）。
+#[derive(Resource)]
+struct PendingClick {
+    pos: Vec2,
+    drag_to: Option<Vec2>,
+    phase: u8,
+    reply: Sender<String>,
+    reply_hits: Vec<String>,
 }
 
 /// 悬停用的光标位置：探针优先，其次真实窗口光标（纯函数便于单测）。
@@ -190,7 +225,26 @@ struct ControlQueries<'w, 's> {
         ),
         (With<GroundItem>, Without<LocalPlayer>),
     >,
-    dialog_roots: Query<'w, 's, (&'static DialogRoot, &'static Visibility)>,
+    dialog_roots: Query<'w, 's, (&'static DialogRoot, &'static Node, &'static Visibility)>,
+    /// dialog_rect RPC：标准关闭钮定位（theme::CloseButton 标记 + 布局后矩形）
+    close_buttons: Query<
+        'w,
+        's,
+        (
+            Entity,
+            &'static ComputedNode,
+            &'static UiGlobalTransform,
+            &'static InheritedVisibility,
+            Option<&'static Visibility>,
+        ),
+        With<crate::ui::theme::CloseButton>,
+    >,
+    /// dialog_rect RPC：关闭钮 → 根面板的祖先链
+    child_of: Query<'w, 's, &'static ChildOf>,
+    /// dialog_rect RPC：物理→逻辑坐标换算用的窗口 scale_factor
+    primary_window: Query<'w, 's, &'static Window, With<PrimaryWindow>>,
+    /// dialog_rect 诊断：任意实体的 Visibility 读取（关闭钮祖先链诊断）
+    all_visibility: Query<'w, 's, &'static Visibility>,
     /// #2791：`hero_manage` 是状态驱动窗（不经 `DialogManager.open`，见 dialogs/mod.rs
     /// 的 `DialogKind::HeroManage`），RPC 直接切 `HeroState.managing`
     hero: ResMut<'w, crate::game::dialogs::hero::HeroState>,
@@ -199,6 +253,9 @@ struct ControlQueries<'w, 's> {
     /// #2892 批C：`MirInputBox` 是状态驱动窗（服务端 `S.GuildNameRequest`/`S.GuildRequestWar`
     /// 打开），RPC 直接切 `InputBoxState.open` 以便实机取证
     input_box: ResMut<'w, crate::game::dialogs::input_box::InputBoxState>,
+    /// Storage 窗由 `StorageState.visible`（服务端 `S.StorageOpened`）+ `DialogManager.open`
+    /// 双门控（dialogs/storage.rs `storage_open`），RPC open/close 两边都要切
+    storage: ResMut<'w, crate::game::dialogs::storage::StorageState>,
     map_cameras: Query<
         'w,
         's,
@@ -220,6 +277,38 @@ impl Plugin for ControlPlugin {
             Update,
             apply_control_commands.run_if(in_state(AppState::Game)),
         );
+        // 合成点击驱动：First 调度，抢在 PreUpdate picking/input 消费前写消息；
+        // 不加 run_if——资源不在即空转（登录界面也可点）
+        app.add_systems(First, drive_pending_click);
+        // diag_closebtn：exclusive inspect（组件清单含写入者特征 marker）
+        app.add_systems(First, diag_closebtn_inspect.after(drive_pending_click));
+        #[cfg(debug_assertions)]
+        {
+            app.add_systems(PreUpdate, closebtn_vis_change_watch_pre);
+            app.add_systems(PostUpdate, closebtn_vis_change_watch_post);
+            app.add_systems(PostUpdate, vis_batch_watch_post);
+        }
+        // 🐛 实机交互验证诊断：抓「关闭钮 Visibility 被谁写入」——on_insert 钩子打印回溯
+        #[cfg(debug_assertions)]
+        {
+            app.world_mut()
+                .register_component_hooks::<Visibility>()
+                .on_insert(|mut world, ctx| {
+                    let has_close = world
+                        .entity(ctx.entity)
+                        .contains::<crate::ui::theme::CloseButton>();
+                    if has_close {
+                        let vis = world.entity(ctx.entity).get::<Visibility>().copied();
+                        let bt = std::backtrace::Backtrace::force_capture();
+                        tracing::warn!(
+                            "🪝 closebtn {:?} Visibility INSERT {:?}\n{}",
+                            ctx.entity,
+                            vis,
+                            bt
+                        );
+                    }
+                });
+        }
     }
 }
 
@@ -509,6 +598,76 @@ fn handle_conn(mut stream: std::net::TcpStream, tx: Sender<ControlCommand>) {
                     json!({"error": "missing object_id or key"})
                 }
             }
+            "click" => {
+                // 合成鼠标点击：{x, y} 单击；{x, y, drag_to:{x,y}} 按下拖到目标再松开。
+                // 逻辑坐标（与 cursor 探针同坐标系）。返回悬停命中栈（诊断用）。
+                let xy = match (
+                    params.get("x").and_then(|v| v.as_f64()),
+                    params.get("y").and_then(|v| v.as_f64()),
+                ) {
+                    (Some(x), Some(y)) => Some(Vec2::new(x as f32, y as f32)),
+                    _ => None,
+                };
+                match xy {
+                    Some(pos) => {
+                        let drag_to = match params.get("drag_to") {
+                            Some(d) => match (
+                                d.get("x").and_then(|v| v.as_f64()),
+                                d.get("y").and_then(|v| v.as_f64()),
+                            ) {
+                                (Some(dx), Some(dy)) => Some(Vec2::new(dx as f32, dy as f32)),
+                                _ => None,
+                            },
+                            None => None,
+                        };
+                        let (reply_tx, reply_rx) = bounded::<String>(1);
+                        if tx
+                            .send(ControlCommand::Click {
+                                pos,
+                                drag_to,
+                                reply: reply_tx,
+                            })
+                            .is_ok()
+                        {
+                            let s = reply_rx
+                                .recv_timeout(std::time::Duration::from_secs(3))
+                                .unwrap_or_else(|_| "{}".to_string());
+                            serde_json::from_str::<Value>(&s).unwrap_or_else(|_| json!({}))
+                        } else {
+                            json!({"error": "control channel closed"})
+                        }
+                    }
+                    None => json!({"error": "missing x/y"}),
+                }
+            }
+            "diag_closebtn" => {
+                let _ = tx.send(ControlCommand::DiagCloseBtn);
+                json!({"ok": true})
+            }
+            "dialog_rect" => {
+                // {kind} → 根面板屏幕矩形 {x,y,w,h,visible}（逻辑坐标），供 click 算点击点
+                let kind = params.get("kind").and_then(|v| v.as_str()).unwrap_or("");
+                match parse_dialog_kind(kind) {
+                    Some(k) => {
+                        let (reply_tx, reply_rx) = bounded::<String>(1);
+                        if tx
+                            .send(ControlCommand::DialogRect {
+                                kind: k,
+                                reply: reply_tx,
+                            })
+                            .is_ok()
+                        {
+                            let s = reply_rx
+                                .recv_timeout(std::time::Duration::from_secs(2))
+                                .unwrap_or_else(|_| "{}".to_string());
+                            serde_json::from_str::<Value>(&s).unwrap_or_else(|_| json!({}))
+                        } else {
+                            json!({"error": "control channel closed"})
+                        }
+                    }
+                    None => json!({"error": format!("unknown dialog kind: {kind}")}),
+                }
+            }
             "dialog" => {
                 let kind = params.get("kind").and_then(|v| v.as_str()).unwrap_or("");
                 let action = params
@@ -694,6 +853,233 @@ fn has_rpc_mapping(kind: DialogKind) -> bool {
     }
 }
 
+/// click RPC 的逐帧合成输入驱动（First 调度：抢在 PreUpdate 的 picking/input 消费前
+/// 写消息，同帧生效）。三通道同步：
+/// - `PointerInput`（Move/Press/Release）→ bevy_picking → bevy_ui `Interaction`（按钮链路）
+/// - `MouseButtonInput` → `ButtonInput<MouseButton>`（dialog_drag/window_drag 拖动链路）
+/// - `Window::set_physical_cursor_position` → `window.cursor_position()`（拖动/悬停读取方）
+/// phase: 0=Move 到起点, 1=Press（并读 HoverMap 记录命中栈）, 2=拖到 drag_to（可跳过）, 3=Release+回执
+/// diag_closebtn RPC 触发后：打印每个 CloseButton 实体的全组件清单（Debug 值）
+fn diag_closebtn_inspect(world: &mut World) {
+    if world.remove_resource::<DiagCloseBtnReq>().is_none() {
+        return;
+    }
+    {
+        let vis = world
+            .get_resource::<crate::game::dialogs::storage::StorageState>()
+            .map(|s| s.visible);
+        let open = world
+            .get_resource::<DialogManager>()
+            .map(|m| m.is_open(DialogKind::Storage));
+        tracing::warn!("🧬 storage 门控: state.visible={vis:?} mgr.open={open:?}");
+    }
+    let mut q = world.query_filtered::<Entity, With<crate::ui::theme::CloseButton>>();
+    let ents: Vec<Entity> = q.iter(world).collect();
+    for e in ents {
+        let Ok(infos) = world.inspect_entity(e) else {
+            continue;
+        };
+        let names: Vec<String> = infos
+            .map(|i| {
+                let n = i.name().to_string();
+                n.rsplit("::").next().unwrap_or(&n).to_string()
+            })
+            .collect();
+        tracing::warn!("🧬 closebtn {e:?} components: {names:?}");
+    }
+}
+
+/// 🐛 诊断：Visibility 变化侦测（Changed 过滤器在 PreUpdate 与 PostUpdate 各挂一份，
+/// 对比同一帧内写入发生的位置——实机交互验证抓「关闭钮被压 Hidden」用）。
+/// 由 `diag_closebtn` RPC arm 的 `VisBatchWatch(N)` 帧窗口门控——常态 debug 构建不占日志。
+#[cfg(debug_assertions)]
+pub fn closebtn_vis_change_watch_pre(
+    frames: Option<Res<VisBatchWatch>>,
+    q: Query<(Entity, &Visibility), (With<crate::ui::theme::CloseButton>, Changed<Visibility>)>,
+) {
+    if frames.map(|f| f.0 == 0).unwrap_or(true) {
+        return;
+    }
+    for (e, v) in &q {
+        tracing::warn!("👁[Pre] closebtn {e:?} Visibility CHANGED -> {v:?}");
+    }
+}
+
+/// 同上，PostUpdate 版（帧窗同 `VisBatchWatch`）
+#[cfg(debug_assertions)]
+pub fn closebtn_vis_change_watch_post(
+    frames: Option<Res<VisBatchWatch>>,
+    q: Query<(Entity, &Visibility), (With<crate::ui::theme::CloseButton>, Changed<Visibility>)>,
+) {
+    if frames.map(|f| f.0 == 0).unwrap_or(true) {
+        return;
+    }
+    for (e, v) in &q {
+        tracing::warn!("👁[Post] closebtn {e:?} Visibility CHANGED -> {v:?}");
+    }
+}
+
+/// 🐛 诊断：开窗后 N 帧内打印全 world 的 Visibility 变化批量（识别写入查询的目标集）
+#[cfg(debug_assertions)]
+#[derive(Resource)]
+pub struct VisBatchWatch(pub u32);
+
+/// VisBatchWatch 资源在场时，每帧打印 Changed<Visibility> 实体（限 60 条）
+#[cfg(debug_assertions)]
+pub fn vis_batch_watch_post(
+    frames: Option<ResMut<VisBatchWatch>>,
+    q: Query<(Entity, &Visibility), Changed<Visibility>>,
+) {
+    let Some(mut frames) = frames else { return };
+    if frames.0 == 0 {
+        return;
+    }
+    frames.0 -= 1;
+    let batch: Vec<String> = q.iter().map(|(e, v)| format!("{e:?}={v:?}")).collect();
+    tracing::warn!("👁[Batch] {} changes: {:?}", batch.len(), batch);
+}
+
+fn drive_pending_click(world: &mut World) {
+    let Some(mut pending) = world.remove_resource::<PendingClick>() else {
+        return;
+    };
+    let Some((window_ent, scale)) = (|| {
+        let mut q = world.query_filtered::<(Entity, &Window), With<PrimaryWindow>>();
+        let (e, w) = q.single(world).ok()?;
+        Some((e, w.scale_factor()))
+    })() else {
+        let _ = pending
+            .reply
+            .send(json!({"ok": false, "error": "no window"}).to_string());
+        return;
+    };
+    let set_cursor = |world: &mut World, pos: Vec2| {
+        if let Some(mut w) = world.get_mut::<Window>(window_ent) {
+            w.set_physical_cursor_position(Some(bevy::math::DVec2::new(
+                (pos.x * scale) as f64,
+                (pos.y * scale) as f64,
+            )));
+        }
+    };
+    let target = bevy::camera::NormalizedRenderTarget::Window(
+        bevy::window::WindowRef::Entity(window_ent)
+            .normalize(Some(window_ent))
+            .expect("Entity 归一化恒有值"),
+    );
+    let loc = |pos: Vec2| Location {
+        target: target.clone(),
+        position: pos,
+    };
+    match pending.phase {
+        0 => {
+            set_cursor(world, pending.pos);
+            world.write_message(PointerInput::new(
+                PointerId::Mouse,
+                loc(pending.pos),
+                PointerAction::Move { delta: Vec2::ZERO },
+            ));
+            pending.phase = 1;
+        }
+        1 => {
+            // 读 HoverMap 命中栈（诊断：回报点击落到了什么上），按 depth 降序取前 3
+            let mut hits: Vec<String> = Vec::new();
+            if let Some(map) = world
+                .get_resource::<HoverMap>()
+                .and_then(|h| h.get(&PointerId::Mouse))
+            {
+                let mut v: Vec<(f32, Entity)> = map.iter().map(|(e, h)| (h.depth, *e)).collect();
+                v.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+                for (_, e) in v.into_iter().take(3) {
+                    // 归属链：上溯 ChildOf 找 DialogRoot（诊断点击到底落在哪个窗口/画布上）
+                    let mut chain = String::new();
+                    let mut cur = e;
+                    for _ in 0..32 {
+                        let Some(co) = world.get::<ChildOf>(cur) else {
+                            break;
+                        };
+                        let parent = co.parent();
+                        let mut roots = world.query::<&DialogRoot>();
+                        if let Ok(root) = roots.get(world, parent) {
+                            chain = format!("root={:?}", root.0);
+                            break;
+                        }
+                        cur = parent;
+                    }
+                    let mut cnQ = world.query::<&ComputedNode>();
+                    let size = cnQ
+                        .get(world, e)
+                        .map(|n| format!("{:.0}x{:.0}", n.size().x, n.size().y))
+                        .unwrap_or_else(|_| "?".to_string());
+                    let name = world
+                        .get::<Name>(e)
+                        .map(|n| n.to_string())
+                        .unwrap_or_else(|| format!("{e:?}"));
+                    hits.push(format!("{name} {size} [{chain}]"));
+                }
+            }
+            world.write_message(MouseButtonInput {
+                button: MouseButton::Left,
+                state: ButtonState::Pressed,
+                window: window_ent,
+            });
+            world.write_message(PointerInput::new(
+                PointerId::Mouse,
+                loc(pending.pos),
+                PointerAction::Press(PointerButton::Primary),
+            ));
+            pending.reply_hits = hits;
+            pending.phase = 2;
+        }
+        2 => {
+            if let Some(to) = pending.drag_to {
+                set_cursor(world, to);
+                world.write_message(PointerInput::new(
+                    PointerId::Mouse,
+                    loc(to),
+                    PointerAction::Move { delta: Vec2::ZERO },
+                ));
+            }
+            pending.phase = 3;
+        }
+        _ => {
+            #[cfg(debug_assertions)]
+            {
+                let phys = world
+                    .get::<Window>(window_ent)
+                    .and_then(|w| w.physical_cursor_position());
+                let pressed = world
+                    .get_resource::<ButtonInput<MouseButton>>()
+                    .map(|b| b.pressed(MouseButton::Left))
+                    .unwrap_or(false);
+                let mut q = world.query::<(Entity, &Interaction)>();
+                let states: Vec<String> = q
+                    .iter(world)
+                    .filter(|(_, i)| **i != Interaction::None)
+                    .map(|(e, i)| format!("{e:?}={i:?}"))
+                    .collect();
+                tracing::info!(
+                    "🔍 click phase3: phys={phys:?} pressed={pressed} interactions={states:?}"
+                );
+            }
+            world.write_message(MouseButtonInput {
+                button: MouseButton::Left,
+                state: ButtonState::Released,
+                window: window_ent,
+            });
+            world.write_message(PointerInput::new(
+                PointerId::Mouse,
+                loc(pending.drag_to.unwrap_or(pending.pos)),
+                PointerAction::Release(PointerButton::Primary),
+            ));
+            let _ = pending
+                .reply
+                .send(json!({"ok": true, "hits": pending.reply_hits}).to_string());
+            return; // 完成：资源已移除，不再回插
+        }
+    }
+    world.insert_resource(pending);
+}
+
 fn apply_control_commands(
     mut commands: Commands,
     control: Res<ControlRx>,
@@ -779,6 +1165,23 @@ fn apply_control_commands(
                         DialogAction::Close => q.input_box.open = false,
                         DialogAction::Toggle => q.input_box.open = !q.input_box.open,
                     }
+                } else if kind == DialogKind::Storage {
+                    // Storage 双门控：`StorageState.visible` 与 `DialogManager.open`
+                    // 都要切，否则窗口 open 了根仍 Hidden（交互 sweep FAIL_NO_BTN）
+                    match action {
+                        DialogAction::Open => {
+                            q.storage.visible = true;
+                            mgr.open(kind);
+                        }
+                        DialogAction::Close => {
+                            q.storage.visible = false;
+                            mgr.close(kind);
+                        }
+                        DialogAction::Toggle => {
+                            q.storage.visible = !q.storage.visible;
+                            mgr.toggle(kind);
+                        }
+                    }
                 } else {
                     match action {
                         DialogAction::Open => mgr.open(kind),
@@ -827,7 +1230,7 @@ fn apply_control_commands(
             }
             ControlCommand::GetVisible { reply } => {
                 let mut map: std::collections::BTreeMap<String, usize> = Default::default();
-                for (root, vis) in &q.dialog_roots {
+                for (root, _node, vis) in &q.dialog_roots {
                     if *vis == Visibility::Visible {
                         *map.entry(format!("{:?}", root.0)).or_insert(0) += 1;
                     }
@@ -890,6 +1293,105 @@ fn apply_control_commands(
                     None => json!({"ok": true, "cursor": null}),
                 }
                 .to_string();
+                let _ = reply.send(s);
+            }
+            ControlCommand::Click {
+                pos,
+                drag_to,
+                reply,
+            } => {
+                // 悬停系统同步看到探针光标；逐帧注入交给 First 调度的 drive_pending_click
+                cursor_probe.pos = Some(pos);
+                commands.insert_resource(PendingClick {
+                    pos,
+                    drag_to,
+                    phase: 0,
+                    reply,
+                    reply_hits: Vec::new(),
+                });
+            }
+            ControlCommand::DiagCloseBtn => {
+                commands.insert_resource(DiagCloseBtnReq);
+                #[cfg(debug_assertions)]
+                commands.insert_resource(VisBatchWatch(4));
+            }
+            ControlCommand::DialogRect { kind, reply } => {
+                // 语义：定位该窗口的**标准关闭钮**（spawn_close_button 的 CloseButton
+                // 标记），返回其中心的逻辑坐标（点击点）。根面板是全屏弹性容器时
+                // Node left/top 无意义，布局后矩形才可靠——用 ComputedNode +
+                // UiGlobalTransform（与 ui_picking 同一坐标系：物理÷scale=逻辑）。
+                let scale = q
+                    .primary_window
+                    .single()
+                    .map(|w| w.scale_factor())
+                    .unwrap_or(1.0);
+                let mut found = None;
+                #[cfg(debug_assertions)]
+                for (btn, node, tf, iv, vis) in q.close_buttons.iter() {
+                    let mut cur = btn;
+                    let mut chain = String::new();
+                    let mut anc = String::new();
+                    for _ in 0..32 {
+                        let Ok(co) = q.child_of.get(cur) else { break };
+                        let parent = co.parent();
+                        let pv = q.dialog_roots.get(parent).ok().map(|(_, _, v)| *v);
+                        let pv2 = q.all_visibility.get(parent).ok().copied();
+                        anc.push_str(&format!(" >{parent:?} vis={pv2:?}"));
+                        if let Ok((root, _n, rvis)) = q.dialog_roots.get(parent) {
+                            chain = format!("{:?}/{:?}", root.0, rvis);
+                            break;
+                        }
+                        cur = parent;
+                    }
+                    tracing::info!(
+                        "🔍 closebtn {btn:?} tf=({:.1},{:.1}) size={:?} iv={} vis={:?} owner={} anc={}",
+                        tf.translation.x,
+                        tf.translation.y,
+                        node.size(),
+                        iv.get(),
+                        vis,
+                        chain,
+                        anc
+                    );
+                }
+                // 判别只用「祖先 DialogRoot 的 Visibility」（关闭钮自身 InheritedVisibility
+                // 在部分对话框上不可靠——根 Visible 时仍报 false，忽略 iv 后 finder 全类别可用）
+                for (btn, node, tf, _iv, _vis) in q.close_buttons.iter() {
+                    // 沿 ChildOf 上溯找 DialogRoot（限 32 层防环）；**先查自身**——
+                    // dura_status 的常驻切换钮 DialogRoot 就挂在钮自己身上
+                    let mut cur = btn;
+                    let mut owner: Option<DialogKind> = None;
+                    let mut root_node: Option<&Node> = None;
+                    for _ in 0..32 {
+                        if let Ok((root, n, vis)) = q.dialog_roots.get(cur) {
+                            if *vis == Visibility::Visible {
+                                owner = Some(root.0);
+                                root_node = Some(n);
+                            }
+                            break;
+                        }
+                        let Ok(co) = q.child_of.get(cur) else { break };
+                        cur = co.parent();
+                    }
+                    if owner == Some(kind) {
+                        let c = tf.translation / scale;
+                        let size = node.size();
+                        // rx/ry/rw/rh：根面板的逻辑矩形（拖动测试取空区按点此，
+                        // 不可靠的纯法宝关闭钮坐标测不了空白背景）
+                        let (rx, ry, rw, rh) = root_node
+                            .map(|n| crate::game::dialogs::node_rect(n))
+                            .unwrap_or((0.0, 0.0, 0.0, 0.0));
+                        found = Some(json!({
+                            "ok": true, "kind": format!("{kind:?}"),
+                            "cx": c.x, "cy": c.y, "w": size.x, "h": size.y,
+                            "rx": rx, "ry": ry, "rw": rw, "rh": rh,
+                        }));
+                        break;
+                    }
+                }
+                let s = found
+                    .unwrap_or_else(|| json!({"ok": false, "error": "close button not found"}))
+                    .to_string();
                 let _ = reply.send(s);
             }
             ControlCommand::PlayerMenu { object_id, reply } => {

@@ -22,7 +22,7 @@ use crate::scenes::AppState;
 use crate::ui::gray::UiGray;
 use crate::ui::sprite_ui::{shared_cjk_font, UiCjkFont, UiFont};
 use crate::ui::theme::{
-    load_lib_image, spawn_icon_button, spawn_item_cell_ui, spawn_label, spawn_panel,
+    load_lib_image, spawn_icon_button, spawn_item_cell_ui, spawn_label, spawn_panel, CloseButton,
     UiItemCellData, UiItemCellIcon,
 };
 
@@ -317,7 +317,7 @@ fn spawn_craft(
                 21.0,
                 10,
             )
-            .insert(CraftClose);
+            .insert((CraftClose, CloseButton));
         }
         // C# RecipeLabel(22,5) / PossibilityLabel(10,135) / GoldLabel(30,190)；
         // CraftLine(3) 是 Bevy 扩展（已学会配方数），放在标题下方空位。
