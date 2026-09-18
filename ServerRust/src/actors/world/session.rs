@@ -925,12 +925,11 @@ impl Message<StartGameRequest> for WorldActor {
                     .collect(),
             );
         }
-        let heroes = self
-            .player_heroes
-            .get(&msg.session_id)
-            .cloned()
-            .unwrap_or_default();
-        send_manage_heroes_packet(&self.gate_ref, msg.session_id, &loaded_state, &heroes);
+        // 英雄列表（S.ManageHeroes）登录时不下发：C# 服务端只在英雄管理 NPC
+        // 脚本里发（NPCScript.cs:1130 @MANAGEHEROES），而 C# 客户端收到即
+        // HeroManageDialog.Show()——登录就发会导致客户端每次进图莫名弹出
+        // 英雄管理窗（2026-09-18 实机截图取证；红检 e2e_login_does_not_send_manage_heroes）。
+        // 英雄列表数据在玩家访问英雄管理 NPC 时随 NPC 链路正常下发。
         // #198：有英雄则生成英雄对象
         if loaded_state.hero_index > 0 {
             self.broadcast_hero_spawn(msg.session_id).await;
@@ -8389,50 +8388,11 @@ mod auth_regression_tests {
         login_and_enter_game_full(gate_ref, session_id, rx).await.0
     }
 
-    /// 同 login_and_enter_game，但一并返回 db_pool（DB 断言用，如系统邮件落库回归）
-    async fn login_and_enter_game_full(
+    /// 测试用 Social+World 组装（login_and_enter_game_full 与录包版测试共用）
+    async fn spawn_test_social_and_world(
         gate_ref: &GateActorRef,
-        session_id: u64,
-        rx: &mut RxChannel,
-    ) -> (kameo::actor::ActorRef<WorldActor>, db::DbPool) {
-        let db_pool = db::init_db_pool("sqlite::memory:").await.expect("init_db");
-        let account_ref = AccountActor::spawn((gate_ref.clone(), db_pool.clone()));
-        let _ = gate_ref.ask(SetAccountRef { account_ref }).await;
-
-        // ClientVersion
-        let mut cv_body = Vec::new();
-        let hash = b"test";
-        cv_body.extend_from_slice(&(hash.len() as i32).to_le_bytes());
-        cv_body.extend_from_slice(hash);
-        let _ = gate_ref
-            .ask(ClientData {
-                session_id,
-                data: build_packet_bytes(
-                    mir2_shared::enums::ClientPacketIds::ClientVersion as i16,
-                    &cv_body,
-                ),
-            })
-            .await;
-
-        // Login（不存在账号自动注册，config/server.toml allow_new_account=true）
-        let mut login_body = Vec::new();
-        let _ = mir2_shared::binary::write_dotnet_string(&mut login_body, "testuser");
-        let _ = mir2_shared::binary::write_dotnet_string(&mut login_body, "testpass");
-        let _ = gate_ref
-            .ask(ClientData {
-                session_id,
-                data: build_packet_bytes(
-                    mir2_shared::enums::ClientPacketIds::Login as i16,
-                    &login_body,
-                ),
-            })
-            .await;
-        let login_success = mir2_shared::enums::ServerPacketIds::LoginSuccess as i16;
-        assert!(
-            wait_opcode_body(rx, login_success, 3).await.is_some(),
-            "LoginSuccess"
-        );
-
+        db_pool: &db::DbPool,
+    ) -> kameo::actor::ActorRef<WorldActor> {
         let social_ref = SocialActor::spawn(SocialActorArgs {
             gate_ref: gate_ref.clone(),
             db_pool: db_pool.clone(),
@@ -8496,6 +8456,55 @@ mod auth_regression_tests {
                 world_ref: world_ref.clone(),
             })
             .await;
+        world_ref
+    }
+
+    /// 同 login_and_enter_game，但一并返回 db_pool（DB 断言用，如系统邮件落库回归）
+    async fn login_and_enter_game_full(
+        gate_ref: &GateActorRef,
+        session_id: u64,
+        rx: &mut RxChannel,
+    ) -> (kameo::actor::ActorRef<WorldActor>, db::DbPool) {
+        let db_pool = db::init_db_pool("sqlite::memory:").await.expect("init_db");
+        let account_ref = AccountActor::spawn((gate_ref.clone(), db_pool.clone()));
+        let _ = gate_ref.ask(SetAccountRef { account_ref }).await;
+
+        // ClientVersion
+        let mut cv_body = Vec::new();
+        let hash = b"test";
+        cv_body.extend_from_slice(&(hash.len() as i32).to_le_bytes());
+        cv_body.extend_from_slice(hash);
+        let _ = gate_ref
+            .ask(ClientData {
+                session_id,
+                data: build_packet_bytes(
+                    mir2_shared::enums::ClientPacketIds::ClientVersion as i16,
+                    &cv_body,
+                ),
+            })
+            .await;
+
+        // Login（不存在账号自动注册，config/server.toml allow_new_account=true）
+        let mut login_body = Vec::new();
+        let _ = mir2_shared::binary::write_dotnet_string(&mut login_body, "testuser");
+        let _ = mir2_shared::binary::write_dotnet_string(&mut login_body, "testpass");
+        let _ = gate_ref
+            .ask(ClientData {
+                session_id,
+                data: build_packet_bytes(
+                    mir2_shared::enums::ClientPacketIds::Login as i16,
+                    &login_body,
+                ),
+            })
+            .await;
+        let login_success = mir2_shared::enums::ServerPacketIds::LoginSuccess as i16;
+        assert!(
+            wait_opcode_body(rx, login_success, 3).await.is_some(),
+            "LoginSuccess"
+        );
+
+
+        let world_ref = spawn_test_social_and_world(gate_ref, &db_pool).await;
 
         // NewCharacter
         let mut nc_body = Vec::new();
@@ -8671,6 +8680,140 @@ mod auth_regression_tests {
                 ),
             })
             .await;
+    }
+
+    /// 红绿回归（实机发现，2026-09-18）：进图不得下发 S.ManageHeroes——
+    /// C# 服务端只在英雄管理 NPC 脚本里发（NPCScript.cs:1130），而 C# 客户端
+    /// 收到即 `HeroManageDialog.Show()`；Rust 服务端登录时下发的偏差导致客户端
+    /// 每次进游戏都莫名弹出英雄管理窗。
+    /// 全流程录包（不复用会丢弃中间包的 harness）：红检=恢复登录路径的
+    ///  send_manage_heroes_packet → 录到 opcode 184 → FAILED。
+    #[test]
+    fn e2e_login_does_not_send_manage_heroes() {
+        let rt = big_stack_runtime();
+        rt.block_on(async {
+            let session_id = 44u64;
+            let (gate_ref, mut rx) = setup_gate_and_session(session_id).await;
+            // 完整登录链需要 account + world/social（world 在进图时下发 StartGame 等）
+            let db_pool = db::init_db_pool("sqlite::memory:").await.expect("init_db");
+            let account_ref = AccountActor::spawn((gate_ref.clone(), db_pool.clone()));
+            let _ = gate_ref.ask(SetAccountRef { account_ref }).await;
+            let _world_ref = spawn_test_social_and_world(&gate_ref, &db_pool).await;
+            let mut seen: Vec<i16> = Vec::new();
+            // 边收边录，直到目标 opcode 出现或超时
+            async fn recv_until(
+                rx: &mut RxChannel,
+                target: i16,
+                secs: u64,
+                seen: &mut Vec<i16>,
+            ) -> bool {
+                let deadline =
+                    tokio::time::Instant::now() + std::time::Duration::from_secs(secs);
+                while tokio::time::Instant::now() < deadline {
+                    let remaining = deadline - tokio::time::Instant::now();
+                    match tokio::time::timeout(remaining, rx.recv()).await {
+                        Ok(Some(data)) if data.len() >= 4 => {
+                            let op = i16::from_le_bytes([data[2], data[3]]);
+                            seen.push(op);
+                            if op == target {
+                                return true;
+                            }
+                        }
+                        Ok(Some(_)) => continue,
+                        _ => return false,
+                    }
+                }
+                false
+            }
+
+            // ClientVersion → Login（自动注册）→ NewCharacter → StartGame
+            let mut cv_body = Vec::new();
+            cv_body.extend_from_slice(&(4i32).to_le_bytes());
+            cv_body.extend_from_slice(b"test");
+            let _ = gate_ref
+                .ask(ClientData {
+                    session_id,
+                    data: build_packet_bytes(
+                        mir2_shared::enums::ClientPacketIds::ClientVersion as i16,
+                        &cv_body,
+                    ),
+                })
+                .await;
+            let mut login_body = Vec::new();
+            let _ = mir2_shared::binary::write_dotnet_string(&mut login_body, "nomanagehero");
+            let _ = mir2_shared::binary::write_dotnet_string(&mut login_body, "testpass");
+            let _ = gate_ref
+                .ask(ClientData {
+                    session_id,
+                    data: build_packet_bytes(
+                        mir2_shared::enums::ClientPacketIds::Login as i16,
+                        &login_body,
+                    ),
+                })
+                .await;
+            assert!(
+                recv_until(
+                    &mut rx,
+                    mir2_shared::enums::ServerPacketIds::LoginSuccess as i16,
+                    3,
+                    &mut seen
+                )
+                .await,
+                "LoginSuccess"
+            );
+
+            let mut nc_body = Vec::new();
+            let _ = mir2_shared::binary::write_dotnet_string(&mut nc_body, "NoManageHero");
+            nc_body.push(0u8);
+            nc_body.push(0u8);
+            let _ = gate_ref
+                .ask(ClientData {
+                    session_id,
+                    data: build_packet_bytes(
+                        mir2_shared::enums::ClientPacketIds::NewCharacter as i16,
+                        &nc_body,
+                    ),
+                })
+                .await;
+            assert!(
+                recv_until(
+                    &mut rx,
+                    mir2_shared::enums::ServerPacketIds::NewCharacterSuccess as i16,
+                    3,
+                    &mut seen
+                )
+                .await,
+                "NewCharacterSuccess"
+            );
+
+            let _ = gate_ref
+                .ask(ClientData {
+                    session_id,
+                    data: build_packet_bytes(
+                        mir2_shared::enums::ClientPacketIds::StartGame as i16,
+                        &0i32.to_le_bytes().to_vec(),
+                    ),
+                })
+                .await;
+            assert!(
+                recv_until(
+                    &mut rx,
+                    mir2_shared::enums::ServerPacketIds::StartGame as i16,
+                    5,
+                    &mut seen
+                )
+                .await,
+                "StartGame"
+            );
+            // 进图序列余量：再录 1.5s
+            let _ = recv_until(&mut rx, -1, 2, &mut seen).await;
+
+            let manage = mir2_shared::enums::ServerPacketIds::ManageHeroes as i16;
+            assert!(
+                !seen.contains(&manage),
+                "进图序列不得包含 S.ManageHeroes（C# 只在英雄管理 NPC 处下发）"
+            );
+        });
     }
 
     /// 红绿回归（严重17）：同会话重复 StartGame 必须被忽略（C# MirConnection.StartGame：
