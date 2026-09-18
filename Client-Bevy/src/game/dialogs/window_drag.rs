@@ -3,7 +3,7 @@
 //
 // C# 侧：`MirControl.Movable = true` 的控件在 `OnMouseMove` 里把 `Location` 加上鼠标位移；
 // `Settings.Save/Load` **只持久化技能栏**（`[Game] Skillbar{i}X/Y`，`Settings.cs:163/269/380`）——
-// 这 6 个窗口的位置原版**不落盘**，重进游戏回到默认位。本端因此同样只在会话内保留偏移，
+// 这 5 个窗口的位置原版**不落盘**，重进游戏回到默认位。本端因此同样只在会话内保留偏移，
 // 不做 INI 持久化（与 C# 一致；技能栏有独立持久化，见 `game/skills.rs`）。
 //
 // 涉及的 5 个窗口（C# 基准）：
@@ -15,6 +15,8 @@
 // 本端已由 `chat_scroll_knob_system` 覆盖）。曾因误读该行实现整窗拖动，2026-09-18 移除。
 //
 // 用法：窗口系统每帧用 `WindowDragState::register` 登记**未加偏移**的矩形（UI 逻辑坐标），
+// **隐藏时必须 `unregister`**（矩形跨帧持久，残留矩形会被世界点击闸门当成死区吞点击）；
+
 // 绘制/命中时把 `WindowDragState::offset(w)` 加回去；本模块只负责拖动本身。
 // ============================================================================
 
@@ -62,6 +64,17 @@ impl WindowDragState {
     /// 登记窗口的**基准**矩形（不含拖动偏移）
     pub fn register(&mut self, w: DragWindow, x: f32, y: f32, ww: f32, hh: f32) {
         self.rects.insert(w, (x, y, ww, hh));
+    }
+
+    /// 取消登记（窗口**隐藏时必须调用**）：`rects` 跨帧持久，隐藏后不注销会留下
+    /// 陈旧矩形——`over_window` 只看矩形不看可见性，世界点击闸门会把落在不可见
+    /// 矩形上的输入当成窗口命中吞掉（死点击区，#2966 审查 P1）；拖动中的窗口
+    /// 隐藏时一并结束拖动。偏移保留（C# 会话内记住拖后位置，重开仍在拖后处）。
+    pub fn unregister(&mut self, w: DragWindow) {
+        self.rects.remove(&w);
+        if self.dragging.map(|(dw, _)| dw) == Some(w) {
+            self.dragging = None;
+        }
     }
 
     /// 当前偏移
@@ -178,6 +191,28 @@ mod tests {
         // 命中优先级：弹层（下拉框/备注）排在最前
         assert_eq!(DRAG_ORDER[0], DragWindow::DropDown);
         assert_eq!(DRAG_ORDER[1], DragWindow::Memo);
+    }
+
+    /// #2966 审查 P1：隐藏窗口必须 unregister——残留矩形会被世界点击闸门当成
+    /// 死区吞点击（腰带隐藏后原位置点击被拦）；隐藏拖动中的窗口同时结束拖动。
+    /// 修复前无 unregister 机制（编译即红）。
+    #[test]
+    fn unregister_clears_hit_and_dragging() {
+        let mut st = WindowDragState::default();
+        st.register(DragWindow::PotionBelt, 230.0, 618.0, 240.0, 38.0);
+        assert!(st.over_window(Vec2::new(240.0, 620.0)));
+        st.dragging = Some((DragWindow::PotionBelt, (5.0, 5.0)));
+        st.unregister(DragWindow::PotionBelt);
+        assert!(
+            !st.over_window(Vec2::new(240.0, 620.0)),
+            "注销后原矩形不得再命中"
+        );
+        assert_eq!(st.dragging(), None, "隐藏拖动中的窗口必须结束拖动");
+        // 偏移保留（C# 会话内记住拖后位置）：重新登记后按偏移位置命中
+        st.set_offset(DragWindow::PotionBelt, 100.0, -100.0);
+        st.register(DragWindow::PotionBelt, 230.0, 618.0, 240.0, 38.0);
+        assert!(st.over_window(Vec2::new(340.0, 520.0)));
+        assert!(!st.over_window(Vec2::new(240.0, 620.0)));
     }
 
     /// over_window：按「基准+偏移」的当前显示位置命中——拖走后原位不再算、新位算

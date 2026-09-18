@@ -330,6 +330,8 @@ fn hero_belt_ui_system(
         };
     }
     if !visible.0 {
+        // 隐藏即注销拖动矩形（同 potion_belt，#2966 审查 P1）
+        drag.unregister(crate::game::dialogs::window_drag::DragWindow::HeroBelt);
         return;
     }
     let vert = vertical.0;

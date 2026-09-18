@@ -2397,8 +2397,6 @@ mod whisper_partner_tests {
         chat.visible_lines = chat_size_lines(1);
         world.insert_resource(chat);
         world.insert_resource(Assets::<Image>::default());
-        // #2892 批D 单元①：`chat_size_system` 会登记拖动基准矩形
-        world.insert_resource(crate::game::dialogs::window_drag::WindowDragState::default());
         let h = Handle::<Image>::default();
         let panel = world
             .spawn((

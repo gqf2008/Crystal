@@ -404,6 +404,9 @@ fn potion_belt_ui_system(
         };
     }
     if !visible.0 {
+        // 隐藏即注销拖动矩形：rects 跨帧持久，残留矩形会被世界点击闸门当成
+        // 死区吞点击（#2966 审查 P1）
+        drag.unregister(DragWindow::PotionBelt);
         return;
     }
 

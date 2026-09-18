@@ -1862,7 +1862,7 @@ mod tests {
     /// 面板被拖到任意位置后，落在其上的点击必须被闸门吃掉
     #[test]
     fn over_quest_tracking_panel_follows_dragged_pos() {
-        use crate::game::dialogs::quest_tracking::{PANEL_H, PANEL_W, QuestTrackingState};
+        use crate::game::dialogs::quest_tracking::{QuestTrackingState, PANEL_H, PANEL_W};
         let mut state = QuestTrackingState::default();
         state.pos = (0.0, 100.0);
         // 默认位命中（含边界）
