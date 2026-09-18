@@ -1234,36 +1234,43 @@ fn storage_server_events(
             storage.page = StoragePage::One;
             storage.rent_confirm = false;
             storage.selected = None;
-            // 原版 C#：仓库打开时同时显示背包，且背包推到 (仓宽+5, 仓Y)=(393,0)
-            // 并排（NPCDialogs.cs:2967/2990 `InventoryDialog.Location = new Point(Size.Width+5, Location.Y)`）
-            // —— 否则 388x346 的仓库完全罩住 316x236 的背包。
-            let mut min_x = f32::MAX;
-            for (node, root) in inv_entities.iter() {
-                if root.0 == DialogKind::Inventory {
-                    if let Val::Px(v) = node.left {
-                        min_x = min_x.min(v);
-                    }
-                }
-            }
-            if min_x < f32::MAX {
-                let dx = STORAGE_W + 5.0 - min_x;
-                for (mut node, root) in &mut inv_entities {
+            if *visible {
+                // 原版 C#：仓库打开时同时显示背包，且背包推到 (仓宽+5, 仓Y)=(393,0)
+                // 并排（NPCDialogs.cs:2967/2990 `InventoryDialog.Location = new Point(Size.Width+5, Location.Y)`）
+                // —— 否则 388x346 的仓库完全罩住 316x236 的背包。
+                let mut min_x = f32::MAX;
+                for (node, root) in inv_entities.iter() {
                     if root.0 == DialogKind::Inventory {
-                        let cur = match node.left {
-                            Val::Px(v) => v,
-                            _ => 0.0,
-                        };
-                        node.left = Val::Px(cur + dx);
+                        if let Val::Px(v) = node.left {
+                            min_x = min_x.min(v);
+                        }
                     }
                 }
-                *inv_origin =
-                    crate::game::dialogs::inventory::InventoryOrigin(STORAGE_W + 5.0, 0.0);
-            }
-            if !mgr.is_open(DialogKind::Storage) {
-                mgr.open.push(DialogKind::Storage);
-            }
-            if !mgr.is_open(DialogKind::Inventory) {
-                mgr.open.push(DialogKind::Inventory);
+                if min_x < f32::MAX {
+                    let dx = STORAGE_W + 5.0 - min_x;
+                    for (mut node, root) in &mut inv_entities {
+                        if root.0 == DialogKind::Inventory {
+                            let cur = match node.left {
+                                Val::Px(v) => v,
+                                _ => 0.0,
+                            };
+                            node.left = Val::Px(cur + dx);
+                        }
+                    }
+                    *inv_origin =
+                        crate::game::dialogs::inventory::InventoryOrigin(STORAGE_W + 5.0, 0.0);
+                }
+                if !mgr.is_open(DialogKind::Storage) {
+                    mgr.open.push(DialogKind::Storage);
+                }
+                if !mgr.is_open(DialogKind::Inventory) {
+                    mgr.open.push(DialogKind::Inventory);
+                }
+            } else {
+                // #2960：双闸门配对——visible=false 时 mgr 栈必须同步不含 Storage，
+                // 否则 (visible=false, mgr=open) 失配，RPC `dialog storage toggle`
+                // 在 (false,open)↔(true,closed) 间振荡、永远到不了 (true,true)
+                mgr.close(DialogKind::Storage);
             }
         }
         if let ServerEvent::StoragePasswordResult { result } = ev {
@@ -2209,6 +2216,66 @@ mod tests {
             inv_items(&mut app),
             vec![None, Some(47)],
             "Inventory 组件背包格 1 应收下 uid=47"
+        );
+    }
+
+    /// #2960 回归：服务端 `StorageOpened{visible:false}` 必须**双闸门同步关**
+    /// （state.visible=false 且 mgr 未 open Storage）——无条件 `mgr.open.push(Storage)`
+    /// 会留 (visible=false, mgr=open) 失配态，此后 RPC `dialog storage toggle`
+    /// 在 (false,open)↔(true,closed) 间振荡、永远到不了 (true,true)，窗口永久锁死
+    /// （与 #2956 项 2 同族）。
+    #[test]
+    fn storage_server_event_invisible_closes_both_gates() {
+        use crate::network::server_event::ServerEvent;
+        let mut app = storage_test_app();
+        // 预置开态：双闸门都真（仓库已打开）
+        app.world_mut().resource_mut::<StorageState>().visible = true;
+        app.world_mut()
+            .resource_mut::<DialogManager>()
+            .open(DialogKind::Storage);
+        app.update(); // 初始化消息缓冲/系统状态
+
+        app.world_mut().write_message(ServerEvent::StorageOpened {
+            items: vec![None, None],
+            visible: false,
+        });
+        app.update();
+
+        assert!(
+            !app.world().resource::<StorageState>().visible,
+            "visible=false 事件后 state.visible 应为 false"
+        );
+        assert!(
+            !app.world()
+                .resource::<DialogManager>()
+                .is_open(DialogKind::Storage),
+            "visible=false 事件后 mgr 不应再 open Storage（否则双闸门失配，toggle 永久锁死）"
+        );
+    }
+
+    /// #2960 配对守护：`visible:true` 事件仍须双闸门同开
+    /// （state.visible=true 且 mgr open Storage）——分流修复不得破坏打开路径。
+    #[test]
+    fn storage_server_event_visible_opens_both_gates() {
+        use crate::network::server_event::ServerEvent;
+        let mut app = storage_test_app();
+        app.update();
+
+        app.world_mut().write_message(ServerEvent::StorageOpened {
+            items: vec![None, None],
+            visible: true,
+        });
+        app.update();
+
+        assert!(
+            app.world().resource::<StorageState>().visible,
+            "visible=true 事件后 state.visible 应为 true"
+        );
+        assert!(
+            app.world()
+                .resource::<DialogManager>()
+                .is_open(DialogKind::Storage),
+            "visible=true 事件后 mgr 应 open Storage"
         );
     }
 }
