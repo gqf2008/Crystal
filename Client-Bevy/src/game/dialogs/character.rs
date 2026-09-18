@@ -788,6 +788,13 @@ fn char_skill_system(
             Option<&mut crate::ui::tooltip::UiHint>,
         ),
         (
+            // 必须限定技能行/翻页钮——裸 Without 会匹配全 app 所有 Visibility+Interaction
+            // 实体，开窗期间把别的按钮（含本窗页签/关闭钮）每帧压 Hidden（实机交互验证发现）
+            Or<(
+                With<CharSkillRow>,
+                With<CharSkillNext>,
+                With<CharSkillBack>,
+            )>,
             Without<CharSkillRowChild>,
             Without<CharSkillText>,
             Without<CharSkillIcon>,
@@ -1152,5 +1159,37 @@ mod tests {
         let mut guild_q = world.query_filtered::<&Text, With<CharGuildText>>();
         let guild = guild_q.single(&world).expect("行会标签唯一");
         assert_eq!(guild.0, "", "无行会玩家行会标签应为空串");
+    }
+
+    /// 实机交互验证（control RPC 合成点击）发现的真实 bug：`char_skill_system`
+    /// 的 `rows` 查询只有 `Without` 过滤、**无 `With` 约束**——匹配全 app 所有
+    /// `Visibility + Interaction` 实体；角色窗打开且不在技能页时，每帧把所有按钮
+    /// （含本窗页签/关闭钮、其他对话框按钮）压 `Hidden` → IV=false → 点 X 命中面板
+    /// 而非关闭钮，窗口点 X 关不掉。回归：与技能行无关的按钮不得被它触碰。
+    #[test]
+    fn char_skill_system_does_not_stomp_unrelated_buttons() {
+        use crate::resources::libraries::Libraries;
+        use bevy::ecs::system::RunSystemOnce;
+        let mut world = World::new();
+        let mut mgr = DialogManager::default();
+        mgr.open(DialogKind::Character);
+        world.insert_resource(mgr);
+        world.insert_resource(CharPage(0));
+        world.insert_resource(MagicsState::default());
+        world.insert_resource(crate::game::skills::MagicCooldowns::default());
+        world.insert_resource(CharSkillStart(0));
+        world.insert_resource(AssignKeyState::default());
+        world.insert_resource(GameLibraries(Libraries::new("Data")));
+        world.insert_resource(Assets::<Image>::default());
+        // 诱饵：与技能行无关的按钮（组件形态同角色窗页签/关闭钮）
+        let decoy = world.spawn((Button, Node::default())).id();
+        world
+            .run_system_once(char_skill_system)
+            .expect("char_skill_system 应成功");
+        assert_ne!(
+            world.get::<Visibility>(decoy),
+            Some(&Visibility::Hidden),
+            "与技能行无关的按钮不得被技能系统压 Hidden"
+        );
     }
 }
