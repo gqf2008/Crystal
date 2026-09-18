@@ -898,8 +898,8 @@ impl Message<StartGameRequest> for WorldActor {
             self.send_guild_buff_list(msg.session_id, &buffs).await;
         }
 
-        // #188：下发英雄列表（ManageHeroes）
-        // #194：从 DB 载入英雄（重启不丢）
+        // #188/#194：从 DB 载入英雄列表（重启不丢）；S.ManageHeroes 不在此下发，
+        // 只在英雄管理 NPC / NewHero / GM 链路下发（见下方注释与 #2950）。
         if let Ok(db_heroes) = db::load_heroes(&self.db_pool, &player_name).await {
             self.player_heroes.insert(
                 msg.session_id,
@@ -8805,7 +8805,7 @@ mod auth_regression_tests {
                 .await,
                 "StartGame"
             );
-            // 进图序列余量：再录 1.5s
+            // 进图序列余量：再录 2s
             let _ = recv_until(&mut rx, -1, 2, &mut seen).await;
 
             let manage = mir2_shared::enums::ServerPacketIds::ManageHeroes as i16;
