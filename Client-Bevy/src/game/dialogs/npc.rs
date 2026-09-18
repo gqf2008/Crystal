@@ -212,7 +212,14 @@ fn spawn_npc_dialog(
                 Color::WHITE,
                 8,
             )
-            .insert((NpcLine(i), NpcLineSrc::default(), FontHinting::Enabled));
+            // 必须带 NpcDialogWidget：npc_ui_system 的行渲染查询以它为过滤，
+            // 缺标记则行实体永不匹配、文字永不写入（2026-09-18 实机黑窗根因）
+            .insert((
+                NpcDialogWidget,
+                NpcLine(i),
+                NpcLineSrc::default(),
+                FontHinting::Enabled,
+            ));
         }
     });
 }
@@ -669,6 +676,37 @@ fn npc_input_state_system(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 行实体 spawn 必须带 NpcDialogWidget（2026-09-18 实机黑窗根因）：
+    /// npc_ui_system 的行渲染查询以 With<NpcDialogWidget> 过滤，缺标记则
+    /// 查询恒空、文字永不写入——窗口能开但文本区全黑。
+    /// 红检：把 spawn 处的 NpcDialogWidget 标记去掉 → 本测试 FAILED。
+    #[test]
+    fn npc_line_entities_carry_dialog_widget_marker() {
+        if !crate::resources::libraries::data_assets_present() {
+            eprintln!("无 Data 资产，跳过");
+            return;
+        }
+        let mut app = App::new();
+        app.insert_resource(GameLibraries(crate::resources::libraries::Libraries::new(
+            "Data",
+        )));
+        app.insert_resource(Assets::<Image>::default());
+        app.insert_resource(Assets::<Font>::default());
+        app.init_resource::<UiCjkFont>();
+        app.init_resource::<NpcDialogState>();
+        app.add_systems(Update, spawn_npc_dialog);
+        app.update();
+
+        let mut q = app
+            .world_mut()
+            .query_filtered::<&NpcLine, With<NpcDialogWidget>>();
+        let n = q.iter(app.world()).count();
+        assert_eq!(
+            n, 8,
+            "8 个行实体必须带 NpcDialogWidget（否则渲染查询永不命中）"
+        );
+    }
 
     fn seg(text: &str, color: Option<Color>, link: Option<&str>) -> NpcSeg {
         NpcSeg {
