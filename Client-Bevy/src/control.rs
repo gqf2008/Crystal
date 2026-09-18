@@ -1839,9 +1839,12 @@ mod tests {
     #[test]
     fn parse_control_port_invalid_falls_back_to_9000() {
         for bad in ["abc", "65536", "-1", "9.5", "", "--real-net"] {
-            let args: Vec<String> =
-                vec!["client_bevy".into(), "--control-port".into(), bad.into()];
-            assert_eq!(parse_control_port(&args), 9000, "非法值 {bad:?} 应回退 9000");
+            let args: Vec<String> = vec!["client_bevy".into(), "--control-port".into(), bad.into()];
+            assert_eq!(
+                parse_control_port(&args),
+                9000,
+                "非法值 {bad:?} 应回退 9000"
+            );
         }
         // flag 在末尾、值缺失：同样回退
         let args: Vec<String> = vec!["client_bevy".into(), "--control-port".into()];
@@ -1852,8 +1855,7 @@ mod tests {
     #[test]
     fn parse_control_port_accepts_boundary_values() {
         for (raw, want) in [("0", 0u16), ("65535", 65535u16)] {
-            let args: Vec<String> =
-                vec!["client_bevy".into(), "--control-port".into(), raw.into()];
+            let args: Vec<String> = vec!["client_bevy".into(), "--control-port".into(), raw.into()];
             assert_eq!(parse_control_port(&args), want, "边界值 {raw} 应接受");
         }
     }
