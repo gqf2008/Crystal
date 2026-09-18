@@ -29,6 +29,8 @@ pub(crate) fn spawn_net_objects_when_ready(
     mut actors: Query<(Entity, &NetObjectId, Option<&MountState>)>,
     children: Query<&Children>,
     mut layers: Query<&mut SpriteLayer>,
+    // 下马时连坐骑 ghost 残影层一起移除（ghost 无 SpriteLayer，单独查询）
+    ghost_layers: Query<&GhostLayer>,
 ) {
     if data.map.is_none() {
         return;
@@ -113,32 +115,20 @@ pub(crate) fn spawn_net_objects_when_ready(
                         commands.entity(ent).insert(MountState {
                             mount_type: *mount_type,
                         });
-                        commands.entity(ent).with_children(|p| {
-                            p.spawn((
-                                Sprite::default(),
-                                Transform::default(),
-                                SpriteLayer {
-                                    lib: ArrayLibType::Mounts,
-                                    slot: (*mount_type).max(0) as u32,
-                                    frame: 0,
-                                    is_effect: false,
-                                    is_mount: true,
-                                    alpha: 1.0,
-                                },
-                            ));
-                        });
+                        // 与初始生成同源：attach_mount_layer 含坐骑 ghost 残影层
+                        // （骑乘穿过遮挡物时残影不再只剩身体）
+                        crate::actor::attach_mount_layer(&mut commands, ent, *mount_type);
                         tracing::info!("🐴 玩家 {} 骑乘坐骑 type={}", object_id, mount_type);
                     } else if !*is_mounted && has_mount {
                         commands.entity(ent).remove::<MountState>();
-                        if let Ok(children_of) = children.get(ent) {
-                            for c in children_of.iter() {
-                                if let Ok(l) = layers.get(c) {
-                                    if l.is_mount {
-                                        commands.entity(c).despawn();
-                                    }
-                                }
-                            }
-                        }
+                        // 坐骑层 + 坐骑 ghost 残影层一并移除（helper 与生成同源）
+                        crate::actor::detach_mount_layers(
+                            &mut commands,
+                            &children,
+                            &layers,
+                            &ghost_layers,
+                            ent,
+                        );
                         tracing::info!("🐴 玩家 {} 下马", object_id);
                     }
                     // #1402：重发 ObjectPlayer 时同步行会名标签

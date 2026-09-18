@@ -279,7 +279,42 @@ pub(crate) fn attach_mount_layer(commands: &mut Commands, root: Entity, mount_ty
                 alpha: 1.0,
             },
         ));
+        // ghost 残影层（遮挡时显示，镜像坐骑层）——与 attach_player_layers 的身体
+        // ghost 同构；缺它时骑乘走过建筑/树背后，身体有残影而坐骑直接消失
+        p.spawn((
+            Sprite::default(),
+            Transform::from_xyz(0.0, 0.0, 0.5),
+            Visibility::Hidden,
+            GhostLayer {
+                lib: ArrayLibType::Mounts,
+            },
+        ));
     });
+}
+
+/// 移除 root 的坐骑层与坐骑 ghost 残影层（下马路径）。
+/// ghost 无 SpriteLayer，须按 GhostLayer.lib 单独匹配。
+pub(crate) fn detach_mount_layers(
+    commands: &mut Commands,
+    children: &Query<&Children>,
+    layers: &Query<&mut SpriteLayer>,
+    ghost_layers: &Query<&GhostLayer>,
+    root: Entity,
+) {
+    if let Ok(children_of) = children.get(root) {
+        for c in children_of.iter() {
+            if let Ok(l) = layers.get(c) {
+                if l.is_mount {
+                    commands.entity(c).despawn();
+                }
+            }
+            if let Ok(g) = ghost_layers.get(c) {
+                if g.lib == ArrayLibType::Mounts {
+                    commands.entity(c).despawn();
+                }
+            }
+        }
+    }
 }
 
 /// 玩家分层子精灵（护甲/发型/武器 + 武器特效/翅膀 + ghost 层）
@@ -473,4 +508,95 @@ pub(crate) fn spawn_npc(
         ));
     });
     root
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bevy::ecs::system::RunSystemOnce;
+    use bevy::ecs::world::CommandQueue;
+
+    /// 坐骑层必须带 ghost 残影层（遮挡半透明）——缺它时骑乘走过建筑/树背后，
+    /// 身体有残影而坐骑直接消失（2026-09-18 用户实机报告）
+    #[test]
+    fn attach_mount_layer_spawns_layer_and_ghost() {
+        let mut world = World::new();
+        let root = world.spawn_empty().id();
+        let mut queue = CommandQueue::default();
+        {
+            let mut commands = Commands::new(&mut queue, &world);
+            attach_mount_layer(&mut commands, root, 3);
+        }
+        queue.apply(&mut world);
+        let children = world.get::<Children>(root).expect("root 应有子实体");
+        let mut has_mount_layer = false;
+        let mut has_mount_ghost = false;
+        for c in children.iter() {
+            if let Some(l) = world.get::<SpriteLayer>(c) {
+                if l.is_mount && l.lib == ArrayLibType::Mounts && l.slot == 3 {
+                    has_mount_layer = true;
+                }
+            }
+            if let Some(g) = world.get::<GhostLayer>(c) {
+                if g.lib == ArrayLibType::Mounts {
+                    has_mount_ghost = true;
+                    // ghost 初始 Hidden（遮挡时才由 update_local_ghost 翻 Visible）
+                    assert_eq!(world.get::<Visibility>(c), Some(&Visibility::Hidden));
+                }
+            }
+        }
+        assert!(has_mount_layer, "应有坐骑 SpriteLayer");
+        assert!(has_mount_ghost, "应有坐骑 GhostLayer（遮挡残影）");
+    }
+
+    /// 下马必须连坐骑 ghost 一起移除，身体层保留——否则下马后残留 ghost 实体
+    #[test]
+    fn detach_mount_layers_removes_layer_and_ghost_keeps_body() {
+        let mut world = World::new();
+        let root = world.spawn_empty().id();
+        let mut queue = CommandQueue::default();
+        {
+            let mut commands = Commands::new(&mut queue, &world);
+            attach_mount_layer(&mut commands, root, 0);
+            // 身体层（应保留）
+            commands.entity(root).with_children(|p| {
+                p.spawn((
+                    Sprite::default(),
+                    Transform::default(),
+                    SpriteLayer {
+                        lib: ArrayLibType::CArmours,
+                        slot: 1,
+                        frame: 0,
+                        is_effect: false,
+                        is_mount: false,
+                        alpha: 1.0,
+                    },
+                ));
+            });
+        }
+        queue.apply(&mut world);
+        world
+            .run_system_once(move |mut commands: Commands,
+                                   children: Query<&Children>,
+                                   layers: Query<&mut SpriteLayer>,
+                                   ghost_layers: Query<&GhostLayer>| {
+                detach_mount_layers(&mut commands, &children, &layers, &ghost_layers, root);
+            })
+            .expect("detach 应运行");
+        let children = world.get::<Children>(root).expect("root 应有子实体");
+        let mut remaining: Vec<String> = Vec::new();
+        for c in children.iter() {
+            if let Some(l) = world.get::<SpriteLayer>(c) {
+                remaining.push(format!("layer:{:?}:mount={}", l.lib, l.is_mount));
+            }
+            if world.get::<GhostLayer>(c).is_some() {
+                remaining.push("ghost".to_string());
+            }
+        }
+        assert_eq!(
+            remaining,
+            vec!["layer:CArmours:mount=false".to_string()],
+            "下马后应只剩身体层，实际: {remaining:?}"
+        );
+    }
 }

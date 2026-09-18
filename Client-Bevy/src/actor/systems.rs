@@ -219,14 +219,20 @@ pub(crate) fn dump_depth_debug(
 #[allow(clippy::type_complexity)]
 pub(crate) fn update_local_ghost(
     mut ghosts: Query<
-        (&mut Sprite, &mut Transform, &mut Visibility, &GhostLayer),
+        (
+            &mut Sprite,
+            &mut Transform,
+            &mut Visibility,
+            &GhostLayer,
+            &ChildOf,
+        ),
         (Without<SpriteLayer>, Without<LocalPlayer>),
     >,
-    local: Query<(&Transform, &Children), (With<LocalPlayer>, Without<GhostLayer>)>,
+    local: Query<(Entity, &Transform, &Children), (With<LocalPlayer>, Without<GhostLayer>)>,
     layers: Query<(&Sprite, &Transform, &SpriteLayer), Without<GhostLayer>>,
     front: Query<&crate::map_renderer::FrontTile>,
 ) {
-    let Ok((root_tf, children)) = local.single() else {
+    let Ok((local_ent, root_tf, children)) = local.single() else {
         return;
     };
     let foot_x = root_tf.translation.x;
@@ -239,7 +245,12 @@ pub(crate) fn update_local_ghost(
     const GHOST_ALPHA: f32 = 0.55; // 与 macroquad PLAYER_GHOST_ALPHA 一致
     const GHOST_LOCAL_Z: f32 = 0.5; // 本地 z 偏移：保证世界 z 高于所有 front 瓦片
 
-    for (mut gs, mut gt, mut gv, gl) in &mut ghosts {
+    for (mut gs, mut gt, mut gv, gl, parent) in &mut ghosts {
+        // 只驱动本地玩家自己的 ghost——远端玩家的 ghost 实体若被本地遮挡状态驱动，
+        // 会把本地玩家的精灵镜像到远端玩家身上（潜伏 bug，坐骑 ghost 引入后必须拦住）
+        if parent.parent() != local_ent {
+            continue;
+        }
         let mut matched = None;
         for child in children.iter() {
             if let Ok((ls, lt, ll)) = layers.get(child) {
@@ -645,5 +656,106 @@ fn dir_vec(d: u8) -> (f32, f32) {
         5 => (-1.0, 1.0),
         6 => (-1.0, 0.0),
         _ => (-1.0, -1.0),
+    }
+}
+
+#[cfg(test)]
+mod ghost_tests {
+    use super::*;
+    use crate::actor::components::{ActorAnim, GhostLayer, LocalPlayer, SpriteLayer};
+    use crate::resources::libraries::ArrayLibType;
+    use bevy::ecs::system::RunSystemOnce;
+
+    fn layer(lib: ArrayLibType, is_mount: bool) -> (Sprite, Transform, SpriteLayer) {
+        (
+            Sprite::default(),
+            Transform::default(),
+            SpriteLayer {
+                lib,
+                slot: 0,
+                frame: 0,
+                is_effect: false,
+                is_mount,
+                alpha: 1.0,
+            },
+        )
+    }
+
+    fn ghost(lib: ArrayLibType) -> (Sprite, Transform, Visibility, GhostLayer) {
+        (
+            Sprite::default(),
+            Transform::from_xyz(0.0, 0.0, 0.5),
+            Visibility::Hidden,
+            GhostLayer { lib },
+        )
+    }
+
+    /// 遮挡时：本地玩家的身体 ghost 与坐骑 ghost 都翻 Visible；
+    /// 远端玩家的 ghost 必须保持 Hidden（父级护栏——不得把本地精灵镜像到远端身上）
+    #[test]
+    fn ghost_drive_local_only_including_mount() {
+        let mut world = World::new();
+        let local = world
+            .spawn((
+                LocalPlayer,
+                ActorAnim::default(),
+                Transform::from_xyz(0.0, 0.0, 0.0),
+                Visibility::default(),
+            ))
+            .id();
+        let local_armour_ghost;
+        let local_mount_ghost;
+        {
+            let mut e = world.entity_mut(local);
+            let mut ag = None;
+            let mut mg = None;
+            e.with_children(|p| {
+                p.spawn(layer(ArrayLibType::CArmours, false));
+                p.spawn(layer(ArrayLibType::Mounts, true));
+                ag = Some(p.spawn(ghost(ArrayLibType::CArmours)).id());
+                mg = Some(p.spawn(ghost(ArrayLibType::Mounts)).id());
+            });
+            local_armour_ghost = ag.unwrap();
+            local_mount_ghost = mg.unwrap();
+        }
+        let remote = world
+            .spawn((Transform::from_xyz(200.0, 0.0, 0.0), Visibility::default()))
+            .id();
+        let remote_ghost;
+        {
+            let mut e = world.entity_mut(remote);
+            let mut g = None;
+            e.with_children(|p| {
+                p.spawn(layer(ArrayLibType::CArmours, false));
+                g = Some(p.spawn(ghost(ArrayLibType::CArmours)).id());
+            });
+            remote_ghost = g.unwrap();
+        }
+        // 遮挡瓦片盖住本地玩家身体包围盒（bl=-22,bt=-92,br=22,bb=2）
+        world.spawn(crate::map_renderer::FrontTile {
+            base_y: 0.0,
+            left: -50.0,
+            top: -100.0,
+            right: 50.0,
+            bottom: 10.0,
+        });
+        world
+            .run_system_once(update_local_ghost)
+            .expect("update_local_ghost 应运行");
+        assert_eq!(
+            world.get::<Visibility>(local_armour_ghost),
+            Some(&Visibility::Visible),
+            "本地身体 ghost 遮挡时应 Visible"
+        );
+        assert_eq!(
+            world.get::<Visibility>(local_mount_ghost),
+            Some(&Visibility::Visible),
+            "本地坐骑 ghost 遮挡时应 Visible（bug 修复点）"
+        );
+        assert_eq!(
+            world.get::<Visibility>(remote_ghost),
+            Some(&Visibility::Hidden),
+            "远端玩家 ghost 不得被本地遮挡状态驱动"
+        );
     }
 }
