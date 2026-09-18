@@ -1508,11 +1508,13 @@ fn creature_action_system(
             Has<CreatureAutoBtn>,
             Has<CreatureSemiBtn>,
             Has<CreatureOptionsBtn>,
-            Has<CreatureRenameOk>,
-            Has<CreatureReleaseOk>,
         ),
         // 循环体对每个匹配按钮无条件写 node.color=WHITE——裸查询会踩全 app 的
-        // ImageButton（同 #2954 char_skill 的踩法）；SummonFrames 恒与 SummonBtn 同挂
+        // ImageButton（同 #2954 char_skill 的踩法）。CreatureSummonFrames 恒与
+        // CreatureSummonBtn 同挂（spawn 侧同一 cmds 先插 Btn 再条件插 Frames），
+        // Or 内无需 Frames 条目；CreatureRenameOk/CreatureReleaseOk 由
+        // spawn_container+BackgroundColor 生成、无 ImageNode/ImageButton，永不命中
+        // 本查询（确认走 TextInputSubmit 路径），Or 内不留死条目。
         Or<(
             With<CreatureRenameBtn>,
             With<CreatureDismissBtn>,
@@ -1521,9 +1523,6 @@ fn creature_action_system(
             With<CreatureAutoBtn>,
             With<CreatureSemiBtn>,
             With<CreatureOptionsBtn>,
-            With<CreatureRenameOk>,
-            With<CreatureReleaseOk>,
-            With<CreatureSummonFrames>,
         )>,
     >,
     // #1299：Bevy B0001——两个 &mut Visibility Query 冲突，用 ParamSet 顺序访问（#1298 合并后启动 panic）
@@ -1662,8 +1661,6 @@ fn creature_action_system(
         is_auto,
         is_semi,
         is_opts,
-        is_rok,
-        is_relok,
     ) in &mut buttons
     {
         // C# `RefreshUI`：未选中宠物时按钮保持可见但 `Enabled = false`（灰化且不响应点击）
@@ -1787,10 +1784,6 @@ fn creature_action_system(
                 },
             );
             state.message = "切换到半自动模式".to_string();
-        } else if is_rok {
-            rename_confirm = true;
-        } else if is_relok {
-            release_confirm = true;
         }
     }
     if submits.contains(&33) {
@@ -2145,9 +2138,13 @@ fn creature_server_events(
 
 #[cfg(test)]
 mod tests {
-    /// 表征（#2954 同类防护）：creature_action_system 的 buttons/vis 查询限定
-    /// 宠物部件后，无标记按钮的 `node.color` 与 Visibility 均不得被触碰；
-    /// CreatureRenameInput 显隐仍跟随 rename_open。
+    /// 表征（#2954 同类防护 + #2958 正控制补全）：creature_action_system 的
+    /// buttons/vis 查询限定宠物部件后——
+    /// 负控制：无标记按钮的 `node.color` 与 Visibility 均不得被触碰；
+    /// 正控制 p1：CreatureRenameInput 显隐仍跟随 rename_open；
+    /// 正控制 p0：CreatureDismissBtn/CreatureSummonBtn 显隐按 is_active 互斥驱动；
+    /// 正控制 buttons：CreatureSummonFrames 在「已召唤其它种类」时切 alt 帧、
+    /// 标记按钮 color 被写 WHITE，且 other_summoned 消除后帧切回 base。
     #[test]
     fn creature_action_system_does_not_stomp_unrelated_widgets() {
         use bevy::prelude::*;
@@ -2157,6 +2154,7 @@ mod tests {
         app.insert_resource(crate::network::NetConnection::default());
         app.init_resource::<crate::game::dialogs::text_input::TextInputState>();
         app.add_message::<crate::game::dialogs::text_input::TextInputSubmit>();
+        app.insert_resource(Assets::<Image>::default());
         app.add_systems(Update, super::creature_action_system);
 
         // 无标记按钮：非白 color + Visible——两个维度都不得被踩
@@ -2182,10 +2180,76 @@ mod tests {
             .world_mut()
             .spawn((Visibility::Hidden, super::CreatureRenameInput))
             .id();
+        // p0 正控制：解散钮（初始 Hidden）——选中宠物 is_active=true 时应被驱动为 Visible
+        let dismiss_btn = app
+            .world_mut()
+            .spawn((
+                Button,
+                Interaction::None,
+                Node::default(),
+                ImageNode::default(),
+                crate::ui::theme::ImageButton {
+                    normal: Handle::default(),
+                    hover: Handle::default(),
+                    pressed: Handle::default(),
+                },
+                Visibility::Hidden,
+                super::CreatureDismissBtn,
+            ))
+            .id();
+        // buttons 正控制：召唤钮带两套可区分帧（base≠alt），初始非白 color——
+        // other_summoned=true 时应切 alt 帧并把 color 写回 WHITE
+        let (base, alt) = {
+            let mut images = app.world_mut().resource_mut::<Assets<Image>>();
+            let base = (
+                images.add(Image::default()),
+                images.add(Image::default()),
+                images.add(Image::default()),
+            );
+            let alt = (
+                images.add(Image::default()),
+                images.add(Image::default()),
+                images.add(Image::default()),
+            );
+            (base, alt)
+        };
+        let mut summon_node = ImageNode::new(base.0.clone());
+        summon_node.color = tint;
+        let summon_btn = app
+            .world_mut()
+            .spawn((
+                Button,
+                Interaction::None,
+                Node::default(),
+                summon_node,
+                crate::ui::theme::ImageButton {
+                    normal: base.0.clone(),
+                    hover: base.1.clone(),
+                    pressed: base.2.clone(),
+                },
+                Visibility::Visible,
+                super::CreatureSummonBtn,
+                super::CreatureSummonFrames {
+                    base: base.clone(),
+                    alt: alt.clone(),
+                    current_alt: false,
+                },
+            ))
+            .id();
 
-        app.world_mut()
-            .resource_mut::<super::CreatureState>()
-            .rename_open = true;
+        {
+            let mut state = app.world_mut().resource_mut::<super::CreatureState>();
+            state.rename_open = true;
+            state.creatures.push(super::CreatureEntry {
+                creature_type: 1,
+                active: true,
+                ..Default::default()
+            });
+            state.selected = 0;
+            // 已召唤「其它种类」（type 9 ≠ 选中 1）→ 召唤键切 593..595 禁用帧
+            state.summoned = true;
+            state.summoned_type = 9;
+        }
         app.update();
         assert_eq!(
             app.world().entity(decoy).get::<Visibility>().unwrap(),
@@ -2205,6 +2269,61 @@ mod tests {
             &Visibility::Visible,
             "rename_open=true → CreatureRenameInput Visible"
         );
+        // p0 正控制：is_active=true → 解散 Visible、召唤 Hidden（C# 同坐标互斥）
+        assert_eq!(
+            app.world().entity(dismiss_btn).get::<Visibility>().unwrap(),
+            &Visibility::Visible,
+            "is_active=true → CreatureDismissBtn Visible"
+        );
+        assert_eq!(
+            app.world().entity(summon_btn).get::<Visibility>().unwrap(),
+            &Visibility::Hidden,
+            "is_active=true → CreatureSummonBtn Hidden（由 Dismiss 顶替）"
+        );
+        // buttons 正控制：other_summoned=true → 召唤钮切 alt 帧、color 写 WHITE
+        {
+            let world = app.world();
+            let e = world.entity(summon_btn);
+            let frames = e.get::<super::CreatureSummonFrames>().unwrap();
+            let ib = e.get::<crate::ui::theme::ImageButton>().unwrap();
+            assert!(frames.current_alt, "other_summoned=true → current_alt 置位");
+            assert_eq!(ib.normal, alt.0, "other_summoned=true → normal 切 alt 帧");
+            assert_eq!(ib.hover, alt.1, "other_summoned=true → hover 切 alt 帧");
+            assert_eq!(ib.pressed, alt.2, "other_summoned=true → pressed 切 alt 帧");
+            assert_eq!(
+                e.get::<ImageNode>().unwrap().color,
+                Color::WHITE,
+                "标记按钮 node.color 应被系统写回 WHITE"
+            );
+        }
+
+        // other_summoned 消除（召唤类型变为选中类型）→ 帧切回 base
+        app.world_mut()
+            .resource_mut::<super::CreatureState>()
+            .summoned_type = 1;
+        app.update();
+        {
+            let world = app.world();
+            let e = world.entity(summon_btn);
+            let frames = e.get::<super::CreatureSummonFrames>().unwrap();
+            let ib = e.get::<crate::ui::theme::ImageButton>().unwrap();
+            assert!(
+                !frames.current_alt,
+                "other_summoned=false → current_alt 复位"
+            );
+            assert_eq!(
+                ib.normal, base.0,
+                "other_summoned=false → normal 切回 base 帧"
+            );
+            assert_eq!(
+                ib.hover, base.1,
+                "other_summoned=false → hover 切回 base 帧"
+            );
+            assert_eq!(
+                ib.pressed, base.2,
+                "other_summoned=false → pressed 切回 base 帧"
+            );
+        }
     }
 
     use super::*;

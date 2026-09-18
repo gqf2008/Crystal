@@ -411,10 +411,13 @@ fn fishing_ui_system(
     crate::game::dialogs::sync_dialog_state(&mut mgr, DialogKind::FishingStatus, state.fishing);
     // 显隐分发（同一 `Visibility` 查询按标记取角色，规则走 `fishing_visible`）
     for (mut vis, widget, status_root, cast, disabled, auto_box, esc_tick) in &mut vis_q {
-        let role = if widget.is_some() {
-            FishingVisRole::MainPanel
-        } else if status_root.is_some() {
+        // 状态窗实体同时带 `FishingWidget` + `FishingStatusRoot`（spawn 处两个标记都挂），
+        // 必须先判 `FishingStatusRoot`——否则状态窗被当成主窗，显隐跟主窗开关而非
+        // `state.fishing`（钓鱼中 ESC 关主窗会把状态窗一起藏掉）。
+        let role = if status_root.is_some() {
             FishingVisRole::StatusPanel
+        } else if widget.is_some() {
+            FishingVisRole::MainPanel
         } else if cast.is_some() {
             FishingVisRole::CastButton
         } else if disabled.is_some() {
@@ -669,6 +672,49 @@ mod tests {
     }
 
     use super::*;
+
+    /// 钓鱼状态窗显隐回归：状态面板实体**同时**带 `FishingWidget` + `FishingStatusRoot`
+    /// 两个标记（spawn 处如此），分发必须先判 `FishingStatusRoot`——否则被当成主窗，
+    /// 显隐跟主窗开关而非 `state.fishing`：钓鱼中 ESC 关主窗会把状态窗一起藏起来
+    /// （C# `GameScene.cs:3056-3059`：状态窗只由 `S.FishingUpdate.Fishing` 驱动）。
+    ///
+    /// 阳性对照：把分发两臂对调回「先判 widget」→ 本测试两条断言都 FAILED。
+    #[test]
+    fn fishing_status_panel_follows_state_not_main_window() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.init_resource::<crate::game::dialogs::DialogManager>();
+        app.init_resource::<FishingState>();
+        app.insert_resource(crate::network::NetConnection::default());
+        app.add_systems(Update, fishing_ui_system);
+
+        // 与生产 spawn 一致：状态窗实体同时带两个标记
+        let status = app
+            .world_mut()
+            .spawn((Visibility::Hidden, FishingWidget, FishingStatusRoot))
+            .id();
+
+        // 钓鱼中、主窗未开 → 状态窗必须可见
+        app.world_mut().resource_mut::<FishingState>().fishing = true;
+        app.update();
+        assert_eq!(
+            app.world().entity(status).get::<Visibility>().unwrap(),
+            &Visibility::Visible,
+            "state.fishing=true 时状态窗必须可见（与主窗开关无关）"
+        );
+
+        // 收竿（fishing=false）但主窗打开 → 状态窗必须隐藏（不跟主窗）
+        app.world_mut().resource_mut::<FishingState>().fishing = false;
+        app.world_mut()
+            .resource_mut::<crate::game::dialogs::DialogManager>()
+            .open(crate::game::dialogs::DialogKind::Fishing);
+        app.update();
+        assert_eq!(
+            app.world().entity(status).get::<Visibility>().unwrap(),
+            &Visibility::Hidden,
+            "state.fishing=false 时状态窗必须隐藏（即使主窗开着）"
+        );
+    }
 
     /// #2892：两条 `BeforeDraw` 条的裁绘宽度（C# `FishingDialog.cs:353/367`：
     /// `width = (int)(2.16 * percent)`，`< 0` 钳 0、`> 216` 钳 216）。
