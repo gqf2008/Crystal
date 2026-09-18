@@ -27,7 +27,7 @@ use bevy::input::ButtonState;
 use bevy::prelude::*;
 use bevy::sprite::Anchor;
 
-use crate::ui::sprite_ui::{UiEntity, UiFont};
+use crate::ui::sprite_ui::{shared_cjk_font, UiCjkFont, UiEntity, UiFont};
 use std::path::{Path, PathBuf};
 
 /// 候选条每页数量
@@ -579,6 +579,9 @@ fn pinyin_candidate_ui_system(
     ime: Res<PinyinIme>,
     focus: Res<ImeFocus>,
     ui_font: Res<UiFont>,
+    // Option：资源缺席（极简测试 App 无 AssetPlugin）不触发参数校验失败，仅不 spawn
+    mut fonts: Option<ResMut<Assets<Font>>>,
+    mut cjk_font: Option<ResMut<UiCjkFont>>,
     mut bars: ParamSet<(
         Query<(&mut Sprite, &mut Transform, &mut Visibility), With<PinyinBarBg>>,
         Query<(&mut Text2d, &mut Transform, &mut Visibility), With<PinyinBarText>>,
@@ -586,6 +589,12 @@ fn pinyin_candidate_ui_system(
 ) {
     // 确保候选条实体存在（字体就绪后）
     if bars.p0().is_empty() && bars.p1().is_empty() && ui_font.0.is_strong() {
+        // 候选词是中文——必须用自带 CJK 字形的主字体（LESSON：动态改写文本
+        // 靠脚本回退必豆腐/乱码；Arial 无 CJK）
+        let (Some(fonts), Some(cjk_res)) = (fonts.as_mut(), cjk_font.as_mut()) else {
+            return;
+        };
+        let cjk = shared_cjk_font(fonts, cjk_res);
         commands.spawn((
             UiEntity,
             PinyinBarBg,
@@ -603,7 +612,7 @@ fn pinyin_candidate_ui_system(
             Text2d::new(""),
             Anchor::TOP_LEFT,
             TextFont {
-                font: FontSource::Handle(ui_font.0.clone()),
+                font: FontSource::Handle(cjk),
                 font_size: FontSize::Px(13.0),
                 ..default()
             },
@@ -673,6 +682,8 @@ fn pinyin_mode_chip_system(
     ime: Res<PinyinIme>,
     focus: Res<ImeFocus>,
     ui_font: Res<UiFont>,
+    mut fonts: Option<ResMut<Assets<Font>>>,
+    mut cjk_font: Option<ResMut<UiCjkFont>>,
     mut chips: Query<
         (&mut Text2d, &mut TextColor, &mut Transform, &mut Visibility),
         With<PinyinModeChip>,
@@ -680,13 +691,18 @@ fn pinyin_mode_chip_system(
 ) {
     // 确保 chip 实体存在（字体就绪后；UiFont 补强由候选条系统负责）
     if chips.is_empty() && ui_font.0.is_strong() {
+        // 「中/英」徽标含 CJK——同候选条，用共享 CJK 主字体
+        let (Some(fonts), Some(cjk_res)) = (fonts.as_mut(), cjk_font.as_mut()) else {
+            return;
+        };
+        let cjk = shared_cjk_font(fonts, cjk_res);
         commands.spawn((
             UiEntity,
             PinyinModeChip,
             Text2d::new(""),
             Anchor::TOP_LEFT,
             TextFont {
-                font: FontSource::Handle(ui_font.0.clone()),
+                font: FontSource::Handle(cjk),
                 font_size: FontSize::Px(12.0),
                 ..default()
             },
@@ -730,6 +746,8 @@ impl Plugin for PinyinImePlugin {
         ime.enabled = ime.engine.is_some();
         app.insert_resource(ime);
         app.init_resource::<ImeFocus>();
+        // 候选条/chip 文本用共享 CJK 主字体（Arial 无中文字形 → 候选词豆腐/乱码）
+        app.init_resource::<UiCjkFont>();
         app.add_systems(PreUpdate, (pinyin_ime_system, clear_ime_focus).chain());
         // 候选条必须在 Update 所有输入框回填 ImeFocus 之后渲染；否则聚焦框尚未设置，候选条不会显示。
         app.add_systems(PostUpdate, pinyin_candidate_ui_system);
