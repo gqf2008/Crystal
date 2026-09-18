@@ -1208,6 +1208,90 @@ mod tests {
         });
         queue.apply(&mut world);
     }
+
+    /// bug5 滚动条审计回归：列表挂在**页面容器**（面板子节点）时，滚轮命中必须沿
+    /// ChildOf 链累加各层 Node.left/top 得到屏幕原点（C# 中控件 Location 相对父级、
+    /// 命中判定用屏幕坐标）。否则页级列表（行会成员页/商城分类等）滚轮失效。
+    ///
+    /// 阳性对照：把 `origin()` 退回「只读本实体 left/top」→ 本测试 FAILED
+    /// （页屏幕矩形 (110..160, 70..120)，旧原点 (10,20) 下光标 (120,80) 不命中）。
+    #[test]
+    fn scroll_list_wheel_hits_page_level_list_via_parent_chain() {
+        use bevy::ecs::message::Messages;
+        use bevy::ecs::system::RunSystemOnce;
+
+        let mut world = World::new();
+        world.init_resource::<Messages<MouseWheel>>();
+        world.init_resource::<ButtonInput<MouseButton>>();
+        world.init_resource::<crate::ui::scroll_list::ScrollDrag>();
+
+        // 根面板 @(100,50)，页面容器 @(10,20)；列表可视区页内 (0,0,50,50)
+        // → 屏幕矩形 (110,70)-(160,120)
+        let root = world
+            .spawn(abs_node(100.0, 50.0, Some(300.0), Some(300.0)))
+            .id();
+        let page = world
+            .spawn((
+                abs_node(10.0, 20.0, Some(200.0), Some(200.0)),
+                ChildOf(root),
+                UiScrollList {
+                    rect_rel: (0.0, 0.0, 50.0, 50.0),
+                    row_h: 10.0,
+                    visible: 5,
+                    total: 20,
+                    offset: 0,
+                    step: 1,
+                    track_rel: (50.0, 0.0, 10.0, 50.0),
+                    thumb: None,
+                    z: 1,
+                },
+            ))
+            .id();
+
+        // 窗口 + 光标放在页级列表屏幕矩形内 (120,80)
+        let mut window = Window::default();
+        window.set_cursor_position(Some(Vec2::new(120.0, 80.0)));
+        let win = world.spawn(window).id();
+
+        // 滚一格轮（Line 1 格 × step 1 = 1 行）
+        world.write_message(MouseWheel {
+            unit: MouseScrollUnit::Line,
+            x: 0.0,
+            y: 1.0,
+            window: win,
+            phase: bevy::input::touch::TouchPhase::Moved,
+        });
+        world
+            .run_system_once(scroll_list_ui_system)
+            .expect("滚动系统应可运行");
+        assert_eq!(
+            world.get::<UiScrollList>(page).map(|l| l.offset),
+            Some(1),
+            "光标命中页级列表屏幕矩形时滚轮必须滚动它（链式原点）"
+        );
+
+        // 光标移到页外 (105,55)（根面板内、页面矩形外）→ 不再命中，offset 不变
+        world
+            .get_mut::<Window>(win)
+            .unwrap()
+            .set_cursor_position(Some(Vec2::new(105.0, 55.0)));
+        world.write_message(MouseWheel {
+            unit: MouseScrollUnit::Line,
+            x: 0.0,
+            y: 1.0,
+            window: win,
+            phase: bevy::input::touch::TouchPhase::Moved,
+        });
+        world
+            .run_system_once(scroll_list_ui_system)
+            .expect("滚动系统应可重复运行");
+        assert_eq!(
+            world.get::<UiScrollList>(page).map(|l| l.offset),
+            Some(1),
+            "光标在页面矩形外时不得滚动页级列表"
+        );
+    }
+
 }
 
 // ============================================================================
@@ -1291,15 +1375,19 @@ pub fn spawn_scroll_bar_ui(
 /// bevy_ui 滚轮滚动 + 滑块定位 + 滑块拖动
 /// 滑块为列表容器子节点（UiScrollThumb），按父子关系查找，无需存实体。
 /// thumb_read 只读用于查找/命中；thumb_write 用于每帧定位滑块。
+/// 列表可挂在**页面容器**（面板子节点）上：屏幕原点沿 ChildOf 链累加
+/// （面板拖动只改根 Node.left/top，链和自动跟随）。
 #[allow(clippy::type_complexity)]
 pub fn scroll_list_ui_system(
     mut wheels: MessageReader<MouseWheel>,
     windows: Query<&Window>,
     mouse: Res<ButtonInput<MouseButton>>,
     mut drag: ResMut<crate::ui::scroll_list::ScrollDrag>,
-    mut lists: Query<(Entity, &mut UiScrollList, &Node), Without<UiScrollThumb>>,
+    mut lists: Query<(Entity, &mut UiScrollList), Without<UiScrollThumb>>,
     thumb_read: Query<(&ChildOf, &UiScrollThumb)>,
     mut thumb_write: Query<(&ChildOf, &mut Node, &UiScrollThumb)>,
+    parents: Query<&ChildOf>,
+    node_read: Query<&Node, Without<UiScrollThumb>>,
 ) {
     let Ok(window) = windows.single() else {
         return;
@@ -1308,16 +1396,26 @@ pub fn scroll_list_ui_system(
         return;
     };
 
-    // 容器屏幕原点（面板根 Node.left/top）
-    fn origin(node: &Node) -> (f32, f32) {
-        let x = match node.left {
-            Val::Px(v) => v,
-            _ => 0.0,
-        };
-        let y = match node.top {
-            Val::Px(v) => v,
-            _ => 0.0,
-        };
+    // 容器屏幕原点：沿 ChildOf 链累加各层 Node.left/top（根面板 / 页面容器通用）
+    fn origin(
+        e: Entity,
+        parents: &Query<&ChildOf>,
+        nodes: &Query<&Node, Without<UiScrollThumb>>,
+    ) -> (f32, f32) {
+        let mut x = 0.0;
+        let mut y = 0.0;
+        let mut cur = Some(e);
+        while let Some(c) = cur {
+            if let Ok(n) = nodes.get(c) {
+                if let Val::Px(v) = n.left {
+                    x += v;
+                }
+                if let Val::Px(v) = n.top {
+                    y += v;
+                }
+            }
+            cur = parents.get(c).ok().map(|co| co.parent());
+        }
         (x, y)
     }
 
@@ -1331,11 +1429,11 @@ pub fn scroll_list_ui_system(
 
     // 滑块拖动（C# MirScrollBar movable）
     if mouse.just_pressed(MouseButton::Left) && drag.dragging.is_none() {
-        for (e, list, node) in lists.iter() {
+        for (e, list) in lists.iter() {
             let Some(thumb) = list_thumb(e, &thumb_read) else {
                 continue;
             };
-            let (ox, oy) = origin(node);
+            let (ox, oy) = origin(e, &parents, &node_read);
             let total = list.total.max(list.visible);
             let (tx, ty, tw, th) = list.track_rel;
             let thumb_h = (th * (list.visible as f32 / total as f32)).clamp(14.0, th);
@@ -1361,11 +1459,11 @@ pub fn scroll_list_ui_system(
         if !mouse.pressed(MouseButton::Left) {
             drag.dragging = None;
         } else {
-            for (e, mut list, node) in lists.iter_mut() {
+            for (e, mut list) in lists.iter_mut() {
                 if list_thumb(e, &thumb_read) != Some(thumb_e) {
                     continue;
                 }
-                let (ox, oy) = origin(node);
+                let (_, oy) = origin(e, &parents, &node_read);
                 let total = list.total.max(list.visible);
                 let (_, ty, _, th) = list.track_rel;
                 let thumb_h = (th * (list.visible as f32 / total as f32)).clamp(14.0, th);
@@ -1395,8 +1493,8 @@ pub fn scroll_list_ui_system(
 
     if scroll_y.abs() > 0.0 {
         let mut best: Option<(i32, Entity)> = None;
-        for (e, list, node) in lists.iter() {
-            let (ox, oy) = origin(node);
+        for (e, list) in lists.iter() {
+            let (ox, oy) = origin(e, &parents, &node_read);
             let (rx, ry, rw, rh) = list.rect_rel;
             if cursor.x >= ox + rx
                 && cursor.x <= ox + rx + rw
@@ -1409,7 +1507,7 @@ pub fn scroll_list_ui_system(
             }
         }
         if let Some((_, e)) = best {
-            if let Ok((_, mut list, _)) = lists.get_mut(e) {
+            if let Ok((_, mut list)) = lists.get_mut(e) {
                 let rows = (scroll_y * list.step.max(1) as f32).round() as i32;
                 let max = list.max_offset() as i32;
                 list.offset = (list.offset as i32 + rows).clamp(0, max) as usize;
@@ -1418,7 +1516,7 @@ pub fn scroll_list_ui_system(
     }
 
     // 每帧把滑块移到 offset 对应位置（跟随容器拖动）
-    for (e, list, _) in lists.iter() {
+    for (e, list) in lists.iter() {
         let Some(thumb) = list_thumb(e, &thumb_read) else {
             continue;
         };
