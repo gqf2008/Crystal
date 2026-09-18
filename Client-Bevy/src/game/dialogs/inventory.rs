@@ -188,10 +188,12 @@ pub const GOLD_TEXT_Y: f32 = 212.0;
 /// 负重文本对话框相对坐标（C# InventoryDialog.cs:190 WeightLabel (268,212) 26x14）
 pub const WEIGHT_TEXT_X: f32 = 268.0;
 pub const WEIGHT_TEXT_Y: f32 = 212.0;
-/// 扩容按钮命中区尺寸（C# InventoryDialog.cs:84 AddButton Size(72,23)；精灵 Title[483] 自然
-/// 48x25 绘于 (235,5) 不受影响，此处仅对齐可点击矩形——原 23x23 小于可见按钮，右半点了无反应）
-pub const ADD_BTN_W: f32 = 72.0;
-pub const ADD_BTN_H: f32 = 23.0;
+/// 扩容按钮命中区尺寸（精灵 Title[483] 自然 48x25，绘于 (235,5)。原 23x23 小于可见
+/// 按钮——右半点了无反应；但放大到 C# 的 72x23 右缘压到 x=307，盖住关闭钮左缘 (289)，
+/// z=8 平局时后生成的扩容钮吞掉点 X 的点击（实机交互验证发现）。取自然精灵 48x25：
+/// 右缘 283 < 289 与 X 不相交，且完整覆盖可视按钮）
+pub const ADD_BTN_W: f32 = 48.0;
+pub const ADD_BTN_H: f32 = 25.0;
 const GRID_COLS: usize = 8;
 const GRID_ROWS: usize = 5;
 const QUEST_GRID_SIZE: usize = GRID_COLS * GRID_ROWS; // 任务格 8x5=40（C# QuestInventory）
@@ -3496,5 +3498,35 @@ mod tests {
             UseOutcome::Sent
         );
         assert_eq!(reason, None);
+    }
+
+    /// 实机交互验证（control RPC 合成点击）发现的真实 bug：扩容按钮命中区
+    /// `ADD_BTN_W x ADD_BTN_H` @ (235,5) 右缘压到 x=307，盖住关闭钮 (289..313)
+    /// 左缘；两者 z=8 平局、扩容后生成在上 → 点 X 中心 (301,13.5) 落入重叠区被
+    /// 扩容钮吞掉，背包无法通过点 X 关闭。命中区不得与关闭钮矩形相交。
+    #[test]
+    fn add_button_hit_area_must_not_overlap_close_button() {
+        use crate::ui::theme::CLOSE_BTN_SIZE;
+        let add = (235.0, 5.0, ADD_BTN_W, ADD_BTN_H);
+        let cls = (
+            CLOSE_POS.0,
+            CLOSE_POS.1,
+            CLOSE_BTN_SIZE.0,
+            CLOSE_BTN_SIZE.1,
+        );
+        let overlap_x = add.0 < cls.0 + cls.2 && cls.0 < add.0 + add.2;
+        let overlap_y = add.1 < cls.1 + cls.3 && cls.1 < add.1 + add.3;
+        assert!(
+            !(overlap_x && overlap_y),
+            "扩容命中区 ({},{} {}x{}) 与关闭钮 ({},{} {}x{}) 重叠：点 X 会被扩容钮吞掉",
+            add.0,
+            add.1,
+            add.2,
+            add.3,
+            cls.0,
+            cls.1,
+            cls.2,
+            cls.3
+        );
     }
 }
