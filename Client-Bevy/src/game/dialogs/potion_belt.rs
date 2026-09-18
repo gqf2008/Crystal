@@ -124,7 +124,9 @@ impl Plugin for PotionBeltPlugin {
         );
         app.add_systems(
             Update,
-            (potion_belt_ui_system, potion_belt_icon_system).run_if(in_state(AppState::Game)),
+            (potion_belt_ui_system, potion_belt_icon_system)
+                .chain()
+                .run_if(in_state(AppState::Game)),
         );
     }
 }
@@ -372,6 +374,8 @@ fn potion_belt_ui_system(
             Option<&PotionBeltNumber>,
             Option<&PotionBeltRotate>,
             Option<&PotionBeltClose>,
+            Option<&PotionBeltIcon>,
+            Option<&PotionBeltCount>,
         ),
         With<PotionBeltWidget>,
     >,
@@ -385,9 +389,15 @@ fn potion_belt_ui_system(
         let was = prev.insert(e, *inter);
         *inter == Interaction::Pressed && was != Some(Interaction::Pressed)
     }
-    // 显隐（Z 快捷键 / 关闭按钮）
-    for (_, _, mut vis, _, _, _, _, _, _, _, _) in &mut items {
+    // 显隐（Z 快捷键 / 关闭按钮）。
+    // 隐藏：整排 Hidden；显示：只复活结构件——图标/计数的显隐归
+    // potion_belt_icon_system 按槽位实有物品决定，此处若一并置 Visible，
+    // 空槽的白色占位图就会漏出来（六个白格，2026-09-18 实机截图取证）。
+    for (_, _, mut vis, _, _, _, _, _, _, _, _, icon, count) in &mut items {
         *vis = if visible.0 {
+            if icon.is_some() || count.is_some() {
+                continue;
+            }
             Visibility::Visible
         } else {
             Visibility::Hidden
@@ -412,7 +422,7 @@ fn potion_belt_ui_system(
     let (dx, dy) = drag.offset(DragWindow::PotionBelt);
     let (px, py) = (px + dx, py + dy);
 
-    for (e, mut node, _, mut img, inter, bg, overlay, slot, num, rot, cls) in &mut items {
+    for (e, mut node, _, mut img, inter, bg, overlay, slot, num, rot, cls, ..) in &mut items {
         if bg.is_some() {
             if let Some(h) = load_lib_image(
                 &mut libs,
@@ -501,7 +511,7 @@ fn potion_belt_ui_system(
 
     // 定位点中的腰带格（按当前横纵布局）
     let mut hit: Option<usize> = None;
-    for (_, _, _, _, _, _, _, slot, _, _, _) in &items {
+    for (_, _, _, _, _, _, _, slot, _, _, _, ..) in &items {
         if let Some(s) = slot {
             let (x, y) = if vert { v_slot(s.0) } else { h_slot(s.0) };
             // #2892 批D 单元①：命中带拖动偏移（与绘制用同一套坐标）
@@ -555,6 +565,7 @@ fn potion_belt_ui_system(
 #[allow(clippy::too_many_arguments)]
 fn potion_belt_icon_system(
     belt: Res<PotionBeltState>,
+    visible: Res<PotionBeltVisible>,
     inv_q: Query<&Inventory, With<LocalPlayer>>,
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
@@ -562,6 +573,16 @@ fn potion_belt_icon_system(
     mut icons: Query<(&mut ImageNode, &mut Visibility, &PotionBeltIcon), Without<PotionBeltCount>>,
     mut counts: Query<(&mut Text, &mut Visibility, &PotionBeltCount), Without<PotionBeltIcon>>,
 ) {
+    // 腰带隐藏时图标一律隐藏（ui_system 隐藏全排后，本系统不得再按物品复活图标）
+    if !visible.0 {
+        for (_, mut vis, _) in &mut icons {
+            *vis = Visibility::Hidden;
+        }
+        for (_, mut vis, _) in &mut counts {
+            *vis = Visibility::Hidden;
+        }
+        return;
+    }
     let inv = inv_q.single().ok();
     let find = |i: usize| -> Option<&InvItem> {
         let uid = belt.slots.get(i).and_then(|u| u.as_ref())?;
@@ -599,6 +620,80 @@ fn potion_belt_icon_system(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 空槽图标显隐所有权回归（2026-09-18 实机白格）：腰带可见但槽位无物品时，
+    /// 白色占位图标必须保持 Hidden——无论 ui_system / icon_system 谁先谁后。
+    /// 红检：把 ui_system 显隐循环改回"显示时全置 Visible" → 顺序 B 下图标
+    /// 被复活成 Visible → FAILED。
+    #[test]
+    fn belt_empty_slot_icon_stays_hidden_in_both_system_orders() {
+        use bevy::app::App;
+        use bevy::ecs::schedule::IntoScheduleConfigs;
+
+        for order in ["ui_first", "icon_first"] {
+            let mut app = App::new();
+            app.init_resource::<crate::game::chat::ChatState>();
+            app.init_resource::<PotionBeltState>();
+            app.insert_resource(PotionBeltVisible(true));
+            app.init_resource::<PotionBeltVertical>();
+            app.init_resource::<crate::network::NetConnection>();
+            app.init_resource::<crate::game::dialogs::inventory::ItemUseFeedback>();
+            app.init_resource::<crate::game::dialogs::inventory::InvClickState>();
+            app.insert_resource(Time::<()>::default());
+            app.init_resource::<ButtonInput<MouseButton>>();
+            app.init_resource::<crate::game::dialogs::window_drag::WindowDragState>();
+            app.insert_resource(GameLibraries(
+                crate::resources::libraries::Libraries::new("Data"),
+            ));
+            app.insert_resource(Assets::<Image>::default());
+
+            // 槽位容器 + 白色占位图标（Hidden）+ 空计数（Hidden）：模拟刚生成、无物品
+            app.world_mut().spawn((
+                Node::default(),
+                Visibility::Hidden,
+                PotionBeltWidget,
+                PotionBeltSlot(0),
+            ));
+            let icon = app
+                .world_mut()
+                .spawn((
+                    Node::default(),
+                    ImageNode::default(),
+                    Visibility::Hidden,
+                    PotionBeltWidget,
+                    PotionBeltIcon(0),
+                ))
+                .id();
+            app.world_mut().spawn((
+                Node::default(),
+                Text::new(""),
+                Visibility::Hidden,
+                PotionBeltWidget,
+                PotionBeltCount(0),
+            ));
+
+            if order == "ui_first" {
+                app.add_systems(
+                    Update,
+                    (potion_belt_ui_system, potion_belt_icon_system).chain(),
+                );
+            } else {
+                app.add_systems(
+                    Update,
+                    (potion_belt_icon_system, potion_belt_ui_system).chain(),
+                );
+            }
+            app.update();
+
+            let vis = app.world().get::<Visibility>(icon).copied();
+            assert_eq!(
+                vis,
+                Some(Visibility::Hidden),
+                "[{}] 空槽图标不得被复活成 Visible（白格回归）",
+                order
+            );
+        }
+    }
 
     /// #2781：腰带随聊天窗口档位上移（C# `MainDialogs.cs:1281-1285`；每档长高 48）
     #[test]

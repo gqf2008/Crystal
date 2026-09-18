@@ -302,6 +302,8 @@ fn hero_belt_ui_system(
             Option<&HeroBeltNumber>,
             Option<&HeroBeltRotate>,
             Option<&HeroBeltClose>,
+            Option<&HeroBeltIcon>,
+            Option<&HeroBeltCount>,
         ),
         With<HeroBeltWidget>,
     >,
@@ -315,8 +317,13 @@ fn hero_belt_ui_system(
         let was = prev.insert(e, *inter);
         *inter == Interaction::Pressed && was != Some(Interaction::Pressed)
     }
-    for (_, _, mut vis, _, _, _, _, _, _, _, _, _) in &mut items {
+    // 与 potion_belt 同款修复：显示时只复活结构件，图标/计数归 icon_system 定夺，
+    // 防止空槽白色占位图被强制 Visible（potion_belt 已因此实机白格）。
+    for (_, _, mut vis, _, _, _, _, _, _, _, _, _, icon, count) in &mut items {
         *vis = if visible.0 {
+            if icon.is_some() || count.is_some() {
+                continue;
+            }
             Visibility::Visible
         } else {
             Visibility::Hidden
@@ -349,7 +356,7 @@ fn hero_belt_ui_system(
     let (dx, dy) = drag.offset(crate::game::dialogs::window_drag::DragWindow::HeroBelt);
     let (px, py) = (px + dx, py + dy);
 
-    for (e, mut node, _, mut img, inter, mut btn, bg, overlay, slot, num, rot, cls) in &mut items {
+    for (e, mut node, _, mut img, inter, mut btn, bg, overlay, slot, num, rot, cls, ..) in &mut items {
         if bg.is_some() {
             if let Some(h) = load_lib_image(
                 &mut libs,
@@ -469,12 +476,23 @@ fn swap_btn_frames(
 /// 渲染：图标/数量（英雄背包前 2 格 = 腰带）
 fn hero_belt_icon_system(
     hero: Res<HeroState>,
+    visible: Res<HeroBeltVisible>,
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
     // B0001：icons 与 counts 的 &mut Visibility 需 Without 隔离（#1362 同坑）
     mut icons: Query<(&mut ImageNode, &mut Visibility, &HeroBeltIcon), Without<HeroBeltCount>>,
     mut counts: Query<(&mut Text, &mut Visibility, &HeroBeltCount), Without<HeroBeltIcon>>,
 ) {
+    // 腰带隐藏时图标一律隐藏（ui_system 隐藏全排后，本系统不得再按物品复活图标）
+    if !visible.0 {
+        for (_, mut vis, _) in &mut icons {
+            *vis = Visibility::Hidden;
+        }
+        for (_, mut vis, _) in &mut counts {
+            *vis = Visibility::Hidden;
+        }
+        return;
+    }
     for (mut node, mut vis, icon) in &mut icons {
         if let Some(item) = hero.inventory.get(icon.0).and_then(|s| s.as_ref()) {
             if let Some(h) = load_lib_image(
