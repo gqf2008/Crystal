@@ -159,7 +159,9 @@ fn spawn_npc_dialog(
             visible: 8,
             total: 0,
             offset: 0,
-            step: 3,
+            // 每格 1 行：C# `NPCDialog_MouseWheel`（NPCDialogs.cs:235-245）
+            // `int count = e.Delta / MouseWheelScrollDelta;` → `_index -= count`
+            step: 1,
             track_rel: (420.0, 34.0, 4.0, 144.0),
             thumb: None,
             z: 8,
