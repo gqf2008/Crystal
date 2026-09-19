@@ -19,11 +19,7 @@ type RxChannel = tokio::sync::mpsc::Receiver<Vec<u8>>;
 
 async fn setup_gate_and_session(
     session_id: u64,
-) -> (
-    GateActorRef,
-    tokio::sync::mpsc::Sender<Vec<u8>>,
-    RxChannel,
-) {
+) -> (GateActorRef, tokio::sync::mpsc::Sender<Vec<u8>>, RxChannel) {
     let gate_ref = GateActor::spawn(());
     let (tx, rx) = mpsc::channel::<Vec<u8>>(1024);
     let _ = gate_ref

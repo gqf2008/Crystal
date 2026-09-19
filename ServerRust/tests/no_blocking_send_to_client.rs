@@ -108,8 +108,7 @@ fn strip_comments_and_strings(src: &str) -> String {
             if bytes.get(j) == Some(&b'"') {
                 j += 1;
                 while j < bytes.len() {
-                    if bytes[j] == b'"'
-                        && (0..hashes).all(|k| bytes.get(j + 1 + k) == Some(&b'#'))
+                    if bytes[j] == b'"' && (0..hashes).all(|k| bytes.get(j + 1 + k) == Some(&b'#'))
                     {
                         j += 1 + hashes;
                         break;
@@ -414,8 +413,7 @@ fn no_blocking_tell_send_to_client_await_in_actors() {
             .expect("strip actors prefix")
             .to_string_lossy()
             .replace('\\', "/");
-        let src = fs::read_to_string(path)
-            .unwrap_or_else(|e| panic!("read {:?}: {}", path, e));
+        let src = fs::read_to_string(path).unwrap_or_else(|e| panic!("read {:?}: {}", path, e));
         let count = count_blocking_send_to_client(&src);
         let limit = allowed.get(rel.as_str()).copied().unwrap_or(0);
         if count > limit {

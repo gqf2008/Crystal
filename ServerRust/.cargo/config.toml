@@ -1,0 +1,13 @@
+# libtest 的测试线程栈默认 2 MiB（RUST_MIN_STACK）。ServerRust 的 actor 链路深，
+# 个别 e2e 用例（自带完整交易/邮件搭建流程）的 future 体积已贴住该上限：
+# Linux CI 上 actors::social::tests::return_trade_items_online_player_goes_to_memory_mailbox
+# 直接栈溢出 abort（SIGABRT，CI run 35417980698）；Windows 本地 1 MiB 同样溢出、2 MiB 才过。
+# 这里把测试线程栈统一放大到 8 MiB，避免"恰好压在阈值上"的平台性红绿。
+#
+# 作用域（#2977 审查 P2）：本段只对 **cargo 启动的进程**生效（rustc/build script 以及
+# `cargo run/test/bench` 跑起来的二进制），且**不烙进 `cargo build --release` 产物**。
+# 但注意 `docs/DELIVERY.md` 推荐的启动方式正是 `cargo run --release`——那种跑法下这 8 MiB
+# 会进入服务端进程。逻辑线程不受影响（main.rs 显式 32 MiB），受影响的是依赖内部默认栈的
+# 线程（如 sqlx-sqlite 的 worker）。
+[env]
+RUST_MIN_STACK = "8388608"

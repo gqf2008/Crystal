@@ -739,8 +739,7 @@ impl Message<MarketBuyRequest> for WorldActor {
                 );
                 // 背包/金币回刷
                 if let Ok(Some(new_state)) = record.actor_ref.ask(GetPlayerState).await {
-                    let packet =
-                        super::build_user_information_packet(&new_state, &self.item_infos);
+                    let packet = super::build_user_information_packet(&new_state, &self.item_infos);
                     if let Err(e) = self
                         .gate_ref
                         .tell(SendToClient {
@@ -1771,7 +1770,10 @@ impl Message<MarketSellNowRequest> for WorldActor {
                 &state.name,
                 seller_gold,
                 "拍卖成交款",
-                format!("你的拍卖已立即售出，成交款 {} 金币（已扣 5% 佣金）", seller_gold),
+                format!(
+                    "你的拍卖已立即售出，成交款 {} 金币（已扣 5% 佣金）",
+                    seller_gold
+                ),
             )
             .await;
         let commission = cost - seller_gold;
@@ -3329,7 +3331,10 @@ mod tests {
         );
         // 入包失败 → None（上层退款中止）
         assert_eq!(Some(None).delivered_item_uid(auction_record_uid), None);
-        assert_eq!(None::<Option<u64>>.delivered_item_uid(auction_record_uid), None);
+        assert_eq!(
+            None::<Option<u64>>.delivered_item_uid(auction_record_uid),
+            None
+        );
     }
 
     /// 严重（租赁取消）回归：物主背包满时取消租赁，寄存物品不得蒸发——
@@ -3428,13 +3433,12 @@ mod tests {
             .await
             .expect("init_db");
         let gate_ref = crate::gate::actor::GateActor::spawn(());
-        let social_ref = crate::actors::social::SocialActor::spawn(
-            crate::actors::social::SocialActorArgs {
+        let social_ref =
+            crate::actors::social::SocialActor::spawn(crate::actors::social::SocialActorArgs {
                 gate_ref: gate_ref.clone(),
                 db_pool: db_pool.clone(),
                 config: crate::actors::social::SocialActorConfig::default(),
-            },
-        );
+            });
         let world_ref =
             crate::actors::world::WorldActor::spawn(crate::actors::world::WorldActorArgs {
                 tick_interval_ms: 1000,
@@ -3563,7 +3567,11 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(delivered_uid, own_uid, "堆叠合并：交付并入买家自有栈");
-        assert_eq!(market_bag_count(&buyer, own_uid).await, 18, "合并后 15+3=18");
+        assert_eq!(
+            market_bag_count(&buyer, own_uid).await,
+            18,
+            "合并后 15+3=18"
+        );
 
         // 回收：只拿走交付量 3，买家自有 15 原样保留
         let (removed, outcome) = clawback_delivered_item(&buyer, delivered_uid, 3).await;
@@ -3687,7 +3695,10 @@ mod tests {
 
         // 退款 1000 > 剩余额度 100：必须整体失败且金币不变（截顶=买家物财两失）
         let ok = try_add_gold_atomic(&buyer, 1000).await;
-        assert!(!ok, "会截顶必须整体失败，由 refund_gold_atomic 走邮件全额兜底");
+        assert!(
+            !ok,
+            "会截顶必须整体失败，由 refund_gold_atomic 走邮件全额兜底"
+        );
         assert_eq!(
             market_player_gold(&buyer).await,
             u32::MAX as u64 - 100,

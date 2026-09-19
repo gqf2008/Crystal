@@ -4,6 +4,7 @@
 - 所有代码/文档改动**必须先创建分支并提交 Pull Request（PR）到 `master`**，不得直接推送到 master。
 - **本机可能多个 agent 并行改代码：任何修改必须在独立的 `git worktree` 中完成**（如 `git worktree add <路径> -b <分支>`），禁止直接改动主工作区 checkout（`Crystal`），避免互相覆盖未提交改动。
 - PR 合并前需完成验证：`cargo check` 通过 + 相关测试通过（客户端 `Client-Bevy`：`cargo test`；服务端 `ServerRust`：`cargo test`）。
+  **服务端另需 `cargo fmt -- --check` 与 `cargo clippy --lib -- -D warnings`**（2026-09-19 补：CI 的 ServerRust job 就按这四步跑，而这四项此前不在本清单里，导致 fmt/clippy 的债攒到 CI 连续 27 次红才被发现）。
 - PR 合并前需经 review（人工或协作 agent）确认通过。
 - PR 描述需写明：改了什么、为什么改、验证了什么。
 - 多个 agent 协作时，各自在独立分支/PR 上工作，避免互相覆盖未提交改动。
@@ -35,5 +36,5 @@
 - **ServerRust 源码为 CRLF**：编辑用 Python `open(path, "r", encoding="utf-8", newline="")` 读写并保持 `\r\n`，避免整文件 diff。
 - PowerShell 下 `gh pr create --body` 含反引号会失败：用 Python 写 `pr_body.md`，`--body-file pr_body.md`。
 - 提交用 `git add <具体文件>`，**不要 `git add -A`**（会混入 `pr_body.md`、`target/.rustc_info.json` 等临时/构建文件）。
-- 验证基线：ServerRust `cargo check --tests` + `cargo test`（当前 368 passed）；Client-Bevy `cargo check --tests` + `cargo test`（当前 179 passed）；SharedRust `cargo test`（172+11）。
+- 验证基线：ServerRust `cargo check --tests` + `cargo test` + `cargo fmt -- --check` + `cargo clippy --lib -- -D warnings`（当前 368 passed）；Client-Bevy `cargo check --tests` + `cargo test`（当前 179 passed）；SharedRust `cargo test`（172+11）。
 - 改 SharedRust 包结构需同步 `MapEditor/SharedRust` 副本 + 各客户端引用处（Client-Bevy）；协议以 Rust 客户端+服务端自洽为准（网络参考 Rust，不强制 C# 线格式）。

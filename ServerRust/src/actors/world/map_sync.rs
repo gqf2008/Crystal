@@ -241,18 +241,11 @@ impl WorldActor {
 
         // ---- 5. 英雄随主人跨图召回（#1661：C# HeroObject.OwnerRecall）----
         if self.hero_ai_states.contains_key(&session_id) {
-            let hero_oid = mover_state
-                .object_id
-                .wrapping_add(hero::HERO_OID_OFFSET);
+            let hero_oid = mover_state.object_id.wrapping_add(hero::HERO_OID_OFFSET);
             let hero_remove = object_remove_packet(hero_oid);
             broadcast_to_map_nb(&self.gate_ref, &self.players, old_map, &hero_remove).await;
             if let Some(ai) = self.hero_ai_states.get_mut(&session_id) {
-                let (hx, hy) = point_move(
-                    mover_state.x,
-                    mover_state.y,
-                    mover_state.direction,
-                    1,
-                );
+                let (hx, hy) = point_move(mover_state.x, mover_state.y, mover_state.direction, 1);
                 ai.x = hx;
                 ai.y = hy;
                 ai.direction = mover_state.direction;
@@ -483,8 +476,15 @@ pub(crate) async fn teleport_core(
 
     let cross_map = old_map != Some(map_index);
     if cross_map {
-        let map_pkt =
-            build_map_changed_packet(map_index, &dest_file, &dest_title, x, y, direction, Some(&dest_mi));
+        let map_pkt = build_map_changed_packet(
+            map_index,
+            &dest_file,
+            &dest_title,
+            x,
+            y,
+            direction,
+            Some(&dest_mi),
+        );
         if let Err(e) = world
             .gate_ref
             .tell(SendToClient {
@@ -619,7 +619,12 @@ mod tests {
         None
     }
 
-    async fn login(gate_ref: &ActorRef<GateActor>, session_id: u64, rx: &mut RxChannel, user: &str) {
+    async fn login(
+        gate_ref: &ActorRef<GateActor>,
+        session_id: u64,
+        rx: &mut RxChannel,
+        user: &str,
+    ) {
         let cv_body = {
             let mut b = Vec::new();
             let hash = b"test";
@@ -639,7 +644,10 @@ mod tests {
         let _ = gate_ref
             .ask(ClientData {
                 session_id,
-                data: build_packet_bytes(mir2_shared::enums::ClientPacketIds::NewAccount as i16, &[]),
+                data: build_packet_bytes(
+                    mir2_shared::enums::ClientPacketIds::NewAccount as i16,
+                    &[],
+                ),
             })
             .await;
         let mut lb = Vec::new();
@@ -705,21 +713,14 @@ mod tests {
             })
             .await;
         assert!(
-            wait_opcode_body(
-                rx,
-                mir2_shared::enums::ServerPacketIds::StartGame as i16,
-                5
-            )
-            .await
-            .is_some(),
+            wait_opcode_body(rx, mir2_shared::enums::ServerPacketIds::StartGame as i16, 5)
+                .await
+                .is_some(),
             "StartGame"
         );
     }
 
-    async fn spawn_world(
-        gate_ref: &ActorRef<GateActor>,
-        db_pool: &DbPool,
-    ) -> ActorRef<WorldActor> {
+    async fn spawn_world(gate_ref: &ActorRef<GateActor>, db_pool: &DbPool) -> ActorRef<WorldActor> {
         let social_ref = SocialActor::spawn(SocialActorArgs {
             gate_ref: gate_ref.clone(),
             db_pool: db_pool.clone(),
@@ -857,10 +858,12 @@ mod tests {
 
             new_character(&gate_ref, session_id, &mut rx, "MoveChar").await;
             // 站到脚本 NPC 旁（CallNPC 有 2 格距离校验；NPC 在 (10,10)）
-            sqlx::query("UPDATE characters SET map_index = 0, x = 11, y = 10 WHERE name = 'MoveChar'")
-                .execute(&db_pool)
-                .await
-                .expect("place character");
+            sqlx::query(
+                "UPDATE characters SET map_index = 0, x = 11, y = 10 WHERE name = 'MoveChar'",
+            )
+            .execute(&db_pool)
+            .await
+            .expect("place character");
             start_game(&gate_ref, session_id, &mut rx).await;
 
             // 起点图 NPC（拿 object_id 供 CallNPC）
@@ -966,10 +969,12 @@ mod tests {
             // A 在图 0，B（锚点）在图 1
             new_character(&gate_ref, 82, &mut rx_a, "GmMover").await;
             new_character(&gate_ref, 83, &mut rx_b, "GotoAnchor").await;
-            sqlx::query("UPDATE characters SET map_index = 0, x = 30, y = 30 WHERE name = 'GmMover'")
-                .execute(&db_pool)
-                .await
-                .expect("place A");
+            sqlx::query(
+                "UPDATE characters SET map_index = 0, x = 30, y = 30 WHERE name = 'GmMover'",
+            )
+            .execute(&db_pool)
+            .await
+            .expect("place A");
             sqlx::query(
                 "UPDATE characters SET map_index = 1, x = 20, y = 21 WHERE name = 'GotoAnchor'",
             )
@@ -1095,9 +1100,13 @@ mod tests {
             assert!(ok, "传送必须成功（玩家在线）");
 
             assert!(
-                wait_opcode_body(&mut rx, mir2_shared::enums::ServerPacketIds::MapChanged as i16, 5)
-                    .await
-                    .is_some(),
+                wait_opcode_body(
+                    &mut rx,
+                    mir2_shared::enums::ServerPacketIds::MapChanged as i16,
+                    5
+                )
+                .await
+                .is_some(),
                 "跨图传送必须发 MapChanged"
             );
             assert!(
@@ -1111,9 +1120,13 @@ mod tests {
                 "跨图传送必须发 UserLocation"
             );
             assert!(
-                wait_opcode_body(&mut rx, mir2_shared::enums::ServerPacketIds::ObjectNpc as i16, 5)
-                    .await
-                    .is_some(),
+                wait_opcode_body(
+                    &mut rx,
+                    mir2_shared::enums::ServerPacketIds::ObjectNpc as i16,
+                    5
+                )
+                .await
+                .is_some(),
                 "统一入口跨图后目标图 NPC 未重发（落图空图）"
             );
             assert!(
@@ -1283,9 +1296,13 @@ mod tests {
                 "同图位移必须发 UserLocation"
             );
             assert!(
-                wait_opcode_body(&mut rx, mir2_shared::enums::ServerPacketIds::MapChanged as i16, 2)
-                    .await
-                    .is_none(),
+                wait_opcode_body(
+                    &mut rx,
+                    mir2_shared::enums::ServerPacketIds::MapChanged as i16,
+                    2
+                )
+                .await
+                .is_none(),
                 "同图位移不得发 MapChanged（客户端无换图重建，会触发多余重建）"
             );
         });

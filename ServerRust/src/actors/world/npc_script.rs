@@ -4164,10 +4164,7 @@ pub(crate) async fn apply_map_entry_rules(world: &mut WorldActor, session_id: u6
 /// 与 gate 处理器内联 ask world 构成环形等待死锁；邮箱满丢包 warn 留痕，
 /// 由 gate 会话通道积满踢线路径兜底）。
 fn try_send_to_client(gate_ref: &ActorRef<GateActor>, session_id: u64, data: Vec<u8>) {
-    if let Err(e) = gate_ref
-        .tell(SendToClient { session_id, data })
-        .try_send()
-    {
+    if let Err(e) = gate_ref.tell(SendToClient { session_id, data }).try_send() {
         warn!(
             "gate mailbox full: SendToClient dropped (session={} opcode={:?} err={})",
             session_id,

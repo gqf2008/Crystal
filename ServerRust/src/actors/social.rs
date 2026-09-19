@@ -1717,10 +1717,7 @@ impl SocialActor {
 
             // 金币退回：与物品同一套「追回多少退多少」语义——先扣减未追回部分（防净铸），
             // 再 TryAddGold 全额不到账即失败（防截顶吞金），失败转邮件
-            let withheld = unrecovered_gold
-                .get(&side.session_id)
-                .copied()
-                .unwrap_or(0);
+            let withheld = unrecovered_gold.get(&side.session_id).copied().unwrap_or(0);
             let refundable = side.gold.saturating_sub(withheld);
             if withheld > 0 {
                 error!(
@@ -3487,7 +3484,8 @@ impl Message<SocialPlayerLeft> for SocialActor {
                 send_trade_cancel_packet(&self.gate_ref, partner);
                 send_trade_close_packet(&self.gate_ref, partner);
             }
-            self.return_trade_items(trade, &HashSet::new(), &HashMap::new()).await;
+            self.return_trade_items(trade, &HashSet::new(), &HashMap::new())
+                .await;
         }
 
         // 清理邀请
@@ -4140,12 +4138,7 @@ impl Message<TradeAddGold> for SocialActor {
                     let total = side.gold;
                     let other_session = trade.other_session(msg.session_id);
                     if let Some(other) = other_session {
-                        send_trade_gold_update_packet(
-                            &self.gate_ref,
-                            other,
-                            msg.session_id,
-                            total,
-                        );
+                        send_trade_gold_update_packet(&self.gate_ref, other, msg.session_id, total);
                     }
                     true
                 }
@@ -4169,7 +4162,6 @@ impl Message<TradeAddGold> for SocialActor {
                     "交易已取消，金币将通过邮件返还"
                 },
             );
-            return;
         }
     }
 }
@@ -4217,7 +4209,8 @@ impl Message<TradeCancel> for SocialActor {
         let (s1, s2) = trade.participant_sessions();
         // 先移除会话防重入，再归还双方托管物品/金币（C# TradeCancel：背包满 GainItemMail）
         self.active_trades.remove(&trade.side_a.session_id);
-        self.return_trade_items(&trade, &HashSet::new(), &HashMap::new()).await;
+        self.return_trade_items(&trade, &HashSet::new(), &HashMap::new())
+            .await;
 
         // 通知双方关窗
         send_trade_cancel_packet(&self.gate_ref, s1);
@@ -7797,7 +7790,9 @@ mod tests {
 
         let mut trade = TradeSession::new(1, "Alice".into(), 2, "Bob".into());
         trade.side_a.gold = 500;
-        trade.side_a.add_item(42, 0, 1, Some(mk_trade_item(42, 7, 1)));
+        trade
+            .side_a
+            .add_item(42, 0, 1, Some(mk_trade_item(42, 7, 1)));
         social
             .return_trade_items(&trade, &std::collections::HashSet::new(), &HashMap::new())
             .await;
@@ -7833,8 +7828,12 @@ mod tests {
         let mut social = social_with_players(HashMap::new(), gate_ref, db_pool.clone());
 
         let mut trade = TradeSession::new(1, "Alice".into(), 2, "Bob".into());
-        trade.side_a.add_item(42, 0, 1, Some(mk_trade_item(42, 5, 1)));
-        trade.side_a.add_item(43, 1, 1, Some(mk_trade_item(43, 6, 1)));
+        trade
+            .side_a
+            .add_item(42, 0, 1, Some(mk_trade_item(42, 5, 1)));
+        trade
+            .side_a
+            .add_item(43, 1, 1, Some(mk_trade_item(43, 6, 1)));
         let mut unrecovered = std::collections::HashSet::new();
         unrecovered.insert(42u64); // uid=42 已交付给 Bob 且未收回
         social
@@ -7897,16 +7896,15 @@ mod tests {
             })
             .await
             .unwrap();
-        bob
-            .ask(crate::actors::player::SetPlayerPosition {
-                x: 331,
-                y: 330,
-                direction: 6, // Left，朝 Alice
-                map_index: None,
-                is_mounted: None,
-            })
-            .await
-            .unwrap();
+        bob.ask(crate::actors::player::SetPlayerPosition {
+            x: 331,
+            y: 330,
+            direction: 6, // Left，朝 Alice
+            map_index: None,
+            is_mounted: None,
+        })
+        .await
+        .unwrap();
 
         let mut players = HashMap::new();
         players.insert(1u64, alice.clone());
@@ -7915,8 +7913,12 @@ mod tests {
 
         let mut trade = TradeSession::new(1, "Alice".into(), 2, "Bob".into());
         trade.side_a.gold = 100;
-        trade.side_a.add_item(42, 0, 1, Some(mk_trade_item(42, 5, 1)));
-        trade.side_b.add_item(43, 0, 1, Some(mk_trade_item(43, 6, 1)));
+        trade
+            .side_a
+            .add_item(42, 0, 1, Some(mk_trade_item(42, 5, 1)));
+        trade
+            .side_b
+            .add_item(43, 0, 1, Some(mk_trade_item(43, 6, 1)));
         social.active_trades.insert(1u64, trade);
 
         social.execute_trade(1).await;
@@ -7931,9 +7933,17 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        assert_eq!(a.inventory.count_item_by_index(6), 1, "Alice 应收到 Bob 的物品");
+        assert_eq!(
+            a.inventory.count_item_by_index(6),
+            1,
+            "Alice 应收到 Bob 的物品"
+        );
         assert_eq!(a.inventory.count_item_by_index(5), 0, "Alice 的物品已交付");
-        assert_eq!(b.inventory.count_item_by_index(5), 1, "Bob 应收到 Alice 的物品");
+        assert_eq!(
+            b.inventory.count_item_by_index(5),
+            1,
+            "Bob 应收到 Alice 的物品"
+        );
         assert_eq!(b.inventory.gold, 100, "Alice 托管的 100 金应付给 Bob");
         assert_eq!(a.inventory.gold, 0);
         assert!(social.active_trades.is_empty(), "会话应清除");

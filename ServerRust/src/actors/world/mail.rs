@@ -41,7 +41,11 @@ pub struct GetPlayerItemUid {
 impl Message<GetPlayerItemUid> for WorldActor {
     type Reply = Option<u64>;
 
-    async fn handle(&mut self, msg: GetPlayerItemUid, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+    async fn handle(
+        &mut self,
+        msg: GetPlayerItemUid,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
         let record = self.players.get(&msg.session_id)?;
         let state = record.actor_ref.ask(GetPlayerState).await.ok()??;
         state
@@ -982,7 +986,11 @@ impl Message<CollectParcelRequest> for WorldActor {
                 .ask(crate::actors::player::TryAddGold { amount: gold })
                 .await
                 .unwrap_or(false);
-            if ok { 0 } else { gold }
+            if ok {
+                0
+            } else {
+                gold
+            }
         };
 
         if !failed_items.is_empty() || failed_gold > 0 {
@@ -1183,11 +1191,11 @@ mod mail_flow_e2e {
 
     use kameo::actor::Spawn;
 
+    use super::{deliver_collect_restore_fallback, GetPlayerItemUid};
     use crate::actors::account::AccountActor;
     use crate::actors::mail::MailMessage;
     use crate::actors::player::{GetPlayerState, Heal, PlayerActor, SetPlayerState};
     use crate::actors::social::{SocialActor, SocialActorArgs, SocialActorConfig};
-    use super::{deliver_collect_restore_fallback, GetPlayerItemUid};
     use crate::actors::world::{WorldActor, WorldActorArgs};
     use crate::db;
     use crate::gate::actor::{ClientData, GateActor, SessionCreated, SetAccountRef, SetWorldRef};
@@ -1418,10 +1426,11 @@ mod mail_flow_e2e {
             random_item_stats: Vec::new(),
             guild_buff_infos: Vec::new(),
         });
-        let _ = gate_ref.ask(SetWorldRef {
-            world_ref: world_ref.clone(),
-        })
-        .await;
+        let _ = gate_ref
+            .ask(SetWorldRef {
+                world_ref: world_ref.clone(),
+            })
+            .await;
         world_ref
     }
 
@@ -2103,12 +2112,11 @@ mod mail_flow_e2e {
             .await;
             assert!(ok, "落库投递必须成功");
 
-            let gold: i64 =
-                sqlx::query_scalar("SELECT gold FROM mail WHERE character_name = ?")
-                    .bind("CollectFC")
-                    .fetch_one(&db_pool)
-                    .await
-                    .expect("归还邮件必须落库（修复前仅 error!：无行）");
+            let gold: i64 = sqlx::query_scalar("SELECT gold FROM mail WHERE character_name = ?")
+                .bind("CollectFC")
+                .fetch_one(&db_pool)
+                .await
+                .expect("归还邮件必须落库（修复前仅 error!：无行）");
             assert_eq!(gold, 300);
             let items_json: String =
                 sqlx::query_scalar("SELECT items_json FROM mail WHERE character_name = ?")

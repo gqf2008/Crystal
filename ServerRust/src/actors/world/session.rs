@@ -367,7 +367,9 @@ impl WorldActor {
         item: mir2_shared::data::item::UserItem,
     ) {
         let readded = matches!(
-            actor_ref.ask(AddItemToInventory { item: item.clone() }).await,
+            actor_ref
+                .ask(AddItemToInventory { item: item.clone() })
+                .await,
             Ok(Some(_))
         );
         if readded {
@@ -384,7 +386,8 @@ impl WorldActor {
             sender_name: "物品租赁".to_string(),
             receiver_name: owner_name.to_string(),
             subject: "租赁归还".to_string(),
-            body: "租赁取消退回的物品无法放入背包（背包已满或角色状态异常），改经邮件返还".to_string(),
+            body: "租赁取消退回的物品无法放入背包（背包已满或角色状态异常），改经邮件返还"
+                .to_string(),
             timestamp: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|d| d.as_secs() as i64)
@@ -670,7 +673,8 @@ impl Message<StartGameRequest> for WorldActor {
                         );
                     }
                     let db_heroes: Vec<db::DbHero> = self.db_heroes_snapshot(old_sid);
-                    if let Err(e) = db::save_heroes(&self.db_pool, &old_state.name, &db_heroes).await
+                    if let Err(e) =
+                        db::save_heroes(&self.db_pool, &old_state.name, &db_heroes).await
                     {
                         warn!(
                             "Failed to save heroes for kicked duplicate {}: {}",
@@ -682,8 +686,13 @@ impl Message<StartGameRequest> for WorldActor {
                     let mut body = Vec::new();
                     body.extend_from_slice(&old_state.object_id.to_le_bytes());
                     let packet = build_packet_bytes(opcode, &body);
-                    broadcast_to_map_nb(&self.gate_ref, &self.players, old_state.map_index, &packet)
-                        .await;
+                    broadcast_to_map_nb(
+                        &self.gate_ref,
+                        &self.players,
+                        old_state.map_index,
+                        &packet,
+                    )
+                    .await;
                 }
                 let _ = self
                     .social_ref
@@ -3069,8 +3078,10 @@ impl Message<PlayerLogOut> for WorldActor {
             // fire-and-forget 也避免 world 内联 await gate（有界邮箱循环等待，#23）
             let gate_ref = self.gate_ref.clone();
             let sid = msg.session_id;
-            let success_packet =
-                build_packet_bytes(mir2_shared::enums::ServerPacketIds::LogOutSuccess as i16, &body);
+            let success_packet = build_packet_bytes(
+                mir2_shared::enums::ServerPacketIds::LogOutSuccess as i16,
+                &body,
+            );
             crate::util::tasks::spawn("world.logout_success", async move {
                 let _ = gate_ref
                     .tell(SendToClient {
@@ -8503,7 +8514,6 @@ mod auth_regression_tests {
             "LoginSuccess"
         );
 
-
         let world_ref = spawn_test_social_and_world(gate_ref, &db_pool).await;
 
         // NewCharacter
@@ -8586,9 +8596,13 @@ mod auth_regression_tests {
             })
             .await;
         assert!(
-            wait_opcode_body(rx, mir2_shared::enums::ServerPacketIds::LoginSuccess as i16, 3)
-                .await
-                .is_some(),
+            wait_opcode_body(
+                rx,
+                mir2_shared::enums::ServerPacketIds::LoginSuccess as i16,
+                3
+            )
+            .await
+            .is_some(),
             "LoginSuccess({})",
             username
         );
@@ -8674,10 +8688,7 @@ mod auth_regression_tests {
         let _ = gate_ref
             .ask(ClientData {
                 session_id,
-                data: build_packet_bytes(
-                    mir2_shared::enums::ClientPacketIds::Chat as i16,
-                    &body,
-                ),
+                data: build_packet_bytes(mir2_shared::enums::ClientPacketIds::Chat as i16, &body),
             })
             .await;
     }
@@ -8707,8 +8718,7 @@ mod auth_regression_tests {
                 secs: u64,
                 seen: &mut Vec<i16>,
             ) -> bool {
-                let deadline =
-                    tokio::time::Instant::now() + std::time::Duration::from_secs(secs);
+                let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(secs);
                 while tokio::time::Instant::now() < deadline {
                     let remaining = deadline - tokio::time::Instant::now();
                     match tokio::time::timeout(remaining, rx.recv()).await {
@@ -9086,8 +9096,7 @@ mod auth_regression_tests {
             // 2) 客户端不得收到第二个 S.StartGame（重进成功的标志）；
             // LogOutSuccess 必须照常送达
             let start_game_opcode = mir2_shared::enums::ServerPacketIds::StartGame as i16;
-            let logout_success_opcode =
-                mir2_shared::enums::ServerPacketIds::LogOutSuccess as i16;
+            let logout_success_opcode = mir2_shared::enums::ServerPacketIds::LogOutSuccess as i16;
             let mut saw_start_game = false;
             let mut saw_logout_success = false;
             let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
@@ -9534,8 +9543,7 @@ mod auth_regression_tests {
                     ip: "127.0.0.1".to_string(),
                 })
                 .await;
-            gate_login_and_enter(&gate_ref, session_c, &mut rx_c, "testuser2", "TestChar2")
-                .await;
+            gate_login_and_enter(&gate_ref, session_c, &mut rx_c, "testuser2", "TestChar2").await;
 
             // 注入租赁：物主 C、租客 A，寄存物品 uid=7777001
             let mut item = mir2_shared::data::item::UserItem::default();

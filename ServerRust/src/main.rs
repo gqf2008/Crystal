@@ -16,8 +16,8 @@ use crystal_server::actors::social::{SocialActor, SocialActorArgs, SocialActorCo
 use crystal_server::actors::world::{WorldActor, WorldActorArgs};
 use crystal_server::db;
 use crystal_server::gate::actor::{
-    GATE_MAILBOX_CAPACITY, GateActor, SetAccountRef, SetMaxConnections, SetSocialRef, SetWorldRef,
-    ShutdownAll,
+    GateActor, SetAccountRef, SetMaxConnections, SetSocialRef, SetWorldRef, ShutdownAll,
+    GATE_MAILBOX_CAPACITY,
 };
 use crystal_server::util::config;
 
@@ -73,8 +73,7 @@ async fn async_main() -> anyhow::Result<()> {
     // GateActor 先启动
     // #23：有界 mailbox——客户端消息洪峰时 ask 自然背压、tell 显式失败，
     // 无界队列会把洪峰变成内存 DoS。容量锚定实机进图洪峰，详见常量注释。
-    let gate_ref =
-        GateActor::spawn_with_mailbox((), mailbox::bounded(GATE_MAILBOX_CAPACITY));
+    let gate_ref = GateActor::spawn_with_mailbox((), mailbox::bounded(GATE_MAILBOX_CAPACITY));
 
     info!("GateActor spawned");
 
@@ -440,7 +439,10 @@ async fn async_main() -> anyhow::Result<()> {
             "ShutdownAll: {} sessions disconnected and saved, settling 5s...",
             count
         ),
-        Ok(Err(e)) => warn!("ShutdownAll ask failed: {} (background cleanup continues)", e),
+        Ok(Err(e)) => warn!(
+            "ShutdownAll ask failed: {} (background cleanup continues)",
+            e
+        ),
         Err(_) => warn!("ShutdownAll timed out after 15s (background cleanup continues)"),
     }
     // 给 actor 5 秒处理断连 + 保存
