@@ -300,7 +300,7 @@ control RPC（127.0.0.1:9000）：`dialog {kind,action}` / `dialogs`（列 Dialo
 
 1. **ServerRust CI job 在 master 上已经红灯**（审查中发现，master 最近 6 次 CI run 全 failure）——与本批次客户端改动无关，但会掩盖后续真实失败，建议优先排查。
 2. `ui_alignment` 的**纯常量断言被同函数的 `require_assets!` 连带跳过**（CI 无 `Data/`），防漂移能力只在本机生效；建议把不依赖资产的断言拆出独立测试。
-3. 背包扩容钮 `z=8` 而其余 17 处关闭钮 `z=10`——把 z 提到 10 才是结构性正解（届时 72x23 命中区也不再吞关闭钮），本轮只改了断言，实现偏离保留。
+3. 背包扩容钮 `z=8`（全仓 `spawn_close_button` 实测：17 处 `z=10`、`npc.rs` 一处 `z=9`、**仅背包 `z=8`**）——把 z 提到 10 才是结构性正解（届时 72x23 命中区也不再吞关闭钮），本轮只改了断言，实现偏离保留。
 4. `mail.rs:636` / `npc.rs:162` / `npc_goods.rs:185` 的列表滚轮仍为 `step: 3`，而 C# 对应处是 1 行/格（#2968 审查标记为超出该 PR 范围）。
 5. 商城仍缺：物品图标、职业分区页签、Preview/Viewer 视图、`qty_up` 的 StackSize 上限（服务端会静默丢弃超量）。排行榜滚动为文档化的 no-op。
 6. `new_char_ui_system` 是唯一剩下的「同函数双 ParamSet」，当前字段不重叠但无初始化级测试——建议照 #2970 补一条 `run_system_once` 冒烟。
