@@ -1,0 +1,53 @@
+# .walgit/ci.toml — Crystal 的门禁（walgit 去中心化 CI，客户端 runner 执行）
+#
+# 契约：docs/D1_CI_PROTOCOL.md §3。`walgit ci validate` 逐条校验。
+# 事件 = 某个 ref 的 tip 移动；runner 读**被测提交树内**的本文件，
+# 在本机 shell 里跑 command，结果签名后发布到 refs/collab/*。
+#
+# 注意：客户端（Client-Bevy）构建依赖 msys64/ucrt64 与 libpinyin 的 DLL，
+# runner 进程必须能读到它们 —— 用 env_allow 把 PATH / LIBPINYIN_DIR 透传进来。
+
+version = 1
+claim_ttl = "15m"
+timeout = "60m"
+max_attempts = 1
+
+[[task]]
+name = "client-fmt"
+refs = ["refs/heads/*"]
+command = "cd Client-Bevy && cargo fmt -- --check"
+timeout = "10m"
+
+[[task]]
+name = "client-test"
+refs = ["refs/heads/*"]
+command = "cd Client-Bevy && cargo test --lib && cargo test --test b0001_smoke --test ui_alignment"
+timeout = "45m"
+env_allow = ["PATH", "LIBPINYIN_DIR", "PKG_CONFIG_PATH"]
+
+[[task]]
+name = "client-check-no-assets"
+refs = ["refs/heads/*"]
+command = "cd Client-Bevy && CRYSTAL_NO_DATA_ASSETS=1 cargo test --lib"
+timeout = "30m"
+env_allow = ["PATH", "LIBPINYIN_DIR", "PKG_CONFIG_PATH"]
+
+[[task]]
+name = "server-fmt"
+refs = ["refs/heads/*"]
+command = "cd ServerRust && cargo fmt -- --check"
+timeout = "10m"
+
+[[task]]
+name = "server-clippy"
+refs = ["refs/heads/*"]
+command = "cd ServerRust && cargo clippy --lib -- -D warnings"
+timeout = "45m"
+env_allow = ["PATH"]
+
+[[task]]
+name = "server-test"
+refs = ["refs/heads/*"]
+command = "cd ServerRust && cargo test --lib"
+timeout = "45m"
+env_allow = ["PATH"]
