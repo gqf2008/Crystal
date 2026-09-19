@@ -42,6 +42,14 @@ pub struct QuestTrackingState {
 }
 
 impl QuestTrackingState {
+    /// 面板是否显示：有已追踪且仍在任务日志中的任务（C# DisplayQuests 交集语义）。
+    /// 渲染系统显隐与世界点击闸门（player_control）共用此判定，防两处漂移。
+    pub(crate) fn panel_visible(&self, quest_log: &QuestLogState) -> bool {
+        self.tracked
+            .iter()
+            .any(|id| quest_log.quests.iter().any(|q| q.id == *id))
+    }
+
     pub fn add(&mut self, id: i32) -> bool {
         if self.tracked.contains(&id) || self.tracked.len() >= MAX_TRACKED {
             return false;
@@ -124,8 +132,8 @@ pub struct QuestTrackingWidget;
 pub struct QuestTrackingText(usize);
 
 /// 小窗面板尺寸（屏幕像素）
-const PANEL_W: f32 = 170.0;
-const PANEL_H: f32 = 200.0;
+pub(crate) const PANEL_W: f32 = 170.0;
+pub(crate) const PANEL_H: f32 = 200.0;
 /// 预生成文本行数（5 任务 × 任务行，够用）
 const TEXT_LINES: usize = 30;
 
@@ -278,7 +286,7 @@ fn quest_tracking_ui_system(
     }
 
     // 无追踪任务或都不在当前任务列表 → 隐藏（C# questsToTrack.Count < 1 → Hide）
-    let visible = !quests_to_track.is_empty();
+    let visible = state.panel_visible(&quest_log);
     for (mut node, mut vis) in &mut widgets {
         *vis = if visible {
             Visibility::Visible

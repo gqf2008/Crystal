@@ -3,15 +3,20 @@
 //
 // C# 侧：`MirControl.Movable = true` 的控件在 `OnMouseMove` 里把 `Location` 加上鼠标位移；
 // `Settings.Save/Load` **只持久化技能栏**（`[Game] Skillbar{i}X/Y`，`Settings.cs:163/269/380`）——
-// 这 6 个窗口的位置原版**不落盘**，重进游戏回到默认位。本端因此同样只在会话内保留偏移，
+// 这 5 个窗口的位置原版**不落盘**，重进游戏回到默认位。本端因此同样只在会话内保留偏移，
 // 不做 INI 持久化（与 C# 一致；技能栏有独立持久化，见 `game/skills.rs`）。
 //
-// 涉及的 6 个窗口（C# 基准）：
+// 涉及的 5 个窗口（C# 基准）：
 //   药水腰带 `BeltDialog`（`InventoryDialog.cs:610`）、英雄腰带 `HeroBeltDialog`（`HeroDialogs.cs:258`）、
-//   聊天窗 `ChatDialog`（`MainDialogs.cs:697`）、好友备注 `MemoDialog`（`FriendDialog.cs:492`）、
-//   钓鱼状态 `FishingStatusDialog`（`FishingDialog.cs:176`）、下拉框 `MirDropDownBox`（`MirDropDownBox.cs:196`）。
+//   好友备注 `MemoDialog`（`FriendDialog.cs:492`）、钓鱼状态 `FishingStatusDialog`（`FishingDialog.cs:176`）、
+//   下拉框 `MirDropDownBox`（`MirDropDownBox.cs:196`）。
+// 注意：聊天窗 **不可拖**——C# `ChatDialog` 是 `MirImageControl` 且不设 `Movable`
+// （`MainDialogs.cs:697` 的 `Movable = true` 属于滚动滑块 `PositionBar`，拖动=滚历史，
+// 本端已由 `chat_scroll_knob_system` 覆盖）。曾因误读该行实现整窗拖动，2026-09-18 移除。
 //
 // 用法：窗口系统每帧用 `WindowDragState::register` 登记**未加偏移**的矩形（UI 逻辑坐标），
+// **隐藏时必须 `unregister`**（矩形跨帧持久，残留矩形会被世界点击闸门当成死区吞点击）；
+
 // 绘制/命中时把 `WindowDragState::offset(w)` 加回去；本模块只负责拖动本身。
 // ============================================================================
 
@@ -25,8 +30,6 @@ pub enum DragWindow {
     PotionBelt,
     /// 英雄腰带（C# `HeroBeltDialog`）
     HeroBelt,
-    /// 聊天窗（C# `ChatDialog`）
-    Chat,
     /// 好友备注（C# `MemoDialog`）
     Memo,
     /// 钓鱼状态（C# `FishingStatusDialog`）
@@ -36,10 +39,9 @@ pub enum DragWindow {
 }
 
 /// 拖动命中优先级（后登记的窗口在上；下拉框/备注这类弹层优先）
-pub const DRAG_ORDER: [DragWindow; 6] = [
+pub const DRAG_ORDER: [DragWindow; 5] = [
     DragWindow::DropDown,
     DragWindow::Memo,
-    DragWindow::Chat,
     DragWindow::FishingStatus,
     DragWindow::PotionBelt,
     DragWindow::HeroBelt,
@@ -64,6 +66,17 @@ impl WindowDragState {
         self.rects.insert(w, (x, y, ww, hh));
     }
 
+    /// 取消登记（窗口**隐藏时必须调用**）：`rects` 跨帧持久，隐藏后不注销会留下
+    /// 陈旧矩形——`over_window` 只看矩形不看可见性，世界点击闸门会把落在不可见
+    /// 矩形上的输入当成窗口命中吞掉（死点击区，#2966 审查 P1）；拖动中的窗口
+    /// 隐藏时一并结束拖动。偏移保留（C# 会话内记住拖后位置，重开仍在拖后处）。
+    pub fn unregister(&mut self, w: DragWindow) {
+        self.rects.remove(&w);
+        if self.dragging.map(|(dw, _)| dw) == Some(w) {
+            self.dragging = None;
+        }
+    }
+
     /// 当前偏移
     pub fn offset(&self, w: DragWindow) -> (f32, f32) {
         self.offsets.get(&w).copied().unwrap_or((0.0, 0.0))
@@ -77,6 +90,18 @@ impl WindowDragState {
     /// 正在拖动的窗口
     pub fn dragging(&self) -> Option<DragWindow> {
         self.dragging.map(|(w, _)| w)
+    }
+
+    /// 光标（UI 逻辑坐标）是否落在任一已登记窗口的**当前显示**矩形（基准 + 拖动偏移）上。
+    /// 供世界点击闸门使用：这些窗口不是 `DialogManager` 对话框，`blocks_world_click`
+    /// 不覆盖；拖离底部常驻区后，落在其上的点击/按住不得穿透成寻路/移动。
+    pub fn over_window(&self, c: Vec2) -> bool {
+        DRAG_ORDER.iter().any(|w| {
+            self.rects.get(w).is_some_and(|(x, y, ww, hh)| {
+                let (dx, dy) = self.offset(*w);
+                c.x >= x + dx && c.x <= x + dx + ww && c.y >= y + dy && c.y <= y + dy + hh
+            })
+        })
     }
 }
 
@@ -166,5 +191,51 @@ mod tests {
         // 命中优先级：弹层（下拉框/备注）排在最前
         assert_eq!(DRAG_ORDER[0], DragWindow::DropDown);
         assert_eq!(DRAG_ORDER[1], DragWindow::Memo);
+    }
+
+    /// #2966 审查 P1：隐藏窗口必须 unregister——残留矩形会被世界点击闸门当成
+    /// 死区吞点击（腰带隐藏后原位置点击被拦）；隐藏拖动中的窗口同时结束拖动。
+    /// 修复前无 unregister 机制（编译即红）。
+    #[test]
+    fn unregister_clears_hit_and_dragging() {
+        let mut st = WindowDragState::default();
+        st.register(DragWindow::PotionBelt, 230.0, 618.0, 240.0, 38.0);
+        assert!(st.over_window(Vec2::new(240.0, 620.0)));
+        // 偏移须在 unregister 之前设置：才能真正鉴别「unregister 不清 offsets」
+        // （复审 P3：先 set 后清，若错误实现连 offsets 一起清则下条断言 FAILED）
+        st.set_offset(DragWindow::PotionBelt, 100.0, -100.0);
+        st.dragging = Some((DragWindow::PotionBelt, (5.0, 5.0)));
+        st.unregister(DragWindow::PotionBelt);
+        assert!(
+            !st.over_window(Vec2::new(240.0, 620.0)),
+            "注销后原矩形不得再命中"
+        );
+        assert_eq!(st.dragging(), None, "隐藏拖动中的窗口必须结束拖动");
+        // 偏移保留（C# 会话内记住拖后位置）：重新登记后按偏移位置命中
+        st.register(DragWindow::PotionBelt, 230.0, 618.0, 240.0, 38.0);
+        assert!(st.over_window(Vec2::new(340.0, 520.0)));
+        assert!(!st.over_window(Vec2::new(240.0, 620.0)));
+    }
+
+    /// over_window：按「基准+偏移」的当前显示位置命中——拖走后原位不再算、新位算
+    /// （世界点击闸门依赖此判定防穿透）
+    #[test]
+    fn over_window_follows_drag_offset() {
+        let mut st = WindowDragState::default();
+        // 未登记任何窗口 → 不命中
+        assert!(!st.over_window(Vec2::new(240.0, 620.0)));
+        st.register(DragWindow::PotionBelt, 230.0, 618.0, 240.0, 38.0);
+        // 基准位置命中（边含边界）
+        assert!(st.over_window(Vec2::new(230.0, 618.0)));
+        assert!(st.over_window(Vec2::new(470.0, 656.0)));
+        assert!(!st.over_window(Vec2::new(471.0, 618.0)));
+        assert!(!st.over_window(Vec2::new(230.0, 657.0)));
+        // 拖走 100,-100 后：原位不命中，新位置命中
+        st.set_offset(DragWindow::PotionBelt, 100.0, -100.0);
+        assert!(!st.over_window(Vec2::new(240.0, 620.0)));
+        assert!(st.over_window(Vec2::new(340.0, 520.0)));
+        // 其它窗口（英雄腰带）独立判定
+        st.register(DragWindow::HeroBelt, 475.0, 618.0, 100.0, 38.0);
+        assert!(st.over_window(Vec2::new(500.0, 630.0)));
     }
 }
