@@ -2402,7 +2402,7 @@ impl WorldActor {
 
         // Send AllowObserve(true)
         let allow_body = vec![1u8];
-        if let Err(_) = self
+        if self
             .gate_ref
             .tell(SendToClient {
                 session_id: observer_session,
@@ -2412,6 +2412,7 @@ impl WorldActor {
                 ),
             })
             .try_send()
+            .is_err()
         {
             warn!(
                 "gate mailbox full: SendToClient dropped (session={} packet=AllowObserve)",
@@ -2721,7 +2722,7 @@ impl Message<RangeAttackRequest> for WorldActor {
         proj_body.extend_from_slice(&(target_x as u32).to_le_bytes());
         proj_body.extend_from_slice(&(target_y as u32).to_le_bytes());
         proj_body.push(0u8); // spell
-        if let Err(_) = self
+        if self
             .gate_ref
             .tell(SendToClient {
                 session_id: msg.session_id,
@@ -2731,6 +2732,7 @@ impl Message<RangeAttackRequest> for WorldActor {
                 ),
             })
             .try_send()
+            .is_err()
         {
             warn!(
                 "gate mailbox full: SendToClient dropped (session={} packet=RangeAttack)",
@@ -3712,8 +3714,8 @@ impl Message<MagicRequest> for WorldActor {
         let magic_cast =
             mir2_shared::packets::server::magic_combat::MagicCast { spell: spell_enum };
         let mut cast_body = Vec::new();
-        if magic_cast.write_body(&mut cast_body).is_ok() {
-            if self
+        if magic_cast.write_body(&mut cast_body).is_ok()
+            && self
                 .gate_ref
                 .tell(SendToClient {
                     session_id: msg.session_id,
@@ -3724,12 +3726,11 @@ impl Message<MagicRequest> for WorldActor {
                 })
                 .try_send()
                 .is_err()
-            {
-                warn!(
-                    "gate mailbox full: SendToClient dropped (session={} packet=MagicCast)",
-                    msg.session_id
-                );
-            }
+        {
+            warn!(
+                "gate mailbox full: SendToClient dropped (session={} packet=MagicCast)",
+                msg.session_id
+            );
         }
 
         // MeteorShower：主目标是怪物时，取周围 4 格内最多 3 个副目标（伤害减半，C# HumanObject.cs:5835）
@@ -3812,8 +3813,8 @@ impl Message<MagicRequest> for WorldActor {
             let mut self_om = object_magic.clone();
             self_om.self_broadcast = true;
             let mut self_body = Vec::new();
-            if self_om.write_body(&mut self_body).is_ok() {
-                if self
+            if self_om.write_body(&mut self_body).is_ok()
+                && self
                     .gate_ref
                     .tell(SendToClient {
                         session_id: msg.session_id,
@@ -3824,12 +3825,11 @@ impl Message<MagicRequest> for WorldActor {
                     })
                     .try_send()
                     .is_err()
-                {
-                    warn!(
-                        "gate mailbox full: SendToClient dropped (session={} packet=ObjectMagic)",
-                        msg.session_id
-                    );
-                }
+            {
+                warn!(
+                    "gate mailbox full: SendToClient dropped (session={} packet=ObjectMagic)",
+                    msg.session_id
+                );
             }
         }
 
@@ -4493,8 +4493,8 @@ impl Message<MagicRequest> for WorldActor {
                         direction: msg.direction,
                     };
                     let mut body = Vec::new();
-                    if fail.write_body(&mut body).is_ok() {
-                        if self
+                    if fail.write_body(&mut body).is_ok()
+                        && self
                             .gate_ref
                             .tell(SendToClient {
                                 session_id: msg.session_id,
@@ -4505,9 +4505,8 @@ impl Message<MagicRequest> for WorldActor {
                             })
                             .try_send()
                             .is_err()
-                        {
-                            warn!("gate mailbox full: SendToClient dropped (session={} packet=UserDashFail)", msg.session_id);
-                        }
+                    {
+                        warn!("gate mailbox full: SendToClient dropped (session={} packet=UserDashFail)", msg.session_id);
                     }
                     let ofail = mir2_shared::packets::server::combat::ObjectDashFail {
                         object_id: state.object_id,
@@ -8456,8 +8455,8 @@ impl Message<MagicRequest> for WorldActor {
                         let req =
                             mir2_shared::packets::server::miscellaneous::RequestReincarnation {};
                         let mut body = Vec::new();
-                        if req.write_body(&mut body).is_ok() {
-                            if self
+                        if req.write_body(&mut body).is_ok()
+                            && self
                                 .gate_ref
                                 .tell(SendToClient {
                                     session_id: dead_sid,
@@ -8469,9 +8468,8 @@ impl Message<MagicRequest> for WorldActor {
                                 })
                                 .try_send()
                                 .is_err()
-                            {
-                                warn!("gate mailbox full: SendToClient dropped (session={} packet=RequestReincarnation)", dead_sid);
-                            }
+                        {
+                            warn!("gate mailbox full: SendToClient dropped (session={} packet=RequestReincarnation)", dead_sid);
                         }
                         debug!(
                             "Magic: {} casts Reincarnation (offered player {})",

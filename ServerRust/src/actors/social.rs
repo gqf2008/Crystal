@@ -4162,7 +4162,6 @@ impl Message<TradeAddGold> for SocialActor {
                     "交易已取消，金币将通过邮件返还"
                 },
             );
-            return;
         }
     }
 }

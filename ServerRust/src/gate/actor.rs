@@ -342,12 +342,12 @@ pub struct LogOutCleanup {
     pub session_id: SessionId,
 }
 
-/// 顶号解绑（原 UnbindSessionLogin）已移除：world dup-kick 改经
-/// StartGameReply.kicked_session_id 把被踢旧会话 id 带回，gate 在下方
-/// StartGame 臂内联摘除 session_usernames——同 handler 内完成，先于邮箱中
-/// 任何后到的 ClientDisconnected/LogOutCleanup 落地（原 spawn 异步 tell 与
-/// 已排队断开消息无 happens-before；且旧客户端被踢后重新 Login 会重建绑定，
-/// 迟到的异步解绑会误删新绑定，保留它不是兜底而是新竞态源，故移除）。
+// 顶号解绑（原 UnbindSessionLogin）已移除：world dup-kick 改经
+// StartGameReply.kicked_session_id 把被踢旧会话 id 带回，gate 在下方
+// StartGame 臂内联摘除 session_usernames——同 handler 内完成，先于邮箱中
+// 任何后到的 ClientDisconnected/LogOutCleanup 落地（原 spawn 异步 tell 与
+// 已排队断开消息无 happens-before；且旧客户端被踢后重新 Login 会重建绑定，
+// 迟到的异步解绑会误删新绑定，保留它不是兜底而是新竞态源，故移除）。
 
 /// 登录结果（从 AccountActor 返回）
 pub struct LoginResult {
