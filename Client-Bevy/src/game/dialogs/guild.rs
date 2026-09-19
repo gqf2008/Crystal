@@ -931,7 +931,8 @@ fn spawn_guild(
 
     // ---- MembersPage：成员列表 + 滚动条 + 显示离线（C# `GuildDialog.cs:318-487`）----
     commands.entity(page_members).with_children(|p| {
-        spawn_scroll_bar_ui(p, (337.0, 1.0, 16.0, 331.0), 8);
+        // 视觉轨道与 track_rel 同值（C# `MembersPositionBar` 行程 16..298 + 滑块高 20）
+        spawn_scroll_bar_ui(p, (337.0, 16.0, 16.0, 302.0), 8);
         // C# `MemberPageRows = 18`，`MembersName[i] @ (125, 30 + i*15)`（7F 字体 → 11px）
         for i in 0..MEMBER_ROWS {
             spawn_label(
