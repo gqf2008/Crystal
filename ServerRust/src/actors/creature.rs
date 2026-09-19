@@ -2,7 +2,9 @@
 // 纯数据结构，由 WorldActor 调用
 
 /// 宠物类型（对应 mir2_shared::IntelligentCreatureType）
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+///
+/// `Deserialize` **手写**（见下方 impl）：需同时接受变体名与数字两种历史表示（#2991）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 pub enum CreatureType {
     None = 0,
     BabyPanda = 1,
@@ -126,6 +128,67 @@ pub fn new_from_egg(
     creature
 }
 
+impl CreatureType {
+    /// 全部取值（容错解析与防漂移测试共用）
+    pub const ALL: [CreatureType; 11] = [
+        CreatureType::None,
+        CreatureType::BabyPanda,
+        CreatureType::BabyPig,
+        CreatureType::BabyOma,
+        CreatureType::BabySkeleton,
+        CreatureType::BabyKitten,
+        CreatureType::BabyChicken,
+        CreatureType::BabySheep,
+        CreatureType::BabyGorilla,
+        CreatureType::BabyBabyDragon,
+        CreatureType::Custom,
+    ];
+
+    /// 变体名（serde 默认表示用的就是这些名字）
+    pub fn name(self) -> &'static str {
+        match self {
+            CreatureType::None => "None",
+            CreatureType::BabyPanda => "BabyPanda",
+            CreatureType::BabyPig => "BabyPig",
+            CreatureType::BabyOma => "BabyOma",
+            CreatureType::BabySkeleton => "BabySkeleton",
+            CreatureType::BabyKitten => "BabyKitten",
+            CreatureType::BabyChicken => "BabyChicken",
+            CreatureType::BabySheep => "BabySheep",
+            CreatureType::BabyGorilla => "BabyGorilla",
+            CreatureType::BabyBabyDragon => "BabyBabyDragon",
+            CreatureType::Custom => "Custom",
+        }
+    }
+}
+
+/// #2991：`owned_json` 里本枚举**历史上有两种表示**——
+/// 变体名字符串（`Serialize` 默认，正常存档路径写的）与**数字**（`migrate.rs`
+/// 从 C# 导入时手拼 `json!` 写的 u8）。只认字符串会让迁移库整表反序列化失败，
+/// 而读入端用的是 `unwrap_or_default()` → 静默变空表 → 下一次存档把 `[]` 写回去，
+/// **宠物永久丢失**。故读入端两种都收；写出端保持默认（变体名），现有格式不变。
+impl<'de> serde::Deserialize<'de> for CreatureType {
+    fn deserialize<D>(d: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(serde::Deserialize)]
+        #[serde(untagged)]
+        enum Repr {
+            Num(u8),
+            Name(String),
+        }
+        use serde::de::Error as _;
+        match Repr::deserialize(d)? {
+            Repr::Num(v) => Ok(CreatureType::from(v)),
+            Repr::Name(n) => CreatureType::ALL
+                .into_iter()
+                .find(|t| t.name() == n)
+                .ok_or_else(|| D::Error::custom(format!("unknown CreatureType: {n}"))),
+        }
+    }
+}
+
 impl From<u8> for CreatureType {
     fn from(v: u8) -> Self {
         match v {
@@ -145,12 +208,54 @@ impl From<u8> for CreatureType {
 }
 
 /// 拾取模式
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+///
+/// `Deserialize` **手写**：同 [`CreatureType`]，历史 `owned_json` 里有变体名与数字两种表示（#2991）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 pub enum PickupMode {
     None = 0,
     GoldOnly = 1,
     GoldAndItem = 2,
     All = 3,
+}
+
+impl PickupMode {
+    pub const ALL: [PickupMode; 4] = [
+        PickupMode::None,
+        PickupMode::GoldOnly,
+        PickupMode::GoldAndItem,
+        PickupMode::All,
+    ];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            PickupMode::None => "None",
+            PickupMode::GoldOnly => "GoldOnly",
+            PickupMode::GoldAndItem => "GoldAndItem",
+            PickupMode::All => "All",
+        }
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for PickupMode {
+    fn deserialize<D>(d: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(serde::Deserialize)]
+        #[serde(untagged)]
+        enum Repr {
+            Num(u8),
+            Name(String),
+        }
+        use serde::de::Error as _;
+        match Repr::deserialize(d)? {
+            Repr::Num(v) => Ok(PickupMode::from(v)),
+            Repr::Name(n) => PickupMode::ALL
+                .into_iter()
+                .find(|m| m.name() == n)
+                .ok_or_else(|| D::Error::custom(format!("unknown PickupMode: {n}"))),
+        }
+    }
 }
 
 impl From<u8> for PickupMode {
@@ -600,5 +705,54 @@ mod tests {
         // Should not underflow
         log.tick(3600);
         assert_eq!(log.active_creature.as_ref().unwrap().hunger, 0);
+    }
+
+    /// #2991：`owned_json` 里枚举的**两种历史表示都要能读回来**。
+    ///
+    /// 变体名是 `Serialize` 的默认输出（正常存档路径），数字是 `migrate.rs` 从 C# 导入时
+    /// 手拼 `json!` 写的。只认字符串 → 迁移库整表反序列化失败 → `unwrap_or_default()`
+    /// 静默变空表 → 下次存档覆盖为 `[]`，宠物永久丢失。
+    #[test]
+    fn owned_json_accepts_both_enum_representations() {
+        let as_name = r#"{"creature_type":"BabyPig","custom_name":"p","pickup_mode":"All",
+                          "hunger":50,"enabled":true}"#;
+        let as_num = r#"{"creature_type":2,"custom_name":"p","pickup_mode":3,
+                         "hunger":50,"enabled":true}"#;
+        for raw in [as_name, as_num] {
+            let v: Vec<IntelligentCreature> = serde_json::from_str(&format!("[{raw}]"))
+                .unwrap_or_else(|e| {
+                    panic!("必须能读回来（{raw}）：{e}");
+                });
+            assert_eq!(v.len(), 1);
+            assert_eq!(v[0].creature_type, CreatureType::BabyPig);
+            assert_eq!(v[0].pickup_mode, PickupMode::All);
+            assert!(v[0].enabled);
+        }
+        // 未知名字/未知数字不得静默变成别的种类
+        assert!(serde_json::from_str::<CreatureType>(r#""Nope""#).is_err());
+        assert_eq!(
+            serde_json::from_str::<CreatureType>("99").unwrap(),
+            CreatureType::Custom
+        );
+    }
+
+    /// 防漂移：`name()` 表必须与 `Serialize` 的派生输出一致——否则容错解析会在
+    /// 「存档写变体名」与「读入按 name() 匹配」之间悄悄错位。
+    #[test]
+    fn enum_name_table_matches_serialized_form() {
+        for t in CreatureType::ALL {
+            assert_eq!(
+                serde_json::to_value(t).unwrap(),
+                serde_json::Value::String(t.name().to_string()),
+                "{t:?} 的 name() 与 serde 表示不一致"
+            );
+        }
+        for m in PickupMode::ALL {
+            assert_eq!(
+                serde_json::to_value(m).unwrap(),
+                serde_json::Value::String(m.name().to_string()),
+                "{m:?} 的 name() 与 serde 表示不一致"
+            );
+        }
     }
 }
