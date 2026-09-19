@@ -8,6 +8,13 @@
 //   nearby {}            返回周围实体（含 object_id）
 //   attack {object_id}   攻击指定对象
 //   interact {object_id} 与指定 NPC 对话
+//   cursor {x,y|clear}  注入/清除光标探针（悬停类系统读它；None=真实光标）
+//   wheel {x,y,delta}   在 (x,y) 注入一行滚轮（UI 逻辑坐标，正=向下滚=offset 增）
+//   scroll {}           返回全部 UiScrollList 真值：轨道矩形 x/y/w/h、列表矩形
+//                       rx/ry/rw/rh（**滚轮命中用后者**）、offset/total/visible/
+//                       step/z、shown。矩形口径与滚轮命中的绝对原点算法一致
+//                       （theme::scroll_origin，沿 ChildOf 累加 Node.left/top），
+//                       与 dialog_rect 的「布局后 ComputedNode」口径**不同**，勿混用
 //   npc_call {object_id,key} 对 NPC 发 CallNPC(key)（e2e 页面跳转驱动；后台窗口无法注入鼠标）
 //   pickup {object_id}  拾取指定地面物品
 //   chat {message}    发送聊天/GM 命令（@MAKE 等）
@@ -1057,7 +1064,8 @@ fn control_reply(cmd: &ControlCommand) -> Option<&Sender<String>> {
         | ControlCommand::CharPage { reply, .. }
         | ControlCommand::ChatSize { reply, .. }
         | ControlCommand::Click { reply, .. }
-        | ControlCommand::DialogRect { reply, .. } => Some(reply),
+        | ControlCommand::DialogRect { reply, .. }
+        | ControlCommand::GetScroll { reply } => Some(reply),
         _ => None,
     }
 }
@@ -1223,10 +1231,21 @@ fn apply_control_commands(
     ime: Res<crate::ui::pinyin_ime::PinyinIme>,
     mut cursor_probe: ResMut<CursorProbe>,
     mut wheels: MessageWriter<MouseWheel>,
+    // #2978 审查 P1：`wheel` 注入的探针必须在滚轮消息被消费后**撤销**——否则它常驻，
+    // 滚轮命中与 9 个悬停类系统会永久旁路真实光标（#2956 在 click 上修掉的同一类缺陷）。
+    // `apply_control_commands` 与 `scroll_list_ui_system` 在 Update 无排序边，不能同帧撤，
+    // 故给 2 帧窗口（消息双缓冲下足够被消费）。
+    mut wheel_clear: Local<u8>,
     mut player_menu: ResMut<crate::game::player_menu::PlayerMenuState>,
     mut page_res: ResMut<crate::game::dialogs::character::CharPage>,
     mut q: ControlQueries,
 ) {
+    if *wheel_clear > 0 {
+        *wheel_clear -= 1;
+        if *wheel_clear == 0 {
+            cursor_probe.pos = None;
+        }
+    }
     while let Ok(cmd) = control.0.try_recv() {
         match cmd {
             ControlCommand::Move { dx, dy, run } => {
@@ -1664,6 +1683,7 @@ fn apply_control_commands(
                     window: Entity::PLACEHOLDER,
                     phase: TouchPhase::Moved,
                 });
+                *wheel_clear = 2;
                 tracing::info!("🎮 control wheel: ({x},{y}) delta={delta}");
             }
             ControlCommand::GetScroll { reply } => {

@@ -1219,7 +1219,7 @@ mod tests {
         use bevy::ecs::message::Messages;
         use bevy::ecs::system::RunSystemOnce;
 
-        let build = |probe: Option<Vec2>| {
+        let build = |probe: Option<Vec2>, win_cursor: Option<Vec2>| {
             let mut world = World::new();
             world.init_resource::<Messages<MouseWheel>>();
             world.init_resource::<ButtonInput<MouseButton>>();
@@ -1242,8 +1242,10 @@ mod tests {
                     },
                 ))
                 .id();
-            // 窗口**不设**光标：模拟无焦点/共享桌面（真实光标不可用）
-            let win = world.spawn(Window::default()).id();
+            // `win_cursor = None`：模拟无焦点/共享桌面（真实光标不可用）
+            let mut window = Window::default();
+            window.set_cursor_position(win_cursor);
+            let win = world.spawn(window).id();
             world.write_message(MouseWheel {
                 unit: MouseScrollUnit::Line,
                 x: 0.0,
@@ -1257,12 +1259,21 @@ mod tests {
 
         // (a) 探针指向列表可视区 → 滚动生效
         assert_eq!(
-            build(Some(Vec2::new(10.0, 10.0))),
+            build(Some(Vec2::new(10.0, 10.0)), None),
             1,
             "探针注入的光标应能驱动滚轮"
         );
         // (b) 负控：无探针且窗口无光标 → 不该滚动
-        assert_eq!(build(None), 0, "无任何光标来源时不得滚动");
+        assert_eq!(build(None, None), 0, "无任何光标来源时不得滚动");
+        // (c) #2978 审查 P2：**优先级**必须钉住——探针优先于真实光标。
+        // 若日后写成 `window.cursor_position().or(probe.pos)`，(a)(b) 仍会全绿，但在
+        // 有真实光标（共享桌面/脚本跑一半有人动鼠标）的机器上注入会被真实光标盖掉，
+        // 表现为"脚本偶尔说没滚动"的假阴性。窗口光标故意设在列表**外**。
+        assert_eq!(
+            build(Some(Vec2::new(10.0, 10.0)), Some(Vec2::new(180.0, 180.0))),
+            1,
+            "探针优先于真实光标：窗口光标在列表外时也必须按探针命中"
+        );
     }
 
     /// #2968 审查阻塞项回归：**隐藏列表不得吞滚轮**——行会成员页与仓库页两个
