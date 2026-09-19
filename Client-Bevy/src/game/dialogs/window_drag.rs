@@ -201,6 +201,9 @@ mod tests {
         let mut st = WindowDragState::default();
         st.register(DragWindow::PotionBelt, 230.0, 618.0, 240.0, 38.0);
         assert!(st.over_window(Vec2::new(240.0, 620.0)));
+        // 偏移须在 unregister 之前设置：才能真正鉴别「unregister 不清 offsets」
+        // （复审 P3：先 set 后清，若错误实现连 offsets 一起清则下条断言 FAILED）
+        st.set_offset(DragWindow::PotionBelt, 100.0, -100.0);
         st.dragging = Some((DragWindow::PotionBelt, (5.0, 5.0)));
         st.unregister(DragWindow::PotionBelt);
         assert!(
@@ -209,7 +212,6 @@ mod tests {
         );
         assert_eq!(st.dragging(), None, "隐藏拖动中的窗口必须结束拖动");
         // 偏移保留（C# 会话内记住拖后位置）：重新登记后按偏移位置命中
-        st.set_offset(DragWindow::PotionBelt, 100.0, -100.0);
         st.register(DragWindow::PotionBelt, 230.0, 618.0, 240.0, 38.0);
         assert!(st.over_window(Vec2::new(340.0, 520.0)));
         assert!(!st.over_window(Vec2::new(240.0, 620.0)));
