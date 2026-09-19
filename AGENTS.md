@@ -11,7 +11,7 @@
     **同一 SHA 会有多行**——`CI` 与 `Build & Release` 各一条，必须按 `name` 分辨，否则可能读到 `Build & Release` 的 success 而误判；
     **短 SHA 会静默返回 `[]`**，别把它当成"没有红灯"。也可用 `gh pr checks <n>`（红 exit 1 / pending 8 / 全绿 0）。
   - **该 head SHA 的 run 尚无结论（pending）时**，以**最近一次有结论**的 `pull_request` run 为准；**pending 不豁免**（本次事故的合并时刻正是 pending），绿也不强制等待（与 `RULE_CI常规以本地门禁为准` 一致）。
-  - 红了就**先修红**，或本地按 CI 全步骤补齐门禁。注意 CI 跑的是 `cargo test`（**含 `tests/` 集成测试**）——`cargo test --lib` 拦不住 `b0001_smoke` 这类。
+  - 红了就**先修红**，或本地按 CI 全步骤补齐门禁。注意 CI 是两步：`cargo test --lib` **加** `cargo test --test b0001_smoke --test ui_alignment`（`.github/workflows/ci.yml:84/89`）——只跑 `cargo test --lib` 拦不住 `b0001_smoke` 这类集成测试。
   - 本仓 master **未配置 required status checks**（`enforcement_level=off`），**红灯不会自动拦人**；`gh pr merge --admin` 按设计会绕过审批位与 required checks，**它是为「作者不能自批」准备的，不是「跳过检查」的快捷方式**。删掉 `--admin` 也不会让 CI 变成闸门——闸门只有"人核对"这一道。
   - 边界：`RULE_合并规范` 的「CI 不作为常规合并前置」指**不必等 CI 绿**，不等于**可以红着合**。
   - （2026-09-19 补：商城那个「一进游戏即崩」的 B0001 P0 就是这样进 master 的——该 PR 自身的 `pull_request` CI 自首推起一路红（合并前约 8 小时即红），三次 push 无一绿，合并时无人核对该结论。见 `LESSON_admin合并绕过红灯_必先查该PR自身run结论`。）
