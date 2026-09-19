@@ -1209,6 +1209,73 @@ mod tests {
         queue.apply(&mut world);
     }
 
+    /// #2961 项5 验收能力：滚轮命中可经 `CursorProbe` 驱动——无焦点/共享桌面上
+    /// `Window::cursor_position()` 恒为 None，滚动**没法被自动化驱动**，本项就只能
+    /// 靠"截图人工看"。修复前系统只读真实光标，故本测试的 (a) 段 FAILED。
+    /// (b) 段是内建负控：探针为 None 且窗口无光标 → 不得滚动（证明开关是探针，
+    /// 而不是把命中判定整个放宽了）。
+    #[test]
+    fn scroll_list_wheel_hits_via_cursor_probe() {
+        use bevy::ecs::message::Messages;
+        use bevy::ecs::system::RunSystemOnce;
+
+        let build = |probe: Option<Vec2>, win_cursor: Option<Vec2>| {
+            let mut world = World::new();
+            world.init_resource::<Messages<MouseWheel>>();
+            world.init_resource::<ButtonInput<MouseButton>>();
+            world.init_resource::<crate::ui::scroll_list::ScrollDrag>();
+            world.insert_resource(crate::control::CursorProbe { pos: probe });
+            let e = world
+                .spawn((
+                    abs_node(0.0, 0.0, Some(200.0), Some(200.0)),
+                    InheritedVisibility::VISIBLE,
+                    UiScrollList {
+                        rect_rel: (0.0, 0.0, 50.0, 50.0),
+                        row_h: 10.0,
+                        visible: 5,
+                        total: 20,
+                        offset: 0,
+                        step: 1,
+                        track_rel: (50.0, 0.0, 10.0, 50.0),
+                        thumb: None,
+                        z: 1,
+                    },
+                ))
+                .id();
+            // `win_cursor = None`：模拟无焦点/共享桌面（真实光标不可用）
+            let mut window = Window::default();
+            window.set_cursor_position(win_cursor);
+            let win = world.spawn(window).id();
+            world.write_message(MouseWheel {
+                unit: MouseScrollUnit::Line,
+                x: 0.0,
+                y: 1.0,
+                window: win,
+                phase: bevy::input::touch::TouchPhase::Moved,
+            });
+            world.run_system_once(scroll_list_ui_system).unwrap();
+            world.get::<UiScrollList>(e).unwrap().offset
+        };
+
+        // (a) 探针指向列表可视区 → 滚动生效
+        assert_eq!(
+            build(Some(Vec2::new(10.0, 10.0)), None),
+            1,
+            "探针注入的光标应能驱动滚轮"
+        );
+        // (b) 负控：无探针且窗口无光标 → 不该滚动
+        assert_eq!(build(None, None), 0, "无任何光标来源时不得滚动");
+        // (c) #2978 审查 P2：**优先级**必须钉住——探针优先于真实光标。
+        // 若日后写成 `window.cursor_position().or(probe.pos)`，(a)(b) 仍会全绿，但在
+        // 有真实光标（共享桌面/脚本跑一半有人动鼠标）的机器上注入会被真实光标盖掉，
+        // 表现为"脚本偶尔说没滚动"的假阴性。窗口光标故意设在列表**外**。
+        assert_eq!(
+            build(Some(Vec2::new(10.0, 10.0)), Some(Vec2::new(180.0, 180.0))),
+            1,
+            "探针优先于真实光标：窗口光标在列表外时也必须按探针命中"
+        );
+    }
+
     /// #2968 审查阻塞项回归：**隐藏列表不得吞滚轮**——行会成员页与仓库页两个
     /// UiScrollList 屏幕区域重叠、z 相同时，靠可见性区分（C# 按页分发：隐藏页
     /// 收不到 MouseWheel）。阳性对照：去掉 `shown()` 门控 → z 更高的隐藏列表
@@ -1220,6 +1287,9 @@ mod tests {
 
         let mut world = World::new();
         world.init_resource::<Messages<MouseWheel>>();
+        // 滚轮命中改读注入探针（#2961 项5）：本测试走**真实光标**路径，
+        // 故探针保持 None（probe 为 None 时回落 window.cursor_position）
+        world.init_resource::<crate::control::CursorProbe>();
         world.init_resource::<ButtonInput<MouseButton>>();
         world.init_resource::<crate::ui::scroll_list::ScrollDrag>();
 
@@ -1288,6 +1358,9 @@ mod tests {
 
         let mut world = World::new();
         world.init_resource::<Messages<MouseWheel>>();
+        // 滚轮命中改读注入探针（#2961 项5）：本测试走**真实光标**路径，
+        // 故探针保持 None（probe 为 None 时回落 window.cursor_position）
+        world.init_resource::<crate::control::CursorProbe>();
         world.init_resource::<ButtonInput<MouseButton>>();
         world.init_resource::<crate::ui::scroll_list::ScrollDrag>();
 
@@ -1366,6 +1439,34 @@ mod tests {
 // 与 sprite scroll_list 同语义：UiScrollList 挂在面板根（Node.left/top = 屏幕坐标），
 // rect_rel/track_rel 相对面板；滚轮滚动 + 滑块拖动 + 滑块跟随 offset。
 // ============================================================================
+
+/// 滚动命中/读值的**唯一**绝对原点算法：沿 `ChildOf` 链累加各层 `Node.left/top`
+/// （根面板 / 页面容器通用）。
+///
+/// 滚轮命中、滑块命中（本模块）与 `control` RPC 的 `scroll` 读值**必须共用这一份**：
+/// 三处各写一遍，任一处口径漂移都会让自动化脚本算出的命中点与实际判定错位，
+/// 而那种错位只表现为"脚本说没滚动"这类难查的假阴性。
+pub fn scroll_origin(
+    e: Entity,
+    parents: &Query<&ChildOf>,
+    nodes: &Query<&Node, Without<UiScrollThumb>>,
+) -> (f32, f32) {
+    let mut x = 0.0;
+    let mut y = 0.0;
+    let mut cur = Some(e);
+    while let Some(c) = cur {
+        if let Ok(n) = nodes.get(c) {
+            if let Val::Px(v) = n.left {
+                x += v;
+            }
+            if let Val::Px(v) = n.top {
+                y += v;
+            }
+        }
+        cur = parents.get(c).ok().map(|co| co.parent());
+    }
+    (x, y)
+}
 
 /// bevy_ui 可滚动列表状态（挂在对话框容器实体上）
 #[derive(Component, Debug, Clone)]
@@ -1459,36 +1560,17 @@ pub fn scroll_list_ui_system(
     // 或已关窗口上时不得吞输入；两页同坐标重叠时按此硬性区分。
     // 缺组件（极简测试 App 无可见性传播）按「可见」处理。
     lists_vis: Query<&InheritedVisibility, Without<UiScrollThumb>>,
+    // #2961 项5 验收：滚轮命中改读注入探针——无焦点/共享桌面上
+    // `Window::cursor_position()` 不可用，自动化驱动不了滚动，本项就只能靠"看图"。
+    // 探针为 None 时回落真实光标，常态行为不变（click RPC 完成即撤探针）。
+    probe: Res<crate::control::CursorProbe>,
 ) {
     let Ok(window) = windows.single() else {
         return;
     };
-    let Some(cursor) = window.cursor_position() else {
+    let Some(cursor) = probe.pos.or_else(|| window.cursor_position()) else {
         return;
     };
-
-    // 容器屏幕原点：沿 ChildOf 链累加各层 Node.left/top（根面板 / 页面容器通用）
-    fn origin(
-        e: Entity,
-        parents: &Query<&ChildOf>,
-        nodes: &Query<&Node, Without<UiScrollThumb>>,
-    ) -> (f32, f32) {
-        let mut x = 0.0;
-        let mut y = 0.0;
-        let mut cur = Some(e);
-        while let Some(c) = cur {
-            if let Ok(n) = nodes.get(c) {
-                if let Val::Px(v) = n.left {
-                    x += v;
-                }
-                if let Val::Px(v) = n.top {
-                    y += v;
-                }
-            }
-            cur = parents.get(c).ok().map(|co| co.parent());
-        }
-        (x, y)
-    }
 
     // 列表是否可见（含祖先传播）：隐藏列表跳过命中
     fn shown(e: Entity, vis: &Query<&InheritedVisibility, Without<UiScrollThumb>>) -> bool {
@@ -1512,7 +1594,7 @@ pub fn scroll_list_ui_system(
             let Some(thumb) = list_thumb(e, &thumb_read) else {
                 continue;
             };
-            let (ox, oy) = origin(e, &parents, &node_read);
+            let (ox, oy) = scroll_origin(e, &parents, &node_read);
             let total = list.total.max(list.visible);
             let (tx, ty, tw, th) = list.track_rel;
             let thumb_h = (th * (list.visible as f32 / total as f32)).clamp(14.0, th);
@@ -1542,7 +1624,7 @@ pub fn scroll_list_ui_system(
                 if !shown(e, &lists_vis) || list_thumb(e, &thumb_read) != Some(thumb_e) {
                     continue;
                 }
-                let (_, oy) = origin(e, &parents, &node_read);
+                let (_, oy) = scroll_origin(e, &parents, &node_read);
                 let total = list.total.max(list.visible);
                 let (_, ty, _, th) = list.track_rel;
                 let thumb_h = (th * (list.visible as f32 / total as f32)).clamp(14.0, th);
@@ -1576,7 +1658,7 @@ pub fn scroll_list_ui_system(
             if !shown(e, &lists_vis) {
                 continue;
             }
-            let (ox, oy) = origin(e, &parents, &node_read);
+            let (ox, oy) = scroll_origin(e, &parents, &node_read);
             let (rx, ry, rw, rh) = list.rect_rel;
             if cursor.x >= ox + rx
                 && cursor.x <= ox + rx + rw
