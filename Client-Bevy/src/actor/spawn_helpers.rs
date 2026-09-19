@@ -576,12 +576,14 @@ mod tests {
         }
         queue.apply(&mut world);
         world
-            .run_system_once(move |mut commands: Commands,
-                                   children: Query<&Children>,
-                                   layers: Query<&mut SpriteLayer>,
-                                   ghost_layers: Query<&GhostLayer>| {
-                detach_mount_layers(&mut commands, &children, &layers, &ghost_layers, root);
-            })
+            .run_system_once(
+                move |mut commands: Commands,
+                      children: Query<&Children>,
+                      layers: Query<&mut SpriteLayer>,
+                      ghost_layers: Query<&GhostLayer>| {
+                    detach_mount_layers(&mut commands, &children, &layers, &ghost_layers, root);
+                },
+            )
             .expect("detach 应运行");
         let children = world.get::<Children>(root).expect("root 应有子实体");
         let mut remaining: Vec<String> = Vec::new();
