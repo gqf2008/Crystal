@@ -669,17 +669,20 @@ fn game_shop_ui_system(
     mouse: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window>,
     mut widgets: Query<&mut Visibility, With<GameShopWidget>>,
-    // 9 个 &mut Text/&mut Visibility 查询：ParamSet 分时借用，免 B0001 Without 链
-    mut cell_set: ParamSet<(
+    // 9 个 &mut Text/&mut Visibility 查询：**必须放进同一个 ParamSet** 分时借用。
+    // B0001 只在单个 ParamSet **内部**被豁免——拆成两个 ParamSet 时，各自并集里
+    // 的无过滤 `&mut Text` 会在 system_meta 上正面相撞（实机一进游戏即 panic）。
+    mut ui_set: ParamSet<(
         Query<(&mut Visibility, &GameShopCell), Without<GameShopWidget>>,
         Query<(&mut Text, &GameShopCellName)>,
         Query<(&mut Text, &GameShopCellGold)>,
         Query<(&mut Text, &GameShopCellCredit)>,
         Query<(&mut Text, &GameShopCellStock)>,
-        Query<(&mut Text, &GameShopCellCount)>,
-        Query<(&mut Text, &GameShopCellQty)>,
-    )>,
-    mut page_set: ParamSet<(
+        Query<(
+            &mut Text,
+            Option<&GameShopCellCount>,
+            Option<&GameShopCellQty>,
+        )>,
         Query<(&mut Text, &GameShopCat)>,
         Query<&mut Text, With<GameShopPageLabel>>,
     )>,
@@ -761,7 +764,7 @@ fn game_shop_ui_system(
             shop.qty = [1; 8];
         }
     }
-    for mut t in &mut page_set.p1() {
+    for mut t in &mut ui_set.p7() {
         let s = format!("{} / {}", shop.page + 1, pages);
         if t.0 != s {
             t.0 = s;
@@ -769,14 +772,14 @@ fn game_shop_ui_system(
     }
     // 商品格渲染（C# `UpdateShop`：第 page 页 8 格；空槽整格隐藏；
     // 名称 >17 截断——`MirGameShopCell.UpdateText`）
-    for (mut vis, cell) in &mut cell_set.p0() {
+    for (mut vis, cell) in &mut ui_set.p0() {
         *vis = if cell_item(&shop, &filtered, cell.0).is_some() {
             Visibility::Visible
         } else {
             Visibility::Hidden
         };
     }
-    for (mut text, c) in &mut cell_set.p1() {
+    for (mut text, c) in &mut ui_set.p1() {
         text.0 = match cell_item(&shop, &filtered, c.0) {
             Some(it) => {
                 let n = if it.name.is_empty() {
@@ -794,7 +797,7 @@ fn game_shop_ui_system(
             None => String::new(),
         };
     }
-    for (mut text, c) in &mut cell_set.p2() {
+    for (mut text, c) in &mut ui_set.p2() {
         text.0 = match cell_item(&shop, &filtered, c.0) {
             // C# `UpdateText`：仅 CanBuyGold 写 goldLabel；价格随选购数量联动
             Some(it) if it.can_buy_gold => {
@@ -803,7 +806,7 @@ fn game_shop_ui_system(
             _ => String::new(),
         };
     }
-    for (mut text, c) in &mut cell_set.p3() {
+    for (mut text, c) in &mut ui_set.p3() {
         text.0 = match cell_item(&shop, &filtered, c.0) {
             Some(it) if it.can_buy_credit => {
                 crate::game::hud::format_gold(it.credit_price.saturating_mul(shop.qty[c.0] as u32))
@@ -811,7 +814,7 @@ fn game_shop_ui_system(
             _ => String::new(),
         };
     }
-    for (mut text, c) in &mut cell_set.p4() {
+    for (mut text, c) in &mut ui_set.p4() {
         text.0 = match cell_item(&shop, &filtered, c.0) {
             // C# `UpdateText`：0=∞、>=99=99+、否则原值（原版顺序怪癖：>=99 先判）
             Some(it) if it.stock >= 99 => "99+".to_string(),
@@ -820,23 +823,26 @@ fn game_shop_ui_system(
             None => String::new(),
         };
     }
-    for (mut text, c) in &mut cell_set.p5() {
-        text.0 = match cell_item(&shop, &filtered, c.0) {
-            Some(it) => it.count.to_string(),
-            None => String::new(),
-        };
-    }
-    for (mut text, c) in &mut cell_set.p6() {
-        let s = shop.qty[c.0].to_string();
-        if text.0 != s {
-            text.0 = s;
+    // 数量/单价两文本合并为一查询：`&mut Text` 查询必须全部塞进**单个** ParamSet
+    // 才免 B0001，而 ParamSet 上限 8 个（见系统参数处注释）
+    for (mut text, cnt, qty) in &mut ui_set.p5() {
+        if let Some(c) = cnt {
+            text.0 = match cell_item(&shop, &filtered, c.0) {
+                Some(it) => it.count.to_string(),
+                None => String::new(),
+            };
+        } else if let Some(q) = qty {
+            let s = shop.qty[q.0].to_string();
+            if text.0 != s {
+                text.0 = s;
+            }
         }
     }
     // 分类渲染（C# Filters[22]：第 0 项 = 全部；CStartIndex 行偏移 22 行窗，
     // ▶ 标记当前选中；偏移由共享 UiScrollList 驱动：滚轮 + PositionBar 拖动）
     cat_list.set_total(shop.categories.len());
     let cat_base = cat_list.offset;
-    for (mut text, row) in &mut page_set.p0() {
+    for (mut text, row) in &mut ui_set.p6() {
         let idx = cat_base + row.0;
         text.0 = match shop.categories.get(idx) {
             Some(c) => {
@@ -1265,6 +1271,25 @@ mod tests {
     #[test]
     fn shop_default_pay_type_is_gold() {
         assert_eq!(GameShopState::default().pay_type, 1);
+    }
+
+    /// #2968 实机回归 P0：`game_shop_ui_system` 必须在真实系统初始化时不 panic。
+    /// B0001 只在单个 `ParamSet` 内部豁免——曾把 9 个 `&mut Text` 查询拆成
+    /// `cell_set`/`page_set` 两个 ParamSet，两个并集里的无过滤 `&mut Text` 在
+    /// system_meta 上相撞：一进游戏（`AppState::Game` 首次运行）即 panic 退出。
+    /// 修复前本测试 panic（B0001），修复后通过。
+    #[test]
+    fn shop_ui_system_initializes_without_query_conflict() {
+        use bevy::ecs::system::RunSystemOnce;
+
+        let mut world = World::new();
+        world.insert_resource(DialogManager::default());
+        world.insert_resource(GameShopState::default());
+        world.insert_resource(TextInputState::default());
+        world.insert_resource(NetConnection::default());
+        world.init_resource::<ButtonInput<MouseButton>>();
+        // 系统初始化（B0001 在此触发）后走 `!open` 早退分支
+        world.run_system_once(game_shop_ui_system).unwrap();
     }
 
     /// #2791 单元②：付款复选框查询必须限定标记——否则购买键等任意带图按钮会被当成
