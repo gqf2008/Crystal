@@ -79,6 +79,10 @@ enum ControlCommand {
     GetScroll {
         reply: Sender<String>,
     },
+    /// 诊断：读「上次世界点击为何没反应」（player_control 的 `ControlState.last_click`）
+    GetLastClick {
+        reply: Sender<String>,
+    },
     /// 诊断：返回当前打开的对话框列表
     GetDialogs {
         reply: Sender<String>,
@@ -540,6 +544,21 @@ fn handle_conn(mut stream: std::net::TcpStream, tx: Sender<ControlCommand>) {
                 let delta = params.get("delta").and_then(|v| v.as_f64()).unwrap_or(1.0) as f32;
                 let _ = tx.send(ControlCommand::Wheel { x, y, delta });
                 json!({"ok": true, "x": x, "y": y, "delta": delta})
+            }
+            "last_click" => {
+                // 诊断：点了没反应时，读 `ControlState.last_click` 看是谁丢的
+                let (reply_tx, reply_rx) = bounded::<String>(1);
+                if tx
+                    .send(ControlCommand::GetLastClick { reply: reply_tx })
+                    .is_ok()
+                {
+                    let s = reply_rx
+                        .recv_timeout(std::time::Duration::from_secs(2))
+                        .unwrap_or_else(|_| "{}".to_string());
+                    serde_json::from_str::<Value>(&s).unwrap_or_else(|_| json!({}))
+                } else {
+                    json!({"error": "control channel closed"})
+                }
             }
             "scroll" => {
                 // #2961 项5：读全部 UiScrollList 真值（轨道绝对矩形 + offset/total/visible/z）
@@ -1065,7 +1084,8 @@ fn control_reply(cmd: &ControlCommand) -> Option<&Sender<String>> {
         | ControlCommand::ChatSize { reply, .. }
         | ControlCommand::Click { reply, .. }
         | ControlCommand::DialogRect { reply, .. }
-        | ControlCommand::GetScroll { reply } => Some(reply),
+        | ControlCommand::GetScroll { reply }
+        | ControlCommand::GetLastClick { reply } => Some(reply),
         _ => None,
     }
 }
@@ -1685,6 +1705,9 @@ fn apply_control_commands(
                 });
                 *wheel_clear = 2;
                 tracing::info!("🎮 control wheel: ({x},{y}) delta={delta}");
+            }
+            ControlCommand::GetLastClick { reply } => {
+                let _ = reply.send(json!({ "last_click": control_state.last_click }).to_string());
             }
             ControlCommand::GetScroll { reply } => {
                 // 轨道绝对原点走 theme::scroll_origin（**与滚轮/滑块命中同一份算法**，

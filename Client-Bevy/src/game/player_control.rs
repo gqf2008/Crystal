@@ -45,6 +45,11 @@ pub struct ControlState {
     pub pickup_target: Option<u32>,
     /// 按住移动状态：目标格 + 模式（true=跑, false=走），用于持续追踪鼠标
     pub hold_target: Option<(i32, i32)>,
+    /// **上次世界点击的处置结果**（诊断，供 control RPC `last_click` 读取）。
+    /// 形如 `ok:move` / `ok:attack:<id>` / `drop:chat_panel` / `hold:no_path (a,b)->(c,d)`。
+    /// 起因：点到不可走格或落在闸门上时点击链**静默返回**，线上 INFO 日志里一个字都不出，
+    /// 表现为「点了完全没反应」而无法定性（2026-09-19 实机排查耗时数轮）。
+    pub last_click: Option<String>,
     pub hold_run: Option<bool>,
     /// NPC 对话冷却（C# GameScene.NPCTime/NPCID：同 NPC 5 秒内忽略重复 CallNPC）
     pub npc_id: Option<u32>,
@@ -69,6 +74,7 @@ impl Default for ControlState {
             hold_pressed_at: None,
             npc_id: None,
             last_npc_call: 0.0,
+            last_click: None,
         }
     }
 }
@@ -226,6 +232,41 @@ struct UiLockState<'w> {
 /// 选中物品/数量框/丢弃确认/快捷键分配均为模态交互；右击和按住移动也必须让路。
 fn modal_ui_locked(selected: bool, amount: bool, confirm: bool, assign_key: bool) -> bool {
     selected || amount || confirm || assign_key
+}
+
+/// 世界点击被丢弃的原因——**纯判定**，顺序与措辞由单测钉住。
+/// 顺序必须与 `player_control_system` 里原来的 `||` 链一致，否则诊断会指向错误的闸门。
+fn world_click_drop_reason(
+    locked: bool,
+    over_ui: bool,
+    over_main_dialog: bool,
+    over_chat_panel: bool,
+    over_skill_bar: bool,
+    over_drag_window: bool,
+    blocks_world_click: bool,
+) -> Option<&'static str> {
+    if locked {
+        return Some("modal_locked（选中物品/数量框/丢弃确认/快捷键分配）");
+    }
+    if over_ui {
+        return Some("over_ui");
+    }
+    if over_main_dialog {
+        return Some("main_dialog（主对话框上）");
+    }
+    if over_chat_panel {
+        return Some("chat_panel（聊天面板上）");
+    }
+    if over_skill_bar {
+        return Some("skill_bar（技能栏上）");
+    }
+    if over_drag_window {
+        return Some("drag_window（可拖浮窗上）");
+    }
+    if blocks_world_click {
+        return Some("dialog_open（有窗口类对话框打开）");
+    }
+    None
 }
 
 impl UiLockState<'_> {
@@ -388,6 +429,7 @@ fn right_click_move_system(
     libs.0.ensure_initialized();
     if let Some(p) = pathfinding::find_path(map, from_tile, target_tile) {
         if p.is_empty() {
+            control.last_click = Some(format!("rc:no_path ->{target_tile:?}"));
             tracing::debug!("🚫 目标不可达: {:?}", target_tile);
         } else {
             let len = p.len();
@@ -461,17 +503,28 @@ fn left_click_interact_system(
     //  #1830：窗口类对话框打开时也不处理世界点击，小地图除外；
     //  #2487：技能栏控件吃掉落在其上的点击，不透传地图；
     //  可拖浮动面板（腰带/任务追踪）同样吃掉落在其上的点击）
-    if !mouse.just_pressed(MouseButton::Left)
-        || ui.locked()
-        || over_ui
-        || over_main_dialog(cursor_logical)
-        || over_chat_panel(cursor_logical)
-        || ui.over_visible_skill_bar(cursor_logical)
-        || ui.over_drag_window(cursor_logical)
-        || ui.blocks_world_click()
-    {
+    // 闸门顺序与判定见 `world_click_drop_reason`（纯函数，单测钉住）；
+    // 丢弃时把**原因**记进 `control.last_click`，否则线上日志对此完全沉默
+    if !mouse.just_pressed(MouseButton::Left) {
         return;
     }
+    if let Some(reason) = world_click_drop_reason(
+        ui.locked(),
+        over_ui,
+        over_main_dialog(cursor_logical),
+        over_chat_panel(cursor_logical),
+        ui.over_visible_skill_bar(cursor_logical),
+        ui.over_drag_window(cursor_logical),
+        ui.blocks_world_click(),
+    ) {
+        control.last_click = Some(format!("drop:{reason}"));
+        tracing::debug!("🖱️ 世界点击被丢弃: {reason}");
+        return;
+    }
+    // 过了闸门：记一句，好让「点了没反应」能区分成三类——
+    // ①丢了（drop:*）②打到了 actor（ok:attack/npc:*）③到达世界层但没产生动作
+    // （本条；多半是目标格不可走 / 无路径，见 right_click/hold 的 *_no_path）
+    control.last_click = Some("passed_gates".to_string());
     tracing::debug!(
         "🖱️ 左键点击 screen=({},{}) world=({:.0},{:.0})",
         cursor.x,
@@ -584,6 +637,7 @@ fn left_click_interact_system(
                 object_id,
                 key: "[@Main]".to_string(),
             });
+            control.last_click = Some(format!("ok:npc:{object_id}"));
             tracing::info!("🧙 CallNPC {}", object_id);
         } else if is_player {
             // C# OnMouseDown Left：点击玩家 break（不攻击）；Shift+左键才攻击（PvP）
@@ -606,6 +660,7 @@ fn left_click_interact_system(
             commands.entity(pe).remove::<LocalMove>();
             anim.action = mir2_shared::enums::MirAction::Standing;
             anim.frame_index = 0;
+            control.last_click = Some(format!("ok:attack:{object_id}"));
             tracing::info!("⚔️ 攻击目标 {}", object_id);
         }
     } else {
@@ -941,6 +996,7 @@ fn hold_move_system(
     // #1830：窗口类对话框打开时不按住移动（小地图除外）；
     // 浮动面板拖动进行中（腰带/任务追踪）——拖窗按住超 0.2s 不得转成按住移动
     if ui.blocks_world_click() || ui.drag_in_progress() {
+        control.last_click = Some("hold:drop:modal_or_dragging".to_string());
         return;
     }
     let Some(map) = &game_data.map else { return };
@@ -955,6 +1011,7 @@ fn hold_move_system(
         || ui.over_visible_skill_bar(cursor_logical)
         || ui.over_drag_window(cursor_logical)
     {
+        control.last_click = Some("hold:drop:over_ui（光标在面板/技能栏/浮窗上）".to_string());
         return;
     }
     let Some(cursor) = window.physical_cursor_position() else {
@@ -1475,6 +1532,47 @@ fn npc_call_allowed(prev_id: Option<u32>, last_call: f32, now: f32, object_id: u
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #2961 点击诊断：闸门**判定顺序与措辞**必须稳定——诊断若把原因指到错误的闸门，
+    /// 比没有诊断更糟（排查会被带向反方向）。这里把顺序钉住：多个闸门同时成立时，
+    /// 必须报 `player_control_system` 里 `||` 链中**最先**命中的那个。
+    #[test]
+    fn world_click_drop_reason_reports_first_matching_gate() {
+        assert_eq!(
+            world_click_drop_reason(false, false, false, false, false, false, false),
+            None,
+            "无闸门命中时必须返回 None（否则点击会被误判为丢弃）"
+        );
+        let one = |i: usize| {
+            let mut v = [false; 7];
+            v[i] = true;
+            v
+        };
+        let expect = [
+            "modal_locked",
+            "over_ui",
+            "main_dialog",
+            "chat_panel",
+            "skill_bar",
+            "drag_window",
+            "dialog_open",
+        ];
+        for (i, want) in expect.iter().enumerate() {
+            let v = one(i);
+            let got = world_click_drop_reason(v[0], v[1], v[2], v[3], v[4], v[5], v[6])
+                .unwrap_or_else(|| panic!("第 {i} 个闸门单独成立时应报 {want}"));
+            assert!(
+                got.starts_with(want),
+                "第 {i} 个闸门应报 {want}，实得 {got}"
+            );
+        }
+        // 全部成立 → 报顺序最靠前的（与 if 链一致）
+        let got = world_click_drop_reason(true, true, true, true, true, true, true).unwrap();
+        assert!(
+            got.starts_with("modal_locked"),
+            "全部成立时应报顺序最靠前的 modal_locked，实得 {got}"
+        );
+    }
 
     /// #2633 批次4 步4 R2：player_input_enabled 门控读 `StatusFlags`；实体未生成
     /// （single() 失败）默认放行 true，等价原 HudState 默认 dead/fishing/paralysis=false。
