@@ -16,7 +16,8 @@ use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
 use crate::ui::sprite_ui::{shared_cjk_font, UiCjkFont, UiFont};
 use crate::ui::theme::{
-    load_lib_image, spawn_container, spawn_icon_button, spawn_label, spawn_panel, CloseButton,
+    load_lib_image, spawn_container, spawn_icon_button, spawn_label_center, spawn_panel,
+    CloseButton,
 };
 
 /// #2892 批B：面板精灵与 C# 原生尺寸/坐标（C# `MountDialog.Index = 167; Location = (10,30)`；
@@ -26,6 +27,13 @@ pub const PANEL_4SLOT: (LibraryName, usize) = (LibraryName::Prguse, 160);
 pub const PANEL_SIZE: (f32, f32) = (324.0, 377.0);
 pub const PANEL_POS: (f32, f32) = (10.0, 30.0);
 
+/// C# `MountDialog.cs` 5 孔档的标签几何（防漂移常量）：`MountName` @(30,10)、
+/// `MountLoyalty` @(30,30)，两者 `Size(260,15)` + `DrawFormat = HCenter|VCenter`。
+/// 原实现放在 (30,40)/(30,60) 且左对齐 → 名字压在标题栏边框上。
+pub const LABEL_LEFT: f32 = 30.0;
+pub const LABEL_WIDTH: f32 = 260.0;
+pub const NAME_Y: f32 = 10.0;
+pub const LOYALTY_Y: f32 = 30.0;
 const PANEL_X: f32 = 10.0;
 const PANEL_Y: f32 = 30.0;
 
@@ -109,9 +117,25 @@ fn spawn_mount(
         .insert((MountPanel, DialogRoot(DialogKind::Mount), MountWidget));
 
     commands.entity(panel).with_children(|p| {
-        // 名称/忠诚度
-        spawn_label(p, &cjk, "", 30.0, 40.0, 15.0, Color::WHITE, 9).insert(MountNameText);
-        spawn_label(p, &cjk, "", 30.0, 60.0, 12.0, Color::WHITE, 9).insert(MountLoyaltyText);
+        // 名称/忠诚度：C# `MountDialog.cs` 5 孔档 —— `MountName` @(30,10) `Size(260,15)`、
+        // `MountLoyalty` @(30,30) `Size(260,15)`，两者 `DrawFormat = HCenter|VCenter`。
+        // 原实现放在 (30,40)/(30,60) 且**左对齐** → 名字压在标题栏边框上、文字整体偏左偏下。
+        // 居中标签的 cx = 30 + 260/2 = 160。
+        let cx = LABEL_LEFT + LABEL_WIDTH / 2.0; // 260 宽居中 → cx = 160
+        spawn_label_center(p, &cjk, "", cx, NAME_Y, LABEL_WIDTH, 15.0, Color::WHITE, 9)
+            .insert(MountNameText);
+        spawn_label_center(
+            p,
+            &cjk,
+            "",
+            cx,
+            LOYALTY_Y,
+            LABEL_WIDTH,
+            12.0,
+            Color::WHITE,
+            9,
+        )
+        .insert(MountLoyaltyText);
         // 骑乘按钮 Prguse[155/156/157] @(262,70)
         if let (Some(n), Some(h), Some(pr)) = (
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 155),
@@ -300,5 +324,25 @@ fn mount_ui_system(
             None => tracing::info!("🐴 坐骑: 未装备"),
         }
         *logged = true;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// #2985 B1：坐骑面板标签几何必须对齐 C# `MountDialog.cs` 5 孔档。原实现把名字/忠诚
+    /// 放在 (30,40)/(30,60) 且左对齐，实机表现为**名字压在标题栏边框上、文字偏左偏下**。
+    #[test]
+    fn mount_label_geometry_matches_csharp() {
+        assert_eq!(LABEL_LEFT, 30.0, "C# MountName.Location.X = 30");
+        assert_eq!(LABEL_WIDTH, 260.0, "C# MountName.Size.Width = 260");
+        assert_eq!(NAME_Y, 10.0, "C# MountName.Location.Y = 10");
+        assert_eq!(LOYALTY_Y, 30.0, "C# MountLoyalty.Location.Y = 30");
+        assert_eq!(
+            LABEL_LEFT + LABEL_WIDTH / 2.0,
+            160.0,
+            "居中锚点 = 30 + 260/2（C# HCenter）"
+        );
     }
 }
