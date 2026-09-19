@@ -26,6 +26,8 @@ use std::net::TcpListener;
 
 use bevy::ecs::system::SystemParam;
 use bevy::input::mouse::MouseButtonInput;
+use bevy::input::mouse::{MouseScrollUnit, MouseWheel};
+use bevy::input::touch::TouchPhase;
 use bevy::input::ButtonState;
 use bevy::picking::hover::HoverMap;
 use bevy::picking::pointer::{Location, PointerAction, PointerButton, PointerId, PointerInput};
@@ -58,6 +60,16 @@ enum ControlCommand {
         path: String,
     },
     GetState {
+        reply: Sender<String>,
+    },
+    /// #2961 项5 验收：注入一次滚轮（x,y 为 UI 逻辑坐标；delta 为行数，正=向下滚=offset 增）
+    Wheel {
+        x: f32,
+        y: f32,
+        delta: f32,
+    },
+    /// #2961 项5 验收：读全部滚动列表真值（轨道绝对矩形 + offset/total/visible/z）
+    GetScroll {
         reply: Sender<String>,
     },
     /// 诊断：返回当前打开的对话框列表
@@ -252,8 +264,21 @@ struct ControlQueries<'w, 's> {
         ),
         With<crate::ui::theme::CloseButton>,
     >,
-    /// dialog_rect RPC：关闭钮 → 根面板的祖先链
+    /// dialog_rect RPC：关闭钮 → 根面板的祖先链（scroll RPC 的绝对原点累加也用它）
     child_of: Query<'w, 's, &'static ChildOf>,
+    /// #2961 项5 验收：全部滚动列表；轨道矩形换算绝对坐标用（口径同
+    /// `theme::scroll_list_ui_system` 的 origin()）
+    scroll_lists: Query<
+        'w,
+        's,
+        (
+            Entity,
+            &'static crate::ui::theme::UiScrollList,
+            Option<&'static InheritedVisibility>,
+        ),
+        Without<crate::ui::theme::UiScrollThumb>,
+    >,
+    ui_nodes: Query<'w, 's, &'static Node, Without<crate::ui::theme::UiScrollThumb>>,
     /// dialog_rect RPC：物理→逻辑坐标换算用的窗口 scale_factor
     primary_window: Query<'w, 's, &'static Window, With<PrimaryWindow>>,
     /// dialog_rect 诊断：任意实体的 Visibility 读取（关闭钮祖先链诊断）
@@ -491,6 +516,29 @@ fn handle_conn(mut stream: std::net::TcpStream, tx: Sender<ControlCommand>) {
                         pos,
                         reply: reply_tx,
                     })
+                    .is_ok()
+                {
+                    let s = reply_rx
+                        .recv_timeout(std::time::Duration::from_secs(2))
+                        .unwrap_or_else(|_| "{}".to_string());
+                    serde_json::from_str::<Value>(&s).unwrap_or_else(|_| json!({}))
+                } else {
+                    json!({"error": "control channel closed"})
+                }
+            }
+            "wheel" => {
+                // #2961 项5：{x,y} UI 逻辑坐标（缺省屏幕中心），{delta} 行数（正=向下滚）
+                let x = params.get("x").and_then(|v| v.as_f64()).unwrap_or(512.0) as f32;
+                let y = params.get("y").and_then(|v| v.as_f64()).unwrap_or(384.0) as f32;
+                let delta = params.get("delta").and_then(|v| v.as_f64()).unwrap_or(1.0) as f32;
+                let _ = tx.send(ControlCommand::Wheel { x, y, delta });
+                json!({"ok": true, "x": x, "y": y, "delta": delta})
+            }
+            "scroll" => {
+                // #2961 项5：读全部 UiScrollList 真值（轨道绝对矩形 + offset/total/visible/z）
+                let (reply_tx, reply_rx) = bounded::<String>(1);
+                if tx
+                    .send(ControlCommand::GetScroll { reply: reply_tx })
                     .is_ok()
                 {
                     let s = reply_rx
@@ -1174,6 +1222,7 @@ fn apply_control_commands(
     mut chat: ResMut<crate::game::chat::ChatState>,
     ime: Res<crate::ui::pinyin_ime::PinyinIme>,
     mut cursor_probe: ResMut<CursorProbe>,
+    mut wheels: MessageWriter<MouseWheel>,
     mut player_menu: ResMut<crate::game::player_menu::PlayerMenuState>,
     mut page_res: ResMut<crate::game::dialogs::character::CharPage>,
     mut q: ControlQueries,
@@ -1604,6 +1653,41 @@ fn apply_control_commands(
                         }
                     }
                 }
+            }
+            ControlCommand::Wheel { x, y, delta } => {
+                // 命中判定走 CursorProbe（theme::scroll_list_ui_system 已改读探针）
+                cursor_probe.pos = Some(Vec2::new(x, y));
+                wheels.write(MouseWheel {
+                    unit: MouseScrollUnit::Line,
+                    x: 0.0,
+                    y: delta,
+                    window: Entity::PLACEHOLDER,
+                    phase: TouchPhase::Moved,
+                });
+                tracing::info!("🎮 control wheel: ({x},{y}) delta={delta}");
+            }
+            ControlCommand::GetScroll { reply } => {
+                // 轨道绝对原点走 theme::scroll_origin（**与滚轮/滑块命中同一份算法**，
+                // 否则脚本算的命中点会与实际判定错位）
+                let mut out: Vec<Value> = Vec::new();
+                for (e, list, vis) in q.scroll_lists.iter() {
+                    let (ox, oy) = crate::ui::theme::scroll_origin(e, &q.child_of, &q.ui_nodes);
+                    let (tx, ty, tw, th) = list.track_rel;
+                    let (rx, ry, rw, rh) = list.rect_rel;
+                    // 轨道矩形（画在哪）+ 列表本体矩形（**滚轮命中用哪个**）都给，
+                    // 脚本据此算注入点；`step` 一并给，免得脚本另猜行数/格
+                    out.push(json!({
+                        "entity": e.to_bits(),
+                        "x": ox + tx, "y": oy + ty, "w": tw, "h": th,
+                        "rx": ox + rx, "ry": oy + ry, "rw": rw, "rh": rh,
+                        "offset": list.offset, "total": list.total,
+                        "visible": list.visible, "step": list.step, "z": list.z,
+                        // 列表实体自身是否可见（#2968 闸门：隐藏列表不吃滚轮）；
+                        // 缺组件（极简测试世界无可见性传播）按 true 处理，与系统同口径
+                        "shown": vis.map(|v| v.get()).unwrap_or(true),
+                    }));
+                }
+                let _ = reply.send(json!({ "lists": out }).to_string());
             }
             ControlCommand::Chat { message } => {
                 tracing::info!("🎮 control chat: {}", message);
