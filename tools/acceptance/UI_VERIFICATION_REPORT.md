@@ -298,7 +298,7 @@ control RPC（127.0.0.1:9000）：`dialog {kind,action}` / `dialogs`（列 Dialo
 
 ### 10.5 残余缺口与跟进项（如实记录）
 
-1. **ServerRust CI job 在 master 上已经红灯**（审查中发现，master 最近 6 次 CI run 全 failure）——与本批次客户端改动无关，但会掩盖后续真实失败，建议优先排查。
+1. **ServerRust CI job 在 master 上已经红灯**——`gh run list` 实测：最近连续 5 次**已完成**的 `ci.yml` run 均为 failure；其中 `f269ab27` 那次 `ServerRust=failure` 而 `SharedRust=success`。与本批次客户端改动无关（这些 run 覆盖的提交不含本批客户端改动），但会掩盖后续真实失败，建议优先排查。
 2. `ui_alignment` 的**纯常量断言被同函数的 `require_assets!` 连带跳过**（CI 无 `Data/`），防漂移能力只在本机生效；建议把不依赖资产的断言拆出独立测试。
 3. 背包扩容钮 `z=8`（全仓 `spawn_close_button` 实测：17 处 `z=10`、`npc.rs` 一处 `z=9`、**仅背包 `z=8`**）——把 z 提到 10 才是结构性正解（届时 72x23 命中区也不再吞关闭钮），本轮只改了断言，实现偏离保留。
 4. `mail.rs:636` / `npc.rs:162` / `npc_goods.rs:185` 的列表滚轮仍为 `step: 3`，而 C# 对应处是 1 行/格（#2968 审查标记为超出该 PR 范围）。
