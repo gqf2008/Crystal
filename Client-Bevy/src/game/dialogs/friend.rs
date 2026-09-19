@@ -522,6 +522,12 @@ mod tests {
     fn friend_text_uses_cjk_capable_font() {
         use bevy::ecs::system::RunSystemOnce;
 
+        // CI 无游戏资产（`Data/` 不入库）→ spawn 在取背景图处提前返回、一个文本都没有，
+        // 断言会假红（本 PR 自己的 CI 就是这么红的）；按 `data_assets_present` 跳过。
+        if !crate::resources::libraries::data_assets_present() {
+            eprintln!("skip: 无 Data 资产（CI 只 checkout 仓库）");
+            return;
+        }
         let mut world = World::new();
         world.insert_resource(GameLibraries::default());
         world.insert_resource(Assets::<Image>::default());
@@ -536,12 +542,17 @@ mod tests {
         // 两者都用 `TextFont` 携带字体句柄，故只查后者即可全覆盖
         let mut q = world.query::<&TextFont>();
         for tf in q.iter(&world) {
-            if let FontSource::Handle(h) = &tf.font {
-                assert_eq!(
-                    *h, cjk,
-                    "好友面板文本必须用自带 CJK 的主字体（Arial 会豆腐）"
-                );
-                n += 1;
+            match &tf.font {
+                FontSource::Handle(h) => {
+                    assert_eq!(
+                        *h, cjk,
+                        "好友面板文本必须用自带 CJK 的主字体（Arial 会豆腐）"
+                    );
+                    n += 1;
+                }
+                // 非 Handle 源会被 `if let` 静默跳过（假绿口子）：这类实体同样
+                // 渲染中文，出现即失败
+                other => panic!("好友面板文本应为显式字体句柄，实得 {other:?}"),
             }
         }
         assert!(n > 0, "应至少 spawn 出若干文本实体");
