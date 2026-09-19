@@ -240,6 +240,26 @@ struct CreatureAnimImage {
     switch_at: f32,
 }
 
+/// C# `CreatureImage` 的 `Location`（`IntelligentCreatureDialogs.cs:167-179`）。
+///
+/// 注意它是**逻辑**位置：`CreatureImage.UseOffSet = true`，而
+/// `MirImageControl.DisplayLocation => UseOffSet ? Location + Library.GetOffSet(Index) : Location`
+/// （`MirImageControl.cs:7`）—— **实际绘制点还要叠加艺术图自带的 offset**。
+/// 本端此前只按 `Location` 画，宠物就整体偏到右下，压住"可以拾取物品"那行并溢出边框。
+pub const CREATURE_IMAGE_POS: (f32, f32) = (50.0, 110.0);
+
+/// C# `MirImageControl.DisplayLocation`：`UseOffSet` 时把艺术偏移叠到 `Location` 上。
+///
+/// 偏移按宠物种类不同（实测 `Prguse2`：BabyPig 帧 540 `(-16,-39)`、
+/// Kitten 帧 600 `(-11,-40)`、BabySkeleton 帧 630 `(0,-45)`），所以必须在**换种类加载帧时**
+/// 重算，不能只在 spawn 时算一次。
+pub fn creature_image_origin(offset: (i16, i16)) -> (f32, f32) {
+    (
+        CREATURE_IMAGE_POS.0 + offset.0 as f32,
+        CREATURE_IMAGE_POS.1 + offset.1 as f32,
+    )
+}
+
 /// C# `SummonButton` 的两套帧：`Title[576..578]`（可召唤）与 `Title[593..595]`
 /// （「已召唤其它种类」时的禁用态，`:651-653`）
 #[derive(Component)]
@@ -784,8 +804,8 @@ fn spawn_creature(
         spawn_image(
             p,
             images.add(crate::map_renderer::make_image(vec![0, 0, 0, 0], 1, 1)),
-            50.0,
-            110.0,
+            CREATURE_IMAGE_POS.0,
+            CREATURE_IMAGE_POS.1,
             72.0,
             68.0,
             8,
@@ -1399,6 +1419,10 @@ fn creature_anim_system(
             if let Some(info) = libs.0.get_image(LibraryName::Prguse2, idx) {
                 node.width = Val::Px(info.width.max(1) as f32);
                 node.height = Val::Px(info.height.max(1) as f32);
+                // C# `UseOffSet`：绘制点 = Location + 艺术偏移（见 `creature_image_origin`）
+                let (ox, oy) = creature_image_origin((info.offset_x, info.offset_y));
+                node.left = Val::Px(ox);
+                node.top = Val::Px(oy);
             }
             anim.frames = frames;
             anim.loaded_type = creature_type;
@@ -2715,5 +2739,23 @@ mod layout_tests {
         // 没有其它种类召唤：与既有语义一致
         assert!(creature_op_enabled(Summon, true, false, false));
         assert!(!creature_op_enabled(Summon, true, true, false));
+    }
+
+    /// #2985 B4：宠物立绘必须叠加**艺术偏移**（C# `MirImageControl.DisplayLocation` 的
+    /// `UseOffSet` 分支）。
+    ///
+    /// 只按 `Location=(50,110)` 画，会把宠物整体偏到右下：`Prguse2[540]`（BabyPig 首帧）
+    /// 的艺术偏移是 `(-16,-39)` → 正确绘制点 `(34,71)`；差 16/39 px 的结果是立绘压住
+    /// 「可以拾取物品 …」那一行、并溢出面板给它留的框。
+    #[test]
+    fn creature_image_origin_adds_art_offset() {
+        // 实测值（tools/acceptance/lib_size.py 读 .lib 元数据）
+        assert_eq!(creature_image_origin((-16, -39)), (34.0, 71.0)); // BabyPig 540
+        assert_eq!(creature_image_origin((-11, -40)), (39.0, 70.0)); // Kitten 600
+        assert_eq!(creature_image_origin((0, -45)), (50.0, 65.0)); // BabySkeleton 630
+                                                                   // 无偏移种类退化为 Location 本身
+        assert_eq!(creature_image_origin((0, 0)), CREATURE_IMAGE_POS);
+        // 防漂移：基准 Location 是 C# 的 (50,110)
+        assert_eq!(CREATURE_IMAGE_POS, (50.0, 110.0));
     }
 }
