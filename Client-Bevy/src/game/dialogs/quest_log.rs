@@ -43,6 +43,13 @@ pub const DETAIL_POS: (f32, f32) = (532.0, 60.0);
 /// C# Globals.MaxConcurrentQuests（服务端 quest_log.can_accept 同值）
 pub const MAX_CONCURRENT_QUESTS: usize = 20;
 
+/// 「任务：{已接}/{上限}」计数标签的面板内位置。
+///
+/// C# `QuestDiaryDialog` 构造器：`_takenQuestsLabel { Parent = this, AutoSize = true,
+/// Location = new Point(210, 7) }`——在**标题栏右侧**、关闭钮左边。
+/// 此前写死在 (18,20)，实测正好压在标题栏下沿、切到面板边框。
+pub const DIARY_COUNT_POS: (f32, f32) = (210.0, 7.0);
+
 /// 任务条目（ChangeQuest 写入）
 #[derive(Debug, Clone, Default)]
 pub struct QuestEntry {
@@ -777,8 +784,18 @@ fn spawn_quest_log(
         ) {
             spawn_icon_button(p, n, h, pr, 200.0, 436.0, 76.0, 25.0, 10).insert(QuestLogClose);
         }
-        // 已接计数标签 @(18,20)
-        spawn_label(p, &cjk, "", 18.0, 20.0, 12.0, Color::WHITE, 9).insert(QuestLogLine(14));
+        // 已接计数标签（C# `_takenQuestsLabel @(210,7)`；原写死 (18,20) 压住标题栏）
+        spawn_label(
+            p,
+            &cjk,
+            "",
+            DIARY_COUNT_POS.0,
+            DIARY_COUNT_POS.1,
+            12.0,
+            Color::WHITE,
+            9,
+        )
+        .insert(QuestLogLine(14));
         // 任务行 8 + 详情 6 @(18,40+20i)
         for i in 0..14usize {
             spawn_label(
@@ -4215,6 +4232,49 @@ mod tests {
             rows,
             vec![DiaryRow::Header(0), DiaryRow::Header(1), DiaryRow::Quest(1)]
         );
+    }
+
+    /// #2985 B3：日记「任务：x/y」计数标签落在 C# 的位置上。
+    ///
+    /// C# `QuestDiaryDialog` 的 `_takenQuestsLabel` 是 `Location = new Point(210, 7)`
+    /// （标题栏右侧、关闭钮左边），不是左上角；写死 (18,20) 会压住标题栏下沿、切到面板边框。
+    #[test]
+    fn diary_count_label_sits_where_csharp_puts_it() {
+        use crate::resources::libraries::Libraries;
+        use bevy::ecs::system::RunSystemOnce;
+
+        if !crate::resources::libraries::data_assets_present() {
+            eprintln!(
+                "skip diary_count_label_sits_where_csharp_puts_it: 无 Data 资产（CI 只 checkout 仓库）"
+            );
+            return;
+        }
+        let mut world = World::new();
+        world.insert_resource(GameLibraries(Libraries::new("Data")));
+        world.insert_resource(Assets::<Image>::default());
+        world.insert_resource(Assets::<Font>::default());
+        world.insert_resource(UiFont::default());
+        world.insert_resource(UiCjkFont::default());
+        world
+            .run_system_once(spawn_quest_log)
+            .expect("spawn_quest_log 应成功");
+
+        let mut q = world.query::<(&QuestLogLine, &Node)>();
+        let mut found = 0;
+        for (line, node) in q.iter(&world) {
+            if line.0 != 14 {
+                continue;
+            }
+            found += 1;
+            assert_eq!(
+                (node.left, node.top),
+                (Val::Px(DIARY_COUNT_POS.0), Val::Px(DIARY_COUNT_POS.1)),
+                "计数标签应在 C# 的 (210,7)，而不是标题栏左上角"
+            );
+        }
+        assert_eq!(found, 1, "计数标签应恰好一个（QuestLogLine(14)）");
+        // 与标题栏解耦：必须在面板右半边，否则又会压住 Title[15]
+        assert!(DIARY_COUNT_POS.0 > 150.0 && DIARY_COUNT_POS.1 < 20.0);
     }
 }
 /// #2810 单元②：一行里要叠加渲染的部件（彩色段 / 链接）——偏移均为**最终显示文本**内的字节偏移
