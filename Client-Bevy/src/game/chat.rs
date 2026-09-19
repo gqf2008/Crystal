@@ -1416,6 +1416,11 @@ pub(crate) fn chat_input_system(
         focus.rect = Some((231.0, 725.0, 627.0, 13.0));
     }
 
+    // 开框触发键：本帧开框的那个键不再进文本循环（防止同帧重复入框）。
+    // 需在 Enter 开框路径**之前**声明——Enter 也是开框键：winit 给 Enter 的 `KeyboardInput.text` 是回车符，
+    // 不挡就会往草稿缓冲里塞一个不可见 CR。
+    let mut opened_trigger: Option<Key> = None;
+
     // Enter：激活/发送（组合中被 IME 接管 → 跳过，不发送）
     for key in &key_list {
         if key.state != bevy::input::ButtonState::Pressed {
@@ -1456,6 +1461,10 @@ pub(crate) fn chat_input_system(
                 }
             } else {
                 chat.input_active = true;
+                // #2961：Enter 开框同样要把本键登记为触发键，否则下方文本循环会
+                // 把该键的 `KeyboardInput.text`（回车符）推进缓冲——草稿里留下不可见 CR，
+                // 光标 x 估计多算一位（发送时被 trim 掉，所以只在光标位置上看得出）
+                opened_trigger = Some(key.logical_key.clone());
             }
             continue;
         }
@@ -1474,7 +1483,6 @@ pub(crate) fn chat_input_system(
     // 会把已输入文本整体重置成前缀；C# ActiveControl 非 null 时按键进文本框）。
     // #2609：开框帧记录触发键，下方文本循环跳过之——否则 '@' 开框后同帧
     // 再进文本循环得 "@@"（C# MainDialogs.cs:1096-1123 开框字符不进框）
-    let mut opened_trigger: Option<Key> = None;
     if !chat.input_active {
         for key in &key_list {
             if key.state != bevy::input::ButtonState::Pressed || ime.consumes_key(key) {
@@ -1992,6 +2000,46 @@ mod tests {
         let chat = app.world().resource::<ChatState>();
         assert!(!chat.input_active, "Escape 应关闭聊天输入行");
         assert_eq!(chat.input_text, "nihao", "C# 取消聚焦不清文本");
+    }
+
+    /// #2961 实机复核发现的缺陷：**Enter 开框那一帧把回车符写进了草稿缓冲**。
+    /// winit 给 Enter 键的 `KeyboardInput.text` 是回车符；`opened_trigger`
+    /// 守卫原先只覆盖 `@ ! / 空格` 开框路径，Enter 开框漏登记 → 同帧文本循环
+    /// 把 CR 推进去。可见影响：光标 x 估计多算一位（发送时被 `trim()` 掉，
+    /// 所以只在光标位置上看得出）。修复前本测试 FAILED（缓冲里多一个 CR）。
+    #[test]
+    fn enter_open_does_not_insert_cr_into_input() {
+        use bevy::ecs::message::Messages;
+        use bevy::input::keyboard::{Key, KeyboardInput};
+        use bevy::input::ButtonState;
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(crate::ui::pinyin_ime::PinyinImePlugin);
+        app.add_message::<KeyboardInput>();
+        app.insert_resource(crate::ui::sprite_ui::UiFont(Handle::<Font>::default()));
+        app.insert_resource(ChatState::default()); // input_active=false，文本为空
+        app.init_resource::<crate::network::NetConnection>();
+        app.insert_resource(crate::network::NetMode(crate::network::NetworkMode::Mock));
+        app.init_resource::<ChatFilter>();
+        app.add_systems(Update, chat_input_system);
+        app.world_mut()
+            .resource_mut::<Messages<KeyboardInput>>()
+            .write(KeyboardInput {
+                key_code: bevy::input::keyboard::KeyCode::Enter,
+                logical_key: Key::Enter,
+                state: ButtonState::Pressed,
+                text: Some("\r".into()),
+                repeat: false,
+                window: Entity::PLACEHOLDER,
+            });
+        app.update();
+        let chat = app.world().resource::<ChatState>();
+        assert!(chat.input_active, "Enter 应打开聊天输入行");
+        assert_eq!(
+            chat.input_text, "",
+            "开框那一帧的 Enter 不得把回车符写进文本域"
+        );
     }
 
     #[test]
