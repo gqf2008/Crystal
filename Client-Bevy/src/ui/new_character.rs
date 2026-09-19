@@ -931,6 +931,11 @@ mod tests {
     ///
     /// 本测试跑真实的系统初始化（不构造业务数据）：将来任何字段重叠、或有人再加一个
     /// ParamSet，都会在这里变红，而不是等上线后崩在玩家机器上。
+    ///
+    /// **红控**（复跑用）：给 `preview.p0` 加 `&mut Text2d` 并同步改解构——报错为
+    /// `error[B0001]: Query<.. &mut Text2d, (With<NcNameBox>..)> ... conflicts with a
+    /// previous system parameter`（与商城 P0 同形），本测试 FAILED；恢复即绿。
+    /// 注意这是代表性样本而非唯一路径：加参数/改 fetch/删 `Without`/拆 ParamSet 都会红。
     #[test]
     fn new_char_ui_system_initializes_without_query_conflict() {
         use bevy::ecs::message::Messages;
@@ -945,7 +950,9 @@ mod tests {
         world.init_resource::<ButtonInput<MouseButton>>();
         world.insert_resource(PinyinIme::new());
         world.init_resource::<Messages<KeyboardInput>>();
-        world.run_system_once(new_char_ui_system).unwrap();
+        world
+            .run_system_once(new_char_ui_system)
+            .expect("new_char_ui_system 初始化失败：缺资源（Skipped）或查询冲突（B0001）");
     }
 
     /// #2892 批C：同一个对话框两种模式——英雄模式 OK 发 `C.NewHero`、
