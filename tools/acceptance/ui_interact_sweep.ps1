@@ -3,7 +3,9 @@
 # 另：inventory 拖动测试（press→move→release 走 ButtonInput 拖动链路，断言矩形位移）
 # 前提：mir2_server 在跑；客户端 --real-net --auto-enter。
 $ErrorActionPreference = 'Stop'
-$env:PATH = 'D:\toolchains\msys64\ucrt64\bin;' + $env:PATH
+# 客户端依赖 msys64/ucrt64 与 libpinyin 的 DLL：缺任一目录会以 0xC0000135 静默退出
+$env:PATH = 'D:\toolchains\msys64\ucrt64\bin;D:\toolchains\libpinyin-install\bin;' + $env:PATH
+$env:LIBPINYIN_DIR = 'D:/toolchains/libpinyin-install'
 $acc = 'E:\Users\gxh\Documents\GitHub\Crystal\tools\acceptance'
 $exe = 'E:\Users\gxh\Documents\GitHub\Crystal\Client-Bevy\target\debug\client_bevy.exe'
 $wd  = 'E:\Users\gxh\Documents\GitHub\Crystal\Client-Bevy'
