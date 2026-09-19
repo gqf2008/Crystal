@@ -945,12 +945,16 @@ fn character_dialog_aligned() {
     println!("  ✓ 角色对话框 14 装备格(36x32)/ClassImage/名字/行会 布局对齐 C# CharacterDialog");
 }
 
+/// 背包/大地图**常量**单独成测（不依赖 `Data/` 资产，CI 上真跑）。
+///
+/// 独立审查发现：这些断言原先都排在 `require_assets!` **之后**，而 CI 没有
+/// `Data/`（`.gitignore:368`）→ 整个测试提前 `return`，防漂移断言在 CI 上等于
+/// 没跑（`inventory_bigmap_aligned` 曾在 master 上红了一整轮而 CI 全绿）。
+/// 口径：**不依赖资产的断言不要与依赖资产的断言同函数**。
 #[test]
-fn inventory_bigmap_aligned() {
+fn inventory_bigmap_constants() {
     use client_bevy::game::dialogs::big_map as bm;
     use client_bevy::game::dialogs::inventory as inv;
-    require_assets!("inventory_bigmap_aligned");
-    let mut libs = Libs::new();
 
     // ---- 背包（C# InventoryDialog.cs）常量 == C# 字面值（防漂移）----
     // 窗口原点：C# 构造器未设 Location（InventoryDialog.cs:25-31）→ MirControl
@@ -985,6 +989,24 @@ fn inventory_bigmap_aligned() {
         25.0,
         "扩容命中高 = 精灵 Title[483] 自然高（刻意偏离 C# 23，见 #2953）"
     );
+
+    // ---- 大地图（C# BigMapDialog.cs）常量 == C# 字面值（防漂移）----
+    assert_eq!(bm::PANEL_W, 760.0, "大地图面板宽 = Title[820] 实测 760");
+    assert_eq!(bm::PANEL_H, 500.0, "大地图面板高 = Title[820] 实测 500");
+    assert_eq!(bm::SEARCH_X, 59.0, "搜索框 x = C# SearchTextBox (59,H-27)");
+    assert_eq!(bm::SEARCH_Y_FROM_BOTTOM, 27.0, "搜索框底距 = C# H-27");
+    assert_eq!(bm::SEARCH_W, 130.0, "搜索框宽 = C# Size(130,10)");
+    assert_eq!(bm::SEARCH_H, 10.0, "搜索框高 = C# Size(130,10)");
+
+    println!("  ✓ 背包/大地图常量对齐 C#（资产无关，CI 亦跑）");
+}
+
+#[test]
+fn inventory_bigmap_aligned() {
+    use client_bevy::game::dialogs::big_map as bm;
+    use client_bevy::game::dialogs::inventory as inv;
+    require_assets!("inventory_bigmap_aligned");
+    let mut libs = Libs::new();
 
     // 背包对话框真实尺寸（Title[196]），子控件 bbox ⊆ 对话框
     let (idw, idh) = libs.size(LibraryName::Title, 196);
@@ -1023,14 +1045,6 @@ fn inventory_bigmap_aligned() {
         idw,
         idh,
     );
-
-    // ---- 大地图（C# BigMapDialog.cs）常量 == C# 字面值（防漂移）----
-    assert_eq!(bm::PANEL_W, 760.0, "大地图面板宽 = Title[820] 实测 760");
-    assert_eq!(bm::PANEL_H, 500.0, "大地图面板高 = Title[820] 实测 500");
-    assert_eq!(bm::SEARCH_X, 59.0, "搜索框 x = C# SearchTextBox (59,H-27)");
-    assert_eq!(bm::SEARCH_Y_FROM_BOTTOM, 27.0, "搜索框底距 = C# H-27");
-    assert_eq!(bm::SEARCH_W, 130.0, "搜索框宽 = C# Size(130,10)");
-    assert_eq!(bm::SEARCH_H, 10.0, "搜索框高 = C# Size(130,10)");
 
     // 搜索框 ⊆ 大地图面板 + ⊆ 画布
     let (mx, my) = ((SW - bm::PANEL_W) / 2.0, (SH - bm::PANEL_H) / 2.0);
@@ -4455,7 +4469,9 @@ const ALL_DIALOG_KINDS: [client_bevy::game::dialogs::DialogKind; DIALOG_KIND_COU
 fn kind_alignment_tests(kind: client_bevy::game::dialogs::DialogKind) -> &'static [&'static str] {
     use client_bevy::game::dialogs::DialogKind as K;
     match kind {
-        K::Inventory | K::BigMap => &["inventory_bigmap_aligned"],
+        // 常量断言单独成测（无 require_assets!）：CI 无 Data/ 时也跑，
+        // 口径见 `inventory_bigmap_constants` 的文档注释
+        K::Inventory | K::BigMap => &["inventory_bigmap_aligned", "inventory_bigmap_constants"],
         K::Character => &["character_dialog_aligned"],
         K::QuestLog | K::QuestDetail => &["panel_sprites_batch_b3_match_csharp"],
         K::Settings => &["settings_dialog_aligned"],
