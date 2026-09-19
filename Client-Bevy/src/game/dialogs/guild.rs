@@ -12,6 +12,7 @@
 //   - 邀请提示 = 独立覆盖层 Prguse[360]（456x190）@ (284,289)。
 // ============================================================================
 
+use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use std::collections::HashMap;
 
@@ -556,6 +557,24 @@ pub struct GuildStorageUp;
 #[derive(Component)]
 pub struct GuildStorageDown;
 
+/// 仓库页按钮打包（存/取/上/下；全只读查询，控系统参数个数）
+#[derive(SystemParam)]
+struct GuildStorageBtns<'w, 's> {
+    deposit: Query<'w, 's, (Entity, &'static Interaction), With<GuildItemDeposit>>,
+    withdraw: Query<'w, 's, (Entity, &'static Interaction), With<GuildItemWithdraw>>,
+    up: Query<'w, 's, (Entity, &'static Interaction), With<GuildStorageUp>>,
+    down: Query<'w, 's, (Entity, &'static Interaction), With<GuildStorageDown>>,
+}
+
+/// 成员列表滚动条（挂在 Members 页容器；C# `MembersPositionBar`）。
+/// 2026-09-19 修复：原挂在根面板而滑块在页容器下——父子不匹配，滑块永不跟随/不可拖。
+#[derive(Component)]
+pub struct GuildMembersScroll;
+
+/// 仓库滚动条（挂在 Storage 页容器；C# `StoragePositionBar`）
+#[derive(Component)]
+pub struct GuildStorageScroll;
+
 // 邀请提示
 #[derive(Component)]
 pub struct GuildInviteWidget;
@@ -660,23 +679,6 @@ fn spawn_guild(
             GuildWidget,
             GlobalZIndex(30),
             Visibility::Hidden,
-            // #89 成员列表滚动（C# `MembersPage` 内 (125,30) 起；行高见 §7 偏差记录）
-            UiScrollList {
-                rect_rel: (
-                    MEMBER_COL_NAME,
-                    PAGE_LEFT.1 + MEMBER_ROW_Y0,
-                    200.0,
-                    MEMBER_ROW_DY * MEMBER_ROWS as f32,
-                ),
-                row_h: MEMBER_ROW_DY,
-                visible: MEMBER_ROWS,
-                total: 0,
-                offset: 0,
-                step: 3,
-                track_rel: (337.0, 61.0, 16.0, 300.0),
-                thumb: None,
-                z: 8,
-            },
         ))
         .id();
 
@@ -757,6 +759,46 @@ fn spawn_guild(
     let page_rank = page_of(GuildPage::Rank);
     let page_status = page_of(GuildPage::Status);
     let page_buff = page_of(GuildPage::Buff);
+
+    // #89 成员列表滚动（C# `MembersPage` 内 (125,30) 起；行高见 §7 偏差记录）——
+    // 挂在页容器上（滑块同为页容器子节点，父子匹配才跟随/可拖；屏幕原点沿父链累加）
+    commands.entity(page_members).insert((
+        GuildMembersScroll,
+        UiScrollList {
+            rect_rel: (
+                MEMBER_COL_NAME,
+                MEMBER_ROW_Y0,
+                200.0,
+                MEMBER_ROW_DY * MEMBER_ROWS as f32,
+            ),
+            row_h: MEMBER_ROW_DY,
+            visible: MEMBER_ROWS,
+            total: 0,
+            offset: 0,
+            // C# `MembersPositionBar` @(337,16)，clamp y ∈ [16, DownButton.Y-20]
+            // （`GuildDialog.cs:441-450/1665-1683`）→ 行程 16..298、滑块高 20、轨道高 302
+            step: 1,
+            track_rel: (337.0, 16.0, 16.0, 302.0),
+            thumb: None,
+            z: 8,
+        },
+    ));
+    // 仓库滚动（C# `StoragePage.MouseWheel` + `StoragePositionBar` @(337,16)，
+    // 行程 16..318 = 302；可见 8 行 / 总 14 行 → 偏移上限 6 = `STORAGE_MAX_START`）
+    commands.entity(page_storage).insert((
+        GuildStorageScroll,
+        UiScrollList {
+            rect_rel: (0.0, 0.0, 336.0, 332.0),
+            row_h: 36.0,
+            visible: STORAGE_WINDOW_ROWS,
+            total: STORAGE_ROWS_TOTAL,
+            offset: 0,
+            step: 1,
+            track_rel: (337.0, 16.0, 16.0, 302.0),
+            thumb: None,
+            z: 8,
+        },
+    ));
 
     // 页面底图（C#：Members=`Prguse[1852]`@(13,1)、Storage=`[1851]`@(30,19)、
     // Status=`[1850]`@(10,2)、Buff=页面自身 `[1853]`@(0,0)；NoticePage 无底图）
@@ -889,7 +931,8 @@ fn spawn_guild(
 
     // ---- MembersPage：成员列表 + 滚动条 + 显示离线（C# `GuildDialog.cs:318-487`）----
     commands.entity(page_members).with_children(|p| {
-        spawn_scroll_bar_ui(p, (337.0, 1.0, 16.0, 331.0), 8);
+        // 视觉轨道与 track_rel 同值（C# `MembersPositionBar` 行程 16..298 + 滑块高 20）
+        spawn_scroll_bar_ui(p, (337.0, 16.0, 16.0, 302.0), 8);
         // C# `MemberPageRows = 18`，`MembersName[i] @ (125, 30 + i*15)`（7F 字体 → 11px）
         for i in 0..MEMBER_ROWS {
             spawn_label(
@@ -1183,6 +1226,8 @@ fn spawn_guild(
             spawn_icon_button(p, n, h, pr, 120.0, 200.0, 76.0, 25.0, 9).insert(GuildItemWithdraw);
             spawn_label(p, &cjk, "取出", 140.0, 205.0, 11.0, Color::WHITE, 10);
         }
+        // C# `StoragePositionBar` `Prguse2[206]` @(337,16)：共享滚动条（滚轮+拖动+跟随）
+        spawn_scroll_bar_ui(p, (337.0, 16.0, 16.0, 302.0), 8);
         // C# 翻页 `Prguse2[197/198/199]` @(337,1)、`[207/208/209]` @(337,318)、`[206]` @(337,16)
         if let (Some(n), Some(h), Some(pr)) = (
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 197),
@@ -1422,7 +1467,7 @@ fn guild_member_rows_system(
     net: Res<NetConnection>,
     mgr: Res<DialogManager>,
     local_name: Query<&crate::actor::PlayerName, With<crate::actor::LocalPlayer>>,
-    scroll: Query<&UiScrollList, With<GuildWidget>>,
+    scroll: Query<&UiScrollList, With<GuildMembersScroll>>,
     mut status: Query<(&GuildMemberStatusLine, &mut Text, &mut TextColor)>,
     mut del: Query<
         (&GuildMemberDelete, &mut Visibility),
@@ -1743,6 +1788,16 @@ fn guild_page_system(
 
 /// 显隐 + 渲染 + 打开时请求行会信息 + 创建按钮
 #[allow(clippy::too_many_arguments)]
+/// guild_ui_system 辅助参数包（删除钮/面板原点/两个 Local；控 Bevy 16 参上限）
+#[derive(SystemParam)]
+struct GuildUiAux<'w, 's> {
+    /// #2892 批B 单元8：C# `MembersDelete[i].Click → DeleteMember(i)`
+    del_btns: Query<'w, 's, (Entity, &'static Interaction, &'static GuildMemberDelete)>,
+    prev_inter: Local<'s, HashMap<Entity, Interaction>>,
+    requested: Local<'s, bool>,
+    panel_origin: Query<'w, 's, &'static Node, With<GuildWidget>>,
+}
+
 fn guild_ui_system(
     mut mgr: ResMut<DialogManager>,
     mut guild: ResMut<GuildState>,
@@ -1752,10 +1807,8 @@ fn guild_ui_system(
     btns: Query<(Entity, &Interaction, &GuildBtn)>,
     mouse: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window>,
-    mut widgets: Query<
-        (&mut Visibility, Option<&mut UiScrollList>),
-        (With<GuildWidget>, Without<GuildCreateBtn>),
-    >,
+    mut widgets: Query<&mut Visibility, (With<GuildWidget>, Without<GuildCreateBtn>)>,
+    mut members_scroll: Query<&mut UiScrollList, With<GuildMembersScroll>>,
     mut lines: Query<(&mut Text, &mut TextColor, &GuildLine)>,
     // #2892 批B 单元7：Buff 槽行与剩余点数（C# `BuffPage` 的 `GuildBuffButton[i].Name`/`PointsLeft`）
     mut buff_lines: Query<(&mut Text, &mut TextColor, &GuildBuffLine), Without<GuildLine>>,
@@ -1767,31 +1820,33 @@ fn guild_ui_system(
             Without<GuildBuffLine>,
         ),
     >,
-    // #2892 批B 单元8：C# `MembersDelete[i].Click → DeleteMember(i)`
-    del_btns: Query<(Entity, &Interaction, &GuildMemberDelete)>,
-    mut prev_inter: Local<HashMap<Entity, Interaction>>,
-    mut requested: Local<bool>,
-    panel_origin: Query<&Node, With<GuildWidget>>,
+    aux: GuildUiAux,
 ) {
+    let GuildUiAux {
+        del_btns,
+        mut prev_inter,
+        mut requested,
+        panel_origin,
+    } = aux;
     fn edge(e: Entity, inter: &Interaction, prev: &mut HashMap<Entity, Interaction>) -> bool {
         let was = prev.insert(e, *inter);
         *inter == Interaction::Pressed && was != Some(Interaction::Pressed)
     }
     let open = mgr.is_open(DialogKind::Guild);
-    for (mut vis, sl) in &mut widgets {
+    for mut vis in &mut widgets {
         *vis = if open {
             Visibility::Visible
         } else {
             Visibility::Hidden
         };
-        if let Some(mut sl) = sl {
-            // #89 成员列表行数（滚动夹紧）
-            sl.set_total(if guild.in_guild {
-                guild.visible_member_indices().len()
-            } else {
-                0
-            });
-        }
+    }
+    for mut sl in &mut members_scroll {
+        // #89 成员列表行数（滚动夹紧）
+        sl.set_total(if guild.in_guild {
+            guild.visible_member_indices().len()
+        } else {
+            0
+        });
     }
     // 创建行会按钮：仅对话框打开且未入会时显示（此前完全没管理显隐，一直残留屏幕）；
     // 点击动作在下方"创建按钮 → GuildNameReturn"统一处理
@@ -1925,10 +1980,7 @@ fn guild_ui_system(
         }
     }
     // 渲染（#89 成员列表支持滚轮滚动）
-    let scroll_offset = widgets
-        .iter()
-        .find_map(|(_, sl)| sl.map(|s| s.offset))
-        .unwrap_or(0);
+    let scroll_offset = members_scroll.iter().next().map(|s| s.offset).unwrap_or(0);
     // #1348：可见成员下标（过滤离线）
     let visible = guild.visible_member_indices();
     // #2892 批B 单元7：BuffPage 的 8 个槽 + 剩余点数（C# `GuildBuffButton[i].Name` / `PointsLeft`）
@@ -2362,10 +2414,8 @@ fn guild_storage_system(
     net: Res<NetConnection>,
     inv_q: Query<&crate::game::player_state::Inventory, With<crate::actor::LocalPlayer>>,
     inv_click: Res<crate::game::dialogs::inventory::InvClickState>,
-    deposit_btn: Query<(Entity, &Interaction), With<GuildItemDeposit>>,
-    withdraw_btn: Query<(Entity, &Interaction), With<GuildItemWithdraw>>,
-    up_btn: Query<(Entity, &Interaction), With<GuildStorageUp>>,
-    down_btn: Query<(Entity, &Interaction), With<GuildStorageDown>>,
+    btns: GuildStorageBtns,
+    mut storage_scroll: Query<&mut UiScrollList, With<GuildStorageScroll>>,
     // #2892 批B 单元9：C# `StorageGrid` 的 64 个可见格（图标 + 数量）
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
@@ -2446,18 +2496,32 @@ fn guild_storage_system(
         });
         tracing::info!("🏰 请求仓库物品列表");
     }
-    for (e, inter) in &up_btn {
+    // 滚动偏移唯一源 = UiScrollList（滚轮/滑块拖动直写；C# `StoragePage.MouseWheel` +
+    // `StoragePositionBar_OnMoving`）；`storage_page` 每帧镜像供格阵渲染
+    if let Ok(mut sl) = storage_scroll.single_mut() {
+        sl.set_total(STORAGE_ROWS_TOTAL);
+        if guild.storage_page != sl.offset {
+            guild.storage_page = sl.offset;
+        }
+    }
+    for (e, inter) in &btns.up {
         if edge(e, inter, &mut prev_inter) {
-            guild.storage_page = guild.storage_page.saturating_sub(1);
+            if let Ok(mut sl) = storage_scroll.single_mut() {
+                sl.offset = sl.offset.saturating_sub(1);
+            }
         }
     }
-    for (e, inter) in &down_btn {
+    for (e, inter) in &btns.down {
         // C# `StorageDownButton.Click`：`StorageIndex` 上限 6（14 行 - 8 行窗口）
-        if edge(e, inter, &mut prev_inter) && guild.storage_page < STORAGE_MAX_START {
-            guild.storage_page += 1;
+        if edge(e, inter, &mut prev_inter) {
+            if let Ok(mut sl) = storage_scroll.single_mut() {
+                if sl.offset < STORAGE_MAX_START {
+                    sl.offset += 1;
+                }
+            }
         }
     }
-    for (e, inter) in &deposit_btn {
+    for (e, inter) in &btns.deposit {
         if edge(e, inter, &mut prev_inter) && guild.in_guild {
             // 选中背包物品 → 存入（原版 C#：选中物品 → GuildStorageItemChange type=0）
             let items = inv_q
@@ -2488,7 +2552,7 @@ fn guild_storage_system(
             }
         }
     }
-    for (e, inter) in &withdraw_btn {
+    for (e, inter) in &btns.withdraw {
         if edge(e, inter, &mut prev_inter) && guild.in_guild {
             if let Some(slot) = guild.selected_storage {
                 if slot < guild.storage_items.len() && guild.storage_items[slot].is_some() {
