@@ -1,0 +1,222 @@
+<title>Crystal UI 对齐验收</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
+<style>
+  :root{
+    --ground:#f2f4f1; --surface:#ffffff; --sunk:#e8ebe7; --ink:#141d1a; --ink-soft:#414f4a;
+    --ink-faint:#6f7d77; --line:#d6dbd5; --line-strong:#b4bdb6; --accent:#0d6a5b; --accent-soft:#dfeeea;
+    --pass:#1c7a45; --pass-soft:#e0f0e5; --warn:#8f540f; --warn-soft:#f6ebda;
+    --code:#161d1b; --code-ink:#e4eae7; --shadow:0 1px 2px rgba(20,29,26,.05),0 10px 26px -18px rgba(20,29,26,.42);
+  }
+  @media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+    --ground:#0f1513; --surface:#171f1c; --sunk:#121917; --ink:#e6ece9; --ink-soft:#b0bcb6;
+    --ink-faint:#87938d; --line:#28322e; --line-strong:#3b4743; --accent:#5cc7b1; --accent-soft:#15302b;
+    --pass:#63cd92; --pass-soft:#132c1c; --warn:#dfa45f; --warn-soft:#2e2618;
+    --code:#0b100f; --code-ink:#dde5e1; --shadow:0 1px 2px rgba(0,0,0,.4),0 10px 26px -18px rgba(0,0,0,.85);
+  }}
+  :root[data-theme="dark"]{
+    --ground:#0f1513; --surface:#171f1c; --sunk:#121917; --ink:#e6ece9; --ink-soft:#b0bcb6;
+    --ink-faint:#87938d; --line:#28322e; --line-strong:#3b4743; --accent:#5cc7b1; --accent-soft:#15302b;
+    --pass:#63cd92; --pass-soft:#132c1c; --warn:#dfa45f; --warn-soft:#2e2618;
+    --code:#0b100f; --code-ink:#dde5e1;
+  }
+  *{box-sizing:border-box}
+  body{background:var(--ground);color:var(--ink);
+    font-family:"IBM Plex Sans","PingFang SC","Microsoft YaHei","Noto Sans SC",system-ui,sans-serif;
+    font-size:16px;line-height:1.62;margin:0;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:62rem;margin:0 auto;padding-block:3rem 4.5rem;padding-inline:1.25rem;
+    display:flex;flex-direction:column;gap:2.5rem}
+  code{font-family:"IBM Plex Mono",ui-monospace,"Cascadia Mono",Consolas,monospace;font-size:.86em;
+    font-variant-numeric:tabular-nums;background:var(--sunk);border:1px solid var(--line);
+    border-radius:3px;padding:.1em .36em}
+  header{display:flex;flex-direction:column;gap:.9rem;border-bottom:2px solid var(--ink);padding-bottom:1.4rem}
+  .eyebrow{font-size:.72rem;letter-spacing:.17em;text-transform:uppercase;color:var(--accent);font-weight:600}
+  h1{font-size:clamp(1.7rem,4vw,2.4rem);line-height:1.12;margin:0;letter-spacing:-.015em;text-wrap:balance}
+  .lede{margin:0;color:var(--ink-soft);max-width:46rem}
+  .meta{display:flex;flex-wrap:wrap;gap:.4rem .5rem;font-size:.82rem;color:var(--ink-faint)}
+  .meta span{border:1px solid var(--line);border-radius:999px;padding:.15rem .6rem;background:var(--surface)}
+  .stats{display:grid;gap:.7rem;grid-template-columns:repeat(auto-fit,minmax(9.5rem,1fr))}
+  .stat{background:var(--surface);border:1px solid var(--line);border-radius:9px;padding:.8rem 1rem;box-shadow:var(--shadow)}
+  .stat .k{font-size:.72rem;letter-spacing:.07em;text-transform:uppercase;color:var(--ink-faint)}
+  .stat .v{font-size:1.5rem;font-weight:600;letter-spacing:-.02em;font-variant-numeric:tabular-nums;line-height:1.2}
+  .stat .v small{font-size:.72rem;font-weight:400;color:var(--ink-faint);margin-left:.25rem}
+  h2{font-size:1.06rem;margin:0 0 .9rem;padding-bottom:.45rem;border-bottom:1px solid var(--line-strong)}
+  section{display:flex;flex-direction:column;gap:1rem}
+  p{margin:0}
+  .scroll{overflow-x:auto;background:var(--surface);border:1px solid var(--line);border-radius:9px;box-shadow:var(--shadow)}
+  table{border-collapse:collapse;width:100%;font-size:.875rem}
+  th,td{text-align:left;padding:.55rem .8rem;border-bottom:1px solid var(--line);vertical-align:top}
+  thead th{font-size:.7rem;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-faint);
+    border-bottom-color:var(--line-strong);white-space:nowrap;background:var(--sunk)}
+  tbody tr:last-child td{border-bottom:none}
+  td.k{white-space:nowrap;font-weight:500}
+  .chip{display:inline-block;font-size:.72rem;font-weight:600;padding:.08rem .5rem;border-radius:999px;white-space:nowrap}
+  .hot{background:var(--accent-soft);color:var(--accent)}
+  .ledger{display:flex;flex-direction:column;gap:.85rem;margin:0;padding:0;list-style:none}
+  .ledger li{background:var(--surface);border:1px solid var(--line);border-left:3px solid var(--accent);
+    border-radius:0 9px 9px 0;padding:.85rem 1rem;box-shadow:var(--shadow);display:flex;flex-direction:column;gap:.35rem}
+  .ledger .h{font-weight:600;display:flex;gap:.6rem;align-items:baseline;flex-wrap:wrap}
+  .ledger .h .tag{font-size:.7rem;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-faint)}
+  .ledger .why{color:var(--ink-soft);font-size:.92rem}
+  .ledger .ev{font-size:.86rem;color:var(--ink-soft);border-top:1px dashed var(--line);padding-top:.42rem}
+  .ledger .ev b{color:var(--ink);font-weight:600}
+  pre{background:var(--code);color:var(--code-ink);border-radius:9px;padding:.9rem 1.05rem;overflow-x:auto;
+    font-family:"IBM Plex Mono",ui-monospace,Consolas,monospace;font-size:.8rem;line-height:1.62;margin:0}
+  pre .c{color:#93a9a2}
+  ul.gaps{margin:0;padding-left:1.15rem;display:flex;flex-direction:column;gap:.45rem;color:var(--ink-soft)}
+  ul.gaps strong{color:var(--ink)}
+  footer{border-top:1px solid var(--line);padding-top:1rem;color:var(--ink-faint);font-size:.82rem}
+  @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+
+<div class="wrap">
+  <header>
+    <div class="eyebrow">Crystal · Client-Bevy / ServerRust · 验收依据</div>
+    <h1>UI 与 C# 原版对齐验收</h1>
+    <p class="lede">第二批用户报障（#2985）的逐项定位、修复与<strong>实机截图复验</strong>。方法固定为：自己给测试角色塞数据 → 每个窗开→截图→关 → 与 C# 逐项比 → 量像素取真值。本页给出每项可判真假的判据与仍然开着的口子。</p>
+    <div class="meta">
+      <span>master <code>e103293c</code> 起</span>
+      <span>40 窗截图矩阵 + 联络表目检</span>
+      <span>真值取 control RPC，不靠肉眼</span>
+      <span>2026-09-19</span>
+    </div>
+  </header>
+
+  <div class="stats">
+    <div class="stat"><div class="k">实修缺陷</div><div class="v">14 <small>条</small></div></div>
+    <div class="stat"><div class="k">截图矩阵</div><div class="v">40<small>/48 窗</small></div></div>
+    <div class="stat"><div class="k">交互巡回</div><div class="v">41<small>/41</small></div></div>
+    <div class="stat"><div class="k">客户端测试</div><div class="v">671 <small>passed</small></div></div>
+    <div class="stat"><div class="k">服务端测试</div><div class="v">820 <small>passed</small></div></div>
+    <div class="stat"><div class="k">本轮合并 PR</div><div class="v">7 <small>个</small></div></div>
+  </div>
+
+  <section>
+    <h2>关键一步：把数据自己塞进去</h2>
+    <p>前几轮我以「没有测试数据就验不出来」停手——这是错的。停服 → 直接写服务端 SQLite → 重启，<strong>面板一打开就炸出 3 个空数据时物理上看不见的缺陷</strong>。空夹具下，填充类/滚动类/比例类缺陷与正确实现<strong>渲染结果相同</strong>。</p>
+    <div class="scroll">
+      <table>
+        <thead><tr><th>表</th><th>塞入内容</th><th>为什么需要</th></tr></thead>
+        <tbody>
+          <tr><td class="k"><code>guild_members</code></td><td>28 名成员</td><td>越过 18 行视窗 → 才触发滚动、翻页与滑块行程</td></tr>
+          <tr><td class="k"><code>guilds.rank_defs_json</code></td><td>3 档职务</td><td>成员行的职务下拉才有内容</td></tr>
+          <tr><td class="k"><code>quests</code></td><td>5 个已接任务（跨 3 组）</td><td>任务日记的「已接」段与组头</td></tr>
+          <tr><td class="k"><code>creatures.owned_json</code></td><td>5 只宠物</td><td>宠物面板的图标格与三行信息</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <h2>修复清单</h2>
+    <ol class="ledger">
+      <li>
+        <div class="h"><span class="tag">行会</span>离线成员被默认滤掉：28 人只列出 1 行</div>
+        <div class="why">字段注释写着「默认 true」，但 <code>#[derive(Default)]</code> 把 <code>bool</code> 初始化成 <b>false</b>；C# 是 <code>MembersShowOfflinesetting = true</code>。后果不止少显示几行——<b>成员翻页与滚动条行程全部归零</b>，怎么滚都不动。</div>
+        <div class="ev">判据 <b>scroll RPC 真值</b>：<code>total 1 → 28</code></div>
+      </li>
+      <li>
+        <div class="h"><span class="tag">滚动条</span>滑块从来没动过 <span class="chip hot">P1</span></div>
+        <div class="why"><code>list_thumb</code> 返回 <code>co.0</code>——<code>co</code> 是 <code>&amp;ChildOf</code>，取到的是<b>父实体</b>（列表自己），于是 <code>get_mut</code> 恒失败、<code>continue</code>，滑块死在初始 <code>16×40</code>。这正是「好多窗口滚动条好像都没实现」的真根因；同源的拖动逻辑因为两边都错得一样反而歪打正着能用。</div>
+        <div class="ev">判据 <b>滑块 Node 真值</b>：高 <code>40 → 194</code>（=302×18/28）；滚到底 <code>top 76 → 184</code></div>
+      </li>
+      <li>
+        <div class="h"><span class="tag">滚动条</span>滑块跟随被光标判定挡住</div>
+        <div class="why">更新 <code>Node</code> 的那段在系统尾部，而函数开头 <code>cursor_position()</code> 为 None 就 <code>return</code>（无焦点窗口 / 共享桌面 / 自动化），整段跳过。滑块跟随与光标无关，移到判定之前。</div>
+        <div class="ev">与上条同批复验</div>
+      </li>
+      <li>
+        <div class="h"><span class="tag">行会</span>隐藏页控件串页</div>
+        <div class="why">Bevy 的 <code>Visibility::Visible</code> <b>会越过隐藏祖先继续渲染</b>（官方文档原话）；六个页容器漏挂 <code>UiRootDisplay</code> → 切到名次/状态页后，成员行的职务下拉留在屏幕上。</div>
+        <div class="ev">判据 <b>像素</b>：原下拉框位置 <code>(12,12,20) → (3,3,3)</code></div>
+      </li>
+      <li>
+        <div class="h"><span class="tag">行会</span>状态页表头没右对齐、也不是灰的</div>
+        <div class="why">C# 是 <code>DrawFormat = Right</code> + <code>ForeColour = Gray</code>，右对齐到 x=437（正好贴住值列）；本端左对齐在 x=7，中间空 60px。</div>
+        <div class="ev">判据 <b>像素</b>：灰字亮区 <code>[362..384] → [417.3..439.3]</code></div>
+      </li>
+      <li>
+        <div class="h"><span class="tag">行会</span>翻页箭头被拉伸（16×14 vs 艺术 12×12）</div>
+        <div class="why">C# 那 6 处虽写了 <code>Size = new Size(16,14)</code>，但 <code>MirImageControl.AutoSize</code> 让 getter 返回艺术尺寸，绘制也不读 Size——那个 16×14 在绘制与命中两边都被顶掉。</div>
+        <div class="ev">判据 <b>像素</b>：亮区 <code>12.0×12.0</code></div>
+      </li>
+      <li>
+        <div class="h"><span class="tag">行会</span>列表滚轮只有一小块区域生效</div>
+        <div class="why">C# 把滚轮同时挂在页容器、页面底图与每个行/格控件上（并集 = 整页）；本端成员列表写的是 <code>(125,30,200,270)</code>——「只有鼠标压在名字列上才滚得动」。</div>
+        <div class="ev">判据：页内右下角注滚轮 <code>offset 1→2</code>，页外负控不变</div>
+      </li>
+      <li>
+        <div class="h"><span class="tag">行会</span>公告页<b>永远空白</b> <span class="chip hot">P1</span></div>
+        <div class="why">公告框 spawn 时写死 <code>Visibility::Hidden</code> 且<b>全仓无人再置显</b>，正文也<b>没有任何地方写入</b>——服务端下发了 13 行公告，页面一片黑。C# 的 <code>Notice</code> 是 <code>Visible = true</code> + <code>Enabled = false</code>（平时只读展示，点「编辑」才可改）。</div>
+        <div class="ev">修后实机渲染出「欢迎来到测试行会！/ 本行会仅用于 UI 验证。/ 公告第二段用来撑出滚动条。」+「第九行」</div>
+      </li>
+      <li>
+        <div class="h"><span class="tag">任务</span>「任务：x/y」压住标题栏</div>
+        <div class="why">C# <code>_takenQuestsLabel @(210,7)</code>（标题栏右侧、关闭钮左边），本端写死 <code>(18,20)</code>，正好压在内边框上、文字被切。</div>
+        <div class="ev">判据 <b>像素</b>：亮区起于 panel <code>x=211</code></div>
+      </li>
+      <li>
+        <div class="h"><span class="tag">宠物</span>立绘漏叠艺术偏移，偏右下 16/39px</div>
+        <div class="why">C# <code>CreatureImage.UseOffSet = true</code> → <code>DisplayLocation = Location + GetOffSet(Index)</code>，<code>Location</code> 只是<b>逻辑</b>位置。<code>Prguse2[540]</code> 偏移 <code>(-16,-39)</code> → 正确绘制点 <code>(34,71)</code>。偏移按种类不同，必须在换种类加载帧时重算。</div>
+        <div class="ev">修后立绘回到框中，不再压住「可以拾取物品」那行</div>
+      </li>
+      <li>
+        <div class="h"><span class="tag">好友</span>页签文字压在 <code>FRIEND</code> 标题上</div>
+        <div class="why">C# 是<b>贴图按钮</b> <code>Title[163]@(10,34)</code> / <code>Title[167]@(128,34)</code>（124×24）；本端画的是「好友」「黑名单」两个文字标签 @(18,18)/(70,18)——位置不对且与美术标题重叠。</div>
+        <div class="ev">修后 <code>FRIEND</code> / <code>BLACKLIST</code> 贴图页签就位</div>
+      </li>
+      <li>
+        <div class="h"><span class="tag">师徒</span>标题被拉伸 51% 且被文字覆盖</div>
+        <div class="why">C# 标题就是美术 <code>Title[51] @(18,8)</code>，艺术尺寸 <b>68×15</b>；本端按 103×17 画，并额外 spawn 一行「师徒」文字叠在上面（实机 <code>师徒MENTOR</code>）。</div>
+        <div class="ev">修后 <code>MENTOR</code> 单独、原尺寸</div>
+      </li>
+      <li>
+        <div class="h"><span class="tag">全局</span>中文豆腐扫尾：24 文件 35 处 + 裸 <code>.spawn((</code> 18 处</div>
+        <div class="why">Bevy <b>没有全局字体</b>——<code>TextFont</code> 是每实体组件。本仓两个句柄：Arial（无 CJK）与宋体（自带）。日志显示 Han 回退已注册，但<b>实测不生效</b>，Arial 句柄画中文一律 <code>.notdef</code>。旧清扫按<b>变量名</b> grep，而名字会骗人（<code>friend.rs</code> 里 <code>let font = shared_cjk_font(..)</code>）。</div>
+        <div class="ev">改为按<b>绑定表达式</b>判类；补扫裸 <code>.spawn((</code>（公告就是这么漏的，改完立刻渲染成 <code>□□□□</code>）。回归：40 窗巡回 <b>41/41</b></div>
+      </li>
+      <li>
+        <div class="h"><span class="tag">服务端</span>C# 迁移角色的宠物静默丢光</div>
+        <div class="why"><code>migrate.rs</code> 把枚举写成<b>数字</b>，而 <code>CreatureType</code> / <code>PickupMode</code> 的 serde 默认表示是<b>变体名</b> → 反序列化整表失败 → <code>unwrap_or_default()</code> 吞成空表 → 下次存档把 <code>[]</code> 写回去，<b>不可恢复</b>。</div>
+        <div class="ev">读入端两种表示都收；实机：旧库加载出 5 只，存档<b>自愈</b>为变体名形式</div>
+      </li>
+    </ol>
+  </section>
+
+  <section>
+    <h2>仍然开着的口子</h2>
+    <ul class="gaps">
+      <li><strong>A3 键盘面板乱码</strong>——默认状态复现不出（截图正常），需要指出具体状态（翻页后？按键后？）</li>
+      <li><code>dura_status</code> 面板 <code>dialog_rect</code> 读出 <strong>20×19</strong>，与代码里的 64×85 不符，待查</li>
+      <li><code>report</code> 面板内容超出右边界、<code>item_rental_browse</code> 的 RENT 按钮压住下边框——待与 C# 逐一核对</li>
+      <li><code>settings</code> 首个分页标签是英文（SKILL MODE / EFFECTS …），C# 无此字面量，待核对是否本端自造</li>
+      <li><code>craft</code> 的「学会配方 #0」直接打 recipe_id（观感问题）</li>
+      <li>测试角色数据是<strong>造的假数据</strong>（成员叫 <code>成员Seed01</code>），原库备份在 <code>tools/acceptance/crystal.db.bak</code></li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>复现配方</h2>
+    <pre><span class="c"># 0) 客户端依赖 msys64/ucrt64 与 libpinyin 的 DLL，缺任一目录会以 0xC0000135 静默退出</span>
+$env:PATH = 'D:\toolchains\msys64\ucrt64\bin;D:\toolchains\libpinyin-install\bin;' + $env:PATH
+$env:LIBPINYIN_DIR = 'D:/toolchains/libpinyin-install'
+
+<span class="c"># 1) 造数据（必须先停服：跑着写会被存档覆盖，行会启动时才整体载缓存）</span>
+python tools/acceptance/seed_db.py
+
+<span class="c"># 2) 逐窗截图矩阵 + 联络表（客户端已起、已在游戏内）</span>
+python tools/acceptance/ui_shot_matrix.py
+python tools/acceptance/contact_sheet.py
+
+<span class="c"># 3) 字体审计 / 单窗放大 / 40 窗交互巡回</span>
+python tools/acceptance/font_audit.py
+python tools/acceptance/crop_kind.py &lt;kind&gt; out.png 2.2
+powershell -File tools/acceptance/ui_interact_sweep.ps1</pre>
+  </section>
+
+  <footer>
+    验收依据同步存于仓库 <code>tools/acceptance/UI_VERIFICATION_REPORT.md</code> §11。
+    本轮合并 PR #2986–#2993；截图证据在 <code>tools/acceptance/shots/</code>。
+  </footer>
+</div>
