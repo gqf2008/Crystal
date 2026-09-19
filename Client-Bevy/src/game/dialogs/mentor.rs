@@ -85,6 +85,7 @@ pub struct MentorPlugin;
 
 impl Plugin for MentorPlugin {
     fn build(&self, app: &mut App) {
+        app.init_resource::<UiCjkFont>();
         app.init_resource::<MentorState>();
         app.add_systems(
             Update,
@@ -239,7 +240,7 @@ fn spawn_mentor(
             MentorInviteWidget,
         ));
         commands.entity(inv).with_children(|ip| {
-            spawn_label(ip, &font, "", 35.0, 35.0, 12.0, Color::WHITE, 9).insert(MentorInviteText);
+            spawn_label(ip, &cjk, "", 35.0, 35.0, 12.0, Color::WHITE, 9).insert(MentorInviteText);
             if let (Some(n), Some(h), Some(pr)) = (
                 load_lib_image(&mut libs, &mut images, LibraryName::Title, 206),
                 load_lib_image(&mut libs, &mut images, LibraryName::Title, 207),

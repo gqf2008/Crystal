@@ -237,6 +237,7 @@ pub struct ItemRentalPlugin;
 
 impl Plugin for ItemRentalPlugin {
     fn build(&self, app: &mut App) {
+        app.init_resource::<UiCjkFont>();
         app.init_resource::<ItemRentalState>();
         app.add_systems(
             Update,
@@ -361,7 +362,7 @@ fn spawn_item_rental(
         spawn_item_cell_ui(
             p,
             &mut images,
-            &font,
+            &cjk,
             ITEM_CELL_POS.0,
             ITEM_CELL_POS.1,
             RENTAL_CELL_W,
@@ -486,7 +487,7 @@ fn spawn_item_rental(
         spawn_item_cell_ui(
             p,
             &mut images,
-            &font,
+            &cjk,
             ITEM_CELL_POS.0,
             ITEM_CELL_POS.1,
             RENTAL_CELL_W,

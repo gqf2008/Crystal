@@ -12,8 +12,8 @@ use crate::ui::credits::{credits_update_system, CreditsState};
 use crate::ui::modal_box::{spawn_modal_box, ModalKind, ModalState};
 use crate::ui::new_character::{spawn_new_character_dialog, NewCharState};
 use crate::ui::sprite_ui::{
-    spawn_ui_button, spawn_ui_camera, spawn_ui_sprite, spawn_ui_text, ui_button_system, ui_image,
-    UiButton, UiEntity, UiFont, UiImageCache,
+    shared_cjk_font, spawn_ui_button, spawn_ui_camera, spawn_ui_sprite, spawn_ui_text,
+    ui_button_system, ui_image, UiButton, UiCjkFont, UiEntity, UiFont, UiImageCache,
 };
 
 pub struct SelectPlugin;
@@ -23,6 +23,7 @@ impl Plugin for SelectPlugin {
         app.init_resource::<SelectAnim>();
         app.init_resource::<UiImageCache>();
         app.init_resource::<UiFont>();
+        app.init_resource::<UiCjkFont>();
         app.init_resource::<CreditsState>();
         app.add_systems(OnEnter(AppState::Select), setup_select_ui);
         app.add_systems(OnEnter(AppState::Select), spawn_ui_camera);
@@ -189,6 +190,7 @@ fn setup_select_ui(
     mut anim: ResMut<SelectAnim>,
     mut cache: ResMut<UiImageCache>,
     mut ui_font: ResMut<UiFont>,
+    mut cjk_font: ResMut<UiCjkFont>,
     mut new_char: ResMut<NewCharState>,
     mut modal: ResMut<ModalState>,
     mut session: ResMut<SessionState>,
@@ -223,6 +225,7 @@ fn setup_select_ui(
         &session,
         &mut new_char,
         &mut modal,
+        &mut cjk_font,
     );
 }
 
@@ -238,10 +241,13 @@ fn build_select_ui(
     session: &SessionState,
     new_char: &mut NewCharState,
     _modal: &mut ModalState,
+    cjk_font: &mut UiCjkFont,
 ) {
     libs.0.ensure_initialized();
     ui_font.0 = crate::ui::sprite_ui::load_ui_font(fonts);
     let font = ui_font.0.clone();
+    // 可能含中文（动态填充/服务端文案）：用自带 CJK 的主字体（Arial handle 画中文是豆腐）
+    let cjk = shared_cjk_font(fonts, cjk_font);
 
     // 背景 Prguse[65]（1024x768）
     if let Some(h) = ui_image(
@@ -306,7 +312,7 @@ fn build_select_ui(
     // LastAccessLabelLabel 标题 "最后登录:" 是其子控件 (-65,0) → 绝对 (200,609) 100x21）
     spawn_ui_text(
         &mut *commands,
-        &font,
+        &cjk,
         "最后登录:",
         200.0,
         609.0,
@@ -520,6 +526,7 @@ fn select_reload_system(
     mut anim: ResMut<SelectAnim>,
     mut cache: ResMut<UiImageCache>,
     mut ui_font: ResMut<UiFont>,
+    mut cjk_font: ResMut<UiCjkFont>,
     mut new_char: ResMut<NewCharState>,
     mut modal: ResMut<ModalState>,
     ui_entities: Query<Entity, With<UiEntity>>,
@@ -565,6 +572,7 @@ fn select_reload_system(
         &session,
         &mut new_char,
         &mut modal,
+        &mut cjk_font,
     );
 }
 

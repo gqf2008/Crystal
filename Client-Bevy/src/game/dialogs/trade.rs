@@ -32,6 +32,7 @@ use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
 use crate::ui::outlined_text::spawn_outlined_label_center;
 use crate::ui::sprite_ui::UiFont;
+use crate::ui::sprite_ui::{shared_cjk_font, UiCjkFont};
 use crate::ui::theme::{
     load_lib_image, spawn_icon_button, spawn_item_cell_ui, spawn_panel, CloseButton, ImageButton,
     UiItemCellData, UiItemCellIcon,
@@ -216,6 +217,7 @@ pub struct TradePlugin;
 
 impl Plugin for TradePlugin {
     fn build(&self, app: &mut App) {
+        app.init_resource::<UiCjkFont>();
         app.init_resource::<TradeState>();
         app.add_systems(Update, trade_server_events.run_if(in_state(AppState::Game)));
         app.add_systems(OnEnter(AppState::Game), spawn_trade);
@@ -248,12 +250,15 @@ fn spawn_trade(
     mut images: ResMut<Assets<Image>>,
     mut fonts: ResMut<Assets<Font>>,
     mut ui_font: ResMut<UiFont>,
+    mut cjk_font: ResMut<UiCjkFont>,
 ) {
     libs.0.ensure_initialized();
     if !ui_font.0.is_strong() {
         ui_font.0 = crate::ui::sprite_ui::load_ui_font(&mut fonts);
     }
     let font = ui_font.0.clone();
+    // 可能含中文（动态填充/服务端文案）：用自带 CJK 的主字体（Arial handle 画中文是豆腐）
+    let cjk = shared_cjk_font(&mut fonts, &mut cjk_font);
 
     // ---- 我方窗（TradeDialog）Prguse[389] 204x152 @ (298,418) ----
     let Some(bg) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 389) else {
@@ -290,7 +295,7 @@ fn spawn_trade(
         // 迁移后只有面板根有 TradeWidget，子实体显式 Hidden 将永无写方而不可见
         spawn_outlined_label_center(
             p,
-            &font,
+            &cjk,
             "",
             NAME_X + NAME_W / 2.0,
             NAME_Y + 2.0,
@@ -303,7 +308,7 @@ fn spawn_trade(
         // 金币标签（框内居中；可点击开数量框）
         spawn_outlined_label_center(
             p,
-            &font,
+            &cjk,
             "",
             GOLD_X + GOLD_W / 2.0,
             GOLD_Y + 1.0,
@@ -335,7 +340,7 @@ fn spawn_trade(
     commands.entity(gpanel).with_children(|p| {
         spawn_outlined_label_center(
             p,
-            &font,
+            &cjk,
             "",
             GUEST_NAME_X + TRADE_W / 2.0,
             NAME_Y + 2.0,
@@ -347,7 +352,7 @@ fn spawn_trade(
         .insert(TradeLabel(TradeText::GuestName));
         spawn_outlined_label_center(
             p,
-            &font,
+            &cjk,
             "",
             GOLD_X + GOLD_W / 2.0,
             GOLD_Y + 1.0,

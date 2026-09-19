@@ -21,6 +21,7 @@ use crate::map_renderer::GameLibraries;
 use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
+use crate::ui::sprite_ui::{shared_cjk_font, UiCjkFont};
 use crate::ui::theme::{
     load_lib_image, spawn_icon_button, spawn_image, spawn_item_cell_ui, spawn_panel,
     UiItemCellData, UiItemCellIcon,

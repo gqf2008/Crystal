@@ -60,6 +60,7 @@ pub struct ReportPlugin;
 
 impl Plugin for ReportPlugin {
     fn build(&self, app: &mut App) {
+        app.init_resource::<UiCjkFont>();
         app.init_resource::<ReportState>();
         app.add_systems(OnEnter(AppState::Game), spawn_report);
         app.add_systems(OnExit(AppState::Game), cleanup_report);
@@ -126,7 +127,7 @@ fn spawn_report(
         // 类型下拉（C# ReportType @(12,35)，170x14）
         spawn_dropdown_ui(
             p,
-            &font,
+            &cjk,
             vec![
                 "请选择类型".to_string(),
                 "提交BUG".to_string(),

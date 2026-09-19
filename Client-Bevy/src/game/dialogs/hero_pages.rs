@@ -21,7 +21,7 @@ use crate::game::dialogs::{DialogKind, DialogManager};
 use crate::map_renderer::GameLibraries;
 use crate::network::server_event::HeroStatsInfo;
 use crate::resources::libraries::LibraryName;
-use crate::ui::sprite_ui::UiCjkFont;
+use crate::ui::sprite_ui::{shared_cjk_font, UiCjkFont};
 use crate::ui::theme::{load_lib_image, spawn_image, spawn_label};
 
 /// 英雄对话框的四页（C# `CharacterDialog` 的 Character/Status/State/Skill）

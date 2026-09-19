@@ -12,7 +12,9 @@ use crate::game::dialogs::text_input::TextInputState;
 use crate::game::dialogs::{DialogKind, DialogManager};
 use crate::network::NetConnection;
 use crate::scenes::AppState;
-use crate::ui::sprite_ui::{spawn_ui_text, ui_button_system, UiButton, UiEntity, UiFont};
+use crate::ui::sprite_ui::{
+    shared_cjk_font, spawn_ui_text, ui_button_system, UiButton, UiCjkFont, UiEntity, UiFont,
+};
 
 /// 菜单选项
 #[derive(Clone, Copy, PartialEq, Eq)]

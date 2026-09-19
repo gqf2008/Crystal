@@ -253,6 +253,7 @@ pub struct CreaturePlugin;
 
 impl Plugin for CreaturePlugin {
     fn build(&self, app: &mut App) {
+        app.init_resource::<UiCjkFont>();
         app.init_resource::<CreatureState>();
         app.add_systems(
             Update,
@@ -905,7 +906,7 @@ fn spawn_creature(
                     Visibility::Hidden,
                 ))
                 .with_children(|c| {
-                    spawn_label(c, &font, "", 0.0, 4.0, 12.0, Color::WHITE, 11);
+                    spawn_label(c, &cjk, "", 0.0, 4.0, 12.0, Color::WHITE, 11);
                 });
         }
         spawn_container(p, 20.0, 255.0, 44.0, 22.0, 10)
@@ -917,7 +918,7 @@ fn spawn_creature(
                 Visibility::Hidden,
             ))
             .with_children(|c| {
-                spawn_label(c, &font, "保存", 0.0, 5.0, 12.0, Color::WHITE, 11);
+                spawn_label(c, &cjk, "保存", 0.0, 5.0, 12.0, Color::WHITE, 11);
             });
         spawn_container(p, 80.0, 255.0, 44.0, 22.0, 10)
             .insert((
@@ -928,7 +929,7 @@ fn spawn_creature(
                 Visibility::Hidden,
             ))
             .with_children(|c| {
-                spawn_label(c, &font, "取消", 0.0, 5.0, 12.0, Color::WHITE, 11);
+                spawn_label(c, &cjk, "取消", 0.0, 5.0, 12.0, Color::WHITE, 11);
             });
         spawn_label(p, &cjk, "品质:全部", 20.0, 280.0, 12.0, Color::WHITE, 11).insert((
             CreatureOptionsWidget,
@@ -956,7 +957,7 @@ fn spawn_creature(
         spawn_creature_input(
             p,
             &mut images,
-            &font,
+            &cjk,
             33,
             CreatureRenameInput,
             "确认改名",
@@ -965,7 +966,7 @@ fn spawn_creature(
         spawn_creature_input(
             p,
             &mut images,
-            &font,
+            &cjk,
             34,
             CreatureReleaseInput,
             "确认释放",
