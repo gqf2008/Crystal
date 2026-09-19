@@ -242,24 +242,24 @@ control RPC（127.0.0.1:9000）：`dialog {kind,action}` / `dialogs`（列 Dialo
 |---|---|---|---|
 | 1 | 坐骑没有像英雄一样实现遮挡半透明 | ✅ 已修已验 | 骑乘走过树冠，坐骑以**半透明残影**显示而非消失（`shots/mount_ghost_evidence.png`） |
 | 2 | 底部的信息输入/出框居然可以被拖动 | ✅ 已修已验 | 面板内起点 (400,700) 拖到 (700,250)：玩家 tile 不变 + 面板左边框锚定区像素原位 |
-| 3 | 中文输入法候选词是乱码 | ✅ 已修已验 | 候选条 `nihao 1.你好 2.你 3.尼 4.呢 5.泥 6.妮 7.拟 8.逆 9.倪` 字形正常；输入框 `> 你好`；聊天记录 `[bevychar]: 你好` |
+| 3 | 中文输入法候选词是乱码 | ✅ 已修已验 | 候选条 `nihao 1.你好 2.你 3.尼 4.呢 5.泥 6.妮 7.拟 8.逆 9.倪` 字形正常（`shots/ime_rpc_3_candidates.png`）；输入框 `> 你好`（`shots/ime_rpc_4_committed.png`）；聊天记录 `[bevychar]: 你好`（`shots/chat_sent_evidence.png`） |
 | 4 | 商场窗口里的内容错位 | ✅ 已修已验 | 面板 @(164,146)；按 C# 坐标点格 0/格 3/格 4/分类行 → 4/4 命中 `root=GameShop` |
-| 5 | 好多窗口滚动条好像都没实现 | ✅ 已修已验 | 商城分类条（滑块 + 上下箭头）、行会双列表两条轨道（截图）；链式原点修复后子列表不再错位 |
+| 5 | 好多窗口滚动条好像都没实现 | ✅ 已修 · **截图人工复核** | 商城分类条（滑块 + 上下箭头）、行会双列表两条轨道（截图）；本项**无滚动行为的自动断言**（脚本只截图），见 §10.5 残余 |
 | 6 | 鼠标拖拽窗口事件会穿透到游戏中 | ✅ 已修已验 | 拖腰带/点拖后腰带：玩家不移动；正控制空白点仍可走（证明没被一刀切拦死） |
 
-**6 项全部修复并实机验证通过。** 实机脚本汇总：`ui_bugfix_verify.ps1` **16/16**、`ime_rpc_verify.ps1` **10/10**、`ui_interact_sweep.ps1` **41/41**（含拖动）。
+**6 项全部修复；其中 5 项有可判真假的实机断言，项 5 为截图人工复核**（滚动条渲染无自动断言，见 §10.5）。实机脚本汇总：`ui_bugfix_verify.ps1` **15/15**、`ime_rpc_verify.ps1` **10/10**、`ui_interact_sweep.ps1` **41/41**。
 
 ### 10.2 逐项证据
 
 **项1 坐骑遮挡半透明** — 根因：`attach_mount_layer` 只挂 `SpriteLayer`，未像 `attach_player_layers` 那样同挂 `GhostLayer`，遮挡系统查询不到残影层 → 走到建筑/树后被整个剔除。修 #2965（审查又抓出 `MountUpdated` 下马主路径 ghost 泄漏，一并修）。
-实机复验（本轮补齐）：`@make LeatherBridle 1` + `@make Saddle 1` → `@ride`（服务端日志 `🐴 玩家 24495 骑乘坐骑 type=0`）→ 骑乘走过树冠 → **骑手与虎体以半透明残影压在树叶之上**，不再消失。
+实机复验（本轮补齐）：`@make LeatherBridle 1` + `@make Saddle 1` → `@ride`（**客户端**日志 `client_bevy::actor::spawn`：`🐴 玩家 24495 骑乘坐骑 type=0`）→ 骑乘走过树冠 → **骑手与虎体以半透明残影压在树叶之上**，不再消失。
 
 **项2 聊天窗可拖** — 根因：曾把 C# `MainDialogs.cs:697` 的 `Movable = true` 误读成整窗可拖，实际那是滚动滑块 `PositionBar`。修 #2966（移除整窗拖动 + 补 `WindowDragState::unregister` 契约）。
 实机复验：面板内拖动玩家不移动；面板左边框锚定区像素原位；正控制（面板外世界点）仍可走。
 
 **项3 IME 候选乱码** — 三层根因逐层修：
 ① 候选条标签用 Arial + parley Han 回退（只在首次排版生效）→ 候选全豆腐，修 #2967；
-② **聊天面板**同样豆腐（`chat.rs` 是全仓最后一个仍用 `load_ui_font` 的大模块），输入框 `> □□`、聊天记录 `[玩家]: □□`，修 #2971；
+② **聊天面板**同样豆腐——`chat.rs` 是最后一个把 Arial 当**中文正文**主字体的模块（`grep load_ui_font` 仍有约 50 处调用，多为纯拉丁/单次排版站点），输入框 `> □□`、聊天记录 `[玩家]: □□`，修 #2971；
 ③ Enter 开框当帧把回车符写进草稿（`opened_trigger` 漏登记 Enter 路径），光标多算一位，修 #2973。
 实机判据全部取自 RPC 真值：`ime_composing == "nihao"`、`chat_input_text == "你好"`、`chat_input_text` 在中文输入过程中恒为空（无裸 ASCII 泄漏）。
 
@@ -286,15 +286,17 @@ control RPC（127.0.0.1:9000）：`dialog {kind,action}` / `dialogs`（列 Dialo
 
 | 门禁 | 结果 |
 |---|---|
-| `cargo test --lib` | **660 passed / 0 failed** |
+| `cargo test --lib` | **660 passed / 0 failed**（本机 Windows；同 sha 的 CI（Linux）报 659，差 1 为平台相关用例） |
 | `cargo test --test b0001_smoke` | 1 passed |
 | `cargo test --test ui_alignment` | **50 passed / 0 failed**（修前 49/1） |
 | `cargo fmt -- --check` | 干净 |
-| `ui_bugfix_verify.ps1`（项 2/4/5/6 实机） | **16/16** |
+| `ui_bugfix_verify.ps1`（项 2/4/5/6 实机 + 基线正控制） | **15/15** |
 | `ime_rpc_verify.ps1`（项 3 实机，RPC 真值） | **10/10** |
-| `ui_interact_sweep.ps1`（40 窗交互回归） | **41/41**（含拖动） |
+| `ui_interact_sweep.ps1`（40 窗交互回归） | **41/41**（40 窗中 34 窗点 X 关闭、6 窗无钮设计走 RPC 往返；另含 inventory 拖动与 npc/hero_manage 的 X 点击） |
 
 本批次 PR：#2962 #2963 #2964 #2965 #2966 #2967 #2968 #2970 #2971 #2972 #2973（issue #2969 P0）。
+
+三条实机脚本的结果 JSON 均在 `tools/acceptance/`（`ui_bugfix_verify_results.json` / `ime_rpc_verify_results.json` / `ui_interact_results.json`），都是在 **`32bec332` 重建的同一份二进制**上跑出来的；截图同目录 `shots/`。
 
 ### 10.5 残余缺口与跟进项（如实记录）
 
@@ -305,7 +307,8 @@ control RPC（127.0.0.1:9000）：`dialog {kind,action}` / `dialogs`（列 Dialo
 5. 商城仍缺：物品图标、职业分区页签、Preview/Viewer 视图、`qty_up` 的 StackSize 上限（服务端会静默丢弃超量）。排行榜滚动为文档化的 no-op。
 6. `new_char_ui_system` 是唯一剩下的「同函数双 ParamSet」，当前字段不重叠但无初始化级测试——建议照 #2970 补一条 `run_system_once` 冒烟。
 7. Enter 分支不判 `key.repeat`，长按回车会反复开/关输入框（既有行为，非本批次引入）。
-8. **坐骑实机验证的完整链路**现已打通并记录于此（`@make` → 装备 → `@ride`）；但「装备」一步靠界面操作，RPC 尚无双击/拖拽物品的原语，本轮是先用界面把坐骑装好（BengalTiger + 鞍）再骑乘验证遮挡。
+8. **同类风险站点**：`chat_notice.rs:73`（通知条）、`guild.rs`、`hud.rs` 等处仍以 Arial 句柄 spawn 文本，且通知条是**先建空串、后由系统写内容**（与 tooltip 同源的豆腐机制）。本次未找到触发入口，未实机复现，列为同源疑似缺口。
+9. **坐骑实机验证的完整链路**现已打通并记录于此（`@make` → 装备 → `@ride`）；但「装备」一步靠界面操作，RPC 尚无双击/拖拽物品的原语，本轮是先用界面把坐骑装好（BengalTiger + 鞍）再骑乘验证遮挡。
 
 ### 10.6 复现方法（本机）
 
@@ -318,7 +321,7 @@ $env:LIBPINYIN_DIR = 'D:/toolchains/libpinyin-install'
 cd ServerRust; ./target/release/mir2_server.exe
 
 # 2) 三项实机复验（脚本各自起停客户端）
-powershell -File tools/acceptance/ui_bugfix_verify.ps1    # 项 2/4/5/6 -> 16/16
+powershell -File tools/acceptance/ui_bugfix_verify.ps1    # 项 2/4/5/6 -> 15/15
 powershell -File tools/acceptance/ime_rpc_verify.ps1      # 项 3     -> 10/10（需先起客户端）
 powershell -File tools/acceptance/ui_interact_sweep.ps1   # 40 窗回归 -> 41/41
 ```
