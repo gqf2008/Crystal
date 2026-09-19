@@ -970,15 +970,20 @@ fn inventory_bigmap_aligned() {
         212.0,
         "负重 y = C# WeightLabel (268,212)"
     );
+    // #2953 实机交互验证：照搬 C# Size(72,23) 会让命中区右缘压到关闭钮 (289..313)
+    // 并吞掉点 X 的点击（两者 z=8 平局、扩容钮后生成）。故本端**有意**收窄到精灵
+    // Title[483] 自然尺寸 48x25（右缘 283 < 289）。此处断言该刻意偏离本身以防漂移；
+    // 「不得与关闭钮重叠」由 inventory.rs 的
+    // `add_button_hit_area_must_not_overlap_close_button` 单独守。
     assert_eq!(
         inv::ADD_BTN_W,
-        72.0,
-        "扩容命中宽 = C# AddButton Size(72,23)"
+        48.0,
+        "扩容命中宽 = 精灵 Title[483] 自然宽（刻意偏离 C# 72，见 #2953）"
     );
     assert_eq!(
         inv::ADD_BTN_H,
-        23.0,
-        "扩容命中高 = C# AddButton Size(72,23)"
+        25.0,
+        "扩容命中高 = 精灵 Title[483] 自然高（刻意偏离 C# 23，见 #2953）"
     );
 
     // 背包对话框真实尺寸（Title[196]），子控件 bbox ⊆ 对话框
@@ -1049,7 +1054,7 @@ fn inventory_bigmap_aligned() {
         bm::SEARCH_H,
     );
 
-    println!("  ✓ 背包金币/负重(212)+扩容命中(72x23)+窗口原点(0,0)、大地图搜索框(59,H-27,130x10) 对齐 C#");
+    println!("  ✓ 背包金币/负重(212)+扩容命中(48x25，刻意偏离 C# 72x23 见 #2953)+窗口原点(0,0)、大地图搜索框(59,H-27,130x10) 对齐 C#");
 }
 
 /// 英雄背包窗口原点（C# HeroInventoryDialog 构造器未设 Location，HeroDialogs.cs:24-31
