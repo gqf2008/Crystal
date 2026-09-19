@@ -182,7 +182,9 @@ fn spawn_npc_goods(
             visible: 8,
             total: 0,
             offset: 0,
-            step: 3,
+            // 每格 1 行：C# `NPCGoodsPanel_MouseWheel`（NPCDialogs.cs:1310-1318）
+            // `int count = e.Delta / MouseWheelScrollDelta;` → `StartIndex -= count`
+            step: 1,
             track_rel: (220.0, 16.0, 4.0, 176.0),
             thumb: None,
             z: 9,

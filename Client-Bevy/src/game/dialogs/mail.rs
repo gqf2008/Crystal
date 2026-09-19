@@ -633,7 +633,9 @@ fn spawn_mail(
             visible: MAIL_VISIBLE_ROWS,
             total: 0,
             offset: 0,
-            step: 3,
+            // 每格 1 行：C# `MailDialogs.cs` 全文**没有** MouseWheel 处理，本端
+            // 的列表滚动是增补；行数取与其余列表（NPC/商品/行会/商城）同一口径
+            step: 1,
             track_rel: (
                 300.0,
                 mail_row_y(0),
