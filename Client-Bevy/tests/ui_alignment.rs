@@ -4469,7 +4469,9 @@ const ALL_DIALOG_KINDS: [client_bevy::game::dialogs::DialogKind; DIALOG_KIND_COU
 fn kind_alignment_tests(kind: client_bevy::game::dialogs::DialogKind) -> &'static [&'static str] {
     use client_bevy::game::dialogs::DialogKind as K;
     match kind {
-        K::Inventory | K::BigMap => &["inventory_bigmap_aligned"],
+        // 常量断言单独成测（无 require_assets!）：CI 无 Data/ 时也跑，
+        // 口径见 `inventory_bigmap_constants` 的文档注释
+        K::Inventory | K::BigMap => &["inventory_bigmap_aligned", "inventory_bigmap_constants"],
         K::Character => &["character_dialog_aligned"],
         K::QuestLog | K::QuestDetail => &["panel_sprites_batch_b3_match_csharp"],
         K::Settings => &["settings_dialog_aligned"],
