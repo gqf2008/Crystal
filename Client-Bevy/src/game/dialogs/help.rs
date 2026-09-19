@@ -22,7 +22,7 @@ use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
 use crate::map_renderer::GameLibraries;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
-use crate::ui::sprite_ui::{shared_cjk_font, UiCjkFont, UiFont};
+use crate::ui::sprite_ui::{shared_cjk_font, UiCjkFont};
 use crate::ui::theme::{
     load_lib_image, spawn_icon_button, spawn_image, spawn_label, spawn_label_center, spawn_panel,
     CloseButton, ImageButton,
@@ -192,6 +192,7 @@ pub struct HelpPlugin;
 impl Plugin for HelpPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<HelpState>();
+        app.init_resource::<UiCjkFont>();
         app.add_systems(OnEnter(AppState::Game), spawn_help);
         app.add_systems(OnExit(AppState::Game), cleanup_help);
         app.add_systems(
@@ -213,13 +214,11 @@ fn spawn_help(
     mut images: ResMut<Assets<Image>>,
     mut fonts: ResMut<Assets<Font>>,
     mut cjk_font: ResMut<UiCjkFont>,
-    mut ui_font: ResMut<UiFont>,
 ) {
     libs.0.ensure_initialized();
-    if !ui_font.0.is_strong() {
-        ui_font.0 = crate::ui::sprite_ui::load_ui_font(&mut fonts);
-    }
-    let font = ui_font.0.clone();
+    // 上列三处（页标题/页码/表头）此前走 Arial 主字体 → 中文全是豆腐（实机截图确认：
+    // 列头 `□□□`/`□□`、标题 `1. □□□□□`）。本模块其余文本早已是 `&cjk`，此处补齐；
+    // `ui_font` 随之不再需要（Arial 无 CJK 字形，且本环境实测 Han 回退对静态文本同样不生效）。
     let cjk = shared_cjk_font(&mut fonts, &mut cjk_font);
     let (ox, oy) = ORIGIN;
 
@@ -257,10 +256,10 @@ fn spawn_help(
             }
         }
         // 页标题（居中 @(268,54) 242x30）
-        spawn_label_center(p, &font, "", 268.0, 54.0, 242.0, 10.0, Color::WHITE, 9)
+        spawn_label_center(p, &cjk, "", 268.0, 54.0, 242.0, 10.0, Color::WHITE, 9)
             .insert(HelpTitleText);
         // 页码（居中 @(270,490) 80x20）
-        spawn_label_center(p, &font, "", 270.0, 490.0, 80.0, 9.0, Color::WHITE, 9)
+        spawn_label_center(p, &cjk, "", 270.0, 490.0, 80.0, 9.0, Color::WHITE, 9)
             .insert(HelpPageLabelText);
         // 图文页图像（@(12,75)，Auto 尺寸）
         let white = images.add(crate::map_renderer::make_image(
@@ -282,7 +281,7 @@ fn spawn_help(
         ));
         // 快捷键页两列表头（居中）
         for (text, cx, ry) in [("快捷键", 75.0, 125.0), ("信息", 328.0, 125.0)] {
-            spawn_label_center(p, &font, text, cx, ry, 100.0, 10.0, Color::WHITE, 9)
+            spawn_label_center(p, &cjk, text, cx, ry, 100.0, 10.0, Color::WHITE, 9)
                 .insert(HelpShortcutHeader(text));
         }
         // 快捷键页行（黄键名/白说明）
@@ -444,6 +443,49 @@ fn help_ui_system(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #2985 A2：帮助面板**页标题/页码/表头**必须用自带 CJK 字形的主字体。此前这三处
+    /// 走 Arial（表体早已是宋体），实机截图列头 `□□□`/`□□`、标题 `1. □□□□□` 是豆腐。
+    /// 修复前本测试 FAILED。
+    #[test]
+    fn help_text_uses_cjk_capable_font() {
+        use bevy::ecs::system::RunSystemOnce;
+
+        // CI 无游戏资产（`Data/` 不入库）→ spawn 在取背景图处提前返回、一个文本都没有，
+        // 断言会假红（本 PR 自己的 CI 就是这么红的）；按 `data_assets_present` 跳过。
+        if !crate::resources::libraries::data_assets_present() {
+            eprintln!("skip: 无 Data 资产（CI 只 checkout 仓库）");
+            return;
+        }
+        let mut world = World::new();
+        world.insert_resource(GameLibraries::default());
+        world.insert_resource(Assets::<Image>::default());
+        world.insert_resource(Assets::<Font>::default());
+        world.insert_resource(UiCjkFont::default());
+        world.run_system_once(spawn_help).unwrap();
+
+        let cjk = world.resource::<UiCjkFont>().0.clone();
+        assert!(cjk.is_strong(), "CJK 字体应已被惰性加载");
+        let mut n = 0usize;
+        // 这些面板走 `spawn_label` → bevy_ui 的 `Text`（不是 `Text2d`），
+        // 两者都用 `TextFont` 携带字体句柄，故只查后者即可全覆盖
+        let mut q = world.query::<&TextFont>();
+        for tf in q.iter(&world) {
+            match &tf.font {
+                FontSource::Handle(h) => {
+                    assert_eq!(
+                        *h, cjk,
+                        "帮助面板文本必须用自带 CJK 的主字体（Arial 会豆腐）"
+                    );
+                    n += 1;
+                }
+                // 非 Handle 源会被 `if let` 静默跳过（假绿口子）：这类实体同样
+                // 渲染中文，出现即失败
+                other => panic!("帮助面板文本应为显式字体句柄，实得 {other:?}"),
+            }
+        }
+        assert!(n > 0, "应至少 spawn 出若干文本实体");
+    }
 
     /// 45 页 = 3 快捷键 + 42 图文；图文页 ImageID 与 C# 清单逐项一致
     #[test]
