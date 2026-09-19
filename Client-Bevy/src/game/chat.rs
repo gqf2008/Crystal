@@ -1431,6 +1431,14 @@ pub(crate) fn chat_input_system(
             continue;
         }
         if key.logical_key == Key::Enter {
+            // #2961：长按 Enter 的**重复事件**不得参与开/关切换。
+            // C# 侧按焦点分两个 KeyPress：框未聚焦时 `ChatPanel_KeyPress` 开框，
+            // 聚焦后重复事件进 `ChatTextBox_KeyPress` 的发送分支，空文本是 no-op
+            // （`MainDialogs.cs:719` 有 `if (!string.IsNullOrEmpty(...))` 守卫）——
+            // 即**不会把框关掉**。本端原先每次重复都走"发送并关框"，长按会开/关反复跳。
+            if key.repeat {
+                continue;
+            }
             if chat.input_active {
                 let msg = chat.input_text.trim().to_string();
                 chat.input_text.clear();
@@ -2007,6 +2015,50 @@ mod tests {
     /// 守卫原先只覆盖 `@ ! / 空格` 开框路径，Enter 开框漏登记 → 同帧文本循环
     /// 把 CR 推进去。可见影响：光标 x 估计多算一位（发送时被 `trim()` 掉，
     /// 所以只在光标位置上看得出）。修复前本测试 FAILED（缓冲里多一个 CR）。
+    /// #2961 长按 Enter 的重复事件不得切换输入框开/关。
+    /// C#：重复事件进的是 `ChatTextBox_KeyPress` 的发送分支且被
+    /// `!string.IsNullOrEmpty` 守卫挡住（`MainDialogs.cs:719`）→ 框保持打开；
+    /// 本端原先每次重复都"发送并关框"，长按表现为开/关反复跳。
+    /// 修复前本测试 FAILED（input_active 被置 false）。
+    #[test]
+    fn enter_repeat_does_not_toggle_input() {
+        use bevy::ecs::message::Messages;
+        use bevy::input::keyboard::{Key, KeyboardInput};
+        use bevy::input::ButtonState;
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(crate::ui::pinyin_ime::PinyinImePlugin);
+        app.add_message::<KeyboardInput>();
+        app.insert_resource(crate::ui::sprite_ui::UiFont(Handle::<Font>::default()));
+        app.insert_resource(ChatState {
+            input_active: true,
+            ..Default::default()
+        });
+        app.init_resource::<crate::network::NetConnection>();
+        app.insert_resource(crate::network::NetMode(crate::network::NetworkMode::Mock));
+        app.init_resource::<ChatFilter>();
+        app.add_systems(Update, chat_input_system);
+        // 只发**重复**事件（长按的后续帧）：不得把已打开的框关掉。
+        // （不能先发一次真按下——那本身就是"发送并关框"的合法路径。）
+        app.world_mut()
+            .resource_mut::<Messages<KeyboardInput>>()
+            .write(KeyboardInput {
+                key_code: bevy::input::keyboard::KeyCode::Enter,
+                logical_key: Key::Enter,
+                state: ButtonState::Pressed,
+                text: None,
+                repeat: true,
+                window: Entity::PLACEHOLDER,
+            });
+        app.update();
+        let chat = app.world().resource::<ChatState>();
+        assert!(
+            chat.input_active,
+            "长按 Enter 的重复事件不应把输入框关掉（C# 侧是 no-op）"
+        );
+    }
+
     #[test]
     fn enter_open_does_not_insert_cr_into_input() {
         use bevy::ecs::message::Messages;
