@@ -232,7 +232,7 @@ control RPC（127.0.0.1:9000）：`dialog {kind,action}` / `dialogs`（列 Dialo
 
 用户实测报出 6 个 UI 缺陷，逐项修复后做**实机复验**。本节是本批次的验收依据。
 
-**版本**：master @ `32bec332`（含 #2962~#2973 共 11 个 PR）
+**版本**：master @ `7726c529`（本批**修复 PR 共 16 个**：#2962~#2973 与 #2976~#2981，另有报告自身 #2974/#2975；#2980 已撤回。本节数字均取自该 sha 重建的二进制）
 **环境**：ServerRust release（后台常驻）+ Client-Bevy debug（`--real-net --auto-enter`），测试账号 `test / bevychar`，地图 BichonProvince
 **方法**：每项都要「单元测试红→绿」+「实机可判真假的断言」，实机断言优先取 control RPC 的**真值字段**，像素只作字形类证据。
 
@@ -244,10 +244,10 @@ control RPC（127.0.0.1:9000）：`dialog {kind,action}` / `dialogs`（列 Dialo
 | 2 | 底部的信息输入/出框居然可以被拖动 | ✅ 已修已验 | 面板内起点 (400,700) 拖到 (700,250)：玩家 tile 不变 + 面板左边框锚定区像素原位 |
 | 3 | 中文输入法候选词是乱码 | ✅ 已修已验 | 候选条 `nihao 1.你好 2.你 3.尼 4.呢 5.泥 6.妮 7.拟 8.逆 9.倪` 字形正常（`shots/ime_rpc_3_candidates.png`）；输入框 `> 你好`（`shots/ime_rpc_4_committed.png`）；聊天记录 `[bevychar]: 你好`（`shots/chat_sent_evidence.png`） |
 | 4 | 商场窗口里的内容错位 | ✅ 已修已验 | 面板 @(164,146)；按 C# 坐标点格 0/格 3/格 4/分类行 → 4/4 命中 `root=GameShop` |
-| 5 | 好多窗口滚动条好像都没实现 | ✅ 已修 · **截图人工复核** | 商城分类条（滑块 + 上下箭头）、行会双列表两条轨道（截图）；本项**无滚动行为的自动断言**（脚本只截图），见 §10.5 残余 |
+| 5 | 好多窗口滚动条好像都没实现 | ✅ 已修已验 | 滚轮注入 + `scroll` 读**真值**：邮件列表注入 1 格 → `offset 0 → 1`（恰为 `step=1`）；负控（所有列表之外滚）offset 不变。另有商城分类条/行会双列表截图存档 |
 | 6 | 鼠标拖拽窗口事件会穿透到游戏中 | ✅ 已修已验 | 拖腰带/点拖后腰带：玩家不移动；正控制空白点仍可走（证明没被一刀切拦死） |
 
-**6 项全部修复；其中 5 项有可判真假的实机断言，项 5 为截图人工复核**（滚动条渲染无自动断言，见 §10.5）。实机脚本汇总：`ui_bugfix_verify.ps1` **15/15**、`ime_rpc_verify.ps1` **10/10**、`ui_interact_sweep.ps1` **41/41**。
+**6 项全部修复并实机验证通过。** 项 5 最初只有截图人工目视（独立审查据此判为弱证据），#2978 把滚轮/滚动条做成可注入、可读真值的 RPC 后升级为**真值断言**。实机脚本汇总：`ui_bugfix_verify.ps1` **18/18**、`ime_rpc_verify.ps1` **10/10**、`ui_interact_sweep.ps1` **41/41**。
 
 ### 10.2 逐项证据
 
@@ -268,7 +268,7 @@ control RPC（127.0.0.1:9000）：`dialog {kind,action}` / `dialogs`（列 Dialo
 实机判据：C# 坐标 4 个点全部命中 `root=GameShop`。
 
 **项5 滚动条缺失** — 修 #2968：`UiScrollList` 屏幕原点改为沿 `ChildOf` 链逐级累加（子列表不再错位）、隐藏列表不再吞滚轮、商城分类条与行会双列表各自绑定轨道。修 #2966 上游另有 `PositionBar` 链路修整。
-实机判据：截图（`bug5_shop_scrollbar.png` / `bug5_guild.png`）——商城分类条渲染出滑块（约 1/5 行程）与上下箭头；行会 Members/Storage 两条轨道并排。
+实机判据（#2978 后为真值断言）：`wheel` 在邮件列表内注入 1 格 → `offset 0 → 1`（恰为 `step=1`，与 C# `Delta/MouseWheelScrollDelta` 的 1 行/格一致）；负控——在所有列表之外注入滚轮，`offset` 不变。截图（`bug5_shop_scrollbar.png` / `bug5_guild.png`）保留作渲染存档：商城分类条有滑块与上下箭头、行会 Members/Storage 两条轨道并排。
 
 **项6 拖拽穿透** — 修 #2966：`WindowDragState::over_window` 世界点击闸门 + 隐藏窗口必须 `unregister`（否则残留矩形变死点击区，审查 P1）。
 实机判据：拖腰带不移动玩家；点拖后腰带落点不穿透；**正控制**空白世界点仍可走。
@@ -286,29 +286,40 @@ control RPC（127.0.0.1:9000）：`dialog {kind,action}` / `dialogs`（列 Dialo
 
 | 门禁 | 结果 |
 |---|---|
-| `cargo test --lib` | **660 passed / 0 failed**（本机 Windows 运行，**无留存日志**；同 sha 的 CI（Linux）报 659，与本地数差异的**原因未核实**，不做推断。重跑 `cargo test --lib` 即得本机数字） |
+| `cargo test --lib` | **662 passed / 0 failed**（本机 Windows；同 sha `7726c529` 的 CI（Linux）报 **661**，差 1。本机无留存日志，差异原因未核实、不做推断。重跑 `cargo test --lib` 即得本机数字） |
 | `cargo test --test b0001_smoke` | 1 passed |
-| `cargo test --test ui_alignment` | **50 passed / 0 failed**（修前 49/1） |
+| `cargo test --test ui_alignment` | **51 passed / 0 failed**（修前 49/1） |
 | `cargo fmt -- --check` | 干净 |
-| `ui_bugfix_verify.ps1`（项 2/4/5/6 实机 + 基线正控制） | **15/15** |
+| `ui_bugfix_verify.ps1`（项 2/4/5/6 实机 + 基线正控制） | **18/18** |
 | `ime_rpc_verify.ps1`（项 3 实机，RPC 真值） | **10/10** |
 | `ui_interact_sweep.ps1`（40 窗交互回归） | **41/41**（40 窗中 34 窗点 X 关闭、6 窗无钮设计走 RPC 往返；另含 inventory 拖动与 npc/hero_manage 的 X 点击） |
 
-本批次 PR：#2962 #2963 #2964 #2965 #2966 #2967 #2968 #2970 #2971 #2972 #2973（issue #2969 P0）。
+本批次 PR：#2962 #2963 #2964 #2965 #2966 #2967 #2968 #2970 #2971 #2972 #2973（issue #2969 P0），以及后续跟进 #2976（`new_char_ui_system` 冒烟）／#2977（ServerRust CI 三层红）／#2978（wheel/scroll RPC）／#2979（常量断言拆出 `require_assets!`）／#2981（滚轮 1 行/格）；#2980 因审查证伪其前提而**撤回未合并**。
 
-三条实机脚本的结果 JSON 均在 `tools/acceptance/`（`ui_bugfix_verify_results.json` / `ime_rpc_verify_results.json` / `ui_interact_results.json`），都是在 **`32bec332` 重建的同一份二进制**上跑出来的；截图同目录 `shots/`。
+三条实机脚本的结果 JSON 均在 `tools/acceptance/`（`ui_bugfix_verify_results.json` / `ime_rpc_verify_results.json` / `ui_interact_results.json`），**均为在 `7726c529` 重建的同一份二进制上重跑的最新结果**；截图同目录 `shots/`。
 
 ### 10.5 残余缺口与跟进项（如实记录）
 
-1. **ServerRust CI job 在 master 上已经红灯**——`gh run list` 实测：最近连续 5 次**已完成**的 `ci.yml` run 均为 failure；其中 `f269ab27` 那次 `ServerRust=failure` 而 `SharedRust=success`。与本批次客户端改动无关（这些 run 覆盖的提交不含本批客户端改动），但会掩盖后续真实失败，建议优先排查。
-2. `ui_alignment` 的**纯常量断言被同函数的 `require_assets!` 连带跳过**（CI 无 `Data/`），防漂移能力只在本机生效；建议把不依赖资产的断言拆出独立测试。
-3. 背包扩容钮 `z=8`（全仓 `spawn_close_button` 实测：17 处 `z=10`、`npc.rs` 一处 `z=9`、**仅背包 `z=8`**）——把 z 提到 10 才是结构性正解（届时 72x23 命中区也不再吞关闭钮），本轮只改了断言，实现偏离保留。
-4. `mail.rs:636` / `npc.rs:162` / `npc_goods.rs:185` 的列表滚轮仍为 `step: 3`，而 C# 对应处是 1 行/格（#2968 审查标记为超出该 PR 范围）。
-5. 商城仍缺：物品图标、职业分区页签、Preview/Viewer 视图、`qty_up` 的 StackSize 上限（服务端会静默丢弃超量）。排行榜滚动为文档化的 no-op。
-6. `new_char_ui_system` 是唯一剩下的「同函数双 ParamSet」，当前字段不重叠但无初始化级测试——建议照 #2970 补一条 `run_system_once` 冒烟。
-7. Enter 分支不判 `key.repeat`，长按回车会反复开/关输入框（既有行为，非本批次引入）。
-8. **同类站点已逐个核实，结论：不构成风险**（原先笼统列为"同源疑似缺口"过宽，本次更正）。`chat_notice.rs:73` 的通知条虽是「先建空串、后由系统写内容」的 Arial 文本，但 `ChatNoticeState` **全仓无任何写入方**（`grep` 只在本模块内出现）→ 该条**不可达**；`guild.rs:1419/1424` 的 Arial 文本是 `▲/▼` 符号；`hud.rs` 经 `spawn_text` 传 `&font` 的是经验/等级/金币等**数字**标签。三者都不产生中文正文豆腐。
-9. **坐骑实机验证的完整链路**现已打通并记录于此（`@make` → 装备 → `@ride`）；但「装备」一步靠界面操作，RPC 尚无双击/拖拽物品的原语，本轮是先用界面把坐骑装好（BengalTiger + 鞍）再骑乘验证遮挡。
+**本轮已处理**（原文留痕便于对照）：
+
+- ~~ServerRust CI job 在 master 上红灯~~ → **已修 #2977**。不是一层而是**三层**，每层都被前一层挡着：fmt（120 处 diff / 17 文件）→ clippy（25 errors）→ 测试线程栈溢出（SIGABRT）。修后 CI 的 ServerRust job 四步全绿，并把 `cargo fmt -- --check` + `cargo clippy --lib -- -D warnings` 补进 `AGENTS.md` 本地门禁防复发。
+- ~~`ui_alignment` 的常量断言被同函数 `require_assets!` 连带跳过~~ → **已拆 #2979**（`inventory_bigmap_constants`，`CRYSTAL_NO_DATA_ASSETS=1` 下确认真跑）。同类混排在其余测试里仍存在，未逐个拆。
+- ~~`mail/npc/npc_goods` 列表滚轮 `step: 3`~~ → **已修 #2981**（三处均按 C# 原文改 1 行/格；实机确认邮件列表 `offset 0 → 1`）。
+- ~~项 5 只有截图人工复核~~ → **已升级 #2978**（`wheel`/`scroll` RPC：真值断言 + 负控）。
+
+**仍然开着**：
+
+1. 背包扩容钮 `z=8`（全仓实测：17 处 `z=10`、`npc.rs` 一处 `z=9`、**仅背包 `z=8`**）——把 z 提到 10 才是结构性正解（届时 C# 的 72×23 命中区也不再吞关闭钮），本轮只改了断言，实现偏离保留。
+2. 商城仍缺：物品图标、职业分区页签、Preview/Viewer 视图、`qty_up` 的 StackSize 上限（服务端会静默丢弃超量）。排行榜滚动为文档化的 no-op。
+3. `market.rs` 列表 `step: 10`（1 格 = 1 页）——C# `TrustMerchantDialog` 同样没有滚轮处理，本端是**增补**的翻页语义；是否改成 1 行/格属产品判断，未动。
+4. **【自我更正】商城 P0 不是防线盲区，是合并闸门被绕过。** 我先前在这里写「`b0001_smoke` 没登记 UI 插件、所以没拦住」——**错了**：`tests/b0001_smoke.rs:101` **登记了 `game_shop`**，该 PR 自身的 pull_request CI **三次 push 全红**（最晚一次是 tip `3a7938bf`，红于合并前约 8 小时），run [35411949422](https://github.com/gqf2008/Crystal/actions/runs/35411949422) 的 `Client-Bevy :: test (integration)` 步骤就是 **failure**（合并提交 `09b16ac8` 的 push run 35411951451 结论相同），日志即 `[game_shop] error[B0001]: Query<..., GameShopCat> ...::game_shop_ui_system`。**红线被看到了，是合并时用 `--admin` 绕过它把 P0 放进了 master。**
+   → 整改方向随之改变：**不是**去补插件覆盖，而是**别在 CI 红着时 `--admin` 合并**（至少先看该 run 的结论）。
+   （附带事实仍然成立但**与商城 P0 无关**：该冒烟里确实一个 `ui::` 插件都没登记，`ui::` 类插件的冲突目前只有 #2976 那条 `run_system_once` 冒烟覆盖。）
+5. Enter 长按：本轮曾按「C# 是 no-op」提了 #2980，**被独立审查证伪**（`MainDialogs.cs:749-750` 的 `Visible=false; Text=""` 在 `!string.IsNullOrEmpty` 守卫**之外**，空文本同样关框），且该改法会让重复事件漏进第二个文本循环、把 CR 塞进草稿——**已撤回未合并**。即现状与 C# 一致，不再是缺口。
+6. `ServerRust/.cargo/config.toml` 的 8 MiB 测试栈只有一次性实验（1 MiB 复现 / 8 MiB 通过），没有"守住阈值"的断言或基准（#2977 审查 P2-3，留给原作者判断）。
+7. 生产调用点（handler 内联链）的**峰值栈未测量**（#2977 审查 P2-2 更正后的真实缺口；生产 actor 栈已是 32 MiB，测试 8 MiB 仍更严）。
+8. 坐骑「装备」一步没有 RPC 原语（需界面操作），本轮先用界面把坐骑装好（BengalTiger + 鞍）再骑乘验证遮挡。
+9. `chat_notice.rs` 的通知条不可达（`ChatNoticeState` 全仓无写入方）；`chat.rs` 之外仍有 Arial 文本站点，但已逐个核实为数字/符号，不构成中文正文豆腐风险。
 
 ### 10.6 复现方法（本机）
 
@@ -321,9 +332,11 @@ $env:LIBPINYIN_DIR = 'D:/toolchains/libpinyin-install'
 cd ServerRust; ./target/release/mir2_server.exe
 
 # 2) 三项实机复验（脚本各自起停客户端）
-powershell -File tools/acceptance/ui_bugfix_verify.ps1    # 项 2/4/5/6 -> 15/15
+powershell -File tools/acceptance/ui_bugfix_verify.ps1    # 项 2/4/5/6 -> 18/18
 powershell -File tools/acceptance/ime_rpc_verify.ps1      # 项 3     -> 10/10（需先起客户端）
 powershell -File tools/acceptance/ui_interact_sweep.ps1   # 40 窗回归 -> 41/41
 ```
 
-实机脚本的两个已知陷阱（本轮踩过，已在脚本内注释）：正控制点必须落在**可走瓦片**（屏幕偏移对应的瓦片随玩家站位而变，改用 4 方向 8 点探测，任一可走即证通路）；像素锚定必须避开**动态内容**（聊天行实时刷新、输入光标 2Hz 闪烁、输入行随焦点变色），故项 2 改用面板左边框静态条并先自检两帧稳定性。
+`wheel`/`scroll` 两个 RPC 是 #2978 入库的验收能力：`wheel {x,y,delta}` 在 UI 逻辑坐标注入一行滚轮（正=向下滚=offset 增），`scroll {}` 返回全部 `UiScrollList` 真值（轨道矩形、**列表矩形**（滚轮命中用这个）、`offset/total/visible/step/z`、`shown`）。滚轮命中读注入探针且**注入后 2 帧自动撤销**，所以判据要用 `offset` 变化而不是依赖探针常驻；列表 `shown=false`（如行会默认页）时**正确地**不吃滚轮，拿它做正控会得到假 FAIL。
+
+实机脚本的三个已知陷阱（本轮踩过，已在脚本内注释）：正控制点必须落在**可走瓦片**（屏幕偏移对应的瓦片随玩家站位而变，改用 4 方向 8 点探测，任一可走即证通路）；像素锚定必须避开**动态内容**（聊天行实时刷新、输入光标 2Hz 闪烁、输入行随焦点变色），故项 2 改用面板左边框静态条并先自检两帧稳定性。
