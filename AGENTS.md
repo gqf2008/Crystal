@@ -6,6 +6,11 @@
 - PR 合并前需完成验证：`cargo check` 通过 + 相关测试通过（客户端 `Client-Bevy`：`cargo test`；服务端 `ServerRust`：`cargo test`）。
   **服务端另需 `cargo fmt -- --check` 与 `cargo clippy --lib -- -D warnings`**（2026-09-19 补：CI 的 ServerRust job 就按这四步跑，而这四项此前不在本清单里，导致 fmt/clippy 的债攒到 CI 连续 27 次红才被发现）。
 - PR 合并前需经 review（人工或协作 agent）确认通过。
+- **`gh pr merge --admin` 只用于绕过审批位（作者不能自批），不用于绕过红灯。**
+  合并前必须核对该 PR **自身**那次 `pull_request` run 的结论——`gh pr checks <n>`，或 `gh run list --commit <head_sha> --json databaseId,event,conclusion`（认 `event == "pull_request"`）。
+  **红了就不合**：先修红，或本地按 CI 全步骤补齐门禁。
+  （2026-09-19 补：商城那个「一进游戏即崩」的 B0001 P0 就是这样进 master 的——该 PR 自身的 CI 从合并前约 8 小时起一路红，`--admin` 把红线一起绕过了；见 `LESSON_admin合并绕过红灯_必先查该PR自身run结论`。）
+  注意区分：`RULE_合并规范` 的「CI 不作为常规合并前置」指**不必等 CI 绿**，不等于**可以红着合**。
 - PR 描述需写明：改了什么、为什么改、验证了什么。
 - 多个 agent 协作时，各自在独立分支/PR 上工作，避免互相覆盖未提交改动。
 
