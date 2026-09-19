@@ -254,6 +254,71 @@ pub fn spawn_outlined_label_center<'a>(
     ))
 }
 
+/// 定宽 + 指定对齐的描边标签（左上角锚点）。
+///
+/// 与 [`spawn_outlined_label_center`] 的唯一差别：锚点是**左上角** `(x, y)`、宽度
+/// 由调用方给定，行内对齐由 `justify` 决定。C# 侧对应
+/// `MirLabel { Location = 左上角, Size = 宽, DrawFormat = ... }`——`Location` 就是左上角，
+/// 而 `DrawFormat` 决定行内对齐（右对齐的场景如 `GuildDialog.StatusHeaders`）。
+pub fn spawn_outlined_label_block<'a>(
+    parent: &'a mut ChildSpawnerCommands,
+    font: &Handle<Font>,
+    text: &str,
+    x: f32,
+    y: f32,
+    width: f32,
+    size: f32,
+    color: Color,
+    justify: Justify,
+    z: i32,
+) -> EntityCommands<'a> {
+    let mut shadows = Vec::with_capacity(4);
+    for (dx, dy) in OUTLINE_OFFSETS_UI {
+        let e = parent
+            .spawn((
+                OutlineUiShadow,
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: Val::Px(x + dx),
+                    top: Val::Px(y + dy),
+                    width: Val::Px(width),
+                    ..default()
+                },
+                Text::new(text),
+                TextFont {
+                    font: FontSource::Handle(font.clone()),
+                    font_size: FontSize::Px(size),
+                    ..default()
+                },
+                TextLayout::justify(justify),
+                TextColor(OUTLINE_COLOR),
+                ZIndex(z - 1),
+            ))
+            .id();
+        shadows.push(e);
+    }
+    parent.spawn((
+        OutlinedUiText,
+        OutlineUiShadows(shadows),
+        Node {
+            position_type: PositionType::Absolute,
+            left: Val::Px(x),
+            top: Val::Px(y),
+            width: Val::Px(width),
+            ..default()
+        },
+        Text::new(text),
+        TextFont {
+            font: FontSource::Handle(font.clone()),
+            font_size: FontSize::Px(size),
+            ..default()
+        },
+        TextLayout::justify(justify),
+        TextColor(color),
+        ZIndex(z),
+    ))
+}
+
 /// bevy_ui 正文内容变化 → 同步到 4 个黑色副本（同 [`sync_outline_system`]）
 ///
 /// #2817 单元①：副本是正文的**兄弟**（[`spawn_outlined_label`] 注释 `:127-135`——子实体恒画在

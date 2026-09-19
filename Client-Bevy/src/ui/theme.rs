@@ -201,6 +201,28 @@ pub fn spawn_label<'a>(
     crate::ui::outlined_text::spawn_outlined_label(parent, font.clone(), text, x, y, size, color, z)
 }
 
+/// 子节点：绝对定位**定宽**文本标签（左上角锚点 + 指定行内对齐）。
+///
+/// C# `MirLabel` 的 `Location`(左上角) + `Size`(定宽) + `DrawFormat`(行内对齐) 三件套里，
+/// [`spawn_label`] 只覆盖前两者且宽度自适应；需要行内对齐（尤其 `TextFormatFlags.Right`）
+/// 的站点用本函数——对齐只有在**定宽**下才看得出效果。
+pub fn spawn_outlined_label_block<'a>(
+    parent: &'a mut ChildSpawnerCommands,
+    font: &Handle<Font>,
+    text: &str,
+    x: f32,
+    y: f32,
+    width: f32,
+    size: f32,
+    color: Color,
+    justify: Justify,
+    z: i32,
+) -> EntityCommands<'a> {
+    crate::ui::outlined_text::spawn_outlined_label_block(
+        parent, font, text, x, y, width, size, color, justify, z,
+    )
+}
+
 /// 子节点：绝对定位**无描边**文本标签。
 ///
 /// 只用于 C# 里确实没有描边的文本（见 [`spawn_label`] 注释的 4 处 `OutLine = false`
