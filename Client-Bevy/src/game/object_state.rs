@@ -5,11 +5,12 @@
 // 绘制参考：Client-Macroquad/src（对象隐身/传送/击退表现）
 // ============================================================================
 
+use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 
 use crate::actor::{
-    ActorAnim, ActorAppearance, LocalPlayer, MonsterName, MountState, NetObjectId, NpcAppearance,
-    NpcName, Player, PlayerName, Sitting, SpriteLayer,
+    ActorAnim, ActorAppearance, GhostLayer, LocalPlayer, MonsterName, MountState, NetObjectId,
+    NpcAppearance, NpcName, Player, PlayerName, Sitting, SpriteLayer,
 };
 use crate::game::movement::tile_to_world;
 use crate::game::sound::{play_sound_cached, SoundBank, SoundCache};
@@ -98,6 +99,15 @@ impl Plugin for ObjectStatePlugin {
     }
 }
 
+/// `apply_object_state_events` 图层三件套打包（Bevy 系统 16 参数上限，
+/// LESSON_Bevy系统参数上限16 已沉淀的同族处理）
+#[derive(SystemParam)]
+struct ActorLayerQueries<'w, 's> {
+    pub children: Query<'w, 's, &'static Children>,
+    pub layers: Query<'w, 's, &'static mut SpriteLayer>,
+    pub ghost_layers: Query<'w, 's, &'static GhostLayer>,
+}
+
 /// 消费对象状态事件：隐藏/显形/坐下/击退/传送进出/坐骑上马下马
 #[allow(clippy::too_many_arguments)]
 fn apply_object_state_events(
@@ -126,8 +136,7 @@ fn apply_object_state_events(
     >,
     mut local_names: Query<(Entity, Option<&mut PlayerName>), With<crate::actor::LocalPlayer>>,
     mut name_labels: Query<&mut Text2d, With<crate::actor::ActorNameLabel>>,
-    children: Query<&Children>,
-    mut layers: Query<&mut SpriteLayer>,
+    mut lq: ActorLayerQueries,
     mut effects: MessageWriter<crate::game::effects::PendingEffect>,
 ) {
     let pending: Vec<ServerEvent> = events.read().cloned().collect();
@@ -269,7 +278,7 @@ fn apply_object_state_events(
                     }
                 }
                 if let Some(ent) = label_entity {
-                    if let Ok(children_of) = children.get(ent) {
+                    if let Ok(children_of) = lq.children.get(ent) {
                         for c in children_of.iter() {
                             if let Ok(mut t) = name_labels.get_mut(c) {
                                 t.0 = name.clone();
@@ -291,9 +300,9 @@ fn apply_object_state_events(
                 for (ent, id, mut app) in &mut npcs {
                     if id.0 == npc_id {
                         app.npc_index = image;
-                        if let Ok(children_of) = children.get(ent) {
+                        if let Ok(children_of) = lq.children.get(ent) {
                             for c in children_of.iter() {
-                                if let Ok(mut l) = layers.get_mut(c) {
+                                if let Ok(mut l) = lq.layers.get_mut(c) {
                                     if l.lib == crate::resources::libraries::ArrayLibType::Npcs {
                                         l.slot = image as u32;
                                     }
@@ -346,15 +355,16 @@ fn apply_object_state_events(
                         .map(|(e, _, _)| e);
                     if let Some(ent) = target {
                         commands.entity(ent).remove::<MountState>();
-                        if let Ok(children_of) = children.get(ent) {
-                            for c in children_of.iter() {
-                                if let Ok(l) = layers.get(c) {
-                                    if l.is_mount {
-                                        commands.entity(c).despawn();
-                                    }
-                                }
-                            }
-                        }
+                        // 与 spawn.rs 初始生成路径同源：坐骑层 + 坐骑 ghost 残影层
+                        // 一并移除（ghost 无 SpriteLayer，内联只 despawn is_mount
+                        // 图层时 ghost 必泄漏——上马一次叠一个，遮挡时叠画）
+                        crate::actor::detach_mount_layers(
+                            &mut commands,
+                            &lq.children,
+                            &lq.layers,
+                            &lq.ghost_layers,
+                            ent,
+                        );
                         tracing::info!("🐴 对象 {} 下马", object_id);
                     }
                 }
@@ -567,6 +577,104 @@ mod tests {
 
     fn alpha_of(app: &App, e: Entity) -> f32 {
         app.world().entity(e).get::<SpriteLayer>().unwrap().alpha
+    }
+
+    /// #2965 审查 P1：`MountUpdated{is_mounted:false}`（运行时下马主路径——
+    /// 装备/NPC 脚本广播 MountUpdate，SetMountState 不重发 ObjectPlayer）必须连
+    /// 坐骑 ghost 残影层一起移除；旧内联块只 despawn `is_mount` 的 SpriteLayer，
+    /// ghost 无 SpriteLayer 必泄漏（再上马叠一个，遮挡时双份 alpha 叠画）。
+    ///
+    /// 阳性对照：把下马分支退回内联 `layers.get(c)` 循环 → 本测试 ghost 断言 FAILED。
+    #[test]
+    fn dismount_via_mount_updated_removes_mount_layer_and_ghost() {
+        use bevy::ecs::message::Messages;
+        use bevy::ecs::system::RunSystemOnce;
+
+        let mut world = World::new();
+        world.init_resource::<Messages<ServerEvent>>();
+        world.init_resource::<Messages<crate::game::effects::PendingEffect>>();
+
+        // 骑乘态角色：身体层 + 坐骑层 + 身体 ghost + 坐骑 ghost（同生产 spawn 结构）
+        let root = world
+            .spawn((
+                NetObjectId(7),
+                MountState { mount_type: 0 },
+                Visibility::Visible,
+            ))
+            .id();
+        let (body_layer, mount_layer, body_ghost, mount_ghost) = {
+            let mut e = world.entity_mut(root);
+            let mut ids = (
+                Entity::PLACEHOLDER,
+                Entity::PLACEHOLDER,
+                Entity::PLACEHOLDER,
+                Entity::PLACEHOLDER,
+            );
+            e.with_children(|p| {
+                ids.0 = p
+                    .spawn(SpriteLayer {
+                        lib: ArrayLibType::CArmours,
+                        slot: 0,
+                        frame: 0,
+                        is_effect: false,
+                        is_mount: false,
+                        alpha: 1.0,
+                    })
+                    .id();
+                ids.1 = p
+                    .spawn(SpriteLayer {
+                        lib: ArrayLibType::Mounts,
+                        slot: 0,
+                        frame: 0,
+                        is_effect: false,
+                        is_mount: true,
+                        alpha: 1.0,
+                    })
+                    .id();
+                ids.2 = p
+                    .spawn(GhostLayer {
+                        lib: ArrayLibType::CArmours,
+                    })
+                    .id();
+                ids.3 = p
+                    .spawn(GhostLayer {
+                        lib: ArrayLibType::Mounts,
+                    })
+                    .id();
+            });
+            ids
+        };
+
+        world.write_message(ServerEvent::MountUpdated {
+            object_id: 7,
+            mount_type: -1,
+            is_mounted: false,
+        });
+        world
+            .run_system_once(apply_object_state_events)
+            .expect("对象状态系统应可运行");
+        // run_system_once 走 System::run：立即 apply_deferred，命令当帧落地
+
+        assert!(
+            world.get::<MountState>(root).is_none(),
+            "下马后 MountState 必须移除"
+        );
+        assert!(
+            world.get::<SpriteLayer>(body_layer).is_some(),
+            "身体层必须保留"
+        );
+        assert!(
+            world.get::<GhostLayer>(body_ghost).is_some(),
+            "身体 ghost 必须保留"
+        );
+        assert!(
+            world.get::<SpriteLayer>(mount_layer).is_none(),
+            "坐骑层必须随下马移除"
+        );
+        assert!(
+            world.get::<GhostLayer>(mount_ghost).is_none(),
+            "坐骑 ghost 必须随下马移除（P1 泄漏点）"
+        );
     }
 
     /// #2892：`Hidden` 只把**该对象自己**的图层设成 50% 透明。

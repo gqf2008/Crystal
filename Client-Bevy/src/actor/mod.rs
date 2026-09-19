@@ -28,7 +28,7 @@ mod systems;
 pub use components::*;
 pub(crate) use render::ActorNameLabel;
 pub use spawn::depth_z;
-pub(crate) use spawn_helpers::attach_mount_layer;
+pub(crate) use spawn_helpers::{attach_mount_layer, detach_mount_layers};
 
 use render::{actor_sprite_render, apply_poison_tint};
 use spawn::{despawn_removed_objects, spawn_demo_actors_when_ready, spawn_net_objects_when_ready};
