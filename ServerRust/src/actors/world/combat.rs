@@ -2413,7 +2413,10 @@ impl WorldActor {
             })
             .try_send()
         {
-            warn!("gate mailbox full: SendToClient dropped (session={} packet=AllowObserve)", observer_session);
+            warn!(
+                "gate mailbox full: SendToClient dropped (session={} packet=AllowObserve)",
+                observer_session
+            );
         }
 
         // Send PlayerInspect with target info
@@ -2729,7 +2732,10 @@ impl Message<RangeAttackRequest> for WorldActor {
             })
             .try_send()
         {
-            warn!("gate mailbox full: SendToClient dropped (session={} packet=RangeAttack)", msg.session_id);
+            warn!(
+                "gate mailbox full: SendToClient dropped (session={} packet=RangeAttack)",
+                msg.session_id
+            );
         }
 
         // #1560：C# DelayedAction——命中/未命中都预约到箭矢飞行后结算（HumanObject.cs:2827-2836）
@@ -3719,7 +3725,10 @@ impl Message<MagicRequest> for WorldActor {
                 .try_send()
                 .is_err()
             {
-                warn!("gate mailbox full: SendToClient dropped (session={} packet=MagicCast)", msg.session_id);
+                warn!(
+                    "gate mailbox full: SendToClient dropped (session={} packet=MagicCast)",
+                    msg.session_id
+                );
             }
         }
 
@@ -3786,7 +3795,10 @@ impl Message<MagicRequest> for WorldActor {
                     .try_send()
                     .is_err()
                 {
-                    warn!("gate mailbox full: SendToClient dropped (session={} packet=ObjectMagic)", other.session_id);
+                    warn!(
+                        "gate mailbox full: SendToClient dropped (session={} packet=ObjectMagic)",
+                        other.session_id
+                    );
                 }
             }
             // #2573：观战镜像（C# BroadcastObservePackets: ObjectMagic）
@@ -3813,7 +3825,10 @@ impl Message<MagicRequest> for WorldActor {
                     .try_send()
                     .is_err()
                 {
-                    warn!("gate mailbox full: SendToClient dropped (session={} packet=ObjectMagic)", msg.session_id);
+                    warn!(
+                        "gate mailbox full: SendToClient dropped (session={} packet=ObjectMagic)",
+                        msg.session_id
+                    );
                 }
             }
         }

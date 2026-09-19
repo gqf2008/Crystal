@@ -643,7 +643,9 @@ impl Message<ShutdownAll> for GateActor {
                             });
                         }
                     }
-                    info!("ShutdownAll: background notifications for remaining sessions dispatched");
+                    info!(
+                        "ShutdownAll: background notifications for remaining sessions dispatched"
+                    );
                 });
             }
         }
@@ -713,8 +715,7 @@ impl Message<ClientData> for GateActor {
         // 登出窗口门禁：LogOut 已受理（S.LogOutSuccess → LogOutCleanup 在途）到
         // 会话清理落地之间，除 KeepAlive 外一律拒收——否则客户端 rapid-fire 的
         // StartGame 会趁 gate 登录映射尚在、world 玩家记录已删的窗口重进游戏
-        if opcode != ClientPacketIds::KeepAlive as i16
-            && self.logging_out.contains(&msg.session_id)
+        if opcode != ClientPacketIds::KeepAlive as i16 && self.logging_out.contains(&msg.session_id)
         {
             debug!(
                 "ClientData rejected: session {} is logging out (opcode={})",
@@ -2295,8 +2296,7 @@ fn forward_range_attack(
     session_id: SessionId,
     payload: &[u8],
 ) {
-    let Some((dir, target_id, target_x, target_y)) = parse_range_attack_payload(payload)
-    else {
+    let Some((dir, target_id, target_x, target_y)) = parse_range_attack_payload(payload) else {
         return;
     };
     let world_ref = match world_ref {
@@ -6191,9 +6191,7 @@ mod tests {
                 })
                 .await;
 
-            let _ = gate_ref
-                .tell(LogOutCleanup { session_id: 2 })
-                .await;
+            let _ = gate_ref.tell(LogOutCleanup { session_id: 2 }).await;
 
             assert!(
                 !gate_ref

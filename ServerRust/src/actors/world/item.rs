@@ -3966,13 +3966,7 @@ impl Message<BuyItemRequest> for WorldActor {
             .unwrap_or("?");
         debug!(
             "BuyItem: {} bought item={} ({}) x{} for {} gold from NPC '{}' (stock={})",
-            state.name,
-            item_db.name,
-            msg.item_index,
-            msg.count,
-            total_price,
-            npc_name,
-            stock_dbg
+            state.name, item_db.name, msg.item_index, msg.count, total_price, npc_name, stock_dbg
         );
     }
 }
@@ -4039,7 +4033,13 @@ impl Message<SellItemRequest> for WorldActor {
 
         // 出售数量校验：msg.count 客户端可控 u32，`as u16` 截断（count=65536 → 0 件）
         if msg.count == 0 || msg.count > u16::MAX as u32 {
-            send_sell_item_response(&self.gate_ref, msg.session_id, msg.unique_id, msg.count, false);
+            send_sell_item_response(
+                &self.gate_ref,
+                msg.session_id,
+                msg.unique_id,
+                msg.count,
+                false,
+            );
             send_system_message(&self.gate_ref, msg.session_id, "出售数量无效");
             return;
         }
@@ -4064,7 +4064,13 @@ impl Message<SellItemRequest> for WorldActor {
                 .await
                 .unwrap_or(false);
         if !can_gain {
-            send_sell_item_response(&self.gate_ref, msg.session_id, msg.unique_id, msg.count, false);
+            send_sell_item_response(
+                &self.gate_ref,
+                msg.session_id,
+                msg.unique_id,
+                msg.count,
+                false,
+            );
             send_system_message(&self.gate_ref, msg.session_id, "金币即将达到上限，无法出售");
             return;
         }
@@ -4081,7 +4087,13 @@ impl Message<SellItemRequest> for WorldActor {
             .await
             .unwrap_or(None);
         let Some(removed_item) = removed else {
-            send_sell_item_response(&self.gate_ref, msg.session_id, msg.unique_id, msg.count, false);
+            send_sell_item_response(
+                &self.gate_ref,
+                msg.session_id,
+                msg.unique_id,
+                msg.count,
+                false,
+            );
             send_system_message(&self.gate_ref, msg.session_id, "移除物品失败");
             return;
         };
@@ -4137,7 +4149,13 @@ impl Message<SellItemRequest> for WorldActor {
                 };
                 let _ = self.deliver_system_mail_critical(mail).await;
             }
-            send_sell_item_response(&self.gate_ref, msg.session_id, msg.unique_id, msg.count, false);
+            send_sell_item_response(
+                &self.gate_ref,
+                msg.session_id,
+                msg.unique_id,
+                msg.count,
+                false,
+            );
             send_system_message(&self.gate_ref, msg.session_id, "出售失败：金币入账失败");
             return;
         }
@@ -6323,7 +6341,10 @@ mod tests {
         assert!(npc_buy_count_valid(1));
         assert!(npc_buy_count_valid(1000), "单次上限边界允许");
         assert!(!npc_buy_count_valid(1001), "超单次上限拒绝");
-        assert!(!npc_buy_count_valid(65536), "u16 截断点必须拒绝（历史漏洞）");
+        assert!(
+            !npc_buy_count_valid(65536),
+            "u16 截断点必须拒绝（历史漏洞）"
+        );
         assert!(!npc_buy_count_valid(u32::MAX), "极端值拒绝");
         // 上限必须 ≤ u16::MAX，保证后续 `msg.count as u16` 不再截断
         assert!(super::MAX_NPC_BUY_COUNT <= u16::MAX as u32);
@@ -7125,10 +7146,11 @@ mod sell_gold_cap_e2e {
             random_item_stats: Vec::new(),
             guild_buff_infos: Vec::new(),
         });
-        let _ = gate_ref.ask(SetWorldRef {
-            world_ref: world_ref.clone(),
-        })
-        .await;
+        let _ = gate_ref
+            .ask(SetWorldRef {
+                world_ref: world_ref.clone(),
+            })
+            .await;
         world_ref
     }
 
@@ -7251,7 +7273,11 @@ mod sell_gold_cap_e2e {
             let (body, mut seen) = recv_until(&mut rx1, S_SELL_ITEM, 3)
                 .await
                 .expect("SellItem 响应缺失");
-            assert_eq!(body.len(), 11, "SellItem body = [uid u64][count u16][success u8]");
+            assert_eq!(
+                body.len(),
+                11,
+                "SellItem body = [uid u64][count u16][success u8]"
+            );
             assert_eq!(
                 body[10], 0,
                 "金币将溢出时出售必须失败（success=0；旧 AddGold 截顶=1）"
@@ -7450,11 +7476,7 @@ mod buy_settle_atomic {
             .count()
     }
 
-    fn used_goods_item(
-        uid: u64,
-        item_index: i32,
-        count: u16,
-    ) -> mir2_shared::data::item::UserItem {
+    fn used_goods_item(uid: u64, item_index: i32, count: u16) -> mir2_shared::data::item::UserItem {
         mir2_shared::data::item::UserItem {
             unique_id: uid,
             item_index,

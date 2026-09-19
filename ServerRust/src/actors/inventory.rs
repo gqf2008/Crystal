@@ -1333,7 +1333,10 @@ mod tests {
         incoming.unique_id = u64::MAX - 1002; // 托管 uid
         let (_g1, merged_uid) = inv2.add_item(incoming).unwrap();
         assert_eq!(merged_uid, stack_uid, "合并必须返回目标栈 uid");
-        assert!(inv2.get_item(u64::MAX - 1002).is_none(), "入栈 uid 已被丢弃");
+        assert!(
+            inv2.get_item(u64::MAX - 1002).is_none(),
+            "入栈 uid 已被丢弃"
+        );
         assert_eq!(
             inv2.get_item(stack_uid).unwrap().count,
             18,

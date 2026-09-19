@@ -2748,7 +2748,10 @@ impl WorldActor {
             .try_send()
             .is_err()
         {
-            warn!("gate mailbox full: SendToClient dropped (session={} packet=TimeOfDay)", session_id);
+            warn!(
+                "gate mailbox full: SendToClient dropped (session={} packet=TimeOfDay)",
+                session_id
+            );
         }
     }
 
@@ -3124,7 +3127,10 @@ impl WorldActor {
             .try_send()
             .is_err()
         {
-            warn!("gate mailbox full: SendToClient dropped (session={} packet=UserLocation)", session_id);
+            warn!(
+                "gate mailbox full: SendToClient dropped (session={} packet=UserLocation)",
+                session_id
+            );
         }
         let object_id = self
             .players
@@ -3631,7 +3637,10 @@ impl WorldActor {
             })
             .try_send()
         {
-            warn!("gate mailbox full: SendToClient dropped (session={} packet=Pushed)", session_id);
+            warn!(
+                "gate mailbox full: SendToClient dropped (session={} packet=Pushed)",
+                session_id
+            );
         }
         // 他人：ObjectPushed（object_id + location + direction）
         let mut obj_body = Vec::new();
@@ -4035,7 +4044,10 @@ impl WorldActor {
             .try_send()
             .is_err()
         {
-            warn!("gate mailbox full: SendToClient dropped (session={} packet=CombineItem)", session_id);
+            warn!(
+                "gate mailbox full: SendToClient dropped (session={} packet=CombineItem)",
+                session_id
+            );
         }
     }
 
@@ -4524,7 +4536,10 @@ impl WorldActor {
                 .try_send()
                 .is_err()
             {
-                warn!("gate mailbox full: SendToClient dropped (session={} packet=InTrapRock)", session_id);
+                warn!(
+                    "gate mailbox full: SendToClient dropped (session={} packet=InTrapRock)",
+                    session_id
+                );
             }
         }
         debug!(
@@ -9188,7 +9203,10 @@ impl WorldActor {
             })
             .try_send()
         {
-            warn!("gate mailbox full: SendToClient dropped (session={} packet=Awakening)", session_id);
+            warn!(
+                "gate mailbox full: SendToClient dropped (session={} packet=Awakening)",
+                session_id
+            );
         }
     }
 }
@@ -9691,7 +9709,10 @@ impl WorldActor {
                 .try_send()
                 .is_err()
             {
-                warn!("gate mailbox full: SendToClient dropped (session={} packet=NewMagic)", session_id);
+                warn!(
+                    "gate mailbox full: SendToClient dropped (session={} packet=NewMagic)",
+                    session_id
+                );
             }
         }
     }
@@ -9717,7 +9738,10 @@ impl WorldActor {
                 .try_send()
                 .is_err()
             {
-                warn!("gate mailbox full: SendToClient dropped (session={} packet=RemoveMagic)", session_id);
+                warn!(
+                    "gate mailbox full: SendToClient dropped (session={} packet=RemoveMagic)",
+                    session_id
+                );
             }
         }
     }
@@ -10275,7 +10299,10 @@ impl Message<PlayerLeveled> for WorldActor {
                 })
                 .try_send()
             {
-                warn!("gate mailbox full: SendToClient dropped (session={} packet=ObjectLeveled)", other.session_id);
+                warn!(
+                    "gate mailbox full: SendToClient dropped (session={} packet=ObjectLeveled)",
+                    other.session_id
+                );
             }
         }
         info!(
@@ -10333,7 +10360,10 @@ pub(crate) fn send_quest_output_message(
             })
             .try_send()
         {
-            warn!("gate mailbox full: SendToClient dropped (session={} packet=SendOutputMessage)", session_id);
+            warn!(
+                "gate mailbox full: SendToClient dropped (session={} packet=SendOutputMessage)",
+                session_id
+            );
         }
     }
 }
@@ -10420,14 +10450,14 @@ fn broadcast_chat(
                     data: packet.clone(),
                 })
                 .try_send()
-        {
-            warn!(
-                "gate mailbox full: SendToClient dropped (session={} opcode={:?} err={})",
-                session_id,
-                dropped_send_opcode(&e),
-                e
-            );
-        }
+            {
+                warn!(
+                    "gate mailbox full: SendToClient dropped (session={} opcode={:?} err={})",
+                    session_id,
+                    dropped_send_opcode(&e),
+                    e
+                );
+            }
         }
     });
 }
@@ -10548,7 +10578,10 @@ async fn send_opendoor(
         .try_send()
         .is_err()
     {
-        warn!("gate mailbox full: SendToClient dropped (session={} packet=Opendoor)", session_id);
+        warn!(
+            "gate mailbox full: SendToClient dropped (session={} packet=Opendoor)",
+            session_id
+        );
     }
 }
 
@@ -10612,7 +10645,10 @@ fn send_move_item_response(
         })
         .try_send()
     {
-        warn!("gate mailbox full: SendToClient dropped (session={} packet=MoveItem)", session_id);
+        warn!(
+            "gate mailbox full: SendToClient dropped (session={} packet=MoveItem)",
+            session_id
+        );
     }
 }
 
@@ -10627,7 +10663,10 @@ fn send_use_item_response(gate_ref: &ActorRef<GateActor>, session_id: u64, uid: 
         .try_send()
         .is_err()
     {
-        warn!("gate mailbox full: SendToClient dropped (session={} packet=UseItem)", session_id);
+        warn!(
+            "gate mailbox full: SendToClient dropped (session={} packet=UseItem)",
+            session_id
+        );
     }
 }
 
@@ -11212,7 +11251,10 @@ fn send_equip_item_response(
         .try_send()
         .is_err()
     {
-        warn!("gate mailbox full: SendToClient dropped (session={} packet=EquipItem)", session_id);
+        warn!(
+            "gate mailbox full: SendToClient dropped (session={} packet=EquipItem)",
+            session_id
+        );
     }
 }
 
@@ -11239,7 +11281,10 @@ fn send_remove_item_response(
         .try_send()
         .is_err()
     {
-        warn!("gate mailbox full: SendToClient dropped (session={} packet=RemoveItem)", session_id);
+        warn!(
+            "gate mailbox full: SendToClient dropped (session={} packet=RemoveItem)",
+            session_id
+        );
     }
 }
 
@@ -11262,7 +11307,10 @@ fn send_drop_item_response(
         .try_send()
         .is_err()
     {
-        warn!("gate mailbox full: SendToClient dropped (session={} packet=DropItem)", session_id);
+        warn!(
+            "gate mailbox full: SendToClient dropped (session={} packet=DropItem)",
+            session_id
+        );
     }
 }
 
@@ -11289,7 +11337,10 @@ fn send_merge_item_response(
         .try_send()
         .is_err()
     {
-        warn!("gate mailbox full: SendToClient dropped (session={} packet=MergeItem)", session_id);
+        warn!(
+            "gate mailbox full: SendToClient dropped (session={} packet=MergeItem)",
+            session_id
+        );
     }
 }
 
@@ -11318,7 +11369,10 @@ fn send_split_item1_response(
         .try_send()
         .is_err()
     {
-        warn!("gate mailbox full: SendToClient dropped (session={} packet=SplitItem1)", session_id);
+        warn!(
+            "gate mailbox full: SendToClient dropped (session={} packet=SplitItem1)",
+            session_id
+        );
     }
 }
 
@@ -11343,7 +11397,10 @@ fn send_split_item_packet(
         .try_send()
         .is_err()
     {
-        warn!("gate mailbox full: SendToClient dropped (session={} packet=SplitItem)", session_id);
+        warn!(
+            "gate mailbox full: SendToClient dropped (session={} packet=SplitItem)",
+            session_id
+        );
     }
 }
 
@@ -11366,7 +11423,10 @@ fn send_sell_item_response(
         .try_send()
         .is_err()
     {
-        warn!("gate mailbox full: SendToClient dropped (session={} packet=SellItem)", session_id);
+        warn!(
+            "gate mailbox full: SendToClient dropped (session={} packet=SellItem)",
+            session_id
+        );
     }
 }
 
@@ -11395,7 +11455,10 @@ fn send_mail_received_packet(gate_ref: &ActorRef<GateActor>, session_id: u64, ma
         .try_send()
         .is_err()
     {
-        warn!("gate mailbox full: SendToClient dropped (session={} packet=ReceiveMail)", session_id);
+        warn!(
+            "gate mailbox full: SendToClient dropped (session={} packet=ReceiveMail)",
+            session_id
+        );
     }
 }
 
@@ -11437,7 +11500,10 @@ fn send_mail_content_packet(gate_ref: &ActorRef<GateActor>, session_id: u64, mai
         .try_send()
         .is_err()
     {
-        warn!("gate mailbox full: SendToClient dropped (session={} packet=ReceiveMail)", session_id);
+        warn!(
+            "gate mailbox full: SendToClient dropped (session={} packet=ReceiveMail)",
+            session_id
+        );
     }
 }
 
@@ -11525,7 +11591,10 @@ fn send_inspect_packet(
         .try_send()
         .is_err()
     {
-        warn!("gate mailbox full: SendToClient dropped (session={} packet=PlayerInspect)", session_id);
+        warn!(
+            "gate mailbox full: SendToClient dropped (session={} packet=PlayerInspect)",
+            session_id
+        );
     }
 }
 
@@ -11555,7 +11624,10 @@ fn send_basic_inspect_packet(
         .try_send()
         .is_err()
     {
-        warn!("gate mailbox full: SendToClient dropped (session={} packet=PlayerInspect)", session_id);
+        warn!(
+            "gate mailbox full: SendToClient dropped (session={} packet=PlayerInspect)",
+            session_id
+        );
     }
 }
 
@@ -11577,7 +11649,10 @@ fn send_quest_complete_packet(gate_ref: &ActorRef<GateActor>, session_id: u64, q
         .try_send()
         .is_err()
     {
-        warn!("gate mailbox full: SendToClient dropped (session={} packet=CompleteQuest)", session_id);
+        warn!(
+            "gate mailbox full: SendToClient dropped (session={} packet=CompleteQuest)",
+            session_id
+        );
     }
 }
 
@@ -11598,7 +11673,10 @@ fn send_hero_update_packet(gate_ref: &ActorRef<GateActor>, session_id: u64, hero
         .try_send()
         .is_err()
     {
-        warn!("gate mailbox full: SendToClient dropped (session={} packet=ChangeHero)", session_id);
+        warn!(
+            "gate mailbox full: SendToClient dropped (session={} packet=ChangeHero)",
+            session_id
+        );
     }
 }
 
@@ -11618,7 +11696,10 @@ fn send_gold_changed_packet(gate_ref: &ActorRef<GateActor>, session_id: u64, amo
         .try_send()
         .is_err()
     {
-        warn!("gate mailbox full: SendToClient dropped (session={} packet=LoseGold)", session_id);
+        warn!(
+            "gate mailbox full: SendToClient dropped (session={} packet=LoseGold)",
+            session_id
+        );
     }
 }
 
@@ -11678,7 +11759,10 @@ pub(crate) fn send_manage_heroes_packet(
         .try_send()
         .is_err()
     {
-        warn!("gate mailbox full: SendToClient dropped (session={} packet=ManageHeroes)", session_id);
+        warn!(
+            "gate mailbox full: SendToClient dropped (session={} packet=ManageHeroes)",
+            session_id
+        );
     }
 }
 
@@ -11815,7 +11899,10 @@ fn send_member_location_packet(
         .try_send()
         .is_err()
     {
-        warn!("gate mailbox full: SendToClient dropped (session={} packet=SendMemberLocation)", session_id);
+        warn!(
+            "gate mailbox full: SendToClient dropped (session={} packet=SendMemberLocation)",
+            session_id
+        );
     }
 }
 
@@ -12092,7 +12179,10 @@ async fn send_game_entry_sequence(
         })
         .try_send()
     {
-        warn!("gate mailbox full: SendToClient dropped (session={} packet=StartGame)", sid);
+        warn!(
+            "gate mailbox full: SendToClient dropped (session={} packet=StartGame)",
+            sid
+        );
     }
 
     // 2. MapChanged
@@ -12165,7 +12255,10 @@ async fn send_game_entry_sequence(
         })
         .try_send()
     {
-        warn!("gate mailbox full: SendToClient dropped (session={} packet=HealthChanged)", sid);
+        warn!(
+            "gate mailbox full: SendToClient dropped (session={} packet=HealthChanged)",
+            sid
+        );
     }
 
     // 4.5 任务日志推送（M43：C# S.ChangeQuest 语义，登录同步已接任务）
@@ -12230,7 +12323,10 @@ async fn send_game_entry_sequence(
         })
         .try_send()
     {
-        warn!("gate mailbox full: SendToClient dropped (session={} packet=UserLocation)", sid);
+        warn!(
+            "gate mailbox full: SendToClient dropped (session={} packet=UserLocation)",
+            sid
+        );
     }
 
     info!("Game entry sequence sent to session {}", sid);
@@ -13188,7 +13284,10 @@ async fn send_player_update(
         .try_send()
         .is_err()
     {
-        warn!("gate mailbox full: SendToClient dropped (session={} packet=PlayerUpdate)", session_id);
+        warn!(
+            "gate mailbox full: SendToClient dropped (session={} packet=PlayerUpdate)",
+            session_id
+        );
     }
 }
 

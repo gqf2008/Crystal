@@ -25,7 +25,10 @@ impl WorldActor {
             opcode as i16,
             &crate::actors::refine::refine_slot_ack_body(from, to, success),
         );
-        if let Err(e) = self.gate_ref.tell(SendToClient { session_id, data }).try_send()
+        if let Err(e) = self
+            .gate_ref
+            .tell(SendToClient { session_id, data })
+            .try_send()
         {
             warn!(
                 "gate mailbox full: SendToClient dropped (session={} opcode={:?} err={})",
@@ -483,7 +486,10 @@ impl Message<RefineItemRequest> for WorldActor {
             })
             .try_send()
         {
-            warn!("gate mailbox full: SendToClient dropped (session={} packet=RefineItem)", msg.session_id);
+            warn!(
+                "gate mailbox full: SendToClient dropped (session={} packet=RefineItem)",
+                msg.session_id
+            );
         }
 
         send_system_message(&self.gate_ref, msg.session_id, "精炼已开始，请稍后查看");
@@ -767,7 +773,10 @@ impl Message<AwakeningLockedItemRequest> for WorldActor {
             .try_send()
             .is_err()
         {
-            warn!("gate mailbox full: SendToClient dropped (session={} packet=AwakeningLockedItem)", msg.session_id);
+            warn!(
+                "gate mailbox full: SendToClient dropped (session={} packet=AwakeningLockedItem)",
+                msg.session_id
+            );
         }
     }
 }

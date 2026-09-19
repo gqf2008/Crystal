@@ -48,10 +48,7 @@ fn range_attack_parses_21_bytes() {
     // 多余字节忽略
     let mut extra = payload.clone();
     extra.extend_from_slice(&[0xFF, 0xFF]);
-    assert_eq!(
-        parse_range_attack_payload(&extra),
-        Some((3, 0xDEAD, -5, 7))
-    );
+    assert_eq!(parse_range_attack_payload(&extra), Some((3, 0xDEAD, -5, 7)));
 }
 
 /// 严重10：未登录会话发 NewCharacter → 拒绝并断开（会话被移除）。
@@ -80,7 +77,13 @@ async fn new_character_rejected_when_not_logged_in() {
     body.push(0);
     body.push(0);
     let data = build_packet_bytes(ClientPacketIds::NewCharacter as i16, &body);
-    gate_ref.ask(ClientData { session_id: 1, data }).await.unwrap();
+    gate_ref
+        .ask(ClientData {
+            session_id: 1,
+            data,
+        })
+        .await
+        .unwrap();
 
     let (has_session, has_username) = gate_ref
         .ask(TestProbeSession { session_id: 1 })
@@ -120,7 +123,13 @@ async fn new_character_allowed_when_logged_in() {
     body.push(0);
     body.push(0);
     let data = build_packet_bytes(ClientPacketIds::NewCharacter as i16, &body);
-    gate_ref.ask(ClientData { session_id: 1, data }).await.unwrap();
+    gate_ref
+        .ask(ClientData {
+            session_id: 1,
+            data,
+        })
+        .await
+        .unwrap();
 
     let (has_session, has_username) = gate_ref
         .ask(TestProbeSession { session_id: 1 })
@@ -140,10 +149,7 @@ async fn spawn_gate_with_account() -> (
         .await
         .expect("in-memory db");
     let account_ref = AccountActor::spawn((gate_ref.clone(), db_pool));
-    gate_ref
-        .ask(SetAccountRef { account_ref })
-        .await
-        .unwrap();
+    gate_ref.ask(SetAccountRef { account_ref }).await.unwrap();
     let (tx, mut rx) = mpsc::channel(8);
     gate_ref
         .ask(SessionCreated {
@@ -180,7 +186,13 @@ async fn change_password_rejected_when_not_logged_in() {
     let (gate_ref, _tx, mut rx) = spawn_gate_with_account().await;
 
     let data = change_password_packet("someone", "oldpass", "newpass1");
-    gate_ref.ask(ClientData { session_id: 1, data }).await.unwrap();
+    gate_ref
+        .ask(ClientData {
+            session_id: 1,
+            data,
+        })
+        .await
+        .unwrap();
 
     let got = tokio::time::timeout(Duration::from_millis(200), rx.recv()).await;
     assert!(got.is_err(), "未登录改密不得产生回包: {:?}", got.ok());
@@ -215,7 +227,13 @@ async fn change_password_allowed_for_pending_password_change() {
     let _ = tokio::time::timeout(Duration::from_millis(500), rx.recv()).await;
 
     let data = change_password_packet("mustchange", "oldpass", "newpass1");
-    gate_ref.ask(ClientData { session_id: 1, data }).await.unwrap();
+    gate_ref
+        .ask(ClientData {
+            session_id: 1,
+            data,
+        })
+        .await
+        .unwrap();
 
     // AccountActor 受理：账号不存在 → S.ChangePassword{Result=4}
     let got = tokio::time::timeout(Duration::from_millis(500), rx.recv())
@@ -247,7 +265,13 @@ async fn change_password_pending_cannot_target_other_account() {
     let _ = tokio::time::timeout(Duration::from_millis(500), rx.recv()).await;
 
     let data = change_password_packet("victim", "oldpass", "newpass1");
-    gate_ref.ask(ClientData { session_id: 1, data }).await.unwrap();
+    gate_ref
+        .ask(ClientData {
+            session_id: 1,
+            data,
+        })
+        .await
+        .unwrap();
 
     let got = tokio::time::timeout(Duration::from_millis(200), rx.recv()).await;
     assert!(got.is_err(), "待办会话改他人账号必须静默拒绝");
@@ -322,14 +346,23 @@ async fn client_data_rejected_after_session_kick() {
     cv_body.extend_from_slice(&(hash.len() as i32).to_le_bytes());
     cv_body.extend_from_slice(hash);
     let data = build_packet_bytes(ClientPacketIds::ClientVersion as i16, &cv_body);
-    gate_ref.ask(ClientData { session_id: 1, data }).await.unwrap();
+    gate_ref
+        .ask(ClientData {
+            session_id: 1,
+            data,
+        })
+        .await
+        .unwrap();
 
     // 会话仍不存在、且无任何状态变化（入口前置拒绝）
     let (has_session, has_username) = gate_ref
         .ask(TestProbeSession { session_id: 1 })
         .await
         .unwrap();
-    assert!(!has_session && !has_username, "被踢连接的 ClientData 必须被拒");
+    assert!(
+        !has_session && !has_username,
+        "被踢连接的 ClientData 必须被拒"
+    );
 }
 
 /// 踢线后门禁：被踢连接重新 Login 成功（AccountActor 视角凭据合法）时，
@@ -407,13 +440,25 @@ async fn change_password_logged_in_cannot_target_other_account() {
 
     // 已登录 acc1，却请求改 victim 的密码——必须静默拒绝
     let data = change_password_packet("victim", "oldpass", "newpass1");
-    gate_ref.ask(ClientData { session_id: 1, data }).await.unwrap();
+    gate_ref
+        .ask(ClientData {
+            session_id: 1,
+            data,
+        })
+        .await
+        .unwrap();
     let got = tokio::time::timeout(Duration::from_millis(200), rx.recv()).await;
     assert!(got.is_err(), "登录态改他人账号必须静默拒绝: {:?}", got.ok());
 
     // 改【本会话账号】仍受理（AccountActor 回包；账号未注册 → Result=4）
     let data = change_password_packet("acc1", "oldpass", "newpass1");
-    gate_ref.ask(ClientData { session_id: 1, data }).await.unwrap();
+    gate_ref
+        .ask(ClientData {
+            session_id: 1,
+            data,
+        })
+        .await
+        .unwrap();
     let got = tokio::time::timeout(Duration::from_millis(500), rx.recv())
         .await
         .expect("改本会话账号必须受理并回包")

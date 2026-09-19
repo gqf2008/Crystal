@@ -6824,7 +6824,9 @@ mod pool_fk_off_tests {
     /// 修复前 PRAGMA foreign_keys=OFF 只作用于首连接，新连接 sqlx 默认开 FK。
     #[tokio::test]
     async fn insert_mail_for_unknown_character_succeeds_on_any_pool_connection() {
-        let pool = crate::db::init_db_pool("sqlite::memory:").await.expect("init");
+        let pool = crate::db::init_db_pool("sqlite::memory:")
+            .await
+            .expect("init");
         let mail = crate::actors::mail::MailMessage {
             mail_id: crate::actors::mail::generate_mail_id(),
             sender_name: "交易系统".into(),
