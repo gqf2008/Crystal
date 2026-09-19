@@ -1,0 +1,34 @@
+# .walgit/board.toml — Crystal 的工作单元看板（walgit D1 协作层）
+#
+# 看板不是状态：它是 collab 线程集合按本文件声明的列定义折叠出的**确定性投影**。
+# 列定义随仓库版本化（改它走提交+评审）；**移动卡片 = 追加一条签名 status 条目**。
+# 契约：docs/BOARD.md。预览：`walgit collab board --format text`。
+#
+# 列谓词规则：卡片进【第一个】满足的列；字段留空 = 匹配任意；未命中任何列的线程不显示。
+
+version = 1
+
+[sort]
+by = "ts"
+direction = "desc"
+
+[[column]]
+name = "待认领"
+status = "open"
+
+[[column]]
+name = "进行中"
+status = "in-progress"
+
+[[column]]
+name = "待审"
+status = "needs-review"
+
+[[column]]
+name = "已完成"
+status = "done"
+
+# 被合并规则判为不可合并的 PR 单独列出（有 patch 的线程才可能命中）
+[[column]]
+name = "受阻"
+merge = "blocked"

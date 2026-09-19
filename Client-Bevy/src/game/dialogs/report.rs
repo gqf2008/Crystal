@@ -92,10 +92,22 @@ fn spawn_report(
     // C# ReportDialog: Prguse[1633]，Location = Center。当前数据包缺少 1633 时使用
     // 同尺寸深色兜底面板；控件仍按 C# 坐标保留，避免继续错用 Prguse[170]。
     let (px, py) = crate::game::dialogs::center_origin(PANEL_SIZE.0, PANEL_SIZE.1);
-    let bg = load_lib_image(&mut libs, &mut images, PANEL.0, PANEL.1).unwrap_or_else(|| {
+    let art = load_lib_image(&mut libs, &mut images, PANEL.0, PANEL.1);
+    let missing_art = art.is_none();
+    let bg = art.unwrap_or_else(|| {
         images.add(crate::map_renderer::make_image(vec![22, 23, 30, 255], 1, 1))
     });
     let panel = spawn_panel(&mut commands, bg, px, py, PANEL_SIZE.0, PANEL_SIZE.1, 30);
+    if missing_art {
+        // 数据包缺 `Prguse[1633]`：原来的 1x1 兜底图**实测不渲染**（实机整块背景透出世界，
+        // 看着像面板错位）。改用 `BackgroundColor` —— 与下面的消息区同一个
+        // 已被实机验证会渲染的机制。颜色取原兜底图的同值 (22,23,30)。
+        commands.entity(panel).insert(BackgroundColor(Color::srgb(
+            22.0 / 255.0,
+            23.0 / 255.0,
+            30.0 / 255.0,
+        )));
+    }
     commands
         .entity(panel)
         .insert((DialogRoot(DialogKind::Report), ReportWidget));
@@ -160,7 +172,7 @@ fn spawn_report(
                     },
                     Text::new(String::new()),
                     TextFont {
-                        font: FontSource::Handle(font.clone()),
+                        font: FontSource::Handle(cjk.clone()),
                         font_size: FontSize::Px(12.0),
                         ..default()
                     },

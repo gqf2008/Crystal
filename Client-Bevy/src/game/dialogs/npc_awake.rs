@@ -215,7 +215,7 @@ fn spawn_npc_awake(
                         },
                         Text::new(*label),
                         TextFont {
-                            font: FontSource::Handle(font.clone()),
+                            font: FontSource::Handle(cjk.clone()),
                             font_size: FontSize::Px(12.0),
                             ..default()
                         },

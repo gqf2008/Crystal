@@ -23,7 +23,7 @@ use crate::map_renderer::GameLibraries;
 use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
-use crate::ui::sprite_ui::UiFont;
+use crate::ui::sprite_ui::{shared_cjk_font, UiCjkFont, UiFont};
 use crate::ui::theme::{load_lib_image, spawn_container, spawn_label, spawn_panel};
 
 /// 屏幕尺寸（C# `Settings.ScreenWidth/ScreenHeight`，本端固定 1024x768）
@@ -184,12 +184,15 @@ fn spawn_roll(
     mut images: ResMut<Assets<Image>>,
     mut fonts: ResMut<Assets<Font>>,
     mut ui_font: ResMut<UiFont>,
+    mut cjk_font: ResMut<UiCjkFont>,
 ) {
     libs.0.ensure_initialized();
     if !ui_font.0.is_strong() {
         ui_font.0 = crate::ui::sprite_ui::load_ui_font(&mut fonts);
     }
     let font = ui_font.0.clone();
+    // 「点击继续」等提示是中文：用自带 CJK 的主字体
+    let cjk = shared_cjk_font(&mut fonts, &mut cjk_font);
 
     // bevy_ui 图案控件（骰子默认图，白 1x1 占位；roll_ui_system 每帧按相位换图 + 尺寸/位置）
     // 用 `Button` + `Interaction` 承接 C# `_image.Click`（点在控件矩形内才生效）
@@ -459,6 +462,10 @@ mod tests {
         world.insert_resource(Assets::<Image>::default());
         world.insert_resource(Assets::<Font>::default());
         world.insert_resource(crate::ui::sprite_ui::UiFont::default());
+        world.insert_resource(crate::ui::sprite_ui::UiCjkFont::default());
+        // `spawn_roll` 现在还要 `UiCjkFont`（中文提示用自带 CJK 的主字体）；
+        // 缺资源时 Bevy 会**静默跳过**整个系统，测试全绿但什么都没跑——必须显式补上。
+        world.insert_resource(crate::ui::sprite_ui::UiCjkFont::default());
         world
             .run_system_once(spawn_roll)
             .expect("spawn_roll 应成功");
@@ -561,6 +568,10 @@ mod tests {
         world.insert_resource(Assets::<Image>::default());
         world.insert_resource(Assets::<Font>::default());
         world.insert_resource(crate::ui::sprite_ui::UiFont::default());
+        world.insert_resource(crate::ui::sprite_ui::UiCjkFont::default());
+        // `spawn_roll` 现在还要 `UiCjkFont`（中文提示用自带 CJK 的主字体）；
+        // 缺资源时 Bevy 会**静默跳过**整个系统，测试全绿但什么都没跑——必须显式补上。
+        world.insert_resource(crate::ui::sprite_ui::UiCjkFont::default());
         world
             .run_system_once(spawn_roll)
             .expect("spawn_roll 应成功");
@@ -605,6 +616,7 @@ mod tests {
         world.insert_resource(Assets::<Image>::default());
         world.insert_resource(Assets::<Font>::default());
         world.insert_resource(crate::ui::sprite_ui::UiFont::default());
+        world.insert_resource(crate::ui::sprite_ui::UiCjkFont::default());
         world.insert_resource(DialogManager::default());
         world.insert_resource(NetConnection::default());
         world.insert_resource(Time::<()>::default());

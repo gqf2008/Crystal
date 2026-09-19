@@ -494,7 +494,7 @@ fn spawn_storage_dialog(
                             },
                             Text::new(String::new()),
                             TextFont {
-                                font: FontSource::Handle(font.clone()),
+                                font: FontSource::Handle(cjk.clone()),
                                 font_size: FontSize::Px(12.0),
                                 ..default()
                             },
@@ -599,7 +599,7 @@ fn spawn_storage_dialog(
                         },
                         Text::new(String::new()),
                         TextFont {
-                            font: FontSource::Handle(font.clone()),
+                            font: FontSource::Handle(cjk.clone()),
                             font_size: FontSize::Px(12.0),
                             ..default()
                         },

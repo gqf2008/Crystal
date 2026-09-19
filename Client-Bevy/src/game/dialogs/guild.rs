@@ -931,7 +931,10 @@ fn spawn_guild(
             TextInputField(2),
             crate::game::dialogs::text_input::TextInputMultiline,
             TextInputRect(GUILD_X + 13.0, GUILD_Y + 61.0, 322.0, 330.0),
-            Visibility::Hidden,
+            // **常显**（C# `Notice` 文本框是 `Visible = true` + `Enabled = false`：平时只读展示
+            // 公告正文，点「编辑」才可改）。原先写死 `Visibility::Hidden` 且**全仓无人再置显**
+            // → 公告页永远一片空白（实机截图 z_guild_notice.png，服务端已下发 13 行公告）。
+            // 页面之外不会漏出：非当前页由 `UiRootDisplay` 收成 `Display::None`。
         ))
         .with_children(|ic| {
             ic.spawn((
@@ -945,7 +948,9 @@ fn spawn_guild(
                 },
                 Text::new(String::new()),
                 TextFont {
-                    font: FontSource::Handle(font.clone()),
+                    // 公告正文是服务端下发的中文：必须用自带 CJK 的主字体，
+                    // 用 Arial 句柄会整篇豆腐（实机 fix_guild.png 就是 `□□□□`）
+                    font: FontSource::Handle(cjk.clone()),
                     font_size: FontSize::Px(12.0),
                     ..default()
                 },
@@ -1200,7 +1205,7 @@ fn spawn_guild(
                     },
                     Text::new(String::new()),
                     TextFont {
-                        font: FontSource::Handle(font.clone()),
+                        font: FontSource::Handle(cjk.clone()),
                         font_size: FontSize::Px(12.0),
                         ..default()
                     },
@@ -1236,7 +1241,7 @@ fn spawn_guild(
                     },
                     Text::new(String::new()),
                     TextFont {
-                        font: FontSource::Handle(font.clone()),
+                        font: FontSource::Handle(cjk.clone()),
                         font_size: FontSize::Px(12.0),
                         ..default()
                     },
@@ -1300,7 +1305,7 @@ fn spawn_guild(
                     },
                     Text::new(String::new()),
                     TextFont {
-                        font: FontSource::Handle(font.clone()),
+                        font: FontSource::Handle(cjk.clone()),
                         font_size: FontSize::Px(11.0),
                         ..default()
                     },
@@ -1433,7 +1438,7 @@ fn spawn_guild(
                     },
                     Text::new(String::new()),
                     TextFont {
-                        font: FontSource::Handle(font.clone()),
+                        font: FontSource::Handle(cjk.clone()),
                         font_size: FontSize::Px(11.0),
                         ..default()
                     },
@@ -1528,7 +1533,7 @@ fn spawn_guild(
                     },
                     Text::new(String::new()),
                     TextFont {
-                        font: FontSource::Handle(font.clone()),
+                        font: FontSource::Handle(cjk.clone()),
                         font_size: FontSize::Px(11.0),
                         ..default()
                     },
@@ -1801,6 +1806,9 @@ fn guild_member_rows_system(
 #[allow(clippy::type_complexity)]
 fn guild_notice_system(
     mut guild: ResMut<GuildState>,
+    // 公告正文的**唯一来源**是服务端 `GuildNotice` 的行数组；本端把它灌进输入缓冲（槽 2），
+    // 由 `TextInputDisplay(2)` 渲染。此前没有任何地方写这个缓冲 → 公告页空白。
+    mut input: ResMut<TextInputState>,
     // #2892：公告改为多行可编辑框后，翻页 = 平移显示实体（模拟 C# `ScrollToCaret()` 逐行滚动）
     mut texts: Query<&mut Node, (With<GuildNoticeText>, Without<GuildNoticeBar>)>,
     up: Query<(Entity, &Interaction), With<GuildNoticeUp>>,
@@ -1828,6 +1836,20 @@ fn guild_notice_system(
     }
     let open = guild.page == GuildPage::Notice;
     let len = guild.notice.len();
+    // 只读展示：未在编辑（没聚焦槽 2）时，把服务端公告同步进显示缓冲。
+    // 正在编辑则不动，免得把用户敲的内容冲掉。
+    if input.active != Some(2) {
+        let want = guild.notice.join(
+            "
+",
+        );
+        if input.texts.get(2).map(|t| t != &want).unwrap_or(true) {
+            if input.texts.len() <= 2 {
+                input.texts.resize(3, String::new());
+            }
+            input.texts[2] = want;
+        }
+    }
     for (e, inter) in &up {
         if edge(e, inter, &mut prev_inter) {
             // C# `NoticeUpButton.Click`：`if (NoticeScrollIndex == 0) return;`

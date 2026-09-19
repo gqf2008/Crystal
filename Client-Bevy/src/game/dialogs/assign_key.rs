@@ -236,7 +236,7 @@ fn spawn_assign_key_panel(
                         Text::new(assign_key_label(i as u8 + 1)),
                         AssignKeyFKeyText(i),
                         TextFont {
-                            font: FontSource::Handle(font.clone()),
+                            font: FontSource::Handle(cjk.clone()),
                             font_size: FontSize::Px(9.0),
                             ..default()
                         },

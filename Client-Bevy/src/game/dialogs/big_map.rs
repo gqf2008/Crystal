@@ -337,7 +337,7 @@ fn spawn_big_map(
                 },
                 Text::new(String::new()),
                 TextFont {
-                    font: FontSource::Handle(font.clone()),
+                    font: FontSource::Handle(cjk.clone()),
                     font_size: FontSize::Px(10.0),
                     ..default()
                 },
