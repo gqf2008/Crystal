@@ -924,6 +924,37 @@ fn new_char_anim_system(
 mod tests {
     use super::*;
 
+    /// #2970 同类隐患防线：`new_char_ui_system` 是全仓**剩下唯一**的「同函数双 ParamSet」
+    /// （`preview` + `texts`）。Bevy 的 B0001 豁免只在**单个** ParamSet 内部生效，两个
+    /// ParamSet 的并集一旦在某个组件上都持写访问，就会在**系统参数初始化期** panic——
+    /// 商城系统正是这样「一进游戏即崩」（#2969 / #2970）。
+    ///
+    /// 本测试跑真实的系统初始化（不构造业务数据）：将来任何字段重叠、或有人再加一个
+    /// ParamSet，都会在这里变红，而不是等上线后崩在玩家机器上。
+    ///
+    /// **红控**（复跑用）：给 `preview.p0` 加 `&mut Text2d` 并同步改解构——报错为
+    /// `error[B0001]: Query<.. &mut Text2d, (With<NcNameBox>..)> ... conflicts with a
+    /// previous system parameter`（与商城 P0 同形），本测试 FAILED；恢复即绿。
+    /// 注意这是代表性样本而非唯一路径：加参数/改 fetch/删 `Without`/拆 ParamSet 都会红。
+    #[test]
+    fn new_char_ui_system_initializes_without_query_conflict() {
+        use bevy::ecs::message::Messages;
+        use bevy::ecs::system::RunSystemOnce;
+
+        let mut world = World::new();
+        world.insert_resource(NetConnection::default());
+        world.insert_resource(NewCharState::default());
+        world.insert_resource(GameLibraries::default());
+        world.insert_resource(Assets::<Image>::default());
+        world.insert_resource(UiImageCache::default());
+        world.init_resource::<ButtonInput<MouseButton>>();
+        world.insert_resource(PinyinIme::new());
+        world.init_resource::<Messages<KeyboardInput>>();
+        world
+            .run_system_once(new_char_ui_system)
+            .expect("new_char_ui_system 初始化失败：缺资源（Skipped）或查询冲突（B0001）");
+    }
+
     /// #2892 批C：同一个对话框两种模式——英雄模式 OK 发 `C.NewHero`、
     /// 玩家模式发 `C.NewCharacter`（C# 两个实例各自的回调，`GameScene.cs:323-331`）
     #[test]
