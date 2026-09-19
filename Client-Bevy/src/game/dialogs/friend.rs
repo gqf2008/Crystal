@@ -15,7 +15,7 @@ use crate::map_renderer::GameLibraries;
 use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
-use crate::ui::sprite_ui::UiFont;
+use crate::ui::sprite_ui::{shared_cjk_font, UiCjkFont};
 use crate::ui::theme::{
     load_lib_image, spawn_close_button, spawn_container, spawn_icon_button, spawn_image,
     spawn_label, spawn_panel,
@@ -121,6 +121,7 @@ pub struct FriendPlugin;
 impl Plugin for FriendPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<FriendState>();
+        app.init_resource::<UiCjkFont>();
         app.add_systems(
             Update,
             friend_server_events.run_if(in_state(AppState::Game)),
@@ -155,13 +156,13 @@ fn spawn_friend(
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
     mut fonts: ResMut<Assets<Font>>,
-    mut ui_font: ResMut<UiFont>,
+    mut cjk_font: ResMut<UiCjkFont>,
 ) {
     libs.0.ensure_initialized();
-    if !ui_font.0.is_strong() {
-        ui_font.0 = crate::ui::sprite_ui::load_ui_font(&mut fonts);
-    }
-    let font = ui_font.0.clone();
+    // 整面板中文此前走 Arial 主字体 → 全是豆腐（实机截图：标签 `□□`/`□□□`、
+    // 行内 `bevy2char□□□□`）。列表行是**动态写入**（`text.0 = match list.get(idx)`），
+    // 必须用自带 CJK 的主字体，与其余 UI 模块一致。
+    let font = shared_cjk_font(&mut fonts, &mut cjk_font);
     let white = images.add(crate::map_renderer::make_image(
         vec![255, 255, 255, 255],
         1,
@@ -513,6 +514,38 @@ pub fn friend_whisper_command(name: &str, online: bool) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #2985 A1：好友面板文本必须用**自带 CJK 字形**的主字体。此前整面板走 Arial，
+    /// 实机截图整片豆腐（标签 `□□`/`□□□`、行内 `bevy2char□□□□`）；列表行是动态写入
+    /// （`text.0 = ...`），重排后同样不可能靠 Han 回退救回。修复前本测试 FAILED。
+    #[test]
+    fn friend_text_uses_cjk_capable_font() {
+        use bevy::ecs::system::RunSystemOnce;
+
+        let mut world = World::new();
+        world.insert_resource(GameLibraries::default());
+        world.insert_resource(Assets::<Image>::default());
+        world.insert_resource(Assets::<Font>::default());
+        world.insert_resource(UiCjkFont::default());
+        world.run_system_once(spawn_friend).unwrap();
+
+        let cjk = world.resource::<UiCjkFont>().0.clone();
+        assert!(cjk.is_strong(), "CJK 字体应已被惰性加载");
+        let mut n = 0usize;
+        // 这些面板走 `spawn_label` → bevy_ui 的 `Text`（不是 `Text2d`），
+        // 两者都用 `TextFont` 携带字体句柄，故只查后者即可全覆盖
+        let mut q = world.query::<&TextFont>();
+        for tf in q.iter(&world) {
+            if let FontSource::Handle(h) = &tf.font {
+                assert_eq!(
+                    *h, cjk,
+                    "好友面板文本必须用自带 CJK 的主字体（Arial 会豆腐）"
+                );
+                n += 1;
+            }
+        }
+        assert!(n > 0, "应至少 spawn 出若干文本实体");
+    }
 
     #[test]
     fn friend_origin_is_csharp_center() {
