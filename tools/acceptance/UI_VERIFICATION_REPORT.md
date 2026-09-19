@@ -286,7 +286,7 @@ control RPC（127.0.0.1:9000）：`dialog {kind,action}` / `dialogs`（列 Dialo
 
 | 门禁 | 结果 |
 |---|---|
-| `cargo test --lib` | **660 passed / 0 failed**（本机 Windows；同 sha 的 CI（Linux）报 659，差 1 为平台相关用例） |
+| `cargo test --lib` | **660 passed / 0 failed**（本机 Windows 运行，**无留存日志**；同 sha 的 CI（Linux）报 659，差 1 为平台相关用例。重跑 `cargo test --lib` 即得本机数字） |
 | `cargo test --test b0001_smoke` | 1 passed |
 | `cargo test --test ui_alignment` | **50 passed / 0 failed**（修前 49/1） |
 | `cargo fmt -- --check` | 干净 |
