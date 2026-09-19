@@ -426,7 +426,13 @@ pub struct StorageItem {
 }
 
 /// 行会状态
-#[derive(Resource, Default)]
+///
+/// **手写 `Default` 而不用 derive**：`derive` 会把 `show_offline` 初始化成 `false`，
+/// 而 C# 的默认是 **true**（`MembersShowOfflinesetting = true`，`GuildDialog.cs:82`）。
+/// 结果是「一开窗，离线成员全被滤掉」——2026-09-19 实机：测试行会 28 名成员只列出 1 行
+/// （唯一在线的那位），与其配套的成员翻页/滚动条行程全都归零，看着就是"面板不对"。
+/// 手写 impl 还有个附带好处：以后加字段漏写会**编译不过**，derive 不会。
+#[derive(Resource)]
 pub struct GuildState {
     pub in_guild: bool,
     pub name: String,
@@ -464,6 +470,35 @@ pub struct GuildState {
     pub notice_scroll: usize,
     /// #2537：Buff 页滚动起点（C# StartIndex，8 行/页）
     pub buff_start: usize,
+}
+
+impl Default for GuildState {
+    fn default() -> Self {
+        Self {
+            in_guild: false,
+            name: String::new(),
+            leader: String::new(),
+            notice: Vec::new(),
+            members: Vec::new(),
+            gold: 0,
+            storage_items: Vec::new(),
+            storage_received: false,
+            storage_page: 0,
+            selected_storage: None,
+            item_names: HashMap::new(),
+            invite: None,
+            selected_member: None,
+            // C# `GuildDialog.cs:82`：`public bool MembersShowOfflinesetting = true;`
+            show_offline: true,
+            rank_defs: Vec::new(),
+            buff_catalog: Vec::new(),
+            active_buffs: Vec::new(),
+            show_buff_page: false,
+            page: GuildPage::default(),
+            notice_scroll: 0,
+            buff_start: 0,
+        }
+    }
 }
 
 impl GuildState {
@@ -1083,9 +1118,11 @@ fn spawn_guild(
         // C# `MembersRanks[i]` = `MirDropDownBox` @(24, 30 + i*15) 100x14
         // （`Enabled = CanChangeRank && 成员职务下标 >= 自己`；`SelectedIndex` = 该成员职务）
         for i in 0..MEMBER_ROWS {
+            // 字体必须用 **CJK 字体**：条目是 `rank_defs` 的中文职务名（会长/副会长/成员），
+            // Arial 画中文全是豆腐（2026-09-19 实机：18 行下拉全是 `□□`）。
             spawn_dropdown_ui(
                 p,
-                &font,
+                &cjk,
                 Vec::new(),
                 None,
                 (GUILD_X, GUILD_Y + PAGE_LEFT.1),
@@ -1408,7 +1445,7 @@ fn spawn_guild(
         // C# `RanksSelectBox` @(198,36) 130x16
         spawn_dropdown_ui(
             p,
-            &font,
+            &cjk,
             vec!["会长".to_string(), "副会长".to_string(), "成员".to_string()],
             Some(0),
             (GUILD_X, GUILD_Y + 60.0),
@@ -2552,6 +2589,12 @@ fn guild_show_offline_system(
     mut guild: ResMut<GuildState>,
     btn: Query<(Entity, &Interaction), With<GuildShowOfflineBtn>>,
     mut texts: Query<&mut Text, With<GuildShowOfflineText>>,
+    // C# `MembersShowOfflineStatus`（`Prguse[1347]` 的勾）随开关显隐
+    // （`MembersShowOfflineSwitch`，`GuildDialog.cs:1649-1661`）
+    mut checks: Query<
+        &mut Visibility,
+        (With<GuildShowOfflineStatus>, Without<GuildShowOfflineBtn>),
+    >,
     mut prev_inter: Local<HashMap<Entity, Interaction>>,
 ) {
     fn edge(e: Entity, inter: &Interaction, prev: &mut HashMap<Entity, Interaction>) -> bool {
@@ -2566,12 +2609,20 @@ fn guild_show_offline_system(
             }
         }
     }
+    // 勾选框贴图（C# 勾是 `Prguse[1347]` 的独立控件，不是文字里的 ✓ —— 早先写成
+    // 文字 ✓，中文主字体没有 U+2713 就画成空白，看着永远没勾上）
+    let want_check = if guild.show_offline {
+        Visibility::Visible
+    } else {
+        Visibility::Hidden
+    };
+    for mut v in &mut checks {
+        if *v != want_check {
+            *v = want_check;
+        }
+    }
     for mut t in &mut texts {
-        t.0 = if guild.show_offline {
-            "✓显示离线".to_string()
-        } else {
-            "显示离线".to_string()
-        };
+        t.0 = "显示离线".to_string();
     }
 }
 
@@ -3468,5 +3519,35 @@ mod tests {
             Display::None,
             "隐藏页必须连带收掉 Display，才是真正藏住整棵子树"
         );
+    }
+
+    /// #2985 B2（数据复验抓出的 bug）：`GuildState::default()` 必须**显示离线成员**。
+    ///
+    /// C# `GuildDialog.cs:82` `MembersShowOfflinesetting = true`。此前的 `#[derive(Default)]`
+    /// 把 bool 初始化成 false，等价于"默认隐藏离线成员"——28 名成员的行会只列出 1 行，
+    /// 成员翻页与滚动条行程全归零（2026-09-19 实机：`scroll` 报 total=1）。
+    #[test]
+    fn guild_state_defaults_to_showing_offline_members() {
+        let st = GuildState::default();
+        assert!(st.show_offline, "C# `MembersShowOfflinesetting` 默认 true");
+
+        // 造 28 人、其中 1 人在线：默认状态下必须全部可见（否则滚动条行程是 0）
+        let mut st = GuildState::default();
+        st.in_guild = true;
+        st.members = (0..28)
+            .map(|i| GuildMember {
+                name: format!("m{i}"),
+                rank: 2,
+                rank_index: 2,
+                online: i == 0,
+            })
+            .collect();
+        assert_eq!(
+            st.visible_member_indices().len(),
+            28,
+            "默认应显示全部成员（含离线）"
+        );
+        st.show_offline = false;
+        assert_eq!(st.visible_member_indices().len(), 1, "关掉后只剩在线的那位");
     }
 }
