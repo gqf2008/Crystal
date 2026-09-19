@@ -6,11 +6,15 @@
 - PR 合并前需完成验证：`cargo check` 通过 + 相关测试通过（客户端 `Client-Bevy`：`cargo test`；服务端 `ServerRust`：`cargo test`）。
   **服务端另需 `cargo fmt -- --check` 与 `cargo clippy --lib -- -D warnings`**（2026-09-19 补：CI 的 ServerRust job 就按这四步跑，而这四项此前不在本清单里，导致 fmt/clippy 的债攒到 CI 连续 27 次红才被发现）。
 - PR 合并前需经 review（人工或协作 agent）确认通过。
-- **`gh pr merge --admin` 只用于绕过审批位（作者不能自批），不用于绕过红灯。**
-  合并前必须核对该 PR **自身**那次 `pull_request` run 的结论——`gh pr checks <n>`，或 `gh run list --commit <head_sha> --json databaseId,event,conclusion`（认 `event == "pull_request"`）。
-  **红了就不合**：先修红，或本地按 CI 全步骤补齐门禁。
-  （2026-09-19 补：商城那个「一进游戏即崩」的 B0001 P0 就是这样进 master 的——该 PR 自身的 CI 从合并前约 8 小时起一路红，`--admin` 把红线一起绕过了；见 `LESSON_admin合并绕过红灯_必先查该PR自身run结论`。）
-  注意区分：`RULE_合并规范` 的「CI 不作为常规合并前置」指**不必等 CI 绿**，不等于**可以红着合**。
+- **合并前必须核对该 PR 自身那次 `pull_request` run 的结论；红了就不合。**
+  - 查法：`gh run list --commit <40 位完整 head_sha> --json name,event,conclusion`（认 `event == "pull_request"`）。
+    **同一 SHA 会有多行**——`CI` 与 `Build & Release` 各一条，必须按 `name` 分辨，否则可能读到 `Build & Release` 的 success 而误判；
+    **短 SHA 会静默返回 `[]`**，别把它当成"没有红灯"。也可用 `gh pr checks <n>`（红 exit 1 / pending 8 / 全绿 0）。
+  - **该 head SHA 的 run 尚无结论（pending）时**，以**最近一次有结论**的 `pull_request` run 为准；**pending 不豁免**（本次事故的合并时刻正是 pending），绿也不强制等待（与 `RULE_CI常规以本地门禁为准` 一致）。
+  - 红了就**先修红**，或本地按 CI 全步骤补齐门禁。注意 CI 跑的是 `cargo test`（**含 `tests/` 集成测试**）——`cargo test --lib` 拦不住 `b0001_smoke` 这类。
+  - 本仓 master **未配置 required status checks**（`enforcement_level=off`），**红灯不会自动拦人**；`gh pr merge --admin` 按设计会绕过审批位与 required checks，**它是为「作者不能自批」准备的，不是「跳过检查」的快捷方式**。删掉 `--admin` 也不会让 CI 变成闸门——闸门只有"人核对"这一道。
+  - 边界：`RULE_合并规范` 的「CI 不作为常规合并前置」指**不必等 CI 绿**，不等于**可以红着合**。
+  - （2026-09-19 补：商城那个「一进游戏即崩」的 B0001 P0 就是这样进 master 的——该 PR 自身的 `pull_request` CI 自首推起一路红（合并前约 8 小时即红），三次 push 无一绿，合并时无人核对该结论。见 `LESSON_admin合并绕过红灯_必先查该PR自身run结论`。）
 - PR 描述需写明：改了什么、为什么改、验证了什么。
 - 多个 agent 协作时，各自在独立分支/PR 上工作，避免互相覆盖未提交改动。
 
