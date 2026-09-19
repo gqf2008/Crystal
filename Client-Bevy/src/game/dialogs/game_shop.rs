@@ -544,7 +544,7 @@ fn spawn_game_shop(
                     },
                     Text::new(String::new()),
                     TextFont {
-                        font: FontSource::Handle(font.clone()),
+                        font: FontSource::Handle(cjk.clone()),
                         font_size: FontSize::Px(12.0),
                         ..default()
                     },

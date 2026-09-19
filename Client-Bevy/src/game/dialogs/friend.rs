@@ -221,11 +221,19 @@ fn spawn_friend(
             }
         }
 
-        // 页签（好友/黑名单）@(18,18)/(70,18)
-        spawn_label(p, &font, "好友", 18.0, 18.0, 12.0, Color::WHITE, 10)
-            .insert((Button, FriendTabFriend));
-        spawn_label(p, &font, "黑名单", 70.0, 18.0, 12.0, Color::WHITE, 10)
-            .insert((Button, FriendTabBlock));
+        // 页签 = **贴图按钮**（C# `FriendLabel` = `Title[163]` @(10,34)、
+        // `BlacklistLabel` = `Title[167]` @(128,34)，精灵均为 124x24）。
+        // 本端原先画的是「好友」「黑名单」两个**文字**标签 @(18,18)/(70,18)：
+        // 位置既不对（C# 在 y=34），又正好压在面板美术自带的 `FRIEND` 标题上（实机截图 z_friend.png）。
+        if let Some(h) = load_lib_image(&mut libs, &mut images, LibraryName::Title, 163) {
+            // C# 是 `MirImageControl`（无 hover/pressed 帧）→ 三帧同图
+            spawn_icon_button(p, h.clone(), h.clone(), h, 10.0, 34.0, 124.0, 24.0, 10)
+                .insert((Button, FriendTabFriend));
+        }
+        if let Some(h) = load_lib_image(&mut libs, &mut images, LibraryName::Title, 167) {
+            spawn_icon_button(p, h.clone(), h.clone(), h, 128.0, 34.0, 124.0, 24.0, 10)
+                .insert((Button, FriendTabBlock));
+        }
         // 好友列表（10 行，可点击 Button + 文本子节点）
         for i in 0..10usize {
             spawn_container(p, 18.0, 40.0 + i as f32 * 20.0, 190.0, 18.0, 9)

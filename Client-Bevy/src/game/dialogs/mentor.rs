@@ -134,9 +134,11 @@ fn spawn_mentor(
         .insert((DialogRoot(DialogKind::Mentor), MentorWidget));
 
     commands.entity(panel).with_children(|p| {
-        // 标题 Title[51] @(18,8)
+        // 标题 Title[51] @(18,8)：**按艺术尺寸 68x15 画**（C# `MirImageControl` 的
+        // `DrawControl` 走 `Library.Draw(Index, ...)`，显式 `Size` 只影响命中）。
+        // 本端原先按 103x17 画 → 标题被横向拉伸 51%。
         if let Some(h) = load_lib_image(&mut libs, &mut images, LibraryName::Title, 51) {
-            spawn_image(p, h, 18.0, 8.0, 103.0, 17.0, 9);
+            spawn_image(p, h, 18.0, 8.0, 68.0, 15.0, 9);
         }
         // 关闭 Prguse2[360/361/362] @(219,3)
         if let Some(mut btn) =
@@ -144,18 +146,16 @@ fn spawn_mentor(
         {
             btn.insert(MentorClose);
         }
-        // 信息行（标题 + 师父 + 徒弟 + 经验/允许状态）@ C# 区块。
-        for (i, (x, y)) in [
-            (10.0, 10.0),
-            (15.0, 41.0),
-            (15.0, 83.0),
-            (15.0, 112.0),
-            (15.0, 130.0),
-        ]
-        .into_iter()
-        .enumerate()
+        // 信息行（师父 + 徒弟 + 经验/允许状态）@ C# 区块。
+        //
+        // **不再建 `MentorLine(0)`**：C# 的标题就是美术 `Title[51] @(18,8)`，没有标题文字；
+        // 本端额外画了一行「师徒」@(10,10)，正好压在美术标题上（实机截图 z_mentor.png 的
+        // `师徒MENTOR` 重叠）。行号保留下标语义，只是不再 spawn 第 0 行。
+        for (i, (x, y)) in [(15.0, 41.0), (15.0, 83.0), (15.0, 112.0), (15.0, 130.0)]
+            .into_iter()
+            .enumerate()
         {
-            spawn_label(p, &cjk, "", x, y, 12.0, Color::WHITE, 9).insert(MentorLine(i));
+            spawn_label(p, &cjk, "", x, y, 12.0, Color::WHITE, 9).insert(MentorLine(i + 1));
         }
         // 允许拜师（Prguse[114/115/116] @(30,178)）、添加（Title[213/214/215] @(60,178)）、
         // 解除（Title[216/217/218] @(135,178)）
@@ -216,7 +216,7 @@ fn spawn_mentor(
                     },
                     Text::new(String::new()),
                     TextFont {
-                        font: FontSource::Handle(font.clone()),
+                        font: FontSource::Handle(cjk.clone()),
                         font_size: FontSize::Px(12.0),
                         ..default()
                     },
