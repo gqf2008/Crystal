@@ -19,6 +19,7 @@ use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
 use crate::ui::sprite_ui::UiFont;
+use crate::ui::sprite_ui::{shared_cjk_font, UiCjkFont};
 use crate::ui::theme::{
     load_lib_image, spawn_close_button, spawn_container, spawn_icon_button, spawn_image,
     spawn_label, spawn_panel,
@@ -134,6 +135,7 @@ pub struct GroupPlugin;
 
 impl Plugin for GroupPlugin {
     fn build(&self, app: &mut App) {
+        app.init_resource::<UiCjkFont>();
         app.init_resource::<GroupState>();
         app.add_systems(Update, group_server_events.run_if(in_state(AppState::Game)));
         app.add_systems(OnEnter(AppState::Game), spawn_group);
@@ -166,12 +168,15 @@ fn spawn_group(
     mut images: ResMut<Assets<Image>>,
     mut fonts: ResMut<Assets<Font>>,
     mut ui_font: ResMut<UiFont>,
+    mut cjk_font: ResMut<UiCjkFont>,
 ) {
     libs.0.ensure_initialized();
     if !ui_font.0.is_strong() {
         ui_font.0 = crate::ui::sprite_ui::load_ui_font(&mut fonts);
     }
     let font = ui_font.0.clone();
+    // 可能含中文（动态填充/服务端文案）：用自带 CJK 的主字体（Arial handle 画中文是豆腐）
+    let cjk = shared_cjk_font(&mut fonts, &mut cjk_font);
     let white = images.add(crate::map_renderer::make_image(
         vec![255, 255, 255, 255],
         1,
@@ -307,7 +312,7 @@ fn spawn_group(
                     crate::game::dialogs::text_input::TextInputDisplay(32),
                 ));
             });
-        spawn_label(p, &font, "确认", 150.0, 180.0, 12.0, Color::WHITE, 10)
+        spawn_label(p, &cjk, "确认", 150.0, 180.0, 12.0, Color::WHITE, 10)
             .insert((Button, GroupDelOk));
         // 邀请输入框（TextInput id 33）+ 确认
         spawn_container(p, 25.0, 180.0, 120.0, 20.0, 10)
@@ -336,7 +341,7 @@ fn spawn_group(
                     crate::game::dialogs::text_input::TextInputDisplay(33),
                 ));
             });
-        spawn_label(p, &font, "确认", 150.0, 180.0, 12.0, Color::WHITE, 10)
+        spawn_label(p, &cjk, "确认", 150.0, 180.0, 12.0, Color::WHITE, 10)
             .insert((Button, GroupAddOk));
     });
 
@@ -350,7 +355,7 @@ fn spawn_group(
             .entity(inv)
             .insert((DialogRoot(DialogKind::Group), GroupInviteWidget));
         commands.entity(inv).with_children(|ip| {
-            spawn_label(ip, &font, "", 35.0, 35.0, 12.0, Color::WHITE, 9).insert(GroupInviteText);
+            spawn_label(ip, &cjk, "", 35.0, 35.0, 12.0, Color::WHITE, 9).insert(GroupInviteText);
             if let (Some(n), Some(h), Some(pr)) = (
                 load_lib_image(&mut libs, &mut images, LibraryName::Title, 206),
                 load_lib_image(&mut libs, &mut images, LibraryName::Title, 207),

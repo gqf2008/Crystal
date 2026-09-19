@@ -139,6 +139,7 @@ pub struct RelationshipPlugin;
 
 impl Plugin for RelationshipPlugin {
     fn build(&self, app: &mut App) {
+        app.init_resource::<UiCjkFont>();
         app.init_resource::<RelationshipState>();
         app.add_systems(
             Update,
@@ -287,8 +288,7 @@ fn spawn_relationship(
         ));
         commands.entity(inv).with_children(|ip| {
             // Label（C# (35,35)，390x110）
-            spawn_label(ip, &font, "", 35.0, 35.0, 12.0, Color::WHITE, 9)
-                .insert(MarriageInviteText);
+            spawn_label(ip, &cjk, "", 35.0, 35.0, 12.0, Color::WHITE, 9).insert(MarriageInviteText);
             // Yes Title[206/207/208]（C# (260,157)）
             if let (Some(n), Some(h), Some(pr)) = (
                 load_lib_image(&mut libs, &mut images, LibraryName::Title, 206),

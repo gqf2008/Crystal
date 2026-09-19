@@ -116,6 +116,7 @@ pub struct NpcAwakePlugin;
 
 impl Plugin for NpcAwakePlugin {
     fn build(&self, app: &mut App) {
+        app.init_resource::<UiCjkFont>();
         app.init_resource::<NpcAwakeState>();
         app.add_systems(OnEnter(AppState::Game), spawn_npc_awake);
         app.add_systems(OnExit(AppState::Game), cleanup_npc_awake);
@@ -184,7 +185,7 @@ fn spawn_npc_awake(
         // 觉醒类型下拉（C# SelectAwakeType (35,141)）
         spawn_dropdown_ui(
             p,
-            &font,
+            &cjk,
             vec!["攻".to_string(), "魔".to_string(), "道".to_string()],
             None,
             (0.0, 0.0),

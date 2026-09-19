@@ -770,6 +770,7 @@ pub struct HudPlugin;
 
 impl Plugin for HudPlugin {
     fn build(&self, app: &mut App) {
+        app.init_resource::<UiCjkFont>();
         // #2633 批次4：原 hud_server_events（518 行上帝系统）已按域拆为 4 个写系统——
         // player_vitals_events / player_status_events（game/player_state.rs）、
         // inventory_events（dialogs/inventory.rs）、belt_restock_events（dialogs/potion_belt.rs），
@@ -1155,7 +1156,7 @@ fn spawn_hud(
     let level_y = panel_y + HERO_NAME_BOX_POS.1 + HERO_LEVEL_POS.1;
     let e = crate::ui::sprite_ui::spawn_ui_text_anchored(
         &mut commands,
-        &font,
+        &cjk,
         "",
         Anchor::TOP_CENTER,
         level_x,
@@ -1171,7 +1172,7 @@ fn spawn_hud(
     let name_y = panel_y + HERO_NAME_BOX_POS.1 + HERO_NAME_POS.1;
     let e = crate::ui::sprite_ui::spawn_ui_text_anchored(
         &mut commands,
-        &font,
+        &cjk,
         "",
         Anchor::TOP_CENTER,
         name_x,
@@ -1231,7 +1232,7 @@ fn spawn_hud(
     ] {
         let e = spawn_ui_text(
             &mut commands,
-            &font,
+            &cjk,
             "",
             panel_x + pos.0,
             panel_y + pos.1,
@@ -1426,7 +1427,7 @@ fn spawn_hud(
     }
     let death_txt = spawn_ui_text(
         &mut commands,
-        &font,
+        &cjk,
         "你已经死亡，是否要在城镇复活？",
         319.0,
         324.0,

@@ -124,6 +124,7 @@ pub struct NpcGoodsPlugin;
 
 impl Plugin for NpcGoodsPlugin {
     fn build(&self, app: &mut App) {
+        app.init_resource::<UiCjkFont>();
         app.init_resource::<NpcGoodsState>();
         app.add_systems(
             Update,
@@ -211,7 +212,7 @@ fn spawn_npc_goods(
         // 8 行商品（#110：左侧通用 UiItemCell 图标 + 右侧名称/价格文本，对齐 C# MirGoodsCell）
         for i in 0..8usize {
             let y = 16.0 + i as f32 * 22.0;
-            spawn_item_cell_ui(p, &mut images, &font, 10.0, y, 32.0, 20.0, 9, i)
+            spawn_item_cell_ui(p, &mut images, &cjk, 10.0, y, 32.0, 20.0, 9, i)
                 .insert(NpcGoodsCell(i));
             spawn_label(p, &cjk, "", 48.0, y + 2.0, 12.0, Color::WHITE, 9).insert(NpcGoodsLine(i));
         }

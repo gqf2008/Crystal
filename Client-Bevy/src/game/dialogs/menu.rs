@@ -14,6 +14,7 @@ use crate::map_renderer::GameLibraries;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
 use crate::ui::sprite_ui::UiFont;
+use crate::ui::sprite_ui::{shared_cjk_font, UiCjkFont};
 use crate::ui::theme::{load_lib_image, spawn_icon_button, spawn_image, spawn_label, spawn_panel};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -185,6 +186,7 @@ pub struct MenuDialogPlugin;
 
 impl Plugin for MenuDialogPlugin {
     fn build(&self, app: &mut App) {
+        app.init_resource::<UiCjkFont>();
         app.add_systems(OnEnter(AppState::Game), spawn_menu_dialog);
         app.add_systems(OnExit(AppState::Game), cleanup_menu_dialog);
         app.add_systems(Update, (menu_ui_system,).run_if(in_state(AppState::Game)));
@@ -204,12 +206,15 @@ fn spawn_menu_dialog(
     mut fonts: ResMut<Assets<Font>>,
     mut ui_font: ResMut<UiFont>,
     kb: Res<KeyboardState>,
+    mut cjk_font: ResMut<UiCjkFont>,
 ) {
     libs.0.ensure_initialized();
     if !ui_font.0.is_strong() {
         ui_font.0 = crate::ui::sprite_ui::load_ui_font(&mut fonts);
     }
     let font = ui_font.0.clone();
+    // 可能含中文（动态填充/服务端文案）：用自带 CJK 的主字体（Arial handle 画中文是豆腐）
+    let cjk = shared_cjk_font(&mut fonts, &mut cjk_font);
 
     // 背景 Title[567]（C# Location=(ScreenWidth-Width, MainDialog.Y-Height+15) → (988,349)）
     let Some(bg) = load_lib_image(&mut libs, &mut images, LibraryName::Title, 567) else {
@@ -265,7 +270,7 @@ fn spawn_menu_dialog(
     commands.entity(confirm).with_children(|p| {
         spawn_label(
             p,
-            &font,
+            &cjk,
             "确定要退出游戏吗？",
             18.0,
             12.0,
@@ -280,7 +285,7 @@ fn spawn_menu_dialog(
         ) {
             spawn_icon_button(p, n, h, pr, 28.0, 56.0, 76.0, 25.0, 10).insert(MenuExitYes);
         }
-        spawn_label(p, &font, "确定", 50.0, 60.0, 12.0, Color::WHITE, 11);
+        spawn_label(p, &cjk, "确定", 50.0, 60.0, 12.0, Color::WHITE, 11);
         if let (Some(n), Some(h), Some(pr)) = (
             load_lib_image(&mut libs, &mut images, LibraryName::Title, 210),
             load_lib_image(&mut libs, &mut images, LibraryName::Title, 211),
@@ -288,7 +293,7 @@ fn spawn_menu_dialog(
         ) {
             spawn_icon_button(p, n, h, pr, 118.0, 56.0, 76.0, 25.0, 10).insert(MenuExitNo);
         }
-        spawn_label(p, &font, "取消", 148.0, 60.0, 12.0, Color::WHITE, 11);
+        spawn_label(p, &cjk, "取消", 148.0, 60.0, 12.0, Color::WHITE, 11);
     });
 }
 

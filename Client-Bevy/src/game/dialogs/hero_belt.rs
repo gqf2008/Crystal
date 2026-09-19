@@ -29,6 +29,7 @@ use crate::map_renderer::GameLibraries;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
 use crate::ui::sprite_ui::UiFont;
+use crate::ui::sprite_ui::{shared_cjk_font, UiCjkFont};
 use crate::ui::theme::{
     load_lib_image, spawn_container, spawn_icon_button, spawn_image, spawn_label, spawn_panel,
     ImageButton,
@@ -119,6 +120,7 @@ pub struct HeroBeltPlugin;
 
 impl Plugin for HeroBeltPlugin {
     fn build(&self, app: &mut App) {
+        app.init_resource::<UiCjkFont>();
         app.init_resource::<HeroBeltVertical>();
         app.init_resource::<HeroBeltVisible>();
         app.init_resource::<HeroBeltUseArmed>();
@@ -150,12 +152,15 @@ fn spawn_hero_belt(
     mut fonts: ResMut<Assets<Font>>,
     mut ui_font: ResMut<UiFont>,
     kb: Res<crate::game::dialogs::keyboard_layout::KeyboardState>,
+    mut cjk_font: ResMut<UiCjkFont>,
 ) {
     libs.0.ensure_initialized();
     if !ui_font.0.is_strong() {
         ui_font.0 = crate::ui::sprite_ui::load_ui_font(&mut fonts);
     }
     let font = ui_font.0.clone();
+    // 可能含中文（动态填充/服务端文案）：用自带 CJK 的主字体（Arial handle 画中文是豆腐）
+    let cjk = shared_cjk_font(&mut fonts, &mut cjk_font);
 
     // 背景 Prguse[1921]（横 100x38 @ (475,618)）/ 纵向 Prguse[1943]（40x101 @ (0,446)）
     let Some(bg) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 1921) else {
@@ -216,7 +221,7 @@ fn spawn_hero_belt(
                     3,
                 )
                 .insert((HeroBeltWidget, HeroBeltIcon(i), Visibility::Hidden));
-                spawn_label(c, &font, "", 16.0, 20.0, 10.0, Color::WHITE, 3).insert((
+                spawn_label(c, &cjk, "", 16.0, 20.0, 10.0, Color::WHITE, 3).insert((
                     HeroBeltWidget,
                     HeroBeltCount(i),
                     Visibility::Hidden,
@@ -226,7 +231,7 @@ fn spawn_hero_belt(
         for i in 0..BELT_SLOTS {
             spawn_label(
                 p,
-                &font,
+                &cjk,
                 &(i + 7).to_string(),
                 8.0 + i as f32 * CELL_SPACING,
                 2.0,

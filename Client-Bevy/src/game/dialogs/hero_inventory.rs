@@ -107,6 +107,7 @@ pub struct HeroAutoPotPending(pub Option<u8>);
 
 impl Plugin for HeroInventoryPlugin {
     fn build(&self, app: &mut App) {
+        app.init_resource::<UiCjkFont>();
         app.init_resource::<HeroAutoPotPending>();
         app.add_systems(OnEnter(AppState::Game), spawn_hero_inventory);
         app.add_systems(OnExit(AppState::Game), cleanup_hero_inventory);
