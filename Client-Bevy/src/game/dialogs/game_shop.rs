@@ -678,11 +678,14 @@ fn game_shop_ui_system(
         Query<(&mut Text, &GameShopCellGold)>,
         Query<(&mut Text, &GameShopCellCredit)>,
         Query<(&mut Text, &GameShopCellStock)>,
-        Query<(
-            &mut Text,
-            Option<&GameShopCellCount>,
-            Option<&GameShopCellQty>,
-        )>,
+        Query<
+            (
+                &mut Text,
+                Option<&GameShopCellCount>,
+                Option<&GameShopCellQty>,
+            ),
+            Or<(With<GameShopCellCount>, With<GameShopCellQty>)>,
+        >,
         Query<(&mut Text, &GameShopCat)>,
         Query<&mut Text, With<GameShopPageLabel>>,
     )>,
@@ -826,6 +829,11 @@ fn game_shop_ui_system(
     // 数量/单价两文本合并为一查询：`&mut Text` 查询必须全部塞进**单个** ParamSet
     // 才免 B0001，而 ParamSet 上限 8 个（见系统参数处注释）
     for (mut text, cnt, qty) in &mut ui_set.p5() {
+        // spawn 侧不变量：数量与单价文本挂**不同实体**（否则 else-if 会让单价永不刷新）
+        debug_assert!(
+            !(cnt.is_some() && qty.is_some()),
+            "GameShopCellCount 与 GameShopCellQty 不得同挂一个实体"
+        );
         if let Some(c) = cnt {
             text.0 = match cell_item(&shop, &filtered, c.0) {
                 Some(it) => it.count.to_string(),
