@@ -775,8 +775,10 @@ fn spawn_guild(
             visible: MEMBER_ROWS,
             total: 0,
             offset: 0,
-            step: 3,
-            track_rel: (337.0, 1.0, 16.0, 331.0),
+            // C# `MembersPositionBar` @(337,16)，clamp y ∈ [16, DownButton.Y-20]
+            // （`GuildDialog.cs:441-450/1665-1683`）→ 行程 16..298、滑块高 20、轨道高 302
+            step: 1,
+            track_rel: (337.0, 16.0, 16.0, 302.0),
             thumb: None,
             z: 8,
         },
@@ -1804,10 +1806,7 @@ fn guild_ui_system(
     btns: Query<(Entity, &Interaction, &GuildBtn)>,
     mouse: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window>,
-    mut widgets: Query<
-        &mut Visibility,
-        (With<GuildWidget>, Without<GuildCreateBtn>),
-    >,
+    mut widgets: Query<&mut Visibility, (With<GuildWidget>, Without<GuildCreateBtn>)>,
     mut members_scroll: Query<&mut UiScrollList, With<GuildMembersScroll>>,
     mut lines: Query<(&mut Text, &mut TextColor, &GuildLine)>,
     // #2892 批B 单元7：Buff 槽行与剩余点数（C# `BuffPage` 的 `GuildBuffButton[i].Name`/`PointsLeft`）
@@ -1980,11 +1979,7 @@ fn guild_ui_system(
         }
     }
     // 渲染（#89 成员列表支持滚轮滚动）
-    let scroll_offset = members_scroll
-        .iter()
-        .next()
-        .map(|s| s.offset)
-        .unwrap_or(0);
+    let scroll_offset = members_scroll.iter().next().map(|s| s.offset).unwrap_or(0);
     // #1348：可见成员下标（过滤离线）
     let visible = guild.visible_member_indices();
     // #2892 批B 单元7：BuffPage 的 8 个槽 + 剩余点数（C# `GuildBuffButton[i].Name` / `PointsLeft`）

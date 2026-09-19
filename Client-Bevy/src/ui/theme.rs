@@ -1209,6 +1209,72 @@ mod tests {
         queue.apply(&mut world);
     }
 
+    /// #2968 审查阻塞项回归：**隐藏列表不得吞滚轮**——行会成员页与仓库页两个
+    /// UiScrollList 屏幕区域重叠、z 相同时，靠可见性区分（C# 按页分发：隐藏页
+    /// 收不到 MouseWheel）。阳性对照：去掉 `shown()` 门控 → z 更高的隐藏列表
+    /// 会被选中，本测试 FAILED。
+    #[test]
+    fn scroll_list_hidden_list_never_takes_wheel() {
+        use bevy::ecs::message::Messages;
+        use bevy::ecs::system::RunSystemOnce;
+
+        let mut world = World::new();
+        world.init_resource::<Messages<MouseWheel>>();
+        world.init_resource::<ButtonInput<MouseButton>>();
+        world.init_resource::<crate::ui::scroll_list::ScrollDrag>();
+
+        let list = |z: i32| UiScrollList {
+            rect_rel: (0.0, 0.0, 50.0, 50.0),
+            row_h: 10.0,
+            visible: 5,
+            total: 20,
+            offset: 0,
+            step: 1,
+            track_rel: (50.0, 0.0, 10.0, 50.0),
+            thumb: None,
+            z,
+        };
+        // 隐藏列表 z 更高（若不跳过可见性，命中优先选它）
+        let hidden = world
+            .spawn((
+                abs_node(0.0, 0.0, Some(200.0), Some(200.0)),
+                InheritedVisibility::HIDDEN,
+                list(9),
+            ))
+            .id();
+        let shown = world
+            .spawn((
+                abs_node(0.0, 0.0, Some(200.0), Some(200.0)),
+                InheritedVisibility::VISIBLE,
+                list(1),
+            ))
+            .id();
+
+        let mut window = Window::default();
+        window.set_cursor_position(Some(Vec2::new(10.0, 10.0)));
+        let win = world.spawn(window).id();
+        world.write_message(MouseWheel {
+            unit: MouseScrollUnit::Line,
+            x: 0.0,
+            y: 1.0,
+            window: win,
+            phase: bevy::input::touch::TouchPhase::Moved,
+        });
+        world
+            .run_system_once(scroll_list_ui_system)
+            .expect("滚动系统应可运行");
+        assert_eq!(
+            world.get::<UiScrollList>(hidden).map(|l| l.offset),
+            Some(0),
+            "隐藏列表不得接收滚轮（行会成员/仓库页重叠场景）"
+        );
+        assert_eq!(
+            world.get::<UiScrollList>(shown).map(|l| l.offset),
+            Some(1),
+            "可见列表必须正常滚动"
+        );
+    }
+
     /// bug5 滚动条审计回归：列表挂在**页面容器**（面板子节点）时，滚轮命中必须沿
     /// ChildOf 链累加各层 Node.left/top 得到屏幕原点（C# 中控件 Location 相对父级、
     /// 命中判定用屏幕坐标）。否则页级列表（行会成员页/商城分类等）滚轮失效。
@@ -1234,6 +1300,8 @@ mod tests {
             .spawn((
                 abs_node(10.0, 20.0, Some(200.0), Some(200.0)),
                 ChildOf(root),
+                // 裸测试世界无可见性传播系统：Node 派生组件默认 HIDDEN，须显式可见
+                InheritedVisibility::VISIBLE,
                 UiScrollList {
                     rect_rel: (0.0, 0.0, 50.0, 50.0),
                     row_h: 10.0,
@@ -1291,7 +1359,6 @@ mod tests {
             "光标在页面矩形外时不得滚动页级列表"
         );
     }
-
 }
 
 // ============================================================================
@@ -1388,6 +1455,10 @@ pub fn scroll_list_ui_system(
     mut thumb_write: Query<(&ChildOf, &mut Node, &UiScrollThumb)>,
     parents: Query<&ChildOf>,
     node_read: Query<&Node, Without<UiScrollThumb>>,
+    // 隐藏列表不参与滚轮/滑块拖动命中：列表挂在隐藏页（行会成员页/仓库页）
+    // 或已关窗口上时不得吞输入；两页同坐标重叠时按此硬性区分。
+    // 缺组件（极简测试 App 无可见性传播）按「可见」处理。
+    lists_vis: Query<&InheritedVisibility, Without<UiScrollThumb>>,
 ) {
     let Ok(window) = windows.single() else {
         return;
@@ -1419,6 +1490,11 @@ pub fn scroll_list_ui_system(
         (x, y)
     }
 
+    // 列表是否可见（含祖先传播）：隐藏列表跳过命中
+    fn shown(e: Entity, vis: &Query<&InheritedVisibility, Without<UiScrollThumb>>) -> bool {
+        vis.get(e).map(|v| v.get()).unwrap_or(true)
+    }
+
     // 找某列表的子滑块（UiScrollThumb 且 parent == 列表实体）
     fn list_thumb(e: Entity, thumbs: &Query<(&ChildOf, &UiScrollThumb)>) -> Option<Entity> {
         thumbs
@@ -1430,6 +1506,9 @@ pub fn scroll_list_ui_system(
     // 滑块拖动（C# MirScrollBar movable）
     if mouse.just_pressed(MouseButton::Left) && drag.dragging.is_none() {
         for (e, list) in lists.iter() {
+            if !shown(e, &lists_vis) {
+                continue;
+            }
             let Some(thumb) = list_thumb(e, &thumb_read) else {
                 continue;
             };
@@ -1460,7 +1539,7 @@ pub fn scroll_list_ui_system(
             drag.dragging = None;
         } else {
             for (e, mut list) in lists.iter_mut() {
-                if list_thumb(e, &thumb_read) != Some(thumb_e) {
+                if !shown(e, &lists_vis) || list_thumb(e, &thumb_read) != Some(thumb_e) {
                     continue;
                 }
                 let (_, oy) = origin(e, &parents, &node_read);
@@ -1494,6 +1573,9 @@ pub fn scroll_list_ui_system(
     if scroll_y.abs() > 0.0 {
         let mut best: Option<(i32, Entity)> = None;
         for (e, list) in lists.iter() {
+            if !shown(e, &lists_vis) {
+                continue;
+            }
             let (ox, oy) = origin(e, &parents, &node_read);
             let (rx, ry, rw, rh) = list.rect_rel;
             if cursor.x >= ox + rx

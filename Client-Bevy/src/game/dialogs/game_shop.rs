@@ -323,12 +323,12 @@ fn spawn_game_shop(
         .entity(panel)
         .insert((DialogRoot(DialogKind::GameShop), GameShopWidget));
 
-    // 分类滚动条（C# `PositionBar` `Prguse2[205]` @(120,117)，行程 117..421）：
-    // 共享 UiScrollList = 滚轮 + 滑块拖动 + 滑块跟随；轨道 (120,117,16,318)
-    // （318 - 滑块高 14 = 304 = C# 行程）
+    // 分类滚动条（C# `PositionBar` `Prguse2[205]` @(120,117)，y 行程 117..401
+    // = `UpdatePositionBar` 钳位，滑块高 20 → 轨道高 304）：
+    // 共享 UiScrollList = 滚轮 + 滑块拖动 + 滑块跟随；轨道 (120,117,16,304)
     let mut cat_thumb = None;
     commands.entity(panel).with_children(|p| {
-        let (_, thumb) = spawn_scroll_bar_ui(p, (120.0, 117.0, 16.0, 318.0), 10);
+        let (_, thumb) = spawn_scroll_bar_ui(p, (120.0, 117.0, 16.0, 304.0), 10);
         cat_thumb = Some(thumb);
         // 标题 Title[26]（C# (18,9)）
         if let Some(h) = load_lib_image(&mut libs, &mut images, LibraryName::Title, 26) {
@@ -340,8 +340,21 @@ fn spawn_game_shop(
         {
             btn.insert(GameShopClose);
         }
+        // 分类底图（C# `FilterBackground` Title[769] @(11,102)，尺寸取精灵原生；
+        // z=8 垫在页签 z=9 之下；同时承接 C# `FilterBackground.MouseWheel` 的
+        // 滚动命中区——滚轮命中由 UiScrollList rect_rel 覆盖同区域）
+        if let Some(h) = load_lib_image(&mut libs, &mut images, LibraryName::Title, 769) {
+            let (w, hh) = images
+                .get(&h)
+                .map(|img| {
+                    let sz = img.size_f32();
+                    (sz.x, sz.y)
+                })
+                .unwrap_or((125.0, 336.0));
+            spawn_image(p, h, 11.0, 102.0, w, hh, 8);
+        }
         // 分类页签（C# `Filters[22]` 90x20 @(15, 103+15i)，行距 15——
-        // C# 按钮高 20 行距 15 微叠，文本行不重叠；分类底图 `Title[769]` @(11,102)）
+        // C# 按钮高 20 行距 15 微叠，文本行不重叠）
         for i in 0..22usize {
             spawn_label(
                 p,
@@ -597,8 +610,10 @@ fn spawn_game_shop(
         visible: 22,
         total: 0,
         offset: 0,
-        step: 3,
-        track_rel: (120.0, 117.0, 16.0, 318.0),
+        step: 1,
+        // C# `UpdatePositionBar`/`PositionBar_OnMoving`：y 行程 117..(401)，滑块高 20
+        // → 轨道高 304（`GameshopDialog.cs:586-601`）
+        track_rel: (120.0, 117.0, 16.0, 304.0),
         thumb: cat_thumb,
         z: 30,
     });
@@ -714,7 +729,10 @@ fn game_shop_ui_system(
     // 搜索同步（C# KeyUp 本地过滤 + ResetPage；texts 由 text_input_system 每帧回填）
     if let Some(t) = input.texts.get(31) {
         if shop.search != *t {
+            // C# `Search.TextBox.KeyUp → GetCategories()`：TypeFilter="Show All"、
+            // Page/StartIndex 归零、PositionBar 回 (120,117)（`GameshopDialog.cs:180-183/647-651`）
             shop.search = t.clone();
+            shop.category.clear();
             shop.page = 0;
             shop.qty = [1; 8];
             cat_list.offset = 0;
@@ -1405,13 +1423,17 @@ mod tests {
             visible: 22,
             total: 0,
             offset: 0,
-            step: 3,
-            track_rel: (120.0, 117.0, 16.0, 318.0),
+            step: 1,
+            track_rel: (120.0, 117.0, 16.0, 304.0),
             thumb: None,
             z: 30,
         };
         l.set_total(30);
-        assert_eq!(l.max_offset(), 8, "C# DownButton：CStartIndex+22 >= 30 停 → 上限 8");
+        assert_eq!(
+            l.max_offset(),
+            8,
+            "C# DownButton：CStartIndex+22 >= 30 停 → 上限 8"
+        );
         l.offset = 99;
         l.set_total(30);
         assert_eq!(l.offset, 8, "超界由 set_total 夹紧");
