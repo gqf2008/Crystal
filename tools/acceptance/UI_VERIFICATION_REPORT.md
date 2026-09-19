@@ -286,7 +286,7 @@ control RPC（127.0.0.1:9000）：`dialog {kind,action}` / `dialogs`（列 Dialo
 
 | 门禁 | 结果 |
 |---|---|
-| `cargo test --lib` | **660 passed / 0 failed**（本机 Windows；同 sha 的 CI（Linux）报 659，差 1 为平台相关用例） |
+| `cargo test --lib` | **660 passed / 0 failed**（本机 Windows 运行，**无留存日志**；同 sha 的 CI（Linux）报 659，与本地数差异的**原因未核实**，不做推断。重跑 `cargo test --lib` 即得本机数字） |
 | `cargo test --test b0001_smoke` | 1 passed |
 | `cargo test --test ui_alignment` | **50 passed / 0 failed**（修前 49/1） |
 | `cargo fmt -- --check` | 干净 |
@@ -307,7 +307,7 @@ control RPC（127.0.0.1:9000）：`dialog {kind,action}` / `dialogs`（列 Dialo
 5. 商城仍缺：物品图标、职业分区页签、Preview/Viewer 视图、`qty_up` 的 StackSize 上限（服务端会静默丢弃超量）。排行榜滚动为文档化的 no-op。
 6. `new_char_ui_system` 是唯一剩下的「同函数双 ParamSet」，当前字段不重叠但无初始化级测试——建议照 #2970 补一条 `run_system_once` 冒烟。
 7. Enter 分支不判 `key.repeat`，长按回车会反复开/关输入框（既有行为，非本批次引入）。
-8. **同类风险站点**：`chat_notice.rs:73`（通知条）、`guild.rs`、`hud.rs` 等处仍以 Arial 句柄 spawn 文本，且通知条是**先建空串、后由系统写内容**（与 tooltip 同源的豆腐机制）。本次未找到触发入口，未实机复现，列为同源疑似缺口。
+8. **同类站点已逐个核实，结论：不构成风险**（原先笼统列为"同源疑似缺口"过宽，本次更正）。`chat_notice.rs:73` 的通知条虽是「先建空串、后由系统写内容」的 Arial 文本，但 `ChatNoticeState` **全仓无任何写入方**（`grep` 只在本模块内出现）→ 该条**不可达**；`guild.rs:1419/1424` 的 Arial 文本是 `▲/▼` 符号；`hud.rs` 经 `spawn_text` 传 `&font` 的是经验/等级/金币等**数字**标签。三者都不产生中文正文豆腐。
 9. **坐骑实机验证的完整链路**现已打通并记录于此（`@make` → 装备 → `@ride`）；但「装备」一步靠界面操作，RPC 尚无双击/拖拽物品的原语，本轮是先用界面把坐骑装好（BengalTiger + 鞍）再骑乘验证遮挡。
 
 ### 10.6 复现方法（本机）
