@@ -18,7 +18,8 @@ use crate::scenes::AppState;
 use crate::ui::controls::spawn_checkbox;
 use crate::ui::pinyin_ime::{ImeFocus, PinyinIme};
 use crate::ui::sprite_ui::{
-    spawn_ui_sprite, spawn_ui_text, ui_image, UiButton, UiEntity, UiFont, UiImageCache,
+    shared_cjk_font, spawn_ui_sprite, spawn_ui_text, ui_image, UiButton, UiCjkFont, UiEntity,
+    UiImageCache,
 };
 
 /// 聊天频道（主话框页签，对齐 C# MainDialogs ChatPanel）
@@ -501,6 +502,7 @@ impl Plugin for ChatPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(ChatFilter::load());
         app.init_resource::<ChatItemCache>();
+        app.init_resource::<UiCjkFont>();
         app.add_systems(OnEnter(AppState::Game), spawn_chat);
         app.add_systems(OnEnter(AppState::Game), chat_apply_persisted_tab);
         app.add_systems(OnEnter(AppState::Game), spawn_chat_option_panel);
@@ -563,17 +565,17 @@ fn spawn_chat(
     mut images: ResMut<Assets<Image>>,
     mut cache: ResMut<UiImageCache>,
     mut fonts: ResMut<Assets<Font>>,
-    mut ui_font: ResMut<UiFont>,
+    mut cjk_font: ResMut<UiCjkFont>,
 ) {
     if !crate::ui::sprite_ui::ui_enabled("chat") {
         return;
     }
 
     libs.0.ensure_initialized();
-    if !ui_font.0.is_strong() {
-        ui_font.0 = crate::ui::sprite_ui::load_ui_font(&mut fonts);
-    }
-    let font = ui_font.0.clone();
+    // 聊天行/输入行**每帧改写文本**：parley 的 Han 脚本回退只在实体首次排版时生效，
+    // 重排即退化为 .notdef 豆腐（#2599）。故此处必须用自带 CJK 的主字体（宋体），
+    // 与其余 44 个 UI 模块一致；用 Arial + 回退会让中文聊天全变 □□（实机复核）。
+    let font = shared_cjk_font(&mut fonts, &mut cjk_font);
 
     // C# ChatDialog：Prguse[2221] 632x68 @ (MainDialog.X+230, ScreenHeight-97) = (230,671)
     let panel_x = 230.0;
@@ -1038,13 +1040,11 @@ fn spawn_chat_option_panel(
     mut images: ResMut<Assets<Image>>,
     mut cache: ResMut<UiImageCache>,
     mut fonts: ResMut<Assets<Font>>,
-    mut ui_font: ResMut<UiFont>,
+    mut cjk_font: ResMut<UiCjkFont>,
 ) {
     libs.0.ensure_initialized();
-    if !ui_font.0.is_strong() {
-        ui_font.0 = crate::ui::sprite_ui::load_ui_font(&mut fonts);
-    }
-    let font = ui_font.0.clone();
+    // 同 `spawn_chat`：面板文本含 CJK，用自带字形的主字体
+    let font = shared_cjk_font(&mut fonts, &mut cjk_font);
     let (dx, dy) = (400.0f32, 300.0f32);
 
     // 面板背景（半透明深色 + 边框感）
@@ -1775,8 +1775,15 @@ fn chat_input_ui_system(
             Visibility::Hidden
         };
         if active {
-            // 光标跟随文本末尾（粗估：每字符 11px，前缀 “> ” 约 14px）
-            tf.translation.x = CHAT_INPUT_X + 14.0 + chat.input_text.chars().count() as f32 * 11.0;
+            // 光标跟随文本末尾（前缀 “> ” 约 14px）。宋体度量：ASCII 恒 0.50em、
+            // CJK 恒 1.00em——11px 字号下即 5.5/11px；按字符逐位累加，纯 ASCII
+            // 与中文混排都不再累积偏移（审查 P2：原按每字符 11px 粗估）
+            let adv: f32 = chat
+                .input_text
+                .chars()
+                .map(|c| if c.is_ascii() { 5.5 } else { 11.0 })
+                .sum();
+            tf.translation.x = CHAT_INPUT_X + 14.0 + adv;
         }
     }
 }
@@ -1888,6 +1895,40 @@ fn chat_server_events(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #2961 项3 实机复核：聊天面板（消息行 + 输入行 + 光标）必须用**自带 CJK 字形**
+    /// 的主字体。用 Arial + parley Han 回退时，回退只在实体**首次排版**生效，而聊天
+    /// 行/输入行每帧重写文本 → 重排即退化为 `.notdef` 豆腐（#2599）：
+    /// 实机表现为键盘上屏的中文在输入框显示 `□□`、发送后聊天记录显示 `[玩家]: □□`。
+    /// 修复前（主字体 = `UiFont`/Arial）本测试 FAILED。
+    #[test]
+    fn chat_text_uses_cjk_capable_font() {
+        use bevy::ecs::system::RunSystemOnce;
+
+        let mut world = World::new();
+        world.insert_resource(GameLibraries::default());
+        world.insert_resource(Assets::<Image>::default());
+        world.insert_resource(crate::ui::sprite_ui::UiImageCache::default());
+        world.insert_resource(Assets::<Font>::default());
+        world.insert_resource(UiCjkFont::default());
+        world.run_system_once(spawn_chat).unwrap();
+
+        let cjk = world.resource::<UiCjkFont>().0.clone();
+        assert!(cjk.is_strong(), "CJK 字体应已被惰性加载");
+        let mut n = 0usize;
+        let mut q = world.query::<(&Text2d, &TextFont)>();
+        for (_t, tf) in q.iter(&world) {
+            if let FontSource::Handle(h) = &tf.font {
+                assert_eq!(
+                    *h, cjk,
+                    "聊天文本必须用自带 CJK 的主字体——Arial 的 Han 回退在重排时会变豆腐"
+                );
+                n += 1;
+            }
+        }
+        assert!(n > 0, "应至少 spawn 出若干文本实体（消息行/输入行/光标）");
+    }
+
     use mir2_shared::enums::ChatType;
 
     #[test]
