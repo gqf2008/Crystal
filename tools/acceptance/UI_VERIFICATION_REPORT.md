@@ -232,7 +232,7 @@ control RPC（127.0.0.1:9000）：`dialog {kind,action}` / `dialogs`（列 Dialo
 
 用户实测报出 6 个 UI 缺陷，逐项修复后做**实机复验**。本节是本批次的验收依据。
 
-**版本**：master @ `7726c529`（含 #2962~#2981 共 16 个 PR；本节数字均取自该 sha 重建的二进制）
+**版本**：master @ `7726c529`（本批**修复 PR 共 16 个**：#2962~#2973 与 #2976~#2981，另有报告自身 #2974/#2975；#2980 已撤回。本节数字均取自该 sha 重建的二进制）
 **环境**：ServerRust release（后台常驻）+ Client-Bevy debug（`--real-net --auto-enter`），测试账号 `test / bevychar`，地图 BichonProvince
 **方法**：每项都要「单元测试红→绿」+「实机可判真假的断言」，实机断言优先取 control RPC 的**真值字段**，像素只作字形类证据。
 
@@ -286,7 +286,7 @@ control RPC（127.0.0.1:9000）：`dialog {kind,action}` / `dialogs`（列 Dialo
 
 | 门禁 | 结果 |
 |---|---|
-| `cargo test --lib` | **662 passed / 0 failed**（本机 Windows 运行，**无留存日志**；跨平台差异原因未核实、不做推断。重跑 `cargo test --lib` 即得本机数字） |
+| `cargo test --lib` | **662 passed / 0 failed**（本机 Windows；同 sha `7726c529` 的 CI（Linux）报 **661**，差 1。本机无留存日志，差异原因未核实、不做推断。重跑 `cargo test --lib` 即得本机数字） |
 | `cargo test --test b0001_smoke` | 1 passed |
 | `cargo test --test ui_alignment` | **51 passed / 0 failed**（修前 49/1） |
 | `cargo fmt -- --check` | 干净 |
@@ -296,7 +296,7 @@ control RPC（127.0.0.1:9000）：`dialog {kind,action}` / `dialogs`（列 Dialo
 
 本批次 PR：#2962 #2963 #2964 #2965 #2966 #2967 #2968 #2970 #2971 #2972 #2973（issue #2969 P0），以及后续跟进 #2976（`new_char_ui_system` 冒烟）／#2977（ServerRust CI 三层红）／#2978（wheel/scroll RPC）／#2979（常量断言拆出 `require_assets!`）／#2981（滚轮 1 行/格）；#2980 因审查证伪其前提而**撤回未合并**。
 
-三条实机脚本的结果 JSON 均在 `tools/acceptance/`（`ui_bugfix_verify_results.json` / `ime_rpc_verify_results.json` / `ui_interact_results.json`），都是在 **`32bec332` 重建的同一份二进制**上跑出来的；截图同目录 `shots/`。
+三条实机脚本的结果 JSON 均在 `tools/acceptance/`（`ui_bugfix_verify_results.json` / `ime_rpc_verify_results.json` / `ui_interact_results.json`），**均为在 `7726c529` 重建的同一份二进制上重跑的最新结果**；截图同目录 `shots/`。
 
 ### 10.5 残余缺口与跟进项（如实记录）
 
@@ -312,7 +312,9 @@ control RPC（127.0.0.1:9000）：`dialog {kind,action}` / `dialogs`（列 Dialo
 1. 背包扩容钮 `z=8`（全仓实测：17 处 `z=10`、`npc.rs` 一处 `z=9`、**仅背包 `z=8`**）——把 z 提到 10 才是结构性正解（届时 C# 的 72×23 命中区也不再吞关闭钮），本轮只改了断言，实现偏离保留。
 2. 商城仍缺：物品图标、职业分区页签、Preview/Viewer 视图、`qty_up` 的 StackSize 上限（服务端会静默丢弃超量）。排行榜滚动为文档化的 no-op。
 3. `market.rs` 列表 `step: 10`（1 格 = 1 页）——C# `TrustMerchantDialog` 同样没有滚轮处理，本端是**增补**的翻页语义；是否改成 1 行/格属产品判断，未动。
-4. **`b0001_smoke` 里一个 `ui::` 插件都没有登记**（UI 类插件整条防线是盲区）——这正是商城「跨 ParamSet → 一进游戏即崩」没被拦下的原因。已补的 #2976 只钉了 `new_char_ui_system` 一个系统；建议把 UI 插件整体纳入该死冒烟。
+4. **【自我更正】商城 P0 不是防线盲区，是合并闸门被绕过。** 我先前在这里写「`b0001_smoke` 没登记 UI 插件、所以没拦住」——**错了**：`tests/b0001_smoke.rs:100` **登记了 `game_shop`**，CI run [35411951451](https://github.com/gqf2008/Crystal/actions/runs/35411951451)（head `09b16ac8` = #2968 合并提交）的 `Client-Bevy :: test (integration)` 步骤就是 **failure**，日志即 `[game_shop] error[B0001]: Query<..., GameShopCat> ...::game_shop_ui_system`。**红线被看到了，是合并时用 `--admin` 绕过它把 P0 放进了 master。**
+   → 整改方向随之改变：**不是**去补插件覆盖，而是**别在 CI 红着时 `--admin` 合并**（至少先看该 run 的结论）。
+   （附带事实仍然成立但**与商城 P0 无关**：该冒烟里确实一个 `ui::` 插件都没登记，`ui::` 类插件的冲突目前只有 #2976 那条 `run_system_once` 冒烟覆盖。）
 5. Enter 长按：本轮曾按「C# 是 no-op」提了 #2980，**被独立审查证伪**（`MainDialogs.cs:749-750` 的 `Visible=false; Text=""` 在 `!string.IsNullOrEmpty` 守卫**之外**，空文本同样关框），且该改法会让重复事件漏进第二个文本循环、把 CR 塞进草稿——**已撤回未合并**。即现状与 C# 一致，不再是缺口。
 6. `ServerRust/.cargo/config.toml` 的 8 MiB 测试栈只有一次性实验（1 MiB 复现 / 8 MiB 通过），没有"守住阈值"的断言或基准（#2977 审查 P2-3，留给原作者判断）。
 7. 生产调用点（handler 内联链）的**峰值栈未测量**（#2977 审查 P2-2 更正后的真实缺口；生产 actor 栈已是 32 MiB，测试 8 MiB 仍更严）。
@@ -330,7 +332,7 @@ $env:LIBPINYIN_DIR = 'D:/toolchains/libpinyin-install'
 cd ServerRust; ./target/release/mir2_server.exe
 
 # 2) 三项实机复验（脚本各自起停客户端）
-powershell -File tools/acceptance/ui_bugfix_verify.ps1    # 项 2/4/5/6 -> 15/15
+powershell -File tools/acceptance/ui_bugfix_verify.ps1    # 项 2/4/5/6 -> 18/18
 powershell -File tools/acceptance/ime_rpc_verify.ps1      # 项 3     -> 10/10（需先起客户端）
 powershell -File tools/acceptance/ui_interact_sweep.ps1   # 40 窗回归 -> 41/41
 ```
