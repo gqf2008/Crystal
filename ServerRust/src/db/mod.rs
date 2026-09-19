@@ -3387,8 +3387,21 @@ async fn load_creatures(pool: &DbPool, character_name: &str) -> anyhow::Result<C
                 None
             };
 
+            // #2991：**别再用 `unwrap_or_default()` 把"格式不对"和"本来就是空"混为一谈**——
+            // 迁移器曾写出读不回来的 `owned_json`，这里静默变空表、下一次存档再把 `[]` 写回去，
+            // 宠物就永久没了。解析失败必须留痕。
+            let raw_owned: String = r.get("owned_json");
             let owned_creatures: Vec<IntelligentCreature> =
-                serde_json::from_str(&r.get::<String, _>("owned_json")).unwrap_or_default();
+                match serde_json::from_str::<Vec<IntelligentCreature>>(&raw_owned) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        tracing::warn!(
+                        "owned_json 解析失败（按空表继续，**注意下次存档会覆盖**）：{e}；原文={}",
+                        &raw_owned[..raw_owned.len().min(200)]
+                    );
+                        Vec::new()
+                    }
+                };
 
             Ok(CreatureLog {
                 active_creature,
