@@ -19,7 +19,7 @@ use crate::ui::controls::spawn_checkbox;
 use crate::ui::pinyin_ime::{ImeFocus, PinyinIme};
 use crate::ui::sprite_ui::{
     shared_cjk_font, spawn_ui_sprite, spawn_ui_text, ui_image, UiButton, UiCjkFont, UiEntity,
-    UiFont, UiImageCache,
+    UiImageCache,
 };
 
 /// 聊天频道（主话框页签，对齐 C# MainDialogs ChatPanel）
@@ -1043,7 +1043,7 @@ fn spawn_chat_option_panel(
     mut cjk_font: ResMut<UiCjkFont>,
 ) {
     libs.0.ensure_initialized();
-    // 同 `spawn_chat_ui`：面板文本含 CJK，用自带字形的主字体
+    // 同 `spawn_chat`：面板文本含 CJK，用自带字形的主字体
     let font = shared_cjk_font(&mut fonts, &mut cjk_font);
     let (dx, dy) = (400.0f32, 300.0f32);
 
@@ -1775,8 +1775,15 @@ fn chat_input_ui_system(
             Visibility::Hidden
         };
         if active {
-            // 光标跟随文本末尾（粗估：每字符 11px，前缀 “> ” 约 14px）
-            tf.translation.x = CHAT_INPUT_X + 14.0 + chat.input_text.chars().count() as f32 * 11.0;
+            // 光标跟随文本末尾（前缀 “> ” 约 14px）。宋体度量：ASCII 恒 0.50em、
+            // CJK 恒 1.00em——11px 字号下即 5.5/11px；按字符逐位累加，纯 ASCII
+            // 与中文混排都不再累积偏移（审查 P2：原按每字符 11px 粗估）
+            let adv: f32 = chat
+                .input_text
+                .chars()
+                .map(|c| if c.is_ascii() { 5.5 } else { 11.0 })
+                .sum();
+            tf.translation.x = CHAT_INPUT_X + 14.0 + adv;
         }
     }
 }
