@@ -102,7 +102,7 @@ impl Plugin for ObjectStatePlugin {
 /// `apply_object_state_events` 图层三件套打包（Bevy 系统 16 参数上限，
 /// LESSON_Bevy系统参数上限16 已沉淀的同族处理）
 #[derive(SystemParam)]
-pub(crate) struct ActorLayerQueries<'w, 's> {
+struct ActorLayerQueries<'w, 's> {
     pub children: Query<'w, 's, &'static Children>,
     pub layers: Query<'w, 's, &'static mut SpriteLayer>,
     pub ghost_layers: Query<'w, 's, &'static GhostLayer>,
@@ -653,8 +653,7 @@ mod tests {
         world
             .run_system_once(apply_object_state_events)
             .expect("对象状态系统应可运行");
-        // Commands 延迟：再跑一个空系统刷 queue
-        world.run_system_once(|| {}).expect("flush");
+        // run_system_once 走 System::run：立即 apply_deferred，命令当帧落地
 
         assert!(
             world.get::<MountState>(root).is_none(),
