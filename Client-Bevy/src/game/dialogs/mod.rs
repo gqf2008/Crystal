@@ -318,6 +318,10 @@ impl DialogManager {
     }
 }
 
+/// 40 窗「点 X 关」交互门禁（headless 版实机巡回脚本，随 `cargo test --lib` 进 CI）
+#[cfg(test)]
+mod interact_gate;
+
 /// #2825 单元①：测试用辅助 —— 给 world 装上「光标按下」状态后跑一次真实
 /// [`dialog_drag_system`]，断言没有窗口起拖。用于「C# `Movable = false` 的窗口」的
 /// 行为级验证（结构断言只保证挂了 `NotDraggable`，这里验证拖动系统真的不动它）。
