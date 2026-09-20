@@ -408,3 +408,31 @@ python tools/acceptance/crop_kind.py <kind> <out.png> [scale]   # 按 manifest �
 python tools/acceptance/font_audit.py          # Arial 句柄 × 可能含中文 的站点审计
 python tools/acceptance/seed_db.py             # 测试数据塞入（须先停服）
 ```
+
+---
+
+## 12. 交互巡回门禁化（2026-09-20）
+
+§9 的 40 窗交互巡回此前**只在开发机人工跑**：`ui_interact_sweep.ps1` 要「服务端 + 真实 `Data/` +
+桌面窗口」，进不了 CI；脚本本身退出码还恒为 0（红了也无人能自动发现）。本轮把它拆成两道门禁：
+
+**1. headless 门禁（进 CI）** —— `Client-Bevy/src/game/dialogs/interact_gate.rs`（`#[cfg(test)]`，
+随 `cargo test --lib` 跑，CI 的 Client-Bevy job 就含这一步）：
+
+- 名单与脚本 `$kinds` / `$noCloseByDesign` **逐项对齐**：另一支测试解析脚本原文比对，漂移即红；
+- 每窗：开窗（语义逐条对齐 `ControlCommand::Dialog`，含 `hero_manage`/`input_box`/`storage` 状态窗特例）
+  → 按 `dialog_rect` 同判据定位标准关闭钮（`theme::CloseButton` + 最近祖先 `DialogRoot` 且其 Visible）
+  → 合成按压 → 断言已关栈；
+- **自建合成最小 `.Lib`**（每库 2600 帧 1x1；`Data/` 不入库、CI 无资产，走 `require_assets!` 跳过就又是假绿）；
+- 结果 **41/41**（34 窗按压真实标准关闭钮 + 6 窗「设计无 X」开关往返 + `hero_manage`）。
+- **阳性对照（做过，做完即撤）**：抽掉 `storage` 关闭钮的 `StorageWidget` → 报
+  `storage: 按压标准关闭钮后仍在 open 栈`（即 §9.3 那处历史缺陷会被拦住）；抽掉
+  `spawn_close_button` 的 `CloseButton` 标记 → 15 窗报 `无 theme::CloseButton`。
+
+**2. 脚本可当门禁用** —— `ui_interact_sweep.ps1` 非全过即 `throw`，退出码非 0，异常信息里列出失败窗口名
+（阳性对照：喂 `closed=NO` + 拖动未动的假结果 → `交互巡回未全过：失败 2 项 [inventory,drag]（通过 1/3）`；
+全过输入不抛）。
+
+**它不覆盖什么（如实）**：像素级命中区/遮挡（#2953 扩容钮吞点击那类）——headless 无窗口无相机，
+按压是直接写 `Interaction::Pressed` 后只跑 `Update` 调度（`ui_focus_system` 会在 `PreUpdate` 按真实光标复位）；
+窗口内部控件（页签/输入框/滚动条）也不在巡回范围（同 §5 缺口表）。这些仍须实机跑脚本。
