@@ -58,8 +58,8 @@ tools/agents/supervisor.sh stop
 | 任务 | 命令 | 说明 |
 |---|---|---|
 | `client-fmt` | `cd Client-Bevy && cargo fmt -- --check` | |
-| `client-test` | `cargo test --lib` + `b0001_smoke` + `ui_alignment` | 需透传 `PATH`/`LIBPINYIN_DIR`/`PKG_CONFIG_PATH` |
-| `client-check-no-assets` | `CRYSTAL_NO_DATA_ASSETS=1 cargo test --lib` | 复现 CI 无资产路径 |
+| `client-test` | `cargo test --lib` + `b0001_smoke` + `ui_alignment` + `ui_interact_sweep` | 需透传 `PATH`/`LIBPINYIN_DIR`/`PKG_CONFIG_PATH` |
+| `client-check-no-assets` | `CRYSTAL_NO_DATA_ASSETS=1 cargo test --lib` + `cargo test --test ui_interact_sweep` | 复现 CI 无资产路径 |
 | `server-fmt` / `server-clippy` / `server-test` | `cd ServerRust && …` | clippy 带 `-D warnings` |
 
 校验：`walgit ci validate`；跑一次：`walgit ci run --once`（订阅 ref 更新后自动认领执行）。

@@ -21,14 +21,14 @@ timeout = "10m"
 [[task]]
 name = "client-test"
 refs = ["refs/heads/*"]
-command = "cd Client-Bevy && cargo test --lib && cargo test --test b0001_smoke --test ui_alignment"
+command = "cd Client-Bevy && cargo test --lib && cargo test --test b0001_smoke --test ui_alignment --test ui_interact_sweep"
 timeout = "45m"
 env_allow = ["PATH", "LIBPINYIN_DIR", "PKG_CONFIG_PATH"]
 
 [[task]]
 name = "client-check-no-assets"
 refs = ["refs/heads/*"]
-command = "cd Client-Bevy && CRYSTAL_NO_DATA_ASSETS=1 cargo test --lib"
+command = "cd Client-Bevy && CRYSTAL_NO_DATA_ASSETS=1 cargo test --lib && CRYSTAL_NO_DATA_ASSETS=1 cargo test --test ui_interact_sweep"
 timeout = "30m"
 env_allow = ["PATH", "LIBPINYIN_DIR", "PKG_CONFIG_PATH"]
 

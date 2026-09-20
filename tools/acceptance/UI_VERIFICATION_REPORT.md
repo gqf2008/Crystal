@@ -158,8 +158,19 @@ control RPC（127.0.0.1:9000）：`dialog {kind,action}` / `dialogs`（列 Dialo
 |---|---|
 | Client-Bevy `cargo test --lib` | **628 passed / 0 failed**（#2952 + #2955 回归测试） |
 | 交互巡回 `ui_interact_sweep.ps1` | **40/40 关闭钮点击通过** + 拖动 + NPC/hero_manage X 点击全过 |
+| **40 窗结构巡回**（门禁：`Client-Bevy/tests/ui_interact_sweep.rs`） | **DialogRoot 39/39 + 关闭钮 34/34（归属全对）+ chat_notice 实体 1/1**（本机含 `Data/`）；无资产路径（`CRYSTAL_NO_DATA_ASSETS=1`）2 passed，只守「spawn 不崩 + 清单一致」 |
+| 阳性对照（同上测试，2026-09-20） | 去掉 `report.rs` 的 `CloseButton` → 报「`[report]` 根下没有 CloseButton」；去掉 `minimap.rs` 的 `DialogRoot` → 报「`[minimap]` 缺 DialogRoot(Minimap)」；两处恢复后全绿 |
 | ServerRust 全量测试 | 818 + gate_hardening 11 + no_blocking 2 + protocol_conformance 6 全绿 |
 | rustfmt（改动文件） | ✅ edition 2021 check 通过 |
+
+**40 窗交互巡回的两条防线**（2026-09-20 增补）：
+
+| 防线 | 位置 | 覆盖什么 | 前提 |
+|---|---|---|---|
+| 实机（**交互级**） | `tools/acceptance/ui_interact_sweep.ps1` | 合成点击关闭钮走真实 picking→Interaction 链路、窗口拖动位移、NPC/hero_manage 状态窗 | 真客户端 + 真服务端 + Windows 桌面 + `Data/` |
+| 门禁（**结构级**） | `Client-Bevy/tests/ui_interact_sweep.rs` | 40 窗 spawn → `DialogRoot(kind)` 唯一 + 关闭钮归属（`CloseButton` 且 `Button`）+ 孤儿/串窗 + 清单防漂移 | 无（CI 无资产也能跑：只守根节点，关闭钮断言需 `Data/`，与 `ui_alignment` 的 `require_assets!` 同判据） |
+
+结构级防线**不覆盖**真 picking 点击链路（要窗口 + 光标 + `UiPlugin`），也不覆盖需真实网络/NPC 会话的窗口（`npc`/`trade`/`guest_trade`/`npc_goods`/`roll`）——与实机同口径，差异逐条列在测试文件头。另：`chat_notice` 无 `DialogRoot`（`ChatNoticeWidget` 状态驱动），ps1 对它的「RPC 往返」判据实为空转（`dialog` RPC 只动管理栈），结构级防线改断言实体标记。
 
 ## 7. 证据文件清单
 
