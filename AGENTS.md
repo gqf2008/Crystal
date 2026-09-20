@@ -5,6 +5,12 @@
 - **本机可能多个 agent 并行改代码：任何修改必须在独立的 `git worktree` 中完成**（如 `git worktree add <路径> -b <分支>`），禁止直接改动主工作区 checkout（`Crystal`），避免互相覆盖未提交改动。
 - PR 合并前需完成验证：`cargo check` 通过 + 相关测试通过（客户端 `Client-Bevy`：`cargo test`；服务端 `ServerRust`：`cargo test`）。
   **服务端另需 `cargo fmt -- --check` 与 `cargo clippy --lib -- -D warnings`**（2026-09-19 补：CI 的 ServerRust job 就按这四步跑，而这四项此前不在本清单里，导致 fmt/clippy 的债攒到 CI 连续 27 次红才被发现）。
+  **UI 相关改动另需过交互巡回门禁**：`pwsh tools/acceptance/ui_interact_sweep.ps1 -ManageServer`
+  （或 `pwsh scripts/run_real_e2e.ps1 -IncludeInteractSweep`）——**退出码非 0 就不合**。
+  离线测试只能证明「布局数值对」，证明不了「点得动」：#2953（扩容钮吞关闭钮点击）/#2955（关闭钮漏标记、
+  根节点没接显隐、仓库窗漏 StorageWidget）那批全是布局断言全绿而交互失效。覆盖清单见
+  `tools/acceptance/interact_sweep_manifest.json`（新增窗口漏登记会被 `cargo test --lib` 拦下），
+  用法与退出码见 `docs/DELIVERY.md` §5.3。
 - PR 合并前需经 review（人工或协作 agent）确认通过。
 - **合并前必须核对该 PR 自身那次 `pull_request` run 的结论；红了就不合。**
   - 查法：`gh run list --commit <40 位完整 head_sha> --json name,event,conclusion`（认 `event == "pull_request"`）。
