@@ -382,6 +382,8 @@ FodyWeavers.xsd
 !tools/acceptance/
 /tools/acceptance/*
 !tools/acceptance/ui_interact_sweep.ps1
+# 巡回覆盖清单：脚本与 Client-Bevy 的 lib 测试共用（漏登记要被 cargo test --lib 拦下）
+!tools/acceptance/interact_sweep_manifest.json
 !tools/acceptance/UI_VERIFICATION_REPORT.md
 !tools/acceptance/ui_verification_report.html
 
