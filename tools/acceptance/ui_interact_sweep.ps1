@@ -160,6 +160,18 @@ try {
     $total = $results.Count + 1  # +1 = 拖动测试
     if ($moved) { $pass += 1 }
     Write-Host ("== 交互巡回完成: {0}/{1} 通过（含拖动） ==" -f $pass, $total)
+    # 门禁化：非全过 → throw。此前只打印一行统计、退出码恒 0，红了也无人能自动发现；
+    # 加 throw 后既能人工当门禁用，也能被外层脚本按退出码判定。
+    # 用 List[string] 收集（不用 @($list) 子表达式：PowerShell 7.6 对 List[object] 会抛
+    # "Argument types do not match"，见 ~/.agents/rules 同名 LESSON）。
+    $bad = [System.Collections.Generic.List[string]]::new()
+    foreach ($r in $results) { if ($r.closed -ne 'YES') { $bad.Add($r.kind) } }
+    if (-not $moved) { $bad.Add('drag') }
+    # hero_manage：仅「窗开了却没关掉」算失败；未可见 = 环境性跳过（与脚本原判据一致）
+    if ($hmClosed -eq 'NO') { $bad.Add('hero_manage') }
+    if ($bad.Count -gt 0) {
+        throw ("交互巡回未全过：失败 {0} 项 [{1}]（通过 {2}/{3}）" -f $bad.Count, ($bad -join ','), $pass, $total)
+    }
 } finally {
     # #2956：中途 throw（$ErrorActionPreference='Stop'）也不留客户端进程
     Stop-Process -Id $proc.Id -Force -EA SilentlyContinue
