@@ -18,6 +18,17 @@
 .PARAMETER TimeoutSec     单个用例超时秒数（默认 75）。
 .PARAMETER SingleFlags    单客户端用例 flag 列表。
 .PARAMETER KeepServer     结束时保留服务端运行（默认停止）。
+.PARAMETER IncludeInteractSweep
+    跑完常规用例后追加「40 窗交互巡回」（tools/acceptance/ui_interact_sweep.ps1——
+    逐窗 open → 点关闭钮 → 断言真关掉，另有拖动/NPC/hero_manage 段）。
+    复用本脚本已起的服务端；巡回退出码计入汇总与脚本退出码。
+.PARAMETER AllowStaleBinary
+    透传给交互巡回：跳过「客户端产物比源码旧」检查（默认检查，过期即判前置失败）。
+
+.NOTES
+    退出码：0 全过 / 1 有用例 FAIL（含交互巡回的前置失败 exit 2，一并计为 FAIL）。
+    可直接当门禁用：
+        pwsh scripts/run_real_e2e.ps1 -IncludeInteractSweep; if ($LASTEXITCODE) { 别合 }
 
 .EXAMPLE
     ./scripts/run_real_e2e.ps1
@@ -32,7 +43,9 @@ param(
     [string]$SecondPass = "123456",
     [int]$TimeoutSec = 75,
     [string[]]$SingleFlags = @("--fishing-test","--mount-test","--gameshop-test","--ranking-test","--refine-test","--report-test","--level-fx-test"),
-    [switch]$KeepServer
+    [switch]$KeepServer,
+    [switch]$IncludeInteractSweep,
+    [switch]$AllowStaleBinary
 )
 $ErrorActionPreference = "Stop"
 $repo = Split-Path -Parent $PSScriptRoot
@@ -259,6 +272,32 @@ Invoke-PairCase "marriage" "--marriage-test" "--marriage-accept"
 $alive = Get-Process -Id $srv.Id -ErrorAction SilentlyContinue
 Write-Output ("服务端存活: " + [bool]$alive)
 
+# 4b) 交互巡回（40 窗 open→点关闭钮→断言真关掉 + 拖动 / NPC / hero_manage）
+#     独立进程跑（退出码即结论），复用本脚本已起的服务端；-IncludeInteractSweep 未开时跳过。
+if ($IncludeInteractSweep) {
+    $sweepPs1 = Join-Path $repo "tools\acceptance\ui_interact_sweep.ps1"
+    if (-not (Test-Path $sweepPs1)) {
+        Write-Output "[FAIL] ui-interact-sweep: 缺脚本 $sweepPs1"
+        $results.Add([pscustomobject]@{ Case="ui-interact-sweep"; Pass=$false; Marks="脚本缺失" })
+    } else {
+        Write-Output "===== 交互巡回（40 窗）====="
+        $psHost = (Get-Process -Id $PID).Path
+        $sweepArgs = @("-NoProfile","-File",$sweepPs1,"-RepoRoot",$repo,"-ClientExe",$ClientExe,
+                       "-TestUser",$TestUser,"-TestPass",$TestPass)
+        if ($AllowStaleBinary) { $sweepArgs += "-AllowStaleBinary" }
+        # PS7.3+ 的 $PSNativeCommandUseErrorActionPreference 会把非零退出码变成异常，
+        # 而这里正要读退出码 → 临时关掉（跑完还原）
+        $hadNativePref = $null -ne (Get-Variable PSNativeCommandUseErrorActionPreference -ErrorAction SilentlyContinue)
+        if ($hadNativePref) { $PSNativeCommandUseErrorActionPreference = $false }
+        & $psHost @sweepArgs
+        $sweepExit = $LASTEXITCODE
+        $results.Add([pscustomobject]@{
+            Case="ui-interact-sweep"; Pass=($sweepExit -eq 0); Marks="exit=$sweepExit（0 全过 / 1 有 FAIL / 2 前置失败）"
+        })
+        Write-Output ("[{0}] ui-interact-sweep (exit={1})" -f $(if ($sweepExit -eq 0) { "PASS" } else { "FAIL" }), $sweepExit)
+    }
+}
+
 # 5) 汇总
 Write-Output "===== 汇总 ====="
 $results | Format-Table Case, Pass, Marks -AutoSize | Out-String | Write-Output
@@ -266,3 +305,12 @@ $passCount = ($results | Where-Object Pass).Count
 Write-Output ("通过 {0}/{1}" -f $passCount, $results.Count)
 
 if (-not $KeepServer) { Stop-Process -Id $srv.Id -Force -ErrorAction SilentlyContinue }
+
+# 6) 退出码（门禁语义；以前无论红绿都返回 0，只能靠人读打印）
+$failCount = ($results | Where-Object { -not $_.Pass }).Count
+if ($failCount -gt 0) {
+    Write-Output ("❌ 有 {0} 个用例 FAIL——不要合并" -f $failCount)
+    exit 1
+}
+Write-Output "✅ 全部用例通过"
+exit 0
