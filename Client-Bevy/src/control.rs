@@ -1835,60 +1835,65 @@ mod tests {
         assert_eq!(resolve_cursor(None, None), None);
     }
 
+    /// `parse_dialog_kind` 可解析的全部名字（48 个名字 → 45 个变体：含 trust_merchant /
+    /// npc_drop / hero_skill 三个别名）。与交互巡回清单
+    /// （`tools/acceptance/interact_sweep_manifest.json`）共用同一套名字空间。
+    const RPC_KIND_NAMES: [&str; 48] = [
+        "inventory",
+        "character",
+        "quest_log",
+        "settings",
+        "menu",
+        "game_shop",
+        "minimap",
+        "npc",
+        "group",
+        "friend",
+        "trade",
+        "inspect",
+        "npc_goods",
+        "guild",
+        "mail",
+        "ranking",
+        "mentor",
+        "relationship",
+        "mount",
+        "report",
+        "hero_inventory",
+        "hero_equipment",
+        "hero_skill",
+        "creature",
+        "trust_merchant",
+        "item_rental",
+        "guild_territory",
+        "help",
+        "notice",
+        "buff",
+        "fishing",
+        "socket",
+        "refine",
+        "craft",
+        "dura_status",
+        "npc_drop",
+        "roll",
+        "npc_awake",
+        "timer",
+        "keyboard_layout",
+        "big_map",
+        "chat_notice",
+        "market",
+        "storage",
+        "item_rental_browse",
+        "hero_manage",
+        "quest_detail",
+        "input_box",
+    ];
+
     /// parse_dialog_kind 覆盖除 GuestTrade 外全部变体 + 未知返回 None（#2586）
     /// GuestTrade 由网络 trade 会话驱动无独立开关，刻意不做 RPC 映射（批M 审查）
     #[test]
     fn parse_dialog_kind_covers_all_variants() {
-        let all = [
-            "inventory",
-            "character",
-            "quest_log",
-            "settings",
-            "menu",
-            "game_shop",
-            "minimap",
-            "npc",
-            "group",
-            "friend",
-            "trade",
-            "inspect",
-            "npc_goods",
-            "guild",
-            "mail",
-            "ranking",
-            "mentor",
-            "relationship",
-            "mount",
-            "report",
-            "hero_inventory",
-            "hero_equipment",
-            "hero_skill",
-            "creature",
-            "trust_merchant",
-            "item_rental",
-            "guild_territory",
-            "help",
-            "notice",
-            "buff",
-            "fishing",
-            "socket",
-            "refine",
-            "craft",
-            "dura_status",
-            "npc_drop",
-            "roll",
-            "npc_awake",
-            "timer",
-            "keyboard_layout",
-            "big_map",
-            "chat_notice",
-            "market",
-            "storage",
-            "item_rental_browse",
-            "hero_manage",
-            "quest_detail",
-            "input_box",
-        ];
+        let all = RPC_KIND_NAMES;
         // #2599：trust_merchant/npc_drop 是历史别名（→ Market/Npc，真实现移壳后保留工具兼容），
         // 与 market/npc 重复映射——互异断言计数时先去掉这 2 个别名。
         // 名单与 witness 一致：每个可解析名都有 RPC 映射；DialogKind 共 48 个变体（#2892 批58 删 HeroSkill），
@@ -1920,6 +1925,94 @@ mod tests {
         assert!(
             parse_dialog_kind("Inventory").is_none(),
             "snake_case 小写约定"
+        );
+    }
+
+    /// 交互巡回覆盖清单（`tools/acceptance/interact_sweep_manifest.json`）与 RPC 窗口登记对账。
+    ///
+    /// 背景：`parse_dialog_kind` 只是给了窗口一个 RPC 开关，**能开 ≠ 有人验过**。
+    /// `tools/acceptance/ui_interact_sweep.ps1` 是唯一做「open → 点关闭钮 → 断言真关掉」
+    /// 交互级验证的地方，它跑哪些窗口完全由这份清单决定——清单漏登记，那个窗口就从此
+    /// 没人验（#2953/#2955 那批交互缺陷正是这一类）。本测试把「新增 RPC 窗口必须登记
+    /// （进 sweep，或进 excluded 并写明理由与覆盖路径）」变成 `cargo test --lib` 拦得住的约束。
+    ///
+    /// 覆盖按**变体**算（别名 trust_merchant/npc_drop/hero_skill 不额外计数）。
+    /// 已知边界（两条都留给人审，测试只挡"漏登记"与"空理由"）：
+    /// 1. 变体名单取自 [`RPC_KIND_NAMES`]，其完整性由
+    ///    [`parse_dialog_kind_covers_all_variants`] 的 `assert_eq!(all.len(), 48)` 守着——
+    ///    新增变体却完全不碰那张名单时本测试看不见（那条路径要靠 `has_rpc_mapping` 的
+    ///    穷尽 match 逼人去改，改到这里就会看到清单对账）。
+    /// 2. `excluded` 的理由是自由文本：把新窗口塞进 excluded 并编个理由确实能过（只是 ≥8 字），
+    ///    是否真被别的路径覆盖仍要人看——状态驱动窗口（npc/trade/npc_goods/roll）没法塞进
+    ///    逐窗循环：它们的显隐每帧由游戏状态同步，RPC 开一下会被立刻覆盖，硬塞只会得到假 FAIL。
+    #[test]
+    fn interact_sweep_manifest_covers_all_rpc_kinds() {
+        // include_str!：清单文件被删/改名 = 编译失败，而不是静默跳过一个不存在的门禁
+        let raw = include_str!("../../tools/acceptance/interact_sweep_manifest.json");
+        let m: Value = serde_json::from_str(raw).expect("交互巡回清单必须是合法 JSON");
+        let names = |key: &str| -> Vec<String> {
+            m[key]
+                .as_array()
+                .unwrap_or_else(|| panic!("清单缺数组字段 {key}"))
+                .iter()
+                .map(|v| v.as_str().expect("清单项应为字符串").to_string())
+                .collect()
+        };
+        let sweep = names("sweep");
+        let no_btn = names("no_close_by_design");
+        let excluded: Vec<String> = m["excluded"]
+            .as_object()
+            .expect("清单缺 excluded 对象")
+            .iter()
+            .map(|(k, v)| {
+                assert!(
+                    v.as_str().is_some_and(|s| s.trim().chars().count() >= 8),
+                    "excluded[{k}] 必须写明理由（≥8 字）：no RPC 开关的窗口也要说清由谁覆盖"
+                );
+                k.clone()
+            })
+            .collect();
+
+        assert!(!sweep.is_empty(), "sweep 不应为空");
+        for n in sweep.iter().chain(excluded.iter()) {
+            assert!(
+                parse_dialog_kind(n).is_some(),
+                "清单里的 `{n}` 不是可解析的窗口名（parse_dialog_kind 返回 None）"
+            );
+        }
+        let uniq = {
+            let mut s = sweep.clone();
+            s.sort();
+            s.dedup();
+            s.len()
+        };
+        assert_eq!(uniq, sweep.len(), "sweep 有重复项");
+        for n in &no_btn {
+            assert!(
+                sweep.contains(n),
+                "no_close_by_design 的 `{n}` 不在 sweep 里"
+            );
+        }
+        for n in &excluded {
+            assert!(!sweep.contains(n), "`{n}` 同时在 sweep 与 excluded 里");
+        }
+
+        let covered: Vec<DialogKind> = sweep
+            .iter()
+            .chain(excluded.iter())
+            .filter_map(|n| parse_dialog_kind(n))
+            .collect();
+        let missing: Vec<String> = RPC_KIND_NAMES
+            .iter()
+            .filter_map(|n| parse_dialog_kind(n))
+            .filter(|k| has_rpc_mapping(*k) && !covered.contains(k))
+            .map(|k| format!("{k:?}"))
+            .collect();
+        assert!(
+            missing.is_empty(),
+            "有 RPC 开关却既不在 sweep 也不在 excluded：{missing:?}——\
+             请登记进 tools/acceptance/interact_sweep_manifest.json\
+             （可逐窗开关的进 sweep；状态/会话驱动的进 excluded 并写明理由与覆盖路径）"
         );
     }
 
