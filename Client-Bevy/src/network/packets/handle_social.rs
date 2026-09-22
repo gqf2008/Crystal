@@ -870,10 +870,43 @@ pub(crate) fn handle_social(
         }
 
         x if x == ServerPacketIds::KeepAlive as i16 => {
-            // 服务器心跳：回一个 KeepAlive
-            net.send_packet(&mir2_shared::packets::client::connection::KeepAlive { time: 0 });
+            // 服务器心跳：**不回**（P2 修复，2026-09-22）。
+            //
+            // 旧实现收到服务端 KeepAlive 就回一个，而服务端对**每个**客户端 KeepAlive 都回一个
+            // （`gate/actor.rs` 的 handle_keep_alive）→ 两边乒乓、速率只受帧率限制：
+            // 实测峰值 63 个/秒、2 分钟 2912 个 opcode=2 包。
+            // 客户端本就有「5s 空闲自动心跳」（`network/tcp.rs` HEARTBEAT_INTERVAL），
+            // 保活由它负责；这里只记录活跃时间即可（协议上服务端心跳是单向通知）。
+            let _ = keepalive_reply();
         }
         _ => {}
     }
     handled
+}
+/// P2 修复（2026-09-22）：客户端对**服务端心跳**的回应。
+///
+/// 契约上必须是 `None`。服务端对**每个**客户端 KeepAlive 都会回一个
+/// （`ServerRust/src/gate/actor.rs` 的 `handle_keep_alive`），客户端若也回敬，
+/// 两边就形成乒乓、速率只受帧率限制——实测峰值 63 个/秒、2 分钟内 2912 个 opcode=2 包。
+/// 保活由客户端自身的「5s 空闲心跳」（`network/tcp.rs` `HEARTBEAT_INTERVAL`）负责。
+/// 保留这个函数（而不是把分支删掉）是为了让"不许回心跳"成为可被单测钉住的契约。
+pub(crate) fn keepalive_reply() -> Option<mir2_shared::packets::client::connection::KeepAlive> {
+    None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// P2 回归（2026-09-22）：客户端**不得**回应服务端心跳。
+    ///
+    /// 阳性对照（落地时实做）：把 `keepalive_reply` 改成
+    /// `Some(mir2_shared::packets::client::connection::KeepAlive { time: 0 })` → 本测试立即红。
+    #[test]
+    fn server_keepalive_must_not_be_answered() {
+        assert!(
+            keepalive_reply().is_none(),
+            "客户端不得回应服务端心跳：服务端对每个客户端 KeepAlive 都会回一个，两边回敬会形成帧率级乒乓（实测 63/s）"
+        );
+    }
 }
