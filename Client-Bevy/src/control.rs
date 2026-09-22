@@ -57,11 +57,41 @@ use crate::network::NetConnection;
 use crate::scenes::AppState;
 
 /// 控制命令（控制线程 → Bevy 主循环）
+/// 解析 `attack_mode` RPC 的模式名（玩家验收能力，2026-09-22）。
+///
+/// 只接受下面写死的 6 个名字；其余一律 `None`（RPC 侧回 `error` 而不是**静默保持和平模式**）——
+/// 静默回退会让"以为切了模式其实没切"重新变成不可见缺陷，正是 P1 难定位的原因之一。
+fn parse_attack_mode(name: &str) -> Option<mir2_shared::enums::AttackMode> {
+    use mir2_shared::enums::AttackMode;
+    match name.trim().to_ascii_lowercase().as_str() {
+        "peace" => Some(AttackMode::Peace),
+        "group" => Some(AttackMode::Group),
+        "guild" => Some(AttackMode::Guild),
+        "enemy_guild" | "enemyguild" => Some(AttackMode::EnemyGuild),
+        "red_brown" | "redbrown" => Some(AttackMode::RedBrown),
+        "all" => Some(AttackMode::All),
+        _ => None,
+    }
+}
+
 enum ControlCommand {
     Move {
         dx: i32,
         dy: i32,
         run: bool,
+    },
+    /// 玩家视角验收能力：走到指定**世界坐标**（同 `nearby` 的 x/y）——内部用与服务端同款的
+    /// `pathfinding::find_path` 生成 `LocalMove`，因此能绕开建筑，够到被挡住的 NPC/落点。
+    /// （`Move` 只走单格方向；`pickup` 的寻路只服务掉落物。）
+    WalkTo {
+        x: f32,
+        y: f32,
+        run: bool,
+    },
+    /// 玩家视角验收能力：切换攻击模式（等价于 Ctrl+H 循环，但可直接指定）——
+    /// 设 `AttackModeState` 并发 `ChangeAMode`，否则"和平"模式下打不死怪无法自动复现/验证。
+    SetAttackMode {
+        mode: mir2_shared::enums::AttackMode,
     },
     Screenshot {
         path: String,
@@ -432,6 +462,45 @@ fn handle_conn(mut stream: std::net::TcpStream, tx: Sender<ControlCommand>) {
                 let run = params.get("run").and_then(|v| v.as_bool()).unwrap_or(true);
                 let _ = tx.send(ControlCommand::Move { dx, dy, run });
                 json!({"ok": true})
+            }
+            "walk_to" => {
+                // 玩家验收能力（2026-09-22）：走到世界坐标 {x,y}；也接受瓦片坐标 {tx,ty}
+                // （瓦片→世界：48px/格，与 movement::world_to_tile 的逆变换一致）。
+                // 瓦片→世界按 48px/格（movement::world_to_tile 的逆变换）
+                let world = match (
+                    params.get("x").and_then(|v| v.as_f64()),
+                    params.get("y").and_then(|v| v.as_f64()),
+                ) {
+                    (Some(x), Some(y)) => Some((x as f32, y as f32)),
+                    _ => match (
+                        params.get("tx").and_then(|v| v.as_f64()),
+                        params.get("ty").and_then(|v| v.as_f64()),
+                    ) {
+                        (Some(tx), Some(ty)) => Some(((tx as f32) * 48.0, (ty as f32) * 48.0)),
+                        _ => None,
+                    },
+                };
+                match world {
+                    Some((x, y)) => {
+                        let run = params.get("run").and_then(|v| v.as_bool()).unwrap_or(true);
+                        let _ = tx.send(ControlCommand::WalkTo { x, y, run });
+                        json!({"ok": true, "x": x, "y": y})
+                    }
+                    None => json!({"error": "missing x/y (or tx/ty)"}),
+                }
+            }
+            "attack_mode" => {
+                let name = params.get("mode").and_then(|v| v.as_str()).unwrap_or("");
+                match parse_attack_mode(name) {
+                    Some(mode) => {
+                        let _ = tx.send(ControlCommand::SetAttackMode { mode });
+                        json!({"ok": true, "mode": format!("{mode:?}")})
+                    }
+                    None => json!({
+                        "error": "unknown attack mode",
+                        "accepted": ["peace", "group", "guild", "enemy_guild", "red_brown", "all"]
+                    }),
+                }
             }
             "screenshot" => {
                 let path = params
@@ -1614,6 +1683,58 @@ fn apply_control_commands(
                 .to_string();
                 let _ = reply.send(s);
             }
+            ControlCommand::WalkTo { x, y, run } => {
+                // 同 `Move` 臂：寻路 + LocalMove（能绕建筑）；目标是世界坐标 → 瓦片
+                let Ok((pe, ptf, _)) = q.players.single() else {
+                    continue;
+                };
+                let Some(map) = &game_data.map else {
+                    tracing::warn!("🎮 control walk_to: 地图未加载，忽略");
+                    continue;
+                };
+                let from = world_to_tile(ptf.translation.x, ptf.translation.y);
+                let target = world_to_tile(x, y);
+                if target == from {
+                    tracing::info!("🎮 control walk_to: 已在目标 ({},{})", target.0, target.1);
+                    continue;
+                }
+                libs.0.ensure_initialized();
+                match pathfinding::find_path(map, from, target) {
+                    Some(p) if !p.is_empty() => {
+                        let len = p.len();
+                        commands.entity(pe).insert(LocalMove {
+                            path: p.into(),
+                            step_timer_ms: 0.0,
+                            run,
+                            last: None,
+                            step_origin: None,
+                            turn_acc: 0.0,
+                        });
+                        control_state.attack_target = None;
+                        control_state.pickup_target = None;
+                        tracing::info!(
+                            "🎮 control walk_to: ({},{}) -> ({},{}) run={run} 路径 {len} 格",
+                            from.0,
+                            from.1,
+                            target.0,
+                            target.1
+                        );
+                    }
+                    _ => tracing::warn!(
+                        "🎮 control walk_to: ({},{}) -> ({},{}) 无可行路径（墙/越界）",
+                        from.0,
+                        from.1,
+                        target.0,
+                        target.1
+                    ),
+                }
+            }
+            ControlCommand::SetAttackMode { mode } => {
+                // 本系统参数已达 Bevy 上限（16），不能直接挂 ResMut<AttackModeState>：
+                // 经 ControlState 传请求，由 combat::apply_pending_attack_mode 消费并发包。
+                control_state.pending_attack_mode = Some(mode);
+                tracing::info!("🎮 control attack_mode 请求: {mode:?}");
+            }
             ControlCommand::Attack { object_id } => {
                 control_state.attack_target = Some(object_id);
                 control_state.last_attack = 0.0;
@@ -2054,6 +2175,42 @@ mod tests {
         for (raw, want) in [("0", 0u16), ("65535", 65535u16)] {
             let args: Vec<String> = vec!["client_bevy".into(), "--control-port".into(), raw.into()];
             assert_eq!(parse_control_port(&args), want, "边界值 {raw} 应接受");
+        }
+    }
+
+    /// `attack_mode` RPC 的模式名解析（2026-09-22 玩家验收能力）。
+    ///
+    /// 阳性对照（落地时实做）：把 `_ => None` 改成 `_ => Some(Peace)`（静默回退）后，
+    /// 下面 "拒绝未知模式" 的断言立即变红——这一类静默回退正是 P1「以为切了模式其实没切」的土壤。
+    #[test]
+    fn parse_attack_mode_maps_names_and_rejects_unknown() {
+        use mir2_shared::enums::AttackMode;
+        let cases = [
+            ("peace", AttackMode::Peace),
+            ("group", AttackMode::Group),
+            ("guild", AttackMode::Guild),
+            ("all", AttackMode::All),
+            ("enemy_guild", AttackMode::EnemyGuild),
+            ("enemyguild", AttackMode::EnemyGuild),
+            ("red_brown", AttackMode::RedBrown),
+            ("redbrown", AttackMode::RedBrown),
+            ("  GUILD  ", AttackMode::Guild),
+        ];
+        for (raw, want) in cases {
+            assert_eq!(
+                parse_attack_mode(raw),
+                Some(want),
+                "{raw} 应解析为 {want:?}"
+            );
+        }
+        // 注意 "group " 这类**首尾空白**是合法的（解析前 trim），故不放这里；
+        // 这里只放真正未知的名字。
+        for bad in ["", "   ", "peaceful", "全部", "guild_", "allx", "0"] {
+            assert_eq!(
+                parse_attack_mode(bad),
+                None,
+                "未知模式 {bad:?} 必须被拒绝（不得静默回退成某个模式）"
+            );
         }
     }
 }

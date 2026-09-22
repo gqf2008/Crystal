@@ -43,6 +43,10 @@ pub struct ControlState {
     pub attack_interval: f32,
     /// 待拾取的地面物品 object_id（寻路到达后自动 PickUp）
     pub pickup_target: Option<u32>,
+    /// 玩家验收能力（2026-09-22）：control RPC 请求切换攻击模式时的**待办请求**。
+    /// `apply_control_commands` 已达 Bevy 系统参数上限（16），不能再挂 `ResMut<AttackModeState>`，
+    /// 故经 ControlState 传递，由 `apply_pending_attack_mode` 消费。
+    pub pending_attack_mode: Option<mir2_shared::enums::AttackMode>,
     /// 按住移动状态：目标格 + 模式（true=跑, false=走），用于持续追踪鼠标
     pub hold_target: Option<(i32, i32)>,
     pub hold_run: Option<bool>,
@@ -60,6 +64,7 @@ impl Default for ControlState {
         Self {
             autorun: false,
             attack_target: None,
+            pending_attack_mode: None,
             last_attack: 0.0,
             attack_interval: 1.0,
             pickup_target: None,
