@@ -9669,7 +9669,11 @@ mod p2_move_arity_tests {
             None,
             "多余参数必须回用法提示，而不是被当成传送到 (0,300)"
         );
-        assert_eq!(parse_move_args(&["move", "300"]), None, "少参数必须是用法错");
+        assert_eq!(
+            parse_move_args(&["move", "300"]),
+            None,
+            "少参数必须是用法错"
+        );
         assert_eq!(parse_move_args(&["move"]), None);
         assert_eq!(parse_move_args(&["move", "abc", "1"]), None);
     }
