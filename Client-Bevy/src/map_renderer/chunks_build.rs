@@ -949,6 +949,30 @@ mod tests {
         );
     }
 
+    /// P0 回归（2026-09-22 玩家实测）：地图加载失败时 `setup_world` 走 M4 分支、**不插入**
+    /// `MapLightTexture`。若 `chunk_stream_system` 仍把该资源当必选参数，Bevy 会在系统体执行前
+    /// 参数校验失败 → 客户端一进图就 panic（实测堆栈：`Parameter Res<'_, MapLightTexture> failed
+    /// validation: Resource does not exist` → `main_schedule::Main::run_main` panic）。
+    ///
+    /// 阳性对照（落地时实做）：把 `chunks.rs` 的参数改回 `Res<MapLightTexture>`（即本测试要防的写法）
+    /// → 本测试立即失败（`run_system_once` 返回 Err）；改回 `Option<..>` 则通过。
+    #[test]
+    fn chunk_stream_tolerates_missing_map_light_texture() {
+        use bevy::ecs::system::RunSystemOnce;
+        let mut world = world_with_old_map("old_map", Some("__missing_new_map__"));
+        assert!(
+            world
+                .get_resource::<crate::map_renderer::MapLightTexture>()
+                .is_none(),
+            "本测试的前提是资源确实不存在（复现地图加载失败路径）"
+        );
+        let r = world.run_system_once(crate::map_renderer::chunks::chunk_stream_system);
+        assert!(
+            r.is_ok(),
+            "缺 MapLightTexture 时必须安全跳过，而不是让客户端一进图就崩: {r:?}"
+        );
+    }
+
     /// S2 回归：OnExit(Game) 清理后四类地图实体无残留、游标重置、无关实体保留。
     /// 走真实状态迁移（Game → Login），不是直接调清理函数。
     #[test]
