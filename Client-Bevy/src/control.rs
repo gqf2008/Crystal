@@ -566,7 +566,10 @@ fn handle_conn(mut stream: std::net::TcpStream, tx: Sender<ControlCommand>) {
             "combat_probe" => {
                 // 只读：锁定目标 / 距离 / 血条百分比 / 近期战斗事件（判据来自服务端事件流）
                 let (reply_tx, reply_rx) = bounded::<String>(1);
-                if tx.send(ControlCommand::CombatProbe { reply: reply_tx }).is_ok() {
+                if tx
+                    .send(ControlCommand::CombatProbe { reply: reply_tx })
+                    .is_ok()
+                {
                     let s = reply_rx
                         .recv_timeout(std::time::Duration::from_secs(2))
                         .unwrap_or_else(|_| "{}".to_string());
@@ -1765,11 +1768,7 @@ fn apply_control_commands(
                                 let p = world_to_tile(ptf.translation.x, ptf.translation.y);
                                 let t = world_to_tile(tf.translation.x, tf.translation.y);
                                 let cheb = (t.0 - p.0).abs().max((t.1 - p.1).abs());
-                                (
-                                    Some(t),
-                                    Some(cheb),
-                                    Some(name.0.clone()),
-                                )
+                                (Some(t), Some(cheb), Some(name.0.clone()))
                             }
                             None => (None, None, None),
                         }
@@ -1777,8 +1776,7 @@ fn apply_control_commands(
                     _ => (None, None, None),
                 };
                 let hp_percent = target.and_then(|id| {
-                    q.hp
-                        .iter()
+                    q.hp.iter()
                         .find(|(oid, _)| oid.0 == id)
                         .map(|(_, hp)| hp.percent)
                 });
@@ -1835,7 +1833,8 @@ fn apply_control_commands(
             }
             ControlCommand::Attack { object_id } => {
                 control_state.attack_target = Some(object_id);
-                control_state.last_attack = 0.0;
+                // P1 修复：旧写法清零计时器（与"立即攻击"语义相反）→ 连点会永远攻击不出去
+                control_state.mark_attack_ready();
                 if let Ok((pe, _, _)) = q.players.single() {
                     commands.entity(pe).remove::<LocalMove>();
                 }
