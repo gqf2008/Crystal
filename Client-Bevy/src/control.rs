@@ -99,6 +99,12 @@ enum ControlCommand {
     GetState {
         reply: Sender<String>,
     },
+    /// 玩家验收能力（2026-09-22）：只读战斗探针——把"这一次攻击到底有没有落到目标身上"
+    /// 变成可读真值（锁定目标 / 距离 / 是否在射程 / 目标血条百分比 / 近期战斗事件流）。
+    /// 存在理由：`nearby` 的成员变化分不清"目标离开视野"与"被打死"，实测因此误判过一次。
+    CombatProbe {
+        reply: Sender<String>,
+    },
     /// #2961 项5 验收：注入一次滚轮（x,y 为 UI 逻辑坐标；delta 为行数，正=向下滚=offset 增）
     Wheel {
         x: f32,
@@ -245,6 +251,13 @@ pub fn resolve_cursor(probe: Option<Vec2>, window: Option<Vec2>) -> Option<Vec2>
 /// 再加「光标探针 + 相机」就编译失败）。
 #[derive(SystemParam)]
 struct ControlQueries<'w, 's> {
+    /// `combat_probe` 用：对象头顶血条百分比（由 `S.ObjectHealth` 写入 `ActorHp`）。
+    /// 这是"攻击是否真的落到目标身上"的直接证据，不依赖视野成员变化。
+    hp: Query<'w, 's, (&'static NetObjectId, &'static crate::game::combat::ActorHp)>,
+    /// `combat_probe` 用：本地玩家状态标志——`auto_attack_system` 的 run_if 是
+    /// `player_input_enabled`（= 非 dead/fishing/paralysis），命中该门控时攻击**一次都不会发**，
+    /// 而日志里看不出任何异常（P1 实测踩到过）。
+    flags: Query<'w, 's, &'static crate::game::player_state::StatusFlags, With<LocalPlayer>>,
     players: Query<
         'w,
         's,
@@ -546,6 +559,18 @@ fn handle_conn(mut stream: std::net::TcpStream, tx: Sender<ControlCommand>) {
                         .recv_timeout(std::time::Duration::from_secs(2))
                         .unwrap_or_else(|_| "{}".to_string());
                     json!({"visible": s})
+                } else {
+                    json!({"error": "control channel closed"})
+                }
+            }
+            "combat_probe" => {
+                // 只读：锁定目标 / 距离 / 血条百分比 / 近期战斗事件（判据来自服务端事件流）
+                let (reply_tx, reply_rx) = bounded::<String>(1);
+                if tx.send(ControlCommand::CombatProbe { reply: reply_tx }).is_ok() {
+                    let s = reply_rx
+                        .recv_timeout(std::time::Duration::from_secs(2))
+                        .unwrap_or_else(|_| "{}".to_string());
+                    serde_json::from_str::<Value>(&s).unwrap_or_else(|_| json!({}))
                 } else {
                     json!({"error": "control channel closed"})
                 }
@@ -1728,6 +1753,79 @@ fn apply_control_commands(
                         target.1
                     ),
                 }
+            }
+            ControlCommand::CombatProbe { reply } => {
+                // 只读探针：不写任何状态。答复里 events 是**服务端事件流**的近期片段。
+                let target = control_state.attack_target;
+                let player = q.players.single().ok();
+                let (tx_tile, tdist, tname) = match (target, player) {
+                    (Some(id), Some((_, ptf, _))) => {
+                        match q.monsters.iter().find(|(_, _, oid)| oid.0 == id) {
+                            Some((tf, name, _)) => {
+                                let p = world_to_tile(ptf.translation.x, ptf.translation.y);
+                                let t = world_to_tile(tf.translation.x, tf.translation.y);
+                                let cheb = (t.0 - p.0).abs().max((t.1 - p.1).abs());
+                                (
+                                    Some(t),
+                                    Some(cheb),
+                                    Some(name.0.clone()),
+                                )
+                            }
+                            None => (None, None, None),
+                        }
+                    }
+                    _ => (None, None, None),
+                };
+                let hp_percent = target.and_then(|id| {
+                    q.hp
+                        .iter()
+                        .find(|(oid, _)| oid.0 == id)
+                        .map(|(_, hp)| hp.percent)
+                });
+                let events: Vec<serde_json::Value> = control_state
+                    .combat_log
+                    .iter()
+                    .map(|e| {
+                        json!({
+                            "kind": e.kind,
+                            "id": e.object_id,
+                            "value": e.value,
+                            "actor": e.actor_id,
+                        })
+                    })
+                    .collect();
+                let payload = json!({
+                    "ok": true,
+                    "players": q.players.iter().count(),
+                    "flags": q.flags.iter().next().map(|f| json!({
+                        "dead": f.dead,
+                        "fishing": f.fishing,
+                        "paralysis": f.paralysis,
+                    })),
+                    "input_enabled": match q.flags.single() {
+                        Ok(f) => !(f.dead || f.fishing || f.paralysis),
+                        Err(bevy::ecs::query::QuerySingleError::NoEntities(_)) => true,
+                        Err(_) => false,
+                    },
+                    "attack_target": target,
+                    "target_name": tname,
+                    "target_tile": tx_tile.map(|t| vec![t.0, t.1]),
+                    "target_dist_tiles": tdist,
+                    "in_melee_range": tdist.map(|d| d <= 1),
+                    "hp_percent": hp_percent,
+                    "attack_mode": control_state.last_attack_mode.map(|m| format!("{m:?}")),
+                    "attack_interval": control_state.attack_interval,
+                    "since_last_attack": control_state.last_attack,
+                    "events": events,
+                });
+                tracing::info!(
+                    "🎮 control combat_probe: target={:?} dist={:?} hp={:?} events={}",
+                    target,
+                    tdist,
+                    hp_percent,
+                    control_state.combat_log.len()
+                );
+                let _ = reply.send(payload.to_string());
             }
             ControlCommand::SetAttackMode { mode } => {
                 // 本系统参数已达 Bevy 上限（16），不能直接挂 ResMut<AttackModeState>：
