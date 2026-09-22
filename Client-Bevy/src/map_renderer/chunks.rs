@@ -263,7 +263,11 @@ pub(crate) fn chunk_stream_system(
         &FrontChunkKey,
         Option<&MeshMaterial2d<crate::map_tile_anim::MapBlendMaterial>>,
     )>,
-    light_tex: Res<MapLightTexture>,
+    // P0（2026-09-22 玩家实测）：该资源只在 `setup_world` 的**成功路径**插入（`chunks_build.rs`），
+    // 地图加载失败走 M4 失败分支时不会插入。此前这里是必选 `Res<..>`，Bevy 在**系统体执行前**
+    // 做参数校验 → 直接 panic（实测：进图即崩，`Parameter Res<'_, MapLightTexture> failed validation`）。
+    // 改成 Option：缺资源时安全跳过，把"错误可见 + 退回登录"留给 M4 分支去表达。
+    light_tex: Option<Res<MapLightTexture>>,
     lights: Query<(
         Entity,
         &LightChunkKey,
@@ -271,6 +275,10 @@ pub(crate) fn chunk_stream_system(
     )>,
 ) {
     let Some(map_reader) = game_data.map_reader.clone() else {
+        return;
+    };
+    let Some(light_tex) = light_tex else {
+        tracing::warn!("🧩 chunk_stream: 缺 MapLightTexture（地图加载失败路径），本次跳过");
         return;
     };
     let Ok(cam) = camera.single() else { return };
