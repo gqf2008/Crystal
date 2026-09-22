@@ -163,6 +163,10 @@ impl Plugin for CombatPlugin {
         app.add_systems(Update, attack_mode_system.run_if(in_state(AppState::Game)));
         app.add_systems(
             Update,
+            apply_pending_attack_mode.run_if(in_state(AppState::Game)),
+        );
+        app.add_systems(
+            Update,
             attack_mode_server_events.run_if(in_state(AppState::Game)),
         );
         // #234 修复：战斗反馈系统此前未注册（受击动画/伤害飘字/头顶血条/死亡移除从未生效）
@@ -209,6 +213,27 @@ fn attack_mode_system(
     state.mode = next;
     net.send_packet(&mir2_shared::packets::client::misc::ChangeAMode { mode: next });
     tracing::info!("⚔️ 攻击模式 -> {:?}（{}）", next, attack_mode_name(next));
+}
+
+/// 玩家验收能力（2026-09-22）：消费 control RPC 的「切换攻击模式」请求。
+///
+/// 与 Ctrl+H（[`attack_mode_system`]）走同一条出口：写 `AttackModeState` + 发 `ChangeAMode`。
+/// 独立成系统而非并入 control 命令循环，是因为 `apply_control_commands` 的参数已达 Bevy 上限（16）。
+fn apply_pending_attack_mode(
+    mut control: ResMut<crate::game::player_control::ControlState>,
+    mut state: ResMut<AttackModeState>,
+    net: Res<crate::network::NetConnection>,
+) {
+    let Some(mode) = control.pending_attack_mode.take() else {
+        return;
+    };
+    state.mode = mode;
+    net.send_packet(&mir2_shared::packets::client::misc::ChangeAMode { mode });
+    tracing::info!(
+        "🎮 control attack_mode -> {:?}（{}）",
+        mode,
+        attack_mode_name(mode)
+    );
 }
 
 /// 应用受击/死亡事件 + 生成伤害飘字
