@@ -1,0 +1,288 @@
+<title>六项 UI 缺陷验收</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+  :root {
+    --ground: #f4f5f3;
+    --surface: #ffffff;
+    --surface-sunk: #eceeeb;
+    --ink: #17211f;
+    --ink-soft: #46534f;
+    --ink-faint: #77817d;
+    --line: #d9ddd8;
+    --line-strong: #b9c0ba;
+    --accent: #0b6b5f;
+    --accent-soft: #e2f0ed;
+    --pass: #1a7a45;
+    --pass-soft: #e3f2e8;
+    --warn: #9a5b12;
+    --warn-soft: #f7ecdc;
+    --code-ground: #1d2523;
+    --code-ink: #e6ecea;
+    --shadow: 0 1px 2px rgba(23, 33, 31, .06), 0 8px 24px -16px rgba(23, 33, 31, .35);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground: #121917;
+      --surface: #19211f;
+      --surface-sunk: #141b19;
+      --ink: #e8edea;
+      --ink-soft: #b3bcb8;
+      --ink-faint: #8a9490;
+      --line: #2b3532;
+      --line-strong: #3d4845;
+      --accent: #4fc3b0;
+      --accent-soft: #17322d;
+      --pass: #5fc98c;
+      --pass-soft: #16301f;
+      --warn: #e0a35c;
+      --warn-soft: #33291a;
+      --code-ground: #0d1312;
+      --code-ink: #dbe4e1;
+      --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 8px 24px -16px rgba(0, 0, 0, .8);
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground: #121917;
+    --surface: #19211f;
+    --surface-sunk: #141b19;
+    --ink: #e8edea;
+    --ink-soft: #b3bcb8;
+    --ink-faint: #8a9490;
+    --line: #2b3532;
+    --line-strong: #3d4845;
+    --accent: #4fc3b0;
+    --accent-soft: #17322d;
+    --pass: #5fc98c;
+    --pass-soft: #16301f;
+    --warn: #e0a35c;
+    --warn-soft: #33291a;
+    --code-ground: #0d1312;
+    --code-ink: #dbe4e1;
+    --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 8px 24px -16px rgba(0, 0, 0, .8);
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--ink);
+    font-family: "IBM Plex Sans", "PingFang SC", "Microsoft YaHei", "Noto Sans SC", system-ui, sans-serif;
+    font-size: 16px;
+    line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 60rem; margin: 0 auto; padding-block: 3.5rem 5rem; padding-inline: 1.25rem; }
+
+  header.masthead { border-bottom: 2px solid var(--ink); padding-bottom: 1.5rem; margin-bottom: 2.5rem; }
+  .eyebrow {
+    font-size: .72rem; letter-spacing: .16em; text-transform: uppercase;
+    color: var(--accent); font-weight: 600; margin: 0 0 .75rem;
+  }
+  h1 { font-size: clamp(1.75rem, 4vw, 2.5rem); line-height: 1.15; margin: 0 0 .75rem; text-wrap: balance; letter-spacing: -.01em; }
+  .lede { margin: 0; color: var(--ink-soft); max-width: 46rem; }
+
+  dl.meta { display: grid; grid-template-columns: max-content 1fr; gap: .35rem 1.25rem; margin: 1.75rem 0 0; font-size: .9rem; }
+  dl.meta dt { color: var(--ink-faint); }
+  dl.meta dd { margin: 0; color: var(--ink-soft); }
+
+  h2 {
+    font-size: 1.1rem; letter-spacing: .01em; margin: 3rem 0 1rem;
+    padding-bottom: .5rem; border-bottom: 1px solid var(--line-strong);
+  }
+  h3 { font-size: 1rem; margin: 2rem 0 .5rem; }
+  p { margin: 0 0 1rem; }
+  code {
+    font-family: "IBM Plex Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+    font-size: .86em; background: var(--surface-sunk); padding: .12em .38em;
+    border-radius: 3px; border: 1px solid var(--line);
+  }
+  .num { font-variant-numeric: tabular-nums; }
+
+  .scroll { overflow-x: auto; margin: 0 0 1.25rem; }
+  table { border-collapse: collapse; width: 100%; font-size: .9rem; }
+  th, td { text-align: left; padding: .6rem .75rem; border-bottom: 1px solid var(--line); vertical-align: top; }
+  thead th { font-size: .74rem; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-faint); border-bottom-color: var(--line-strong); white-space: nowrap; }
+  tbody tr:last-child td { border-bottom: none; }
+  td.idx { color: var(--ink-faint); font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+  .badge {
+    display: inline-block; font-size: .74rem; font-weight: 600; letter-spacing: .02em;
+    padding: .1rem .5rem; border-radius: 999px; white-space: nowrap;
+    background: var(--pass-soft); color: var(--pass);
+  }
+
+  ol.gaps { margin: 0; padding-left: 1.25rem; }
+  ol.gaps li { margin-bottom: .6rem; color: var(--ink-soft); }
+  ol.gaps li strong { color: var(--ink); }
+
+  pre {
+    background: var(--code-ground); color: var(--code-ink);
+    padding: 1rem 1.15rem; border-radius: 6px; overflow-x: auto;
+    font-family: "IBM Plex Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+    font-size: .82rem; line-height: 1.6; margin: 0 0 1.25rem;
+  }
+  pre .c { color: #9fb3ad; }
+
+  .gates { display: grid; gap: .5rem; grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr)); margin: 0 0 1.5rem; }
+  .gate {
+    background: var(--surface); border: 1px solid var(--line); border-radius: 8px;
+    padding: .85rem 1rem; box-shadow: var(--shadow);
+  }
+  .gate .k { font-size: .76rem; color: var(--ink-faint); letter-spacing: .04em; }
+  .gate .v { font-size: 1.35rem; font-weight: 600; font-variant-numeric: tabular-nums; letter-spacing: -.01em; }
+  .gate .v small { font-size: .72rem; font-weight: 400; color: var(--ink-faint); margin-left: .3rem; }
+
+  footer { margin-top: 3.5rem; padding-top: 1.25rem; border-top: 1px solid var(--line); color: var(--ink-faint); font-size: .82rem; }
+  @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+</style>
+
+<div class="wrap">
+  <header class="masthead">
+    <p class="eyebrow">Crystal · Client-Bevy · 验收依据</p>
+    <h1>六项 UI 缺陷验收</h1>
+    <p class="lede">用户实测报出的 6 项界面缺陷，逐项定位根因、修复并<strong>实机复验</strong>。本页给出每项可判真假的判据、门禁数据，以及仍然开着的口子。</p>
+    <dl class="meta">
+      <dt>版本</dt><dd>master <code>7726c529</code>（#2962~#2981 共 16 个 PR）</dd>
+      <dt>环境</dt><dd>ServerRust release + Client-Bevy debug（<code>--real-net --auto-enter</code>），账号 <code>test / bevychar</code>，地图 BichonProvince</dd>
+      <dt>方法</dt><dd>每项要求「单元测试红→绿」+「实机可判真假的断言」；实机断言优先取 control RPC 的真值字段，像素只用于字形类证据</dd>
+    </dl>
+  </header>
+
+  <h2>结论</h2>
+  <div class="scroll">
+    <table>
+      <thead>
+        <tr><th>#</th><th>用户原话（摘要）</th><th>状态</th><th>实机判据</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="idx">1</td>
+          <td>坐骑没有像英雄一样实现遮挡半透明</td>
+          <td><span class="badge">已修 · 已验</span></td>
+          <td>骑乘走过树冠，坐骑以半透明残影显示而非消失</td>
+        </tr>
+        <tr>
+          <td class="idx">2</td>
+          <td>底部的信息输入/出框居然可以被拖动</td>
+          <td><span class="badge">已修 · 已验</span></td>
+          <td>面板内起点 (400,700) 拖到 (700,250)：玩家坐标不变 + 面板左边框锚定区像素原位</td>
+        </tr>
+        <tr>
+          <td class="idx">3</td>
+          <td>中文输入法候选词是乱码</td>
+          <td><span class="badge">已修 · 已验</span></td>
+          <td>候选条 <code>nihao 1.你好 2.你 3.尼 …</code> 字形正常；输入框 <code>&gt; 你好</code>；聊天记录 <code>[bevychar]: 你好</code>（三张截图见验收报告 §10.1）</td>
+        </tr>
+        <tr>
+          <td class="idx">4</td>
+          <td>商场窗口里的内容错位</td>
+          <td><span class="badge">已修 · 已验</span></td>
+          <td>面板 @(164,146)；按 C# 坐标点格 0 / 格 3 / 格 4 / 分类行 → 4/4 命中 <code>root=GameShop</code></td>
+        </tr>
+        <tr>
+          <td class="idx">5</td>
+          <td>好多窗口滚动条好像都没实现</td>
+          <td><span class="badge">已修 · 已验</span></td>
+          <td>滚轮注入 + <code>scroll</code> 读<strong>真值</strong>：邮件列表注入 1 格 → <code>offset 0 → 1</code>（恰为 <code>step=1</code>）；负控（列表之外滚）offset 不变</td>
+        </tr>
+        <tr>
+          <td class="idx">6</td>
+          <td>鼠标拖拽窗口事件会穿透到游戏中</td>
+          <td><span class="badge">已修 · 已验</span></td>
+          <td>拖腰带 / 点拖后腰带：玩家不移动；正控制空白点仍可走（没被一刀切拦死）</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h2>逐项证据</h2>
+
+  <h3>项 1 · 坐骑遮挡半透明 <span class="badge">#2965</span></h3>
+  <p><strong>根因</strong>：<code>attach_mount_layer</code> 只挂 <code>SpriteLayer</code>，未像 <code>attach_player_layers</code> 那样同挂 <code>GhostLayer</code>，遮挡系统查询不到残影层 → 走到建筑 / 树后被整个剔除。审查又抓出 <code>MountUpdated</code> 下马主路径的 ghost 泄漏，一并修。</p>
+  <p><strong>实机复验</strong>（本轮补齐）：<code>@make LeatherBridle 1</code> + <code>@make Saddle 1</code> → <code>@ride</code>（<strong>客户端</strong>日志 <code>client_bevy::actor::spawn</code>：<code>玩家 24495 骑乘坐骑 type=0</code>）→ 骑乘走过树冠 → <strong>骑手与虎体以半透明残影压在树叶之上</strong>，不再消失。</p>
+
+  <h3>项 2 · 聊天窗可拖 <span class="badge">#2966</span></h3>
+  <p><strong>根因</strong>：曾把 C# <code>MainDialogs.cs:697</code> 的 <code>Movable = true</code> 误读成整窗可拖 —— 实际那是滚动滑块 <code>PositionBar</code>。修法：移除整窗拖动，并补上 <code>WindowDragState::unregister</code> 契约（窗口隐藏时必须注销，否则残留矩形变成死点击区）。</p>
+  <p><strong>实机复验</strong>：面板内拖动玩家不移动；面板左边框锚定区像素原位；正控制（面板外世界点）仍可走。</p>
+
+  <h3>项 3 · IME 候选乱码 <span class="badge">#2967 · #2971 · #2973</span></h3>
+  <p><strong>三层根因逐层修</strong>：</p>
+  <ol class="gaps">
+    <li>候选条标签用 Arial + parley 的 Han 脚本回退，而该回退只在首次排版生效 → 候选全豆腐（修 #2967）。</li>
+    <li><strong>聊天面板同样豆腐</strong>：<code>chat.rs</code> 是最后一个把 Arial 当<strong>中文正文</strong>主字体的模块（<code>grep load_ui_font</code> 仍有约 50 处调用，多为纯拉丁 / 单次排版站点），输入框 <code>&gt; □□</code>、聊天记录 <code>[玩家]: □□</code>，连登录欢迎语整块都是 □（修 #2971）。</li>
+    <li>Enter 开框当帧把回车符写进草稿（<code>opened_trigger</code> 漏登记 Enter 路径），光标因此多算一位（修 #2973）。</li>
+  </ol>
+  <p><strong>实机判据</strong>（全部取自 RPC 真值）：<code>ime_composing == "nihao"</code>、<code>chat_input_text == "你好"</code>、中文输入过程中 <code>chat_input_text</code> 恒为空（无裸 ASCII 泄漏）。</p>
+
+  <h3>项 4 · 商城内容错位 <span class="badge">#2968 · #2970</span></h3>
+  <p><strong>根因</strong>：按 C# <code>GameshopDialog</code> 重写布局（面板 <code>Title[749]</code> 696×476 @(164,146)、8 格 125×146 @(152+i%4×132, 115/275)、分类栏原点 (120,117)）。</p>
+  <p><strong>过程中实机复验立刻抓到 P0</strong>：<code>game_shop_ui_system</code> 把 9 个 <code>&amp;mut Text</code> 查询拆成两个 <code>ParamSet</code> —— Bevy 的冲突豁免只在<strong>单个</strong> ParamSet 内部生效，两个并集在系统元数据上相撞，<strong>一进游戏就 panic 退出</strong>（exit 101）。修 #2970（合并为单个 8 项 ParamSet）+ 回归测试。</p>
+  <p><strong>实机判据</strong>：C# 坐标 4 个点全部命中 <code>root=GameShop</code>。</p>
+
+  <h3>项 5 · 滚动条缺失 <span class="badge">#2968</span></h3>
+  <p><strong>根因</strong>：<code>UiScrollList</code> 的屏幕原点只按根实体算，子列表错位；隐藏列表仍会吞滚轮；商城分类条与行会双列表未绑轨道。修法：原点沿 <code>ChildOf</code> 链逐级累加、隐藏列表加可见性闸门、各自绑定轨道。</p>
+  <p><strong>实机判据</strong>：截图 —— 商城分类条渲染出滑块（约 1/5 行程）与上下箭头；行会 Members / Storage 两条轨道并排。</p>
+
+  <h3>项 6 · 拖拽穿透 <span class="badge">#2966</span></h3>
+  <p><strong>根因</strong>：常驻窗口（药水腰带等）不是 <code>DialogManager</code> 对话框，世界点击闸门看不到它们；且隐藏后不注销会留下陈旧矩形。修法：<code>WindowDragState::over_window</code> 作为世界点击闸门 + 隐藏必须 <code>unregister</code>（审查 P1）。</p>
+  <p><strong>实机判据</strong>：拖腰带不移动玩家；点拖后腰带落点不穿透；<strong>正控制</strong>空白世界点仍可走。</p>
+
+  <h2>实机复验额外发现并修复的 4 个缺陷</h2>
+  <p>都不在用户报告里，是这一轮实机验证自己撞出来的。</p>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>#</th><th>缺陷</th><th>影响</th><th>修复</th></tr></thead>
+      <tbody>
+        <tr><td class="idx">A</td><td>商城系统跨 ParamSet 触发 B0001</td><td><strong>P0 一进游戏即崩</strong></td><td>#2970（issue #2969）</td></tr>
+        <tr><td class="idx">B</td><td>聊天面板中文全豆腐</td><td>用户报的「乱码」在聊天区没修干净</td><td>#2971（+ 审查跟进 P2 光标 advance）</td></tr>
+        <tr><td class="idx">C</td><td>Enter 开框当帧写入回车符</td><td>草稿留不可见 CR、光标偏移一位</td><td>#2973</td></tr>
+        <tr><td class="idx">D</td><td><code>ui_alignment</code> 在 master 上长期 FAILED</td><td>防漂移断言与 #2953 的刻意偏离不同步</td><td>#2972</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h2>门禁与实机脚本</h2>
+  <div class="gates">
+    <div class="gate"><div class="k">cargo test --lib（本机 Windows）</div><div class="v num">662 <small>passed / 0 failed</small></div></div>
+    <div class="gate"><div class="k">cargo test --test b0001_smoke</div><div class="v num">1 <small>passed</small></div></div>
+    <div class="gate"><div class="k">cargo test --test ui_alignment</div><div class="v num">51 <small>passed / 0 failed</small></div></div>
+    <div class="gate"><div class="k">cargo fmt -- --check</div><div class="v">干净</div></div>
+    <div class="gate"><div class="k">ui_bugfix_verify.ps1（项 2/4/5/6 + 基线正控制）</div><div class="v num">18 <small>/ 18</small></div></div>
+    <div class="gate"><div class="k">ime_rpc_verify.ps1（项 3）</div><div class="v num">10 <small>/ 10</small></div></div>
+    <div class="gate"><div class="k">ui_interact_sweep.ps1（40 窗回归）</div><div class="v num">41 <small>/ 41（34 窗点 X + 6 窗无钮设计 + 拖动）</small></div></div>
+  </div>
+
+  <h2>残余缺口</h2>
+  <ol class="gaps">
+    <li><strong>已处理</strong>：ServerRust CI 三层红（fmt → clippy → 测试栈溢出）已修（#2977），并把 fmt/clippy 补进 <code>AGENTS.md</code> 门禁防复发。</li>
+    <li><strong>已处理</strong>：<code>ui_alignment</code> 的常量断言已拆出 <code>require_assets!</code>（#2979），CI 无 <code>Data/</code> 时也真跑。</li>
+    <li>背包扩容钮 <code>z=8</code>（全仓实测：17 处 <code>z=10</code>、<code>npc.rs</code> 一处 <code>z=9</code>、仅背包 <code>z=8</code>）—— 把 z 提到 10 才是结构性正解。</li>
+    <li><code>mail.rs</code> / <code>npc.rs</code> / <code>npc_goods.rs</code> 的列表滚轮仍为 <code>step: 3</code>，而 C# 对应处是 1 行/格。</li>
+    <li>商城仍缺物品图标、职业分区页签、Preview/Viewer 视图、<code>qty_up</code> 的 StackSize 上限（服务端会静默丢弃超量）；排行榜滚动为文档化的 no-op。</li>
+    <li><code>new_char_ui_system</code> 是唯一剩下的「同函数双 ParamSet」，当前字段不重叠但无初始化级测试。</li>
+    <li>Enter 分支不判 <code>key.repeat</code>，长按回车会反复开 / 关输入框（既有行为）。</li>
+    <li><strong>同类站点已逐个核实：不构成风险</strong>。通知条 <code>chat_notice.rs:73</code> 虽是「先建空串、后写内容」的 Arial 文本，但 <code>ChatNoticeState</code> 全仓无写入方（不可达）；<code>guild.rs</code> 的 Arial 文本是 ▲/▼ 符号；<code>hud.rs</code> 传 Arial 的是经验/等级/金币数字标签。</li>
+    <li>项 5 的实机证据是<strong>截图人工复核</strong>（脚本只截图，无滚动行为断言）。</li>
+    <li>坐骑装备那一步目前没有 RPC 原语（需界面操作），本轮先用界面把坐骑装好再骑乘验证遮挡。</li>
+  </ol>
+
+  <h2>复现方法</h2>
+  <pre><span class="c"># 0) 客户端依赖 msys64/ucrt64 与 libpinyin 的 DLL，缺任一目录会以 0xC0000135 静默退出</span>
+$env:PATH = 'D:\toolchains\msys64\ucrt64\bin;D:\toolchains\libpinyin-install\bin;' + $env:PATH
+$env:LIBPINYIN_DIR = 'D:/toolchains/libpinyin-install'
+
+<span class="c"># 1) 服务端（后台常驻）</span>
+cd ServerRust; ./target/release/mir2_server.exe
+
+<span class="c"># 2) 三项实机复验（脚本各自起停客户端）</span>
+powershell -File tools/acceptance/ui_bugfix_verify.ps1    <span class="c"># 项 2/4/5/6  -> 16/16</span>
+powershell -File tools/acceptance/ime_rpc_verify.ps1      <span class="c"># 项 3        -> 10/10（需先起客户端）</span>
+powershell -File tools/acceptance/ui_interact_sweep.ps1   <span class="c"># 40 窗回归   -> 41/41</span></pre>
+  <p>实机脚本有两个已踩过的陷阱（脚本内已注释）：正控制点必须落在<strong>可走瓦片</strong>（改用 4 方向 8 点探测，任一可走即证通路）；像素锚定必须避开<strong>动态内容</strong>（聊天行实时刷新、输入光标 2Hz 闪烁、输入行随焦点变色），故项 2 改用面板左边框静态条，并先自检两帧稳定性。</p>
+
+  <footer>
+    验收依据同步存于仓库 <code>tools/acceptance/UI_VERIFICATION_REPORT.md</code> §10。报告 PR #2974，本页随后续跟进（#2976~#2981）同步更新。
+  </footer>
+</div>
