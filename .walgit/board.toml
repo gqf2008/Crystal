@@ -26,7 +26,12 @@ status = "needs-review"
 
 [[column]]
 name = "已完成"
-status = "done"
+# 谓词取 `closed`（2026-09-22 修）：walgit 技能文档与 `docs/D1_PROTOCOL.md` 的标准流程以
+# `status: closed` 收口（issue → in-progress → patch → review → merge_result → closed），
+# 而这里原写 `done` → 已收口的卡片**不匹配任何列、直接从看板消失**（实测 crystal-rpc-cap）。
+# 另：该字段只接受字符串，写 `["done","closed"]` 会被 TOML 解析拒绝（invalid type: sequence），
+# 故只能二选一；选与标准流程一致的 closed。
+status = "closed"
 
 # 被合并规则判为不可合并的 PR 单独列出（有 patch 的线程才可能命中）
 [[column]]
