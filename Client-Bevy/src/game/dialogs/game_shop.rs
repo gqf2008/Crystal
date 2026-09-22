@@ -32,6 +32,21 @@ pub const PANEL_SIZE: (f32, f32) = (696.0, 476.0);
 /// 关闭键 `Prguse2[360..362]` @(671,4)（`GameShopDialog.cs:67-76`，无 `Size` → 原生 24x21）
 pub const CLOSE_POS: (f32, f32) = (671.0, 4.0);
 
+/// P3-3 后半条（2026-09-22）：把 `NewItemInfo` 回包写进本地物品名表。
+///
+/// 空名字**不写**（否则会把表里的好名字覆盖成空串，`resolve_shop_name` 只能再回退 `#id`）。
+pub fn remember_item_name(
+    item_names: &mut std::collections::HashMap<i32, String>,
+    index: i32,
+    name: &str,
+) -> bool {
+    if name.is_empty() {
+        return false;
+    }
+    item_names.insert(index, name.to_string());
+    true
+}
+
 /// 商品名解析（P3-3，2026-09-22）：`it.name` → 本地物品名表 `item_names[idx]` →
 /// **需要发一次 `RequestItemInfo`** → 仍无则兜底 `#id`。
 ///
@@ -1279,6 +1294,12 @@ fn shop_server_events(
                     shop.item_names.insert(*idx, name.clone());
                 }
             }
+            ServerEvent::ItemInfoReceived { index, name } => {
+                // P3-3：按需请求的回应——写进表，下一帧格子就会显示真名
+                if remember_item_name(&mut shop.item_names, *index, name) {
+                    shop.requested_item_info.remove(index);
+                }
+            }
             _ => {}
         }
     }
@@ -1585,6 +1606,26 @@ mod tests {
     /// 阳性对照（落地时实做）：把中间那段查表删掉（直接回 `#id` + need_request=false）
     /// → 本测试立即红。
     #[test]
+
+    /// P3-3 后半条回归（2026-09-22）：`NewItemInfo` 回包必须写进物品名表；
+    /// 空名字不得覆盖已有名字。
+    ///
+    /// 阳性对照（落地时实做）：把 `remember_item_name` 改成直接 `return false;`（不写表）
+    /// → 本测试立即红。
+    #[test]
+    fn new_item_info_reply_fills_item_names() {
+        let mut names = std::collections::HashMap::new();
+        assert!(remember_item_name(&mut names, 1268, "屠龙"));
+        assert_eq!(names.get(&1268).map(String::as_str), Some("屠龙"));
+        // 格子侧的降级链应当立刻吃到这个名字（不再回 #id）
+        assert_eq!(
+            resolve_shop_name("", &names, 1268),
+            ("屠龙".to_string(), false)
+        );
+        // 空名字不得覆盖已有名字
+        assert!(!remember_item_name(&mut names, 1268, ""));
+        assert_eq!(names.get(&1268).map(String::as_str), Some("屠龙"));
+    }
     fn resolve_shop_name_falls_back_in_order() {
         let mut names = std::collections::HashMap::new();
         names.insert(1269, "金创药（小）".to_string());

@@ -901,6 +901,12 @@ pub enum ServerEvent {
         panel_type: mir2_shared::enums::PanelType,
     },
     /// UserInformation：进图初始化同步（HUD/技能/背包/装备/物品名缓存）
+    /// P3-3（2026-09-22）：`S.NewItemInfo` 的载荷（按需请求物品信息后的回包）。
+    /// 商城格子靠它把 `#id` 换成真名——客户端本地物品名表 `item_names` 的来源之一。
+    ItemInfoReceived {
+        index: i32,
+        name: String,
+    },
     UserInformation {
         name: String,
         level: u16,
