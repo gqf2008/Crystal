@@ -167,6 +167,10 @@ impl Plugin for CombatPlugin {
         );
         app.add_systems(
             Update,
+            record_combat_events.run_if(in_state(AppState::Game)),
+        );
+        app.add_systems(
+            Update,
             attack_mode_server_events.run_if(in_state(AppState::Game)),
         );
         // #234 修复：战斗反馈系统此前未注册（受击动画/伤害飘字/头顶血条/死亡移除从未生效）
@@ -228,12 +232,83 @@ fn apply_pending_attack_mode(
         return;
     };
     state.mode = mode;
+    control.last_attack_mode = Some(mode);
     net.send_packet(&mir2_shared::packets::client::misc::ChangeAMode { mode });
     tracing::info!(
         "🎮 control attack_mode -> {:?}（{}）",
         mode,
         attack_mode_name(mode)
     );
+}
+
+/// 玩家验收能力（2026-09-22）：把战斗相关事件记进 `ControlState.combat_log`，
+/// 供只读 RPC `combat_probe` 读出——判据取自**服务端事件**而不是 `nearby` 的视野成员变化。
+/// （`apply_combat_events` 是另一个 reader，Bevy 的消息可被多个 reader 各读一遍，互不影响。）
+fn record_combat_events(
+    mut control: ResMut<crate::game::player_control::ControlState>,
+    mut events: MessageReader<CombatEvent>,
+) {
+    use crate::game::player_control::{push_combat_log, CombatLogItem};
+    for ev in events.read() {
+        let item = match ev {
+            CombatEvent::Struck {
+                object_id,
+                attacker_id,
+                ..
+            } => CombatLogItem {
+                kind: "struck",
+                object_id: *object_id,
+                value: 0,
+                actor_id: *attacker_id,
+            },
+            CombatEvent::ObjectHealth {
+                object_id, percent, ..
+            } => CombatLogItem {
+                kind: "object_health",
+                object_id: *object_id,
+                value: *percent as i32,
+                actor_id: 0,
+            },
+            CombatEvent::Damage {
+                object_id, damage, ..
+            } => CombatLogItem {
+                kind: "damage",
+                object_id: *object_id,
+                value: *damage,
+                actor_id: 0,
+            },
+            CombatEvent::Died { object_id, .. } => CombatLogItem {
+                kind: "died",
+                object_id: *object_id,
+                value: 0,
+                actor_id: 0,
+            },
+            CombatEvent::Revived { object_id } => CombatLogItem {
+                kind: "revived",
+                object_id: *object_id,
+                value: 0,
+                actor_id: 0,
+            },
+            CombatEvent::Attack {
+                object_id,
+                attack_type,
+                ..
+            } => CombatLogItem {
+                kind: "attack",
+                object_id: *object_id,
+                value: *attack_type as i32,
+                actor_id: 0,
+            },
+            CombatEvent::SpellCast { object_id } => CombatLogItem {
+                kind: "spell",
+                object_id: *object_id,
+                value: 0,
+                actor_id: 0,
+            },
+            _ => continue,
+        };
+        push_combat_log(&mut control.combat_log, item);
+    }
 }
 
 /// 应用受击/死亡事件 + 生成伤害飘字

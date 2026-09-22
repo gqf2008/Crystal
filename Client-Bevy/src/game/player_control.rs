@@ -31,6 +31,33 @@ use crate::scenes::AppState;
 use crate::ui::sprite_ui::UiButton;
 use mir2_shared::enums::MirDirection;
 
+/// 战斗探针日志项（玩家验收能力，2026-09-22）。
+///
+/// 背景：`nearby` 的成员变化**不能**当击杀判据——目标离开视野与被打死无法区分（实测吃过一次误判：
+/// 脚本把"目标从视野消失"报成"已击杀"，而那一轮其实一个攻击包都没发出去）。
+/// 故把服务端事件流里与战斗有关的几条记进环形缓冲，由 `combat_probe` RPC 读出。
+#[derive(Clone, Debug)]
+pub struct CombatLogItem {
+    /// "struck" / "object_health" / "damage" / "died" / "revived" / "attack" / "spell"
+    pub kind: &'static str,
+    pub object_id: u32,
+    /// 数值：object_health=percent、damage=伤害值、attack=attack_type，其余 0
+    pub value: i32,
+    /// 关联 id：struck=attacker_id，其余 0
+    pub actor_id: u32,
+}
+
+/// 战斗日志环形缓冲上限（够覆盖一次近战击杀的全过程）
+pub const COMBAT_LOG_CAP: usize = 64;
+
+/// 追加一条战斗日志并按上限截断（纯函数，便于单测与阳性对照）。
+pub fn push_combat_log(buf: &mut std::collections::VecDeque<CombatLogItem>, item: CombatLogItem) {
+    buf.push_back(item);
+    while buf.len() > COMBAT_LOG_CAP {
+        buf.pop_front();
+    }
+}
+
 #[derive(Resource)]
 pub struct ControlState {
     /// 自动跑步（中键切换）
@@ -47,6 +74,10 @@ pub struct ControlState {
     /// `apply_control_commands` 已达 Bevy 系统参数上限（16），不能再挂 `ResMut<AttackModeState>`，
     /// 故经 ControlState 传递，由 `apply_pending_attack_mode` 消费。
     pub pending_attack_mode: Option<mir2_shared::enums::AttackMode>,
+    /// 玩家验收能力：`combat_probe` 读的近期战斗事件（服务端事件流），判据不依赖视野成员变化。
+    pub combat_log: std::collections::VecDeque<CombatLogItem>,
+    /// 玩家验收能力：最近一次生效的攻击模式（由 `apply_pending_attack_mode` 回填，供探针读出）。
+    pub last_attack_mode: Option<mir2_shared::enums::AttackMode>,
     /// 按住移动状态：目标格 + 模式（true=跑, false=走），用于持续追踪鼠标
     pub hold_target: Option<(i32, i32)>,
     pub hold_run: Option<bool>,
@@ -65,6 +96,8 @@ impl Default for ControlState {
             autorun: false,
             attack_target: None,
             pending_attack_mode: None,
+            combat_log: std::collections::VecDeque::new(),
+            last_attack_mode: None,
             last_attack: 0.0,
             attack_interval: 1.0,
             pickup_target: None,
@@ -1924,5 +1957,37 @@ mod tests {
             ..Default::default()
         });
         assert!(!track.panel_visible(&log), "7/9 均不在日志 → 隐藏");
+    }
+
+    /// 战斗日志环形缓冲（玩家验收能力 2026-09-22）：
+    /// ① 不超过上限；② 超限后**丢最旧、留最新**——探针读的是"最近发生了什么"，
+    /// 若实现成丢最新（例如错用 pop_back）会让 probe 永远看不到刚发生的击杀。
+    ///
+    /// 阳性对照（落地时实做）：把 `pop_front` 改成 `pop_back` → 本测试立即红；恢复后绿。
+    #[test]
+    fn combat_log_is_capped_and_keeps_newest() {
+        let mut buf = std::collections::VecDeque::new();
+        for i in 0..(COMBAT_LOG_CAP as u32 + 10) {
+            push_combat_log(
+                &mut buf,
+                CombatLogItem {
+                    kind: "struck",
+                    object_id: i,
+                    value: 0,
+                    actor_id: 0,
+                },
+            );
+        }
+        assert_eq!(buf.len(), COMBAT_LOG_CAP, "必须按上限截断");
+        assert_eq!(
+            buf.back().map(|i| i.object_id),
+            Some(COMBAT_LOG_CAP as u32 + 9),
+            "最新一条必须在队尾（probe 要能看到刚发生的事）"
+        );
+        assert_eq!(
+            buf.front().map(|i| i.object_id),
+            Some(10),
+            "最旧的 10 条应被丢弃"
+        );
     }
 }
