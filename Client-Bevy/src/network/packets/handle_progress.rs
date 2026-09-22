@@ -1353,8 +1353,14 @@ pub(crate) fn handle_progress(
         }
         // #291：C# 服务端包面收尾（NewItemInfo）
         x if x == ServerPacketIds::NewItemInfo as i16 => {
-            if item::NewItemInfo::read_body(&mut cur).is_ok() {
-                tracing::info!("📦 NewItemInfo 解码");
+            // P3-3（2026-09-22）：旧实现只打一行日志就把载荷丢了，
+            // 于是商城按需请求到的物品名永远到不了货（格子停在 #id）。
+            if let Ok(p) = item::NewItemInfo::read_body(&mut cur) {
+                server_events.write(ServerEvent::ItemInfoReceived {
+                    index: p.info.index,
+                    name: p.info.name.clone(),
+                });
+                tracing::info!("📦 NewItemInfo: idx={} name={}", p.info.index, p.info.name);
             }
         }
         // #291：C# 服务端包面收尾（RepairItem）

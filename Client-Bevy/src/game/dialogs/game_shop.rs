@@ -32,6 +32,46 @@ pub const PANEL_SIZE: (f32, f32) = (696.0, 476.0);
 /// 关闭键 `Prguse2[360..362]` @(671,4)（`GameShopDialog.cs:67-76`，无 `Size` → 原生 24x21）
 pub const CLOSE_POS: (f32, f32) = (671.0, 4.0);
 
+/// P3-3 后半条（2026-09-22）：把 `NewItemInfo` 回包写进本地物品名表。
+///
+/// 空名字**不写**（否则会把表里的好名字覆盖成空串，`resolve_shop_name` 只能再回退 `#id`）。
+pub fn remember_item_name(
+    item_names: &mut std::collections::HashMap<i32, String>,
+    index: i32,
+    name: &str,
+) -> bool {
+    if name.is_empty() {
+        return false;
+    }
+    item_names.insert(index, name.to_string());
+    true
+}
+
+/// 商品名解析（P3-3，2026-09-22）：`it.name` → 本地物品名表 `item_names[idx]` →
+/// **需要发一次 `RequestItemInfo`** → 仍无则兜底 `#id`。
+///
+/// 依据：原版 `GameShopItem`（`Shared/Data/ItemData.cs:778`）只带 `ItemIndex` +（**不入线**的）
+/// `ItemInfo Info`，显示名由客户端本地解析；线协议里也有 `RequestItemInfo/NewItemInfo` 这一对。
+/// 本端此前直接 `format!("#{}")`，既没查本地表也没请求（`handle_progress.rs` 收到
+/// `NewItemInfo` 还只打了行日志就丢弃），于是玩家看到的就是 `#1268`。
+///
+/// 返回 `(显示名, 是否需要请求物品信息)`。纯函数，单测与阳性对照都钉在它上面。
+pub fn resolve_shop_name(
+    name: &str,
+    item_names: &std::collections::HashMap<i32, String>,
+    item_index: i32,
+) -> (String, bool) {
+    if !name.is_empty() {
+        return (name.to_string(), false);
+    }
+    if let Some(n) = item_names.get(&item_index) {
+        if !n.is_empty() {
+            return (n.clone(), false);
+        }
+    }
+    (format!("#{item_index}"), true)
+}
+
 /// 商城商品（GameShopInfo 写入）
 #[derive(Debug, Clone, Default)]
 pub struct ShopItem {
@@ -65,6 +105,8 @@ pub struct GameShopState {
     pub items: Vec<ShopItem>,
     pub gold: u32,
     pub item_names: HashMap<i32, String>,
+    /// P3-3：已发过 `RequestItemInfo` 的商品索引（按索引去重，避免每帧刷包）
+    pub requested_item_info: std::collections::HashSet<i32>,
     /// 搜索关键词（C# GameshopDialog Search，本地按名称过滤）
     pub search: String,
     /// 分类列表（第 0 项 = 全部，C# Filters[22]；服务端 category 去重保序）
@@ -90,6 +132,7 @@ impl Default for GameShopState {
             items: Vec::new(),
             gold: 0,
             item_names: HashMap::new(),
+            requested_item_info: std::collections::HashSet::new(),
             search: String::new(),
             categories: Vec::new(),
             category: String::new(),
@@ -785,11 +828,17 @@ fn game_shop_ui_system(
     for (mut text, c) in &mut ui_set.p1() {
         text.0 = match cell_item(&shop, &filtered, c.0) {
             Some(it) => {
-                let n = if it.name.is_empty() {
-                    format!("#{}", it.item_index)
-                } else {
-                    it.name.clone()
-                };
+                // P3-3：it.name -> 本地物品名表 -> 发一次 RequestItemInfo（按索引去重）-> #id
+                // 先把条目字段拷成局部量：`it` 借的是 `shop`，而下面要写 `shop.requested_item_info`
+                let item_index = it.item_index;
+                let item_name = it.name.clone();
+                let (n, need_req) = resolve_shop_name(&item_name, &shop.item_names, item_index);
+                if need_req && shop.requested_item_info.insert(item_index) {
+                    net.send_packet(&mir2_shared::packets::client::info::RequestItemInfo {
+                        item_index,
+                    });
+                    tracing::info!("🛒 商城缺物品名，请求 ItemInfo: idx={}", item_index);
+                }
                 // C# `UpdateText`：>17 字截断
                 if n.chars().count() > 17 {
                     n.chars().take(17).collect()
@@ -1245,6 +1294,12 @@ fn shop_server_events(
                     shop.item_names.insert(*idx, name.clone());
                 }
             }
+            ServerEvent::ItemInfoReceived { index, name } => {
+                // P3-3：按需请求的回应——写进表，下一帧格子就会显示真名
+                if remember_item_name(&mut shop.item_names, *index, name) {
+                    shop.requested_item_info.remove(index);
+                }
+            }
             _ => {}
         }
     }
@@ -1544,5 +1599,57 @@ mod tests {
         ];
         let idx = filter_shop_items(&items, "金创药", "");
         assert_eq!(idx, vec![0, 3]);
+    }
+    /// P3-3 回归（2026-09-22）：商品名降级链必须是
+    /// `it.name` → 本地物品名表 → （需要请求）→ `#id`。
+    ///
+    /// 阳性对照（落地时实做）：把中间那段查表删掉（直接回 `#id` + need_request=false）
+    /// → 本测试立即红。
+    #[test]
+
+    /// P3-3 后半条回归（2026-09-22）：`NewItemInfo` 回包必须写进物品名表；
+    /// 空名字不得覆盖已有名字。
+    ///
+    /// 阳性对照（落地时实做）：把 `remember_item_name` 改成直接 `return false;`（不写表）
+    /// → 本测试立即红。
+    #[test]
+    fn new_item_info_reply_fills_item_names() {
+        let mut names = std::collections::HashMap::new();
+        assert!(remember_item_name(&mut names, 1268, "屠龙"));
+        assert_eq!(names.get(&1268).map(String::as_str), Some("屠龙"));
+        // 格子侧的降级链应当立刻吃到这个名字（不再回 #id）
+        assert_eq!(
+            resolve_shop_name("", &names, 1268),
+            ("屠龙".to_string(), false)
+        );
+        // 空名字不得覆盖已有名字
+        assert!(!remember_item_name(&mut names, 1268, ""));
+        assert_eq!(names.get(&1268).map(String::as_str), Some("屠龙"));
+    }
+    fn resolve_shop_name_falls_back_in_order() {
+        let mut names = std::collections::HashMap::new();
+        names.insert(1269, "金创药（小）".to_string());
+
+        // ① 条目自带名字：直接用，不需要请求
+        assert_eq!(
+            resolve_shop_name("屠龙", &names, 1268),
+            ("屠龙".to_string(), false)
+        );
+        // ② 条目无名但本地表有：用本地表，不需要请求
+        assert_eq!(
+            resolve_shop_name("", &names, 1269),
+            ("金创药（小）".to_string(), false)
+        );
+        // ③ 两处都没有：显示 #id 并**要求发起一次请求**（不是静默显示 #id 就算完）
+        assert_eq!(
+            resolve_shop_name("", &names, 1270),
+            ("#1270".to_string(), true)
+        );
+        // ④ 表里存了空串同样视为「没有」，仍要请求
+        names.insert(1271, String::new());
+        assert_eq!(
+            resolve_shop_name("", &names, 1271),
+            ("#1271".to_string(), true)
+        );
     }
 }
