@@ -90,6 +90,19 @@ pub struct ControlState {
     pub hold_pressed_at: Option<f32>,
 }
 
+impl ControlState {
+    /// 「选目标 = 立即攻击」的正确写法（P1 修复，2026-09-22）。
+    ///
+    /// `auto_attack_system` 只在 `last_attack >= attack_interval` 时出手，然后把它清零重新蓄力。
+    /// 旧写法在选择目标时把 `last_attack` **清零**（注释却写「立即攻击」）——效果正相反：
+    /// 每次点击/`attack` 命令都把蓄力打断，玩家**连点**（Mir2 里最正常的操作）就永远攒不满，
+    /// 一击都发不出去（实测：连点 30 轮 → 攻击包 opcode=47 计数 0 → 目标满血）。
+    /// 正确做法是把计时器标成「已蓄满」：下一次系统 tick 立即出手，且之后按攻速节流。
+    pub fn mark_attack_ready(&mut self) {
+        self.last_attack = self.attack_interval;
+    }
+}
+
 impl Default for ControlState {
     fn default() -> Self {
         Self {
@@ -627,7 +640,7 @@ fn left_click_interact_system(
             // C# OnMouseDown Left：点击玩家 break（不攻击）；Shift+左键才攻击（PvP）
             if is_shift_down(&keys) {
                 control.attack_target = Some(object_id);
-                control.last_attack = 0.0;
+                control.mark_attack_ready();
                 // #1584：C# 点击攻击后停止移动（CanMove=false）——清除寻路路径并回站立
                 commands.entity(pe).remove::<LocalMove>();
                 anim.action = mir2_shared::enums::MirAction::Standing;
@@ -639,8 +652,8 @@ fn left_click_interact_system(
             }
         } else {
             control.attack_target = Some(object_id);
-            control.last_attack = 0.0; // 立即攻击
-                                       // #1584：C# 点击攻击后停止移动（CanMove=false）——清除寻路路径并回站立
+            control.mark_attack_ready(); // 立即攻击（把计时器标成已蓄满，见方法注释）
+                                         // #1584：C# 点击攻击后停止移动（CanMove=false）——清除寻路路径并回站立
             commands.entity(pe).remove::<LocalMove>();
             anim.action = mir2_shared::enums::MirAction::Standing;
             anim.frame_index = 0;
@@ -1989,5 +2002,30 @@ mod tests {
             Some(10),
             "最旧的 10 条应被丢弃"
         );
+    }
+
+    /// P1 回归（2026-09-22）：选择目标必须把攻击计时器标成**已蓄满**，
+    /// 而不是清零——清零会让「连点」永远攒不满 `attack_interval`，一击都发不出
+    /// （实测：连点 30 轮，攻击包计数 0）。
+    ///
+    /// 阳性对照（落地时实做）：把 `mark_attack_ready` 改回 `self.last_attack = 0.0;`
+    /// → 本测试立即红；恢复后绿。
+    #[test]
+    fn selecting_target_keeps_attack_timer_charged() {
+        let mut s = ControlState::default();
+        s.attack_interval = 1.0;
+        s.last_attack = 0.0;
+        s.mark_attack_ready();
+        assert!(
+            s.last_attack >= s.attack_interval,
+            "选目标后必须立即具备出手条件（last_attack={} < interval={}）",
+            s.last_attack,
+            s.attack_interval
+        );
+        // 连续选目标（玩家连点）不得把蓄力打断
+        for _ in 0..5 {
+            s.mark_attack_ready();
+            assert!(s.last_attack >= s.attack_interval, "连点不得打断蓄力");
+        }
     }
 }
