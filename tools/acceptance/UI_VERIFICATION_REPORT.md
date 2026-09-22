@@ -161,6 +161,26 @@ control RPC（127.0.0.1:9000）：`dialog {kind,action}` / `dialogs`（列 Dialo
 | ServerRust 全量测试 | 818 + gate_hardening 11 + no_blocking 2 + protocol_conformance 6 全绿 |
 | rustfmt（改动文件） | ✅ edition 2021 check 通过 |
 
+### 6.1 交互巡回已进「门禁」（2026-09-20 更新）
+
+§6 那一行的「40/40」当时是**人工跑一遍的记录**，不是门禁：脚本硬编码主检出绝对路径
+（在 worktree 里跑会静默测另一份二进制）、且无论红绿都 `exit 0`（结论只存在于打印里），
+也没被任何脚本/CI 调用——**回归时没人拦得住**。现已改成门禁形态：
+
+| 项 | 现状 |
+|---|---|
+| 退出码 | `0` 全过 / `1` 有用例 FAIL / `2` 前置失败；`-FailOnSkip` 可让 SKIP 也算失败 |
+| 产物来源 | 按 `-RepoRoot`（默认脚本所在检出）解析；产物比源码旧 → `exit 2`；`CARGO_TARGET_DIR` 也认 |
+| 前置自检 | Data 资产、服务端就绪、进图失败（含日志尾）各自 `exit 2`，不再"跑出一堆假 FAIL" |
+| 覆盖清单 | `tools/acceptance/interact_sweep_manifest.json`（单一真源）；`Client-Bevy` 的 `control.rs::interact_sweep_manifest_covers_all_rpc_kinds` 与 RPC 窗口登记对账，漏登记 → `cargo test --lib` 红 |
+| 计数口径 | 逐窗 40 + 拖动 + NPC 会话窗 + hero_manage 全部计入账本（旧版把 NPC/hero_manage 只打印、不计入「41/41」，红了也不影响结论） |
+| 接入 | `pwsh scripts/run_real_e2e.ps1 -IncludeInteractSweep` 追加巡回并把它计入退出码；`AGENTS.md` 与 `docs/DELIVERY.md` §5.3 已列入 PR 门禁 |
+
+**本报告里引用的其余实机脚本不在仓库内**（`.gitignore` 未放行，`git ls-files` 可验）：
+`ui_sweep.ps1`、`ui_bugfix_verify.ps1`、`ime_rpc_verify.ps1`、`npc_text_verify.ps1`
+——它们的 45/45、18/18、10/10 等数字**在干净 checkout 上不可复现**，只能算当时那台机器上的记录。
+目前唯一入库的实机脚本是 `ui_interact_sweep.ps1`（即本节的这个门禁）。
+
 ## 7. 证据文件清单
 
 | 文件 | 内容 |
@@ -174,6 +194,10 @@ control RPC（127.0.0.1:9000）：`dialog {kind,action}` / `dialogs`（列 Dialo
 | `shots/ui_npc_real.png` / `ui_npc_goods_real.png` | 修复前黑文本证据 |
 | `shots/npc_text_fixed.png` | 修复后实机复验（文字已渲染） |
 | `shots/ui_hero_manage_live.png` | 英雄管理窗状态路径验证 |
+
+> 本表是**当时**的产物清单。其中 `ui_sweep.ps1` / `npc_text_verify.ps1` 等**不在仓库内**
+> （`.gitignore` 未放行），干净 checkout 上不可复现；入库且已门禁化的只有
+> `ui_interact_sweep.ps1`（用法与退出码见 §6.1）。
 
 ## 8. 过程纠偏记录（本次踩坑）
 
@@ -334,7 +358,8 @@ cd ServerRust; ./target/release/mir2_server.exe
 # 2) 三项实机复验（脚本各自起停客户端）
 powershell -File tools/acceptance/ui_bugfix_verify.ps1    # 项 2/4/5/6 -> 18/18
 powershell -File tools/acceptance/ime_rpc_verify.ps1      # 项 3     -> 10/10（需先起客户端）
-powershell -File tools/acceptance/ui_interact_sweep.ps1   # 40 窗回归 -> 41/41
+# 40 窗交互巡回（门禁：exit 0 才算过；-ManageServer 可连服务端一起代起停，见 §6.1）
+pwsh tools/acceptance/ui_interact_sweep.ps1 -ManageServer
 ```
 
 `wheel`/`scroll` 两个 RPC 是 #2978 入库的验收能力：`wheel {x,y,delta}` 在 UI 逻辑坐标注入一行滚轮（正=向下滚=offset 增），`scroll {}` 返回全部 `UiScrollList` 真值（轨道矩形、**列表矩形**（滚轮命中用这个）、`offset/total/visible/step/z`、`shown`）。滚轮命中读注入探针且**注入后 2 帧自动撤销**，所以判据要用 `offset` 变化而不是依赖探针常驻；列表 `shown=false`（如行会默认页）时**正确地**不吃滚轮，拿它做正控会得到假 FAIL。
@@ -408,3 +433,33 @@ python tools/acceptance/crop_kind.py <kind> <out.png> [scale]   # 按 manifest �
 python tools/acceptance/font_audit.py          # Arial 句柄 × 可能含中文 的站点审计
 python tools/acceptance/seed_db.py             # 测试数据塞入（须先停服）
 ```
+
+---
+
+## 12. 交互巡回门禁化（2026-09-20）
+
+§9 的 40 窗交互巡回此前**只在开发机人工跑**：`ui_interact_sweep.ps1` 要「服务端 + 真实 `Data/` +
+桌面窗口」，进不了 CI；脚本本身退出码还恒为 0（红了也无人能自动发现）。本轮把它拆成两道门禁：
+
+**1. headless 门禁（进 CI）** —— `Client-Bevy/src/game/dialogs/interact_gate.rs`（`#[cfg(test)]`，
+随 `cargo test --lib` 跑，CI 的 Client-Bevy job 就含这一步）：
+
+- 名单与脚本 `$kinds` / `$noCloseByDesign` **逐项对齐**：另一支测试解析脚本原文比对，漂移即红；
+- 每窗：开窗（语义逐条对齐 `ControlCommand::Dialog`，含 `hero_manage`/`input_box`/`storage` 状态窗特例）
+  → 按 `dialog_rect` 同判据定位标准关闭钮（`theme::CloseButton` + 最近祖先 `DialogRoot` 且其 Visible）
+  → 合成按压 → 断言已关栈；
+- **自建合成最小 `.Lib`**（每库 2600 帧 1x1；`Data/` 不入库、CI 无资产，走 `require_assets!` 跳过就又是假绿）；
+- 结果 **41/41**（34 窗按压真实标准关闭钮 + 6 窗「设计无 X」开关往返 + `hero_manage`）。
+- **阳性对照（做过，做完即撤）**：抽掉 `storage` 关闭钮的 `StorageWidget` → 报
+  `storage: 按压标准关闭钮后仍在 open 栈`（即 §9.3 那处历史缺陷会被拦住）；抽掉
+  `spawn_close_button` 的 `CloseButton` 标记 → 15 窗报 `无 theme::CloseButton`。
+
+**2. 脚本可当门禁用** —— `ui_interact_sweep.ps1` 已按 §6.1 门禁化：退出码 `0` 全过 / `1` 有用例 FAIL /
+`2` 前置失败（未进图、产物陈旧、缺资产），失败项在总结里逐条列出，`-FailOnSkip` 可让 SKIP 也算失败；
+并接入 `pwsh scripts/run_real_e2e.ps1 -IncludeInteractSweep`。
+（合并说明：另一支实现用「非全过即 `throw`」表达同一语义，与 §6.1 的退出码机制重复，落库时取后者；
+`throw` 会经脚本的 `catch` 记成「巡回中断」→ 同样 `exit 1`，故无行为差异。）
+
+**它不覆盖什么（如实）**：像素级命中区/遮挡（#2953 扩容钮吞点击那类）——headless 无窗口无相机，
+按压是直接写 `Interaction::Pressed` 后只跑 `Update` 调度（`ui_focus_system` 会在 `PreUpdate` 按真实光标复位）；
+窗口内部控件（页签/输入框/滚动条）也不在巡回范围（同 §5 缺口表）。这些仍须实机跑脚本。

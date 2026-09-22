@@ -133,6 +133,41 @@ pwsh scripts/run_real_e2e.ps1      # 默认用仓库内 debug 产物与测试库
 - 结果用**轮询**查看（`[@REFINECHECK]` 每轮重试，首轮命中即走），不固定等 65s；
 - 跑完 `restore-db`：角色回钓鱼点、清精炼状态并删掉测试武器（否则后续配对用例的同图摆位会错）。
 
+### 5.3 交互巡回（40 窗；UI 改动合并前必跑）
+
+离线测试只能证明「布局数值对」，证明不了「点得动」——#2953/#2955 那批缺陷（扩容钮吞掉
+关闭钮点击、关闭钮漏挂标记、根节点没接显隐、仓库窗漏 StorageWidget）全是布局断言全绿而
+交互失效。交互级验证由 `tools/acceptance/ui_interact_sweep.ps1` 承担：逐窗 `dialog open`
+→ `dialog_rect` 定位标准关闭钮 → `click` 点它（真实 picking→Interaction 链路）→ 断言窗口
+真关掉；设计上无关闭钮的窗改验 RPC open/close 往返；另有 inventory 拖动、NPC 会话窗 X、
+hero_manage X 三段。
+
+**它是门禁，不是报告：结论看退出码。**
+
+```powershell
+pwsh tools/acceptance/ui_interact_sweep.ps1 -ManageServer     # 自己起停服务端
+pwsh scripts/run_real_e2e.ps1 -IncludeInteractSweep            # 常规用例 + 巡回，一把跑完（复用其服务端）
+```
+
+| 退出码 | 含义 |
+|---|---|
+| 0 | 全过（无 FAIL；SKIP 默认容忍，`-FailOnSkip` 时算失败） |
+| 1 | 有用例 FAIL（点关闭钮没关掉 / 拖动没位移 / NPC·hero_manage 段失败 / 巡回到一半中断） |
+| 2 | 前置不满足（缺产物、产物比源码旧、无 `Data/`、服务端未就绪、未进图） |
+
+三条防「假绿」的前置，别绕：
+
+- **产物按 `-RepoRoot` 解析**（默认 = 脚本所在检出；设了 `CARGO_TARGET_DIR` 时按它找）。
+  在 worktree 里跑要传 worktree 路径——旧版本硬编码主检出绝对路径，会静默测另一份二进制。
+- **产物比源码旧即 exit 2**（`-AllowStaleBinary` 跳过）：防止拿昨天的二进制跑出绿。
+- **覆盖清单单一真源** `tools/acceptance/interact_sweep_manifest.json`：脚本按 `sweep` 逐窗跑；
+  `excluded` 列「有 RPC 开关但走专用段/状态驱动」的窗口并写明理由。`Client-Bevy` 的
+  `control.rs::interact_sweep_manifest_covers_all_rpc_kinds` 拿它与 RPC 窗口登记对账——
+  新增窗口漏登记，`cargo test --lib` 直接红（跑在 CI 与本机门禁里）。
+
+结果 JSON（`tools/acceptance/ui_interact_results.json`）：`gate.exit_code` 与进程退出码一致，
+`gate.failures` / `gate.skips` 是逐条账本，`sweep` 是逐窗原始断言。
+
 ---
 
 ## 6. 已知差异与限制（相对原版 C#）
