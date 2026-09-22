@@ -227,6 +227,21 @@ jobs:
               *) cp -f "$f" dist/stage/ ;;
             esac
           done < "$list"
+      - name: Stage assets + libpinyin data (Windows)
+        if: runner.os == 'Windows'
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          # 运行时必需（缺了玩家机器启动即 panic / IME 降级）：
+          #   assets/            —— resolve_assets_path 先找 exe 同目录（main.rs）
+          #   libpinyin/data     —— pinyin_ime.rs 发布布局约定「数据随 exe 分发」
+          # 注意：make install 只装 data（fork data/Makefile.am 的 libpinyin_dbdir），
+          # conf 由运行时自建（libpinyin_ime.rs create_dir_all）——这里 mkdir 空目录
+          # 随包带上省一次运行时创建；本段与下方 Unix Package 段保持同步（改一必改二）。
+          cp -r Client-Bevy/assets dist/stage/assets
+          lp_root="$(cygpath -u "$RUNNER_TEMP")/libpinyin-install/lib/libpinyin"
+          mkdir -p dist/stage/libpinyin/conf
+          cp -r "$lp_root/data" dist/stage/libpinyin/data
       - name: Package
         shell: bash
         run: |
@@ -234,12 +249,25 @@ jobs:
           mkdir -p dist/stage
           if [ "$RUNNER_OS" != "Windows" ]; then
             cp "Client-Bevy/target/release/client_bevy${{ matrix.exe }}" dist/stage/
+            # 运行时必需资源（布局与理由同上方 Windows staging 段，改一必改二）
+            cp -r Client-Bevy/assets dist/stage/assets
+            # Unix 由 build.rs 装在 OUT_DIR/libpinyin/install（target/release/build/client_bevy-*/out）
+            # awk 全量消费取首行：兼容 GNU/BSD find（macOS 无 -quit 扩展），
+            # 且 awk 不提前退出，find 不吃 SIGPIPE（pipefail 下 | head -1 会假红）。
+            # rust-cache 可能并存多个 client_bevy-<hash>/out；REF+SHA512 固定故数据同源，
+            # 将来 bump REF 时须确认取到的是新 hash 的安装根。
+            marker=$(find Client-Bevy/target/release/build -type f -name pinyin_index.bin -path "*/libpinyin/data/*" | awk 'NR == 1')
+            test -n "$marker" || { echo "FAIL: 找不到 libpinyin 运行时数据（pinyin_index.bin）"; exit 1; }
+            lp_root="$(dirname "$(dirname "$marker")")"
+            mkdir -p dist/stage/libpinyin/conf
+            cp -r "$lp_root/data" dist/stage/libpinyin/data
           fi
           printf '%s\n' \
             "Crystal 客户端 Client-Bevy (${{ matrix.platform }})" \
             "" \
             "运行: ./client_bevy${{ matrix.exe }}" \
-            "- 需要自备 Data/ 资源目录，与可执行文件同目录放置。" \
+            "- assets/（UI 资源）与 libpinyin/（拼音输入法数据）已随包携带；" \
+            "  放入 Data/ 游戏资源目录（地图/素材，需自备）即可运行。" \
             "- macOS 未签名：首次打开被 Gatekeeper 拦截时，右键 -> 打开，或执行" \
             "  xattr -dr com.apple.quarantine client_bevy" \
             "- Windows 首次运行如触发 SmartScreen，请选择 仍要运行。" > dist/stage/README.txt
@@ -249,6 +277,17 @@ jobs:
           else
             zip -9r "../client_bevy-${{ matrix.platform }}.zip" .
           fi
+      - name: Verify package layout (structure assert)
+        shell: bash
+        run: |
+          set -euo pipefail
+          # 结构断言：CI 为 headless 起不了 GUI，用结构断言覆盖「漏进包」故障类。
+          # 三项分别钉住 启动 panic（assets）、IME 降级（libpinyin data）、配置目录缺失。
+          # 阳性对照：删掉任一被断言路径，本步骤必红（本地已验证，见 PR 描述）。
+          ls dist/stage/assets/fonts/*.ttf > /dev/null
+          test -f dist/stage/libpinyin/data/pinyin_index.bin
+          test -d dist/stage/libpinyin/conf
+          echo "OK: assets + libpinyin 已随包"
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
