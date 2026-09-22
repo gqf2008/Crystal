@@ -61,6 +61,14 @@ use crate::scenes::AppState;
 ///
 /// 只接受下面写死的 6 个名字；其余一律 `None`（RPC 侧回 `error` 而不是**静默保持和平模式**）——
 /// 静默回退会让"以为切了模式其实没切"重新变成不可见缺陷，正是 P1 难定位的原因之一。
+/// `quest_probe` 的判据内核（纯函数，可单测）：只挑 `taken == true` 的条目。
+///
+/// 为什么单独抽出来：判据必须**来自状态**（`QuestLogState`），且对同一状态可重复读出同一结果。
+/// 反例是曾被证伪的 `quest_detail {id}`——它对任意 id 都回 ok，用它当"条目数"会得到恒定值。
+pub fn taken_quest_ids(entries: &[crate::game::dialogs::quest_log::QuestEntry]) -> Vec<i32> {
+    entries.iter().filter(|e| e.taken).map(|e| e.id).collect()
+}
+
 fn parse_attack_mode(name: &str) -> Option<mir2_shared::enums::AttackMode> {
     use mir2_shared::enums::AttackMode;
     match name.trim().to_ascii_lowercase().as_str() {
@@ -102,6 +110,19 @@ enum ControlCommand {
     /// 玩家验收能力（2026-09-22）：只读战斗探针——把"这一次攻击到底有没有落到目标身上"
     /// 变成可读真值（锁定目标 / 距离 / 是否在射程 / 目标血条百分比 / 近期战斗事件流）。
     /// 存在理由：`nearby` 的成员变化分不清"目标离开视野"与"被打死"，实测因此误判过一次。
+    /// 只读任务探针（2026-09-22）：暴露客户端侧「已接任务 id 列表 + 完成标记」，
+    /// 判据取自状态而非 UI 代理量——实测 `quest_detail {id}` 对任意 id 都回 ok，
+    /// 用它当「条目数」会得到恒定值（仪器无效），与 P1 的 nearby 成员变化同类。
+    /// 接受任务（2026-09-22）：照 `auto/world.rs:122`/`:932` 的既有写法发 `C.AcceptQuest`。
+    /// 真实签名是 `AcceptQuest { npc_index, quest_index }`——**需要 npc_index**，
+    /// 这也是 `quest_detail {confirm:true}` 只改 UI 状态、`taken` 不变的原因（它不发这个包）。
+    AcceptQuest {
+        npc_index: u32,
+        quest_index: i32,
+    },
+    QuestProbe {
+        reply: Sender<String>,
+    },
     CombatProbe {
         reply: Sender<String>,
     },
@@ -254,6 +275,8 @@ struct ControlQueries<'w, 's> {
     /// `combat_probe` 用：对象头顶血条百分比（由 `S.ObjectHealth` 写入 `ActorHp`）。
     /// 这是"攻击是否真的落到目标身上"的直接证据，不依赖视野成员变化。
     hp: Query<'w, 's, (&'static NetObjectId, &'static crate::game::combat::ActorHp)>,
+    /// `quest_probe` 用：客户端侧任务日记状态（已接/已完成标记）
+    quest_log: Res<'w, crate::game::dialogs::quest_log::QuestLogState>,
     /// `combat_probe` 用：本地玩家状态标志——`auto_attack_system` 的 run_if 是
     /// `player_input_enabled`（= 非 dead/fishing/paralysis），命中该门控时攻击**一次都不会发**，
     /// 而日志里看不出任何异常（P1 实测踩到过）。
@@ -568,6 +591,40 @@ fn handle_conn(mut stream: std::net::TcpStream, tx: Sender<ControlCommand>) {
                 let (reply_tx, reply_rx) = bounded::<String>(1);
                 if tx
                     .send(ControlCommand::CombatProbe { reply: reply_tx })
+                    .is_ok()
+                {
+                    let s = reply_rx
+                        .recv_timeout(std::time::Duration::from_secs(2))
+                        .unwrap_or_else(|_| "{}".to_string());
+                    serde_json::from_str::<Value>(&s).unwrap_or_else(|_| json!({}))
+                } else {
+                    json!({"error": "control channel closed"})
+                }
+            }
+            "accept_quest" => {
+                let npc_index = params
+                    .get("npc_index")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0) as u32;
+                let quest_index = params
+                    .get("quest_index")
+                    .and_then(|v| v.as_i64())
+                    .unwrap_or(0) as i32;
+                if quest_index <= 0 {
+                    json!({"error": "missing quest_index"})
+                } else {
+                    let _ = tx.send(ControlCommand::AcceptQuest {
+                        npc_index,
+                        quest_index,
+                    });
+                    json!({"ok": true, "npc_index": npc_index, "quest_index": quest_index})
+                }
+            }
+            "quest_probe" => {
+                // 只读：已接任务列表（状态判据，非 UI 代理量）
+                let (reply_tx, reply_rx) = bounded::<String>(1);
+                if tx
+                    .send(ControlCommand::QuestProbe { reply: reply_tx })
                     .is_ok()
                 {
                     let s = reply_rx
@@ -1825,6 +1882,35 @@ fn apply_control_commands(
                 );
                 let _ = reply.send(payload.to_string());
             }
+            ControlCommand::AcceptQuest {
+                npc_index,
+                quest_index,
+            } => {
+                net.send_packet(&mir2_shared::packets::client::quest::AcceptQuest {
+                    npc_index,
+                    quest_index,
+                });
+                tracing::info!("🎮 control accept_quest: npc={npc_index} quest={quest_index}");
+            }
+            ControlCommand::QuestProbe { reply } => {
+                let ids = taken_quest_ids(&q.quest_log.quests);
+                let taken: Vec<serde_json::Value> = q
+                    .quest_log
+                    .quests
+                    .iter()
+                    .filter(|e| e.taken)
+                    .map(|e| json!({ "id": e.id, "completed": e.completed }))
+                    .collect();
+                debug_assert_eq!(ids.len(), taken.len());
+                let payload = json!({
+                    "ok": true,
+                    "taken_count": taken.len(),
+                    "taken": taken,
+                    "entries": q.quest_log.quests.len(),
+                });
+                tracing::info!("🎮 control quest_probe: taken={}", payload["taken_count"]);
+                let _ = reply.send(payload.to_string());
+            }
             ControlCommand::SetAttackMode { mode } => {
                 // 本系统参数已达 Bevy 上限（16），不能直接挂 ResMut<AttackModeState>：
                 // 经 ControlState 传请求，由 combat::apply_pending_attack_mode 消费并发包。
@@ -2280,6 +2366,38 @@ mod tests {
     /// 阳性对照（落地时实做）：把 `_ => None` 改成 `_ => Some(Peace)`（静默回退）后，
     /// 下面 "拒绝未知模式" 的断言立即变红——这一类静默回退正是 P1「以为切了模式其实没切」的土壤。
     #[test]
+
+    /// 仪器门禁（2026-09-22）：`quest_probe` 的判据内核必须**只取 taken 条目**，
+    /// 且对同一状态**连续两次读数一致**（来源是状态，不是 UI 代理量）。
+    ///
+    /// 阳性对照（落地时实做）：把 `filter(|e| e.taken)` 去掉（把未接条目也算进去）
+    /// → 本测试立即红；恢复后绿。
+    #[test]
+    fn taken_quest_ids_is_state_sourced_and_stable() {
+        use crate::game::dialogs::quest_log::QuestEntry;
+        let mk = |id: i32, taken: bool, completed: bool| QuestEntry {
+            id,
+            taken,
+            completed,
+            ..Default::default()
+        };
+        // 空态：没有已接任务（反例：quest_detail 那种"任意 id 都 ok"的实现会给出非空恒定值）
+        let empty: Vec<QuestEntry> = vec![];
+        assert!(taken_quest_ids(&empty).is_empty(), "空列表必须读出空");
+        // 非空态：只取 taken
+        let mixed = vec![
+            mk(27, true, false),
+            mk(28, false, false),
+            mk(142, true, true),
+        ];
+        assert_eq!(taken_quest_ids(&mixed), vec![27, 142], "只应取 taken 条目");
+        // 同一状态连读两次必须一致（与实机仪器自检同口径）
+        assert_eq!(
+            taken_quest_ids(&mixed),
+            taken_quest_ids(&mixed),
+            "同一状态连读必须一致"
+        );
+    }
     fn parse_attack_mode_maps_names_and_rejects_unknown() {
         use mir2_shared::enums::AttackMode;
         let cases = [
