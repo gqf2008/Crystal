@@ -1,5 +1,18 @@
 use super::*;
 
+/// `@move <x> <y>` 的参数解析（P2 硬化，2026-09-22）。
+///
+/// 严格要求**恰好**两个参数：多余的尾随参数会让「用法错」被静默当成合法传送执行
+/// （实测 `@move 0 300 300` 被解析成传送到 (0,300)，越界后坐标不变却回了成功消息）。
+fn parse_move_args(parts: &[&str]) -> Option<(i32, i32)> {
+    if parts.len() != 3 {
+        return None;
+    }
+    let x = parts.get(1).and_then(|s| s.parse::<i32>().ok())?;
+    let y = parts.get(2).and_then(|s| s.parse::<i32>().ok())?;
+    Some((x, y))
+}
+
 /// 聊天频道（对齐 C# PlayerObject.Chat 前缀：/ 私聊、!! 组队、!~ 行会、!# 师徒、:) 夫妻、@! GM公告、! 喊话）
 #[derive(Debug, PartialEq, Eq)]
 enum ChatChannel {
@@ -6252,9 +6265,12 @@ impl Message<ChatRequest> for WorldActor {
                         }
                         self.last_teleport_time.insert(msg.session_id, now_ms);
                     }
-                    let x = parts.get(1).and_then(|s| s.parse::<i32>().ok());
-                    let y = parts.get(2).and_then(|s| s.parse::<i32>().ok());
-                    if let (Some(x), Some(y)) = (x, y) {
+                    // P2 硬化（2026-09-22）：参数个数必须正好是 <cmd> <x> <y>。
+                    // 旧写法只取前两个参数，于是 `@move 0 300 300`（多一个参数）会被当成
+                    // 传送到 (0,300) 并回「已传送至 (0, 300)」——越界坐标静默不动，
+                    // 使用者只看到「命令回话了但人没动」（实测踩到过）。
+                    let parsed = parse_move_args(&parts);
+                    if let Some((x, y)) = parsed {
                         // 走统一传送核心：同图只发 UserLocation。裸 SetPlayerPosition
                         // 只改服务端坐标不下发，客户端位置脱同步且断线会把传送后
                         // 坐标落库（2026-09-17 实机冒烟实测，红检 e2e_at_move_chat_*）。
@@ -9633,5 +9649,32 @@ mod auth_regression_tests {
                 texts
             );
         });
+    }
+}
+
+#[cfg(test)]
+mod p2_move_arity_tests {
+    use super::parse_move_args;
+
+    /// P2 硬化回归（2026-09-22）：`@move` 只接受**恰好**两个参数。
+    ///
+    /// 阳性对照（落地时实做）：把 `parts.len() != 3` 的判断删掉（退回旧写法）
+    /// → 本测试立即红（多参/少参会被静默当成合法传送）。
+    #[test]
+    fn parse_move_args_requires_exact_arity() {
+        assert_eq!(parse_move_args(&["move", "300", "300"]), Some((300, 300)));
+        assert_eq!(parse_move_args(&["MOVE", "-5", "7"]), Some((-5, 7)));
+        assert_eq!(
+            parse_move_args(&["move", "0", "300", "300"]),
+            None,
+            "多余参数必须回用法提示，而不是被当成传送到 (0,300)"
+        );
+        assert_eq!(
+            parse_move_args(&["move", "300"]),
+            None,
+            "少参数必须是用法错"
+        );
+        assert_eq!(parse_move_args(&["move"]), None);
+        assert_eq!(parse_move_args(&["move", "abc", "1"]), None);
     }
 }
