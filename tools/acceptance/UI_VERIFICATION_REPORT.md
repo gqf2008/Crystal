@@ -340,3 +340,71 @@ powershell -File tools/acceptance/ui_interact_sweep.ps1   # 40 窗回归 -> 41/4
 `wheel`/`scroll` 两个 RPC 是 #2978 入库的验收能力：`wheel {x,y,delta}` 在 UI 逻辑坐标注入一行滚轮（正=向下滚=offset 增），`scroll {}` 返回全部 `UiScrollList` 真值（轨道矩形、**列表矩形**（滚轮命中用这个）、`offset/total/visible/step/z`、`shown`）。滚轮命中读注入探针且**注入后 2 帧自动撤销**，所以判据要用 `offset` 变化而不是依赖探针常驻；列表 `shown=false`（如行会默认页）时**正确地**不吃滚轮，拿它做正控会得到假 FAIL。
 
 实机脚本的三个已知陷阱（本轮踩过，已在脚本内注释）：正控制点必须落在**可走瓦片**（屏幕偏移对应的瓦片随玩家站位而变，改用 4 方向 8 点探测，任一可走即证通路）；像素锚定必须避开**动态内容**（聊天行实时刷新、输入光标 2Hz 闪烁、输入行随焦点变色），故项 2 改用面板左边框静态条并先自检两帧稳定性。
+
+---
+
+## 11. 用户实测第二批（issue #2985）+ 逐窗截图矩阵 —— 2026-09-19
+
+用户报：「公会 任务 坐骑面板还有很多错位，好友 键盘 帮助面板里有乱码，宠物面板看上去也不对」。
+按「**每个窗开→截图→与 C# 逐项比**」推进；数据不足处改为**自己给测试角色塞数据**。
+
+### 11.1 数据塞入（前置条件，`tools/acceptance/seed_db.py`）
+
+停服 → 直接写 `ServerRust/Data/crystal.db` → 重启（跑着写会被存档覆盖；行会是启动时整体载入缓存的）：
+
+| 表 | 塞什么 | 目的 |
+|---|---|---|
+| `guild_members` | 28 名成员（1 会长 + 2 副会长 + 25 成员） | 越过 18 行视窗 → 触发滚动/翻页/行程 |
+| `guilds.rank_defs_json` | 3 档职务 | 成员行下拉有内容 |
+| `quests` | 5 个已接任务（跨 3 个 group） | 任务日记的已接段 + 组头 |
+| `creatures.owned_json` | 5 只宠物（原版静态表里真有图标/规则的 5 种） | 宠物面板填充 |
+
+原库备份 `tools/acceptance/crystal.db.bak`。
+
+**这一步立刻炸出 3 个空数据时物理上看不见的缺陷**（见 11.2）。
+
+### 11.2 修复清单
+
+| # | 缺陷 | 根因 | 验证 |
+|---|---|---|---|
+| 1 | 行会成员只显示 1/28，翻页与滚动条行程归零 | `GuildState` 用 `#[derive(Default)]`，`bool` 默认 false；C# `MembersShowOfflinesetting = true` | `scroll` RPC：`total 1 → 28` |
+| 2 | **滚动条滑块从来没动过** | `list_thumb` 返回 `co.0`——`co` 是 `&ChildOf`，取到的是**父实体**；`get_mut` 恒失败 | 滑块高 40 → **194**（=302×18/28），滚到底 `top` 76 → **184** |
+| 3 | 滑块跟随被光标判定挡在 `return` 之后 | 无焦点窗口 `cursor_position()` 为 None，整段跳过 | 与 2 同批复验 |
+| 4 | 隐藏页控件串页（名次/状态页浮着成员下拉框） | Bevy 的 `Visibility::Visible` **越过隐藏祖先渲染**；页容器漏挂 `UiRootDisplay` | 原下拉框位置像素 `(12,12,20) → (3,3,3)` |
+| 5 | 状态页表头没右对齐、也不是灰的 | 缺 C# 的 `DrawFormat=Right` + `ForeColour=Gray` | 亮区 `[362..384] → [417.3..439.3]`（右对齐到 437） |
+| 6 | 翻页箭头被 16x14 拉伸（艺术尺寸 12x12） | C# `MirImageControl.AutoSize` 让显式 `Size` 形同虚设 | 亮区 12.0×12.0 |
+| 7 | 列表滚轮只有一小块区域生效 | 命中矩形写成 (125,30,200,270)；C# 是整页并集 | 页内右下角注滚轮 offset 1→2，页外负控不变 |
+| 8 | 任务日记「任务：x/y」压住标题栏 | C# `_takenQuestsLabel @(210,7)`，本端写死 (18,20) | 亮区起于 panel x=211 |
+| 9 | 宠物立绘偏右下 16/39px、压住信息行 | C# `CreatureImage.UseOffSet = true` → 绘制点 = `Location + GetOffSet`；本端漏叠 | 立绘回到框内（`p4_crop.png` → `p5_crop.png`） |
+| 10 | 好友页签：文字标签压在 `FRIEND` 标题上 | C# 是贴图按钮 `Title[163]@(10,34)` / `Title[167]@(128,34)` | 贴图页签就位 |
+| 11 | 师徒标题被拉伸 51% 且被「师徒」文字覆盖 | 按 103x17 画（艺术 68x15）+ 多画了一行文字 | `MENTOR` 单独、原尺寸 |
+| 12 | **行会公告页永远空白** | 公告框写死 `Visibility::Hidden` 且全仓无人置显；正文也无人写入 | 公告 3 行 + 「第九行」正常渲染 |
+| 13 | 中文豆腐扫尾：24 文件 35 处 + 裸 `.spawn((` 18 处 | Arial 句柄画中文一律 `.notdef`；Han 回退实测不生效 | 40 窗巡回 41/41 |
+| 14 | 服务端：C# 迁移角色的宠物静默丢光 | `migrate.rs` 写数字、枚举 serde 默认认变体名；读端 `unwrap_or_default()` 吞掉 + 存档覆盖 | 旧库加载出 5 只，存档自愈为变体名 |
+
+### 11.3 关键方法论（写进 LESSON）
+
+1. **UI 的填充/滚动/比例类缺陷，空夹具下与正确实现渲染结果相同** —— 必须造数据并越过边界。
+2. **测试要断言最终产物，不要只断言中间量**：滚动条 bug 活了很久，是因为测试只断言 `offset`（它一直是对的）。
+3. **审计要按绑定表达式判类，不能按变量名**：`friend.rs` 里 `let font = shared_cjk_font(..)`，
+   `hud.rs` 里 `let font = ui_font.0.clone()` —— 名字会骗人。
+4. **扫中文豆腐别漏裸 `.spawn((`**：只匹配 `spawn_*(` 前缀会漏掉
+   `ic.spawn((..., TextFont { font: FontSource::Handle(font.clone()) }))`（行会公告就是这么漏的）。
+
+### 11.4 仍未处理（如实列出）
+
+- `dura_status` 面板 `dialog_rect` 读出 **20x19**，与代码里的 64x85 不符，待查
+- `craft` 的「学会配方 #0」直接打 recipe_id（观感）
+- `report` 面板内容超出右边界、`item_rental_browse` 的 RENT 按钮压住下边框（待与 C# 核对）
+- `settings`（键位设置的首个分页）标签是英文（SKILL MODE / EFFECTS …），C# 无此字面量，待核对
+- **A3 键盘面板乱码**：默认状态复现不出，等用户指出具体状态
+
+### 11.5 逐窗截图矩阵（本轮新增工具）
+
+```
+python tools/acceptance/ui_shot_matrix.py      # 48 窗逐个开→截图→关，产出 manifest.json
+python tools/acceptance/contact_sheet.py       # 拼联络表逐张目检
+python tools/acceptance/crop_kind.py <kind> <out.png> [scale]   # 按 manifest 矩形裁+放大
+python tools/acceptance/font_audit.py          # Arial 句柄 × 可能含中文 的站点审计
+python tools/acceptance/seed_db.py             # 测试数据塞入（须先停服）
+```

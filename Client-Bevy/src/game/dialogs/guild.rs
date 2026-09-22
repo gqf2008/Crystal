@@ -27,7 +27,8 @@ use crate::scenes::AppState;
 use crate::ui::sprite_ui::{shared_cjk_font, UiCjkFont, UiFont};
 use crate::ui::theme::{
     load_lib_image, spawn_container, spawn_dropdown_ui, spawn_icon_button, spawn_image,
-    spawn_label, spawn_panel, spawn_scroll_bar_ui, CloseButton, UiDropDown, UiScrollList,
+    spawn_label, spawn_outlined_label_block, spawn_panel, spawn_scroll_bar_ui, CloseButton,
+    UiDropDown, UiScrollList,
 };
 
 /// #2892 批B：面板精灵（C# `GuildDialog.Index = 180; Library = Libraries.Prguse`；实测 590x432）
@@ -152,6 +153,20 @@ pub const MEMBER_COL_STATUS: f32 = 225.0;
 /// 删除钮列（C# `MembersDelete[i] @ (210, 30 + i*15)`，`Prguse[917]` 16x14）
 pub const MEMBER_COL_DELETE: f32 = 210.0;
 pub const MEMBER_DELETE_SPRITE: (LibraryName, usize) = (LibraryName::Prguse, 917);
+/// 页内上/下翻钮尺寸 = **艺术尺寸**（`Prguse2[197..209]` 实测 12x12）。
+///
+/// C# 那 6 处都写了 `Size = new Size(16, 14)`，但 `MirImageControl.AutoSize` 默认 true：
+/// `Size` getter 返回 `Library.GetTrueSize(Index)`（`MirImageControl.cs:124-135`），
+/// `DrawControl` 走 `Library.Draw(Index, ...)` 也不读 Size —— 16x14 在绘制与命中两边
+/// 都被艺术尺寸顶掉。按 16x14 画会把箭头横向拉伸 33%。
+pub const PAGE_ARROW_SIZE: (f32, f32) = (12.0, 12.0);
+/// 页内列表的滚轮命中矩形（**页容器内**坐标）= 整页。
+///
+/// C# 把 `*Panel_MouseWheel` 同时挂在页容器、页面底图与每一个行/格控件上
+/// （成员 `:333/354/370/385/399/484`、仓库 `:689/746/747`），并集就是整页 352x372；
+/// 只压在其中一列上才滚得动是错的。
+pub const LIST_WHEEL_RECT: (f32, f32, f32, f32) = (0.0, 0.0, PAGE_LEFT.2, PAGE_LEFT.3);
+
 /// `GuildLine` 行号分段（成员 1..=18 / 仓库 20..=27 / 仓库页头 28）
 pub const MEMBER_LINE_BASE: usize = 1;
 pub const STORAGE_LINE_BASE: usize = MEMBER_LINE_BASE + MEMBER_ROWS;
@@ -168,6 +183,14 @@ pub struct GuildMemberRankDrop(pub usize);
 /// 成员行状态列（C# `MembersStatus[i]` @(225, 30 + i*15) 100x14：在线 LimeGreen / 离线 White）
 #[derive(Component)]
 pub struct GuildMemberStatusLine(pub usize);
+
+/// 成员页上翻钮（C# `MembersUpButton` = `Prguse2[197/198/199]` @(337,1)，艺术尺寸 12x12）
+#[derive(Component)]
+pub struct GuildMemberUp;
+
+/// 成员页下翻钮（C# `MembersDownButton` = `Prguse2[207/208/209]` @(337,318)，艺术尺寸 12x12）
+#[derive(Component)]
+pub struct GuildMemberDown;
 
 /// C# `UpdateMembers`：某行能否改职务 —— `CanChangeRank && 该成员职务下标 >= 自己职务下标`
 /// （C# 职务 0 最高，故 `>=` 表示「同级或更低」）
@@ -403,7 +426,13 @@ pub struct StorageItem {
 }
 
 /// 行会状态
-#[derive(Resource, Default)]
+///
+/// **手写 `Default` 而不用 derive**：`derive` 会把 `show_offline` 初始化成 `false`，
+/// 而 C# 的默认是 **true**（`MembersShowOfflinesetting = true`，`GuildDialog.cs:82`）。
+/// 结果是「一开窗，离线成员全被滤掉」——2026-09-19 实机：测试行会 28 名成员只列出 1 行
+/// （唯一在线的那位），与其配套的成员翻页/滚动条行程全都归零，看着就是"面板不对"。
+/// 手写 impl 还有个附带好处：以后加字段漏写会**编译不过**，derive 不会。
+#[derive(Resource)]
 pub struct GuildState {
     pub in_guild: bool,
     pub name: String,
@@ -441,6 +470,35 @@ pub struct GuildState {
     pub notice_scroll: usize,
     /// #2537：Buff 页滚动起点（C# StartIndex，8 行/页）
     pub buff_start: usize,
+}
+
+impl Default for GuildState {
+    fn default() -> Self {
+        Self {
+            in_guild: false,
+            name: String::new(),
+            leader: String::new(),
+            notice: Vec::new(),
+            members: Vec::new(),
+            gold: 0,
+            storage_items: Vec::new(),
+            storage_received: false,
+            storage_page: 0,
+            selected_storage: None,
+            item_names: HashMap::new(),
+            invite: None,
+            selected_member: None,
+            // C# `GuildDialog.cs:82`：`public bool MembersShowOfflinesetting = true;`
+            show_offline: true,
+            rank_defs: Vec::new(),
+            buff_catalog: Vec::new(),
+            active_buffs: Vec::new(),
+            show_buff_page: false,
+            page: GuildPage::default(),
+            notice_scroll: 0,
+            buff_start: 0,
+        }
+    }
 }
 
 impl GuildState {
@@ -623,6 +681,7 @@ impl Plugin for GuildPlugin {
                 guild_notice_system,
                 guild_member_rows_system,
                 guild_ui_system,
+                guild_member_arrows_system,
                 guild_buff_system,
                 guild_storage_system,
                 guild_invite_system,
@@ -741,6 +800,13 @@ fn spawn_guild(
                 ChildOf(root),
                 GuildPageRoot(page),
                 Visibility::Hidden,
+                // 隐藏页必须把 `Display` 一起收掉（`UiRootDisplay` 的兜底系统负责）：
+                // Bevy 的 `Visibility::Visible` 会**越过**隐藏祖先继续渲染
+                // （`bevy_camera::visibility::Visibility` 文档：*"will be visible regardless of
+                // whether the ChildOf target entity is hidden"*），而成员行的职务下拉/删除钮
+                // 正是显式 Visible 写进去的。不挂本组件时，切到名次/状态页后它们会**浮在页面上**
+                // ——2026-09-19 实机：名次页左上角残留一个 100x14 下拉框 + ▼。
+                crate::ui::theme::UiRootDisplay::default(),
                 ZIndex(8),
             ))
             .id();
@@ -765,12 +831,10 @@ fn spawn_guild(
     commands.entity(page_members).insert((
         GuildMembersScroll,
         UiScrollList {
-            rect_rel: (
-                MEMBER_COL_NAME,
-                MEMBER_ROW_Y0,
-                200.0,
-                MEMBER_ROW_DY * MEMBER_ROWS as f32,
-            ),
+            // 滚轮命中区 = **整页**（C# 在 `MembersPage`(352x372) + `MembersPageBase` + 每行
+            // 三个标签/删除钮上都挂了 `MembersPanel_MouseWheel`，并集就是整页，`:333/354/370/385/399/484`）。
+            // 之前写的是名字列那块 200x270，等于"只有鼠标压在名字列上才滚得动"。
+            rect_rel: LIST_WHEEL_RECT,
             row_h: MEMBER_ROW_DY,
             visible: MEMBER_ROWS,
             total: 0,
@@ -788,7 +852,9 @@ fn spawn_guild(
     commands.entity(page_storage).insert((
         GuildStorageScroll,
         UiScrollList {
-            rect_rel: (0.0, 0.0, 336.0, 332.0),
+            // 滚轮命中区 = 整页（C# `StoragePage` + `StoragePageBase` + 每个格子都挂了
+            // `StoragePanel_MouseWheel`，`:689/746/747`）
+            rect_rel: LIST_WHEEL_RECT,
             row_h: 36.0,
             visible: STORAGE_WINDOW_ROWS,
             total: STORAGE_ROWS_TOTAL,
@@ -865,7 +931,10 @@ fn spawn_guild(
             TextInputField(2),
             crate::game::dialogs::text_input::TextInputMultiline,
             TextInputRect(GUILD_X + 13.0, GUILD_Y + 61.0, 322.0, 330.0),
-            Visibility::Hidden,
+            // **常显**（C# `Notice` 文本框是 `Visible = true` + `Enabled = false`：平时只读展示
+            // 公告正文，点「编辑」才可改）。原先写死 `Visibility::Hidden` 且**全仓无人再置显**
+            // → 公告页永远一片空白（实机截图 z_guild_notice.png，服务端已下发 13 行公告）。
+            // 页面之外不会漏出：非当前页由 `UiRootDisplay` 收成 `Display::None`。
         ))
         .with_children(|ic| {
             ic.spawn((
@@ -879,7 +948,9 @@ fn spawn_guild(
                 },
                 Text::new(String::new()),
                 TextFont {
-                    font: FontSource::Handle(font.clone()),
+                    // 公告正文是服务端下发的中文：必须用自带 CJK 的主字体，
+                    // 用 Arial 句柄会整篇豆腐（实机 fix_guild.png 就是 `□□□□`）
+                    font: FontSource::Handle(cjk.clone()),
                     font_size: FontSize::Px(12.0),
                     ..default()
                 },
@@ -895,14 +966,41 @@ fn spawn_guild(
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 198),
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 199),
         ) {
-            spawn_icon_button(p, n, h, pr, 337.0, 1.0, 16.0, 14.0, 9).insert(GuildNoticeUp);
+            // 尺寸取**艺术尺寸** 12x12（`Prguse2[197..209]` 实测 12x12）。C# 虽然写了
+            // `Size = new Size(16, 14)`，但 `MirImageControl.AutoSize` 默认 true：
+            // `Size` getter 返回 `Library.GetTrueSize(Index)`（`MirImageControl.cs:124-135`），
+            // `DrawControl` 走 `Library.Draw(Index, ...)` 也不读 Size —— 那个 16x14 在绘制与
+            // 命中（`IsMouseOver` 读 `Size`）两边都被艺术尺寸顶掉，故按 12x12 画。
+            spawn_icon_button(
+                p,
+                n,
+                h,
+                pr,
+                337.0,
+                1.0,
+                PAGE_ARROW_SIZE.0,
+                PAGE_ARROW_SIZE.1,
+                9,
+            )
+            .insert(GuildNoticeUp);
         }
         if let (Some(n), Some(h), Some(pr)) = (
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 207),
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 208),
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 209),
         ) {
-            spawn_icon_button(p, n, h, pr, 337.0, 318.0, 16.0, 14.0, 9).insert(GuildNoticeDown);
+            spawn_icon_button(
+                p,
+                n,
+                h,
+                pr,
+                337.0,
+                318.0,
+                PAGE_ARROW_SIZE.0,
+                PAGE_ARROW_SIZE.1,
+                9,
+            )
+            .insert(GuildNoticeDown);
         }
         // 位置条 `Prguse2[206]` @(337,16)（C# `NoticePositionBar`，`Movable` 可拖动；
         // 显隐由 `guild_notice_system` 按「Notice 页激活 + 公告超一屏」控制）
@@ -933,6 +1031,45 @@ fn spawn_guild(
     commands.entity(page_members).with_children(|p| {
         // 视觉轨道与 track_rel 同值（C# `MembersPositionBar` 行程 16..298 + 滑块高 20）
         spawn_scroll_bar_ui(p, (337.0, 16.0, 16.0, 302.0), 8);
+        // 上/下翻钮（C# `MembersUpButton`/`MembersDownButton`，`GuildDialog.cs:402-439`）。
+        // 此前**完全没建**：成员页上看到的箭头其实是公告页/仓库页的同位控件
+        // 越过隐藏页漏出来的（同一个 `Visibility::Visible` 越权问题），一旦按页隐藏就露馅。
+        if let (Some(n), Some(h), Some(pr)) = (
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 197),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 198),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 199),
+        ) {
+            spawn_icon_button(
+                p,
+                n,
+                h,
+                pr,
+                337.0,
+                1.0,
+                PAGE_ARROW_SIZE.0,
+                PAGE_ARROW_SIZE.1,
+                9,
+            )
+            .insert(GuildMemberUp);
+        }
+        if let (Some(n), Some(h), Some(pr)) = (
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 207),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 208),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 209),
+        ) {
+            spawn_icon_button(
+                p,
+                n,
+                h,
+                pr,
+                337.0,
+                318.0,
+                PAGE_ARROW_SIZE.0,
+                PAGE_ARROW_SIZE.1,
+                9,
+            )
+            .insert(GuildMemberDown);
+        }
         // C# `MemberPageRows = 18`，`MembersName[i] @ (125, 30 + i*15)`（7F 字体 → 11px）
         for i in 0..MEMBER_ROWS {
             spawn_label(
@@ -986,9 +1123,11 @@ fn spawn_guild(
         // C# `MembersRanks[i]` = `MirDropDownBox` @(24, 30 + i*15) 100x14
         // （`Enabled = CanChangeRank && 成员职务下标 >= 自己`；`SelectedIndex` = 该成员职务）
         for i in 0..MEMBER_ROWS {
+            // 字体必须用 **CJK 字体**：条目是 `rank_defs` 的中文职务名（会长/副会长/成员），
+            // Arial 画中文全是豆腐（2026-09-19 实机：18 行下拉全是 `□□`）。
             spawn_dropdown_ui(
                 p,
-                &font,
+                &cjk,
                 Vec::new(),
                 None,
                 (GUILD_X, GUILD_Y + PAGE_LEFT.1),
@@ -1020,15 +1159,23 @@ fn spawn_guild(
 
     // ---- StatusPage：行会名/等级/成员 + 招募/创建（C# `GuildDialog.cs:489-611`）----
     commands.entity(page_status).with_children(|p| {
-        // C# `StatusHeaders` @(7,47) 75x300（行头列表）
-        spawn_label(
+        // C# `StatusHeaders` @(7,47) 75x300，`DrawFormat = TextFormatFlags.Right`、
+        // `ForeColour = Color.Gray`（`GuildDialog.cs:519-529`）—— **右对齐**到 7+75=82，
+        // 正好贴住右侧值列 `StatusGuildName @(82,47)`。此前左对齐画在 x=7，
+        // 三个行头离值列隔着 60px 空档，是"错位"最扎眼的一处。
+        // 右对齐靠定宽节点 + `TextLayout::justify(Right)`（同 `game_shop.rs:448` 的 idiom）。
+        spawn_outlined_label_block(
             p,
             &cjk,
-            "行会\n等级\n成员",
+            "行会
+等级
+成员",
             7.0,
             47.0,
+            75.0,
             11.0,
-            Color::WHITE,
+            Color::srgb(0.5, 0.5, 0.5),
+            Justify::Right,
             8,
         );
         // C# `StatusGuildName` @(82,47)（行会名 + 会长 + 金币，由 `guild_ui_system` 填充）
@@ -1058,7 +1205,7 @@ fn spawn_guild(
                     },
                     Text::new(String::new()),
                     TextFont {
-                        font: FontSource::Handle(font.clone()),
+                        font: FontSource::Handle(cjk.clone()),
                         font_size: FontSize::Px(12.0),
                         ..default()
                     },
@@ -1094,7 +1241,7 @@ fn spawn_guild(
                     },
                     Text::new(String::new()),
                     TextFont {
-                        font: FontSource::Handle(font.clone()),
+                        font: FontSource::Handle(cjk.clone()),
                         font_size: FontSize::Px(12.0),
                         ..default()
                     },
@@ -1158,7 +1305,7 @@ fn spawn_guild(
                     },
                     Text::new(String::new()),
                     TextFont {
-                        font: FontSource::Handle(font.clone()),
+                        font: FontSource::Handle(cjk.clone()),
                         font_size: FontSize::Px(11.0),
                         ..default()
                     },
@@ -1234,14 +1381,36 @@ fn spawn_guild(
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 198),
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 199),
         ) {
-            spawn_icon_button(p, n, h, pr, 337.0, 1.0, 16.0, 14.0, 9).insert(GuildStorageUp);
+            spawn_icon_button(
+                p,
+                n,
+                h,
+                pr,
+                337.0,
+                1.0,
+                PAGE_ARROW_SIZE.0,
+                PAGE_ARROW_SIZE.1,
+                9,
+            )
+            .insert(GuildStorageUp);
         }
         if let (Some(n), Some(h), Some(pr)) = (
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 207),
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 208),
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 209),
         ) {
-            spawn_icon_button(p, n, h, pr, 337.0, 318.0, 16.0, 14.0, 9).insert(GuildStorageDown);
+            spawn_icon_button(
+                p,
+                n,
+                h,
+                pr,
+                337.0,
+                318.0,
+                PAGE_ARROW_SIZE.0,
+                PAGE_ARROW_SIZE.1,
+                9,
+            )
+            .insert(GuildStorageDown);
         }
     });
 
@@ -1269,7 +1438,7 @@ fn spawn_guild(
                     },
                     Text::new(String::new()),
                     TextFont {
-                        font: FontSource::Handle(font.clone()),
+                        font: FontSource::Handle(cjk.clone()),
                         font_size: FontSize::Px(11.0),
                         ..default()
                     },
@@ -1281,7 +1450,7 @@ fn spawn_guild(
         // C# `RanksSelectBox` @(198,36) 130x16
         spawn_dropdown_ui(
             p,
-            &font,
+            &cjk,
             vec!["会长".to_string(), "副会长".to_string(), "成员".to_string()],
             Some(0),
             (GUILD_X, GUILD_Y + 60.0),
@@ -1364,7 +1533,7 @@ fn spawn_guild(
                     },
                     Text::new(String::new()),
                     TextFont {
-                        font: FontSource::Handle(font.clone()),
+                        font: FontSource::Handle(cjk.clone()),
                         font_size: FontSize::Px(11.0),
                         ..default()
                     },
@@ -1454,6 +1623,50 @@ fn spawn_guild(
             }
         });
     }
+}
+
+/// 成员页上/下翻钮（C# `MembersUpButton`/`MembersDownButton`，`GuildDialog.cs:414-439`）。
+///
+/// 上 = `MemberScrollIndex--`（到 0 停）、下 = `MemberScrollIndex++`
+/// （到 `MembersShowCount - MemberPageRows` 停）—— 换算成本端就是偏移夹在
+/// `[0, max_offset]`，与 [`UiScrollList`] 自己的夹紧口径一致。
+///
+/// 单独成系统而不是塞进 `guild_member_rows_system`：后者开头就按「是否停在成员页」
+/// 提前返回，箭头逻辑放进去会跟着一起跳过；本系统自带同样的门控，语义独立。
+fn guild_member_arrows_system(
+    guild: Res<GuildState>,
+    mgr: Res<DialogManager>,
+    mut scroll: Query<&mut UiScrollList, With<GuildMembersScroll>>,
+    up: Query<(Entity, &Interaction), With<GuildMemberUp>>,
+    down: Query<(Entity, &Interaction), With<GuildMemberDown>>,
+    mut prev_inter: Local<HashMap<Entity, Interaction>>,
+) {
+    fn edge(e: Entity, inter: &Interaction, prev: &mut HashMap<Entity, Interaction>) -> bool {
+        let was = prev.insert(e, *inter);
+        *inter == Interaction::Pressed && was != Some(Interaction::Pressed)
+    }
+    if !mgr.is_open(DialogKind::Guild) || guild.page != GuildPage::Members {
+        return;
+    }
+    let mut delta = 0i32;
+    for (e, inter) in &up {
+        if edge(e, inter, &mut prev_inter) {
+            delta -= 1;
+        }
+    }
+    for (e, inter) in &down {
+        if edge(e, inter, &mut prev_inter) {
+            delta += 1;
+        }
+    }
+    if delta == 0 {
+        return;
+    }
+    let Ok(mut list) = scroll.single_mut() else {
+        return;
+    };
+    let max = list.max_offset() as i32;
+    list.offset = (list.offset as i32 + delta).clamp(0, max) as usize;
 }
 
 /// #2892 批B 单元7：页签切换（C# `GuildDialog.LeftDialog(0..3)` / `RightDialog(0..1)`）。
@@ -1593,6 +1806,9 @@ fn guild_member_rows_system(
 #[allow(clippy::type_complexity)]
 fn guild_notice_system(
     mut guild: ResMut<GuildState>,
+    // 公告正文的**唯一来源**是服务端 `GuildNotice` 的行数组；本端把它灌进输入缓冲（槽 2），
+    // 由 `TextInputDisplay(2)` 渲染。此前没有任何地方写这个缓冲 → 公告页空白。
+    mut input: ResMut<TextInputState>,
     // #2892：公告改为多行可编辑框后，翻页 = 平移显示实体（模拟 C# `ScrollToCaret()` 逐行滚动）
     mut texts: Query<&mut Node, (With<GuildNoticeText>, Without<GuildNoticeBar>)>,
     up: Query<(Entity, &Interaction), With<GuildNoticeUp>>,
@@ -1620,6 +1836,20 @@ fn guild_notice_system(
     }
     let open = guild.page == GuildPage::Notice;
     let len = guild.notice.len();
+    // 只读展示：未在编辑（没聚焦槽 2）时，把服务端公告同步进显示缓冲。
+    // 正在编辑则不动，免得把用户敲的内容冲掉。
+    if input.active != Some(2) {
+        let want = guild.notice.join(
+            "
+",
+        );
+        if input.texts.get(2).map(|t| t != &want).unwrap_or(true) {
+            if input.texts.len() <= 2 {
+                input.texts.resize(3, String::new());
+            }
+            input.texts[2] = want;
+        }
+    }
     for (e, inter) in &up {
         if edge(e, inter, &mut prev_inter) {
             // C# `NoticeUpButton.Click`：`if (NoticeScrollIndex == 0) return;`
@@ -2381,6 +2611,12 @@ fn guild_show_offline_system(
     mut guild: ResMut<GuildState>,
     btn: Query<(Entity, &Interaction), With<GuildShowOfflineBtn>>,
     mut texts: Query<&mut Text, With<GuildShowOfflineText>>,
+    // C# `MembersShowOfflineStatus`（`Prguse[1347]` 的勾）随开关显隐
+    // （`MembersShowOfflineSwitch`，`GuildDialog.cs:1649-1661`）
+    mut checks: Query<
+        &mut Visibility,
+        (With<GuildShowOfflineStatus>, Without<GuildShowOfflineBtn>),
+    >,
     mut prev_inter: Local<HashMap<Entity, Interaction>>,
 ) {
     fn edge(e: Entity, inter: &Interaction, prev: &mut HashMap<Entity, Interaction>) -> bool {
@@ -2395,12 +2631,20 @@ fn guild_show_offline_system(
             }
         }
     }
+    // 勾选框贴图（C# 勾是 `Prguse[1347]` 的独立控件，不是文字里的 ✓ —— 早先写成
+    // 文字 ✓，中文主字体没有 U+2713 就画成空白，看着永远没勾上）
+    let want_check = if guild.show_offline {
+        Visibility::Visible
+    } else {
+        Visibility::Hidden
+    };
+    for mut v in &mut checks {
+        if *v != want_check {
+            *v = want_check;
+        }
+    }
     for mut t in &mut texts {
-        t.0 = if guild.show_offline {
-            "✓显示离线".to_string()
-        } else {
-            "显示离线".to_string()
-        };
+        t.0 = "显示离线".to_string();
     }
 }
 
@@ -3159,5 +3403,173 @@ mod tests {
         assert_eq!(guild_my_rank_index(&st, Some("bob")), Some(2));
         assert_eq!(guild_my_rank_index(&st, Some("carol")), None);
         assert_eq!(guild_my_rank_index(&st, None), None);
+    }
+
+    /// #2985 B2：成员页上/下翻钮的行为（C# `MembersUpButton`/`MembersDownButton`，
+    /// `GuildDialog.cs:414-439`）—— 逐行移动，两端停住。
+    ///
+    /// 这里同时是本系统的 B0001 兜底：`run_system_once` 会真正初始化系统，
+    /// 参数表若与别的系统/自身查询相撞，在 `cargo check` 下看不出来、只有这里会炸。
+    #[test]
+    fn member_arrows_move_offset_and_clamp() {
+        use crate::game::dialogs::{DialogKind, DialogManager};
+        use bevy::ecs::system::RunSystemOnce;
+
+        fn run(offset: usize, total: usize, up: bool, down: bool) -> usize {
+            let mut world = World::new();
+            let mut mgr = DialogManager::default();
+            mgr.open.push(DialogKind::Guild);
+            world.insert_resource(mgr);
+            let mut guild = GuildState::default();
+            guild.page = GuildPage::Members;
+            world.insert_resource(guild);
+            world.spawn((
+                GuildMembersScroll,
+                UiScrollList {
+                    rect_rel: LIST_WHEEL_RECT,
+                    row_h: MEMBER_ROW_DY,
+                    visible: MEMBER_ROWS,
+                    total,
+                    offset,
+                    step: 1,
+                    track_rel: (337.0, 16.0, 16.0, 302.0),
+                    thumb: None,
+                    z: 8,
+                },
+            ));
+            let inter = |pressed: bool| {
+                if pressed {
+                    Interaction::Pressed
+                } else {
+                    Interaction::None
+                }
+            };
+            if up {
+                world.spawn((GuildMemberUp, inter(true)));
+            }
+            if down {
+                world.spawn((GuildMemberDown, inter(true)));
+            }
+            world
+                .run_system_once(guild_member_arrows_system)
+                .expect("成员翻页系统应可运行");
+            world
+                .query::<&UiScrollList>()
+                .iter(&world)
+                .next()
+                .map(|l| l.offset)
+                .unwrap_or(usize::MAX)
+        }
+
+        // total=30、visible=18 → max_offset = 12
+        assert_eq!(run(0, 30, false, true), 1, "下翻 +1");
+        assert_eq!(run(5, 30, true, false), 4, "上翻 -1");
+        assert_eq!(
+            run(0, 30, true, false),
+            0,
+            "到顶停住（C# `if (MemberScrollIndex == 0) return;`）"
+        );
+        assert_eq!(
+            run(12, 30, false, true),
+            12,
+            "到底停住（C# `== MembersShowCount - MemberPageRows`）"
+        );
+        assert_eq!(run(7, 3, false, true), 0, "数据不满一屏时夹回 0");
+        assert_eq!(run(4, 30, false, false), 4, "没点任何钮则不动");
+    }
+
+    /// #2985 B2：页内翻钮按**艺术尺寸**画、列表滚轮命中区是**整页** —— 两个常量都是
+    /// 从 C# 死代码/多挂点里抠出来的对照值，钉住防漂移。
+    #[test]
+    fn page_arrow_and_wheel_rect_follow_csharp() {
+        // `Prguse2[197..209]` 实测 12x12（tools/acceptance/lib_size.py 读 .lib 元数据）
+        assert_eq!(PAGE_ARROW_SIZE, (12.0, 12.0));
+        // 命中区 = 页容器自身矩形，且必须**盖住**原来的名字列小矩形
+        assert_eq!(LIST_WHEEL_RECT, (0.0, 0.0, PAGE_LEFT.2, PAGE_LEFT.3));
+        assert!(
+            LIST_WHEEL_RECT.2 >= MEMBER_COL_NAME + 200.0,
+            "命中区必须比旧的 (125,30,200,270) 大"
+        );
+    }
+
+    /// #2985 B2（P1 回归）：六个页容器必须挂 `UiRootDisplay`。
+    ///
+    /// 不挂的后果：`guild_page_system` 只把非当前页设成 `Visibility::Hidden`，而 Bevy 的
+    /// `Visibility::Visible` **会越过隐藏祖先继续渲染**（`bevy_camera::visibility::Visibility`
+    /// 文档原话："will be visible regardless of whether the ChildOf target entity is hidden"），
+    /// 成员行的职务下拉/删除钮恰恰是显式 Visible 写进去的 → 切到名次/状态页后它们**浮在页面上**
+    /// （2026-09-19 实机复现：名次页左上角残留一个 100x14 下拉框 + ▼）。
+    #[test]
+    fn guild_page_containers_carry_ui_root_display() {
+        use crate::resources::libraries::Libraries;
+        use bevy::ecs::system::RunSystemOnce;
+
+        // CI 无游戏资产（Data/ 不入库）→ 跳过（详见 libraries::data_assets_present）
+        if !crate::resources::libraries::data_assets_present() {
+            eprintln!(
+                "skip guild_page_containers_carry_ui_root_display: 无 Data 资产（CI 只 checkout 仓库）"
+            );
+            return;
+        }
+        let mut world = World::new();
+        world.insert_resource(GameLibraries(Libraries::new("Data")));
+        world.insert_resource(Assets::<Image>::default());
+        world.insert_resource(Assets::<Font>::default());
+        world.insert_resource(UiFont::default());
+        world.insert_resource(UiCjkFont::default());
+        world
+            .run_system_once(spawn_guild)
+            .expect("spawn_guild 应成功");
+
+        let mut q = world.query::<(Entity, &GuildPageRoot)>();
+        let pages: Vec<Entity> = q.iter(&world).map(|(e, _)| e).collect();
+        assert_eq!(pages.len(), 6, "C# GuildDialog 六个页容器");
+        for e in &pages {
+            assert!(
+                world.get::<crate::ui::theme::UiRootDisplay>(*e).is_some(),
+                "页容器必须挂 UiRootDisplay，否则显式 Visible 的子控件会漏到别的页上"
+            );
+        }
+        // 兜底系统确实会把隐藏页收成 Display::None（并记住原布局模式）
+        let page = pages[0];
+        world.entity_mut(page).insert(Visibility::Hidden);
+        world
+            .run_system_once(crate::ui::theme::enforce_ui_root_display)
+            .expect("UI 根显隐系统应可运行");
+        assert_eq!(
+            world.get::<Node>(page).unwrap().display,
+            Display::None,
+            "隐藏页必须连带收掉 Display，才是真正藏住整棵子树"
+        );
+    }
+
+    /// #2985 B2（数据复验抓出的 bug）：`GuildState::default()` 必须**显示离线成员**。
+    ///
+    /// C# `GuildDialog.cs:82` `MembersShowOfflinesetting = true`。此前的 `#[derive(Default)]`
+    /// 把 bool 初始化成 false，等价于"默认隐藏离线成员"——28 名成员的行会只列出 1 行，
+    /// 成员翻页与滚动条行程全归零（2026-09-19 实机：`scroll` 报 total=1）。
+    #[test]
+    fn guild_state_defaults_to_showing_offline_members() {
+        let st = GuildState::default();
+        assert!(st.show_offline, "C# `MembersShowOfflinesetting` 默认 true");
+
+        // 造 28 人、其中 1 人在线：默认状态下必须全部可见（否则滚动条行程是 0）
+        let mut st = GuildState::default();
+        st.in_guild = true;
+        st.members = (0..28)
+            .map(|i| GuildMember {
+                name: format!("m{i}"),
+                rank: 2,
+                rank_index: 2,
+                online: i == 0,
+            })
+            .collect();
+        assert_eq!(
+            st.visible_member_indices().len(),
+            28,
+            "默认应显示全部成员（含离线）"
+        );
+        st.show_offline = false;
+        assert_eq!(st.visible_member_indices().len(), 1, "关掉后只剩在线的那位");
     }
 }

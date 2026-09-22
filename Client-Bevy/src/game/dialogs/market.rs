@@ -1125,7 +1125,7 @@ fn spawn_market(
         if let Some(search_box) = spawn_market_input(
             p,
             &mut images,
-            &font,
+            &cjk,
             5,
             TM_SEARCH_POS.0,
             TM_SEARCH_POS.1,
@@ -1164,7 +1164,7 @@ fn spawn_market(
         if let Some(price_box) = spawn_market_input(
             p,
             &mut images,
-            &font,
+            &cjk,
             6,
             TM_PRICE_POS.0,
             TM_PRICE_POS.1,

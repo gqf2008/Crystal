@@ -11,6 +11,7 @@ use crate::map_renderer::GameLibraries;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
 use crate::ui::sprite_ui::UiFont;
+use crate::ui::sprite_ui::{shared_cjk_font, UiCjkFont};
 use crate::ui::theme::{load_lib_image, spawn_panel};
 
 /// #2892 批B：面板精灵与 C# 原生尺寸（C# `ChatNoticeDialog.Index = 1361; Library = Libraries.Prguse`，
@@ -46,6 +47,7 @@ pub struct ChatNoticePlugin;
 
 impl Plugin for ChatNoticePlugin {
     fn build(&self, app: &mut App) {
+        app.init_resource::<UiCjkFont>();
         app.init_resource::<ChatNoticeState>();
         app.add_systems(OnEnter(AppState::Game), spawn_chat_notice);
         app.add_systems(OnExit(AppState::Game), cleanup_chat_notice);
@@ -65,12 +67,15 @@ fn spawn_chat_notice(
     mut images: ResMut<Assets<Image>>,
     mut fonts: ResMut<Assets<Font>>,
     mut ui_font: ResMut<UiFont>,
+    mut cjk_font: ResMut<UiCjkFont>,
 ) {
     libs.0.ensure_initialized();
     if !ui_font.0.is_strong() {
         ui_font.0 = crate::ui::sprite_ui::load_ui_font(&mut fonts);
     }
     let font = ui_font.0.clone();
+    // 可能含中文（动态填充/服务端文案）：用自带 CJK 的主字体（Arial handle 画中文是豆腐）
+    let cjk = shared_cjk_font(&mut fonts, &mut cjk_font);
 
     // 背景 Prguse[1361] 原生 660x25；位置按 C# ChatNoticeDialog 公式。
     let Some(bg) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 1361) else {
@@ -82,7 +87,7 @@ fn spawn_chat_notice(
     commands.entity(panel).with_children(|p| {
         crate::ui::theme::spawn_label_center(
             p,
-            &font,
+            &cjk,
             "",
             330.0,
             4.0,

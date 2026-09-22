@@ -12,6 +12,7 @@ use bevy::ecs::hierarchy::ChildOf;
 use bevy::prelude::*;
 
 use crate::ui::sprite_ui::UiButton;
+use crate::ui::sprite_ui::{shared_cjk_font, UiCjkFont};
 
 /// 通用提示状态
 #[derive(Resource, Default)]

@@ -201,6 +201,28 @@ pub fn spawn_label<'a>(
     crate::ui::outlined_text::spawn_outlined_label(parent, font.clone(), text, x, y, size, color, z)
 }
 
+/// 子节点：绝对定位**定宽**文本标签（左上角锚点 + 指定行内对齐）。
+///
+/// C# `MirLabel` 的 `Location`(左上角) + `Size`(定宽) + `DrawFormat`(行内对齐) 三件套里，
+/// [`spawn_label`] 只覆盖前两者且宽度自适应；需要行内对齐（尤其 `TextFormatFlags.Right`）
+/// 的站点用本函数——对齐只有在**定宽**下才看得出效果。
+pub fn spawn_outlined_label_block<'a>(
+    parent: &'a mut ChildSpawnerCommands,
+    font: &Handle<Font>,
+    text: &str,
+    x: f32,
+    y: f32,
+    width: f32,
+    size: f32,
+    color: Color,
+    justify: Justify,
+    z: i32,
+) -> EntityCommands<'a> {
+    crate::ui::outlined_text::spawn_outlined_label_block(
+        parent, font, text, x, y, width, size, color, justify, z,
+    )
+}
+
 /// 子节点：绝对定位**无描边**文本标签。
 ///
 /// 只用于 C# 里确实没有描边的文本（见 [`spawn_label`] 注释的 4 处 `OutLine = false`
@@ -1345,6 +1367,83 @@ mod tests {
         );
     }
 
+    /// #2985 B2：滑块必须**真的跟着 offset 走**（高度按可见比、位置按行程比）。
+    ///
+    /// 曾经的 `list_thumb` 返回 `co.0`——而 `co` 是 `&ChildOf`，`co.0` 是**父实体**（列表自己），
+    /// 于是 `thumb_write.get_mut(thumb)` 永远失败、`continue` 掉：滑块停在
+    /// `spawn_scroll_bar_ui` 的初始值 16x40，滚到天涯也不动。
+    ///
+    /// 之前只有"滚轮改变 offset"的测试，`offset` 是对的，所以这个 bug 一路绿灯——
+    /// 而用户看到的恰恰是"滚动条好像没实现"。故这里断言的是**滑块 Node 本身**。
+    #[test]
+    fn thumb_node_tracks_offset_and_visible_ratio() {
+        use bevy::ecs::message::Messages;
+        use bevy::ecs::system::RunSystemOnce;
+
+        let mut world = World::new();
+        world.init_resource::<Messages<MouseWheel>>();
+        world.init_resource::<crate::control::CursorProbe>();
+        world.init_resource::<ButtonInput<MouseButton>>();
+        world.init_resource::<crate::ui::scroll_list::ScrollDrag>();
+
+        let root = world
+            .spawn(abs_node(0.0, 0.0, Some(400.0), Some(400.0)))
+            .id();
+        // 列表：轨道 (337,16,16,302)、可见 18 行、共 54 行 → 滑块高 302*18/54 ≈ 100.7
+        let page = world
+            .spawn((
+                abs_node(0.0, 0.0, Some(352.0), Some(372.0)),
+                ChildOf(root),
+                InheritedVisibility::VISIBLE,
+                UiScrollList {
+                    rect_rel: (0.0, 0.0, 352.0, 372.0),
+                    row_h: 15.0,
+                    visible: 18,
+                    total: 54,
+                    offset: 0,
+                    step: 1,
+                    track_rel: (337.0, 16.0, 16.0, 302.0),
+                    thumb: None,
+                    z: 8,
+                },
+            ))
+            .id();
+        let thumb = world
+            .spawn((
+                abs_node(337.0, 16.0, Some(16.0), Some(40.0)),
+                UiScrollThumb,
+                ChildOf(page),
+                InheritedVisibility::VISIBLE,
+            ))
+            .id();
+
+        world
+            .run_system_once(scroll_list_ui_system)
+            .expect("滚动系统应可运行");
+        // 与实现同序（先算比例再乘），否则 f32 舍入末位不同，断言会假红
+        let expect_h = 302.0 * (18.0f32 / 54.0f32);
+        let n = world.get::<Node>(thumb).expect("滑块应有 Node");
+        assert_eq!(
+            n.height,
+            Val::Px(expect_h),
+            "滑块高度必须按 可见/总 比例算（而不是停在初始 40）"
+        );
+        assert_eq!(n.top, Val::Px(16.0), "offset=0 时滑块贴轨道顶");
+        assert_eq!(n.width, Val::Px(16.0));
+
+        // 滚到底：行程 = 轨道高 - 滑块高 → 滑块贴轨道底
+        world.get_mut::<UiScrollList>(page).unwrap().offset = 36; // max_offset = 54-18
+        world
+            .run_system_once(scroll_list_ui_system)
+            .expect("滚动系统应可重复运行");
+        let n = world.get::<Node>(thumb).unwrap();
+        assert_eq!(
+            n.top,
+            Val::Px(16.0 + (302.0 - expect_h)),
+            "offset 到底时滑块必须走到轨道末端"
+        );
+    }
+
     /// bug5 滚动条审计回归：列表挂在**页面容器**（面板子节点）时，滚轮命中必须沿
     /// ChildOf 链累加各层 Node.left/top 得到屏幕原点（C# 中控件 Location 相对父级、
     /// 命中判定用屏幕坐标）。否则页级列表（行会成员页/商城分类等）滚轮失效。
@@ -1552,7 +1651,7 @@ pub fn scroll_list_ui_system(
     mouse: Res<ButtonInput<MouseButton>>,
     mut drag: ResMut<crate::ui::scroll_list::ScrollDrag>,
     mut lists: Query<(Entity, &mut UiScrollList), Without<UiScrollThumb>>,
-    thumb_read: Query<(&ChildOf, &UiScrollThumb)>,
+    thumb_read: Query<(Entity, &ChildOf, &UiScrollThumb)>,
     mut thumb_write: Query<(&ChildOf, &mut Node, &UiScrollThumb)>,
     parents: Query<&ChildOf>,
     node_read: Query<&Node, Without<UiScrollThumb>>,
@@ -1565,6 +1664,37 @@ pub fn scroll_list_ui_system(
     // 探针为 None 时回落真实光标，常态行为不变（click RPC 完成即撤探针）。
     probe: Res<crate::control::CursorProbe>,
 ) {
+    // 滑块跟随 offset —— **必须在光标判定之前**跑：
+    // 这一段只依赖列表状态，与光标无关，而下面的命中判定会在
+    // `window.cursor_position()` 为 None（无焦点窗口 / 共享桌面 / 自动化）时提前 return。
+    // 放在后面会让滑块永远停在 `spawn_scroll_bar_ui` 的初始值（16x40），
+    // 不管总行数多少 —— 看上去就是"滚动条没实现"（2026-09-19 实机：28 行成员列表，
+    // 滑块高度仍是 40 而不是 302*18/28≈194）。
+    // 每帧把滑块移到 offset 对应位置（跟随容器拖动）
+    for (e, list) in lists.iter() {
+        let Some(thumb) = list_thumb(e, &thumb_read) else {
+            continue;
+        };
+        let Ok((_, mut tn, _)) = thumb_write.get_mut(thumb) else {
+            continue;
+        };
+        let (tx, ty, tw, th) = list.track_rel;
+        let total = list.total.max(list.visible);
+        let thumb_h = (th * (list.visible as f32 / total as f32)).clamp(14.0, th);
+        let max_off = list.max_offset();
+        let ratio = if max_off == 0 {
+            0.0
+        } else {
+            list.offset as f32 / max_off as f32
+        };
+        let thumb_y = ty + ratio * (th - thumb_h);
+        tn.left = Val::Px(tx);
+        tn.top = Val::Px(thumb_y);
+        tn.width = Val::Px(tw);
+        tn.height = Val::Px(thumb_h);
+    }
+
+    // ---- 以下为命中/拖动/滚轮：都需要光标位置 ----
     let Ok(window) = windows.single() else {
         return;
     };
@@ -1578,11 +1708,11 @@ pub fn scroll_list_ui_system(
     }
 
     // 找某列表的子滑块（UiScrollThumb 且 parent == 列表实体）
-    fn list_thumb(e: Entity, thumbs: &Query<(&ChildOf, &UiScrollThumb)>) -> Option<Entity> {
+    fn list_thumb(e: Entity, thumbs: &Query<(Entity, &ChildOf, &UiScrollThumb)>) -> Option<Entity> {
         thumbs
             .iter()
-            .find(|(co, _)| co.parent() == e)
-            .map(|(co, _)| co.0)
+            .find(|(_, co, _)| co.parent() == e)
+            .map(|(t, _, _)| t)
     }
 
     // 滑块拖动（C# MirScrollBar movable）
@@ -1677,30 +1807,6 @@ pub fn scroll_list_ui_system(
                 list.offset = (list.offset as i32 + rows).clamp(0, max) as usize;
             }
         }
-    }
-
-    // 每帧把滑块移到 offset 对应位置（跟随容器拖动）
-    for (e, list) in lists.iter() {
-        let Some(thumb) = list_thumb(e, &thumb_read) else {
-            continue;
-        };
-        let Ok((_, mut tn, _)) = thumb_write.get_mut(thumb) else {
-            continue;
-        };
-        let (tx, ty, tw, th) = list.track_rel;
-        let total = list.total.max(list.visible);
-        let thumb_h = (th * (list.visible as f32 / total as f32)).clamp(14.0, th);
-        let max_off = list.max_offset();
-        let ratio = if max_off == 0 {
-            0.0
-        } else {
-            list.offset as f32 / max_off as f32
-        };
-        let thumb_y = ty + ratio * (th - thumb_h);
-        tn.left = Val::Px(tx);
-        tn.top = Val::Px(thumb_y);
-        tn.width = Val::Px(tw);
-        tn.height = Val::Px(thumb_h);
     }
 }
 

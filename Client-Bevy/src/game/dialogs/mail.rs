@@ -202,6 +202,7 @@ pub struct MailPlugin;
 
 impl Plugin for MailPlugin {
     fn build(&self, app: &mut App) {
+        app.init_resource::<UiCjkFont>();
         app.init_resource::<MailState>();
         // #2631：跨对话框写邮件请求（friend 发、本模块消费并自行预填+打开）
         app.add_message::<ComposeMail>();
@@ -823,7 +824,7 @@ fn spawn_mail(
                         },
                         Text::new(String::new()),
                         TextFont {
-                            font: FontSource::Handle(font.clone()),
+                            font: FontSource::Handle(cjk.clone()),
                             font_size: FontSize::Px(12.0),
                             ..default()
                         },
@@ -839,7 +840,7 @@ fn spawn_mail(
             spawn_item_cell_ui(
                 p,
                 &mut images,
-                &font,
+                &cjk,
                 10.0 + i as f32 * 46.0,
                 146.0,
                 40.0,
@@ -870,7 +871,7 @@ fn spawn_mail(
             spawn_item_cell_ui(
                 p,
                 &mut images,
-                &font,
+                &cjk,
                 10.0 + col * 46.0,
                 202.0 + row * 46.0,
                 40.0,

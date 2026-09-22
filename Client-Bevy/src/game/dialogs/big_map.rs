@@ -23,7 +23,7 @@ use crate::resources::libraries::LibraryName;
 use crate::resources::map_reader::{resolve_map_path, MapReader};
 use crate::scenes::AppState;
 use crate::ui::outlined_text::spawn_outlined_label;
-use crate::ui::sprite_ui::{UiCjkFont, UiFont};
+use crate::ui::sprite_ui::{shared_cjk_font, UiCjkFont, UiFont};
 use crate::ui::theme::{
     load_lib_image, spawn_container, spawn_icon_button, spawn_image, spawn_label, spawn_panel,
     CloseButton,
@@ -337,7 +337,7 @@ fn spawn_big_map(
                 },
                 Text::new(String::new()),
                 TextFont {
-                    font: FontSource::Handle(font.clone()),
+                    font: FontSource::Handle(cjk.clone()),
                     font_size: FontSize::Px(10.0),
                     ..default()
                 },
