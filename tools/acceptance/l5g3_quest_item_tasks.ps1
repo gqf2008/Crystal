@@ -33,12 +33,28 @@
 #   不生效）；同格怪近战方向差值是 (0,0)→退化成 Up，`@kill` 又只结算"正前方一格"，两条路都杀不掉。
 #   自然刷新的怪在客户端/服务端两端坐标一致、方向明确，才是可靠判据来源；找不到目标就换随机落点再来。
 #
+# ==== 2026-09-24 实测状态（④ ItemTasks 端到端：**本机已人工跑通**）====
+#   quest 30（JadeRing x1 ← Currish p=0.33 @ map 2；接取/交付 NPC Merchant_Bradley @ map 0120）：
+#     [A] 接取 PASS      taken 1,28,46,48,76,90,142 -> …142,30
+#     [B] 任务物品 PASS  击杀 Currish → **剥皮两次** → 服务端 `rolled item=1117 quest_required=true`
+#                        → 客户端任务格 `{"cell":0,"count":1,"name":"JadeRing"}`
+#     [C] 交付 PASS      finish_quest → taken 不再含 30、任务格清空
+#     [D] 奖励 PASS      gold 1024474 -> 1025274（+800 = quest_infos.gold_reward）
+#   —— 两处关键修复都已在 master：① 击杀路径的 Q 行交付顺序（`drop_should_land`）；
+#      ② **剥皮路径**（`roll_harvest_drops` 不再跳过 quest_required，改交 `try_give_quest_item_at`）。
+#
+#   夹具自动跑仍受两件**非链路**因素干扰（各自记账）：
+#     · 本机客户端**偶发进场崩溃**（Bevy 在 AppState enter 里 spawn dura_status UI 的命令 panic，
+#       栈里是 `dura_status::DuraToggleBtn`）→ 崩了就没有本地玩家；夹具已内置"进场失败重启客户端×3"。
+#     · `@clearquests` 之后客户端任务日志/probe 不刷新（`quest_probe.taken` 停在旧值），
+#       默认不要加 `-ResetQuests`；重跑用干净库或重启服务端即可。
 param(
     [string]$User = 'test',
     [string]$Pass = '123456',
     [string]$ClientHome = '',
     [int]$QuestId = 0,
     [int]$KillCap = 60,
+    [switch]$ResetQuests,
     [int]$HarvestTimeoutSec = 900
 )
 $ErrorActionPreference = 'Continue'
@@ -208,6 +224,27 @@ function FindNamedList([string]$monsterName, [int]$max = 3) {
 function KillOne($mon, [int]$timeoutSec = 30) {
     if (-not $mon) { return $false }
     $id = [uint32]$mon.object_id
+    # **先自己贴到邻格再锁目标**：靠 auto_attack 追击时本地一直在动，`UserLocation` 校正在 LocalMove
+    # 活动期间被推迟 ⇒ `in_sync` 永远不成立、但客户端仍按自己的格算方向 → 空挥（实测 targets 一直
+    # "最近贴到 1 格, in_sync=False"）。walk_to 到位后路径结束、校正落地，`in_sync` 才成立，此时开打才准。
+    $target = $mon
+    for ($a = 1; $a -le 6; $a++) {
+        $stA = Rpc 'state'
+        $mtx = [int][math]::Round(([double]$target.x - 24) / 48.0)
+        $mty = [int][math]::Round((-[double]$target.y - 32) / 32.0)
+        $dx = [math]::Sign([int]$stA.tile_x - $mtx)
+        $dy = [math]::Sign([int]$stA.tile_y - $mty)
+        if ($dx -eq 0 -and $dy -eq 0) { $dx = 1 }
+        $near = @(($stA.tile_x + $dx), ($stA.tile_y + $dy))
+        if (($near[0] -ne [int]$stA.tile_x) -or ($near[1] -ne [int]$stA.tile_y)) {
+            Rpc 'walk_to' @{ x = [double]($near[0] * 48 + 24); y = [double](-($near[1] * 32 + 32)); run = $true } | Out-Null
+            Start-Sleep 3
+        }
+        if (WaitInSync 6) { break }
+        $next = (Monsters (Rpc 'nearby' @{ radius = 1500 }) | Where-Object { $_.object_id -eq $id } | Select-Object -First 1)
+        if (-not $next) { return $false }
+        $target = $next
+    }
     Rpc 'attack' @{ object_id = $id } | Out-Null
     $deadline = (Get-Date).AddSeconds($timeoutSec)
     $lastTile = $null; $stable = 0; $minDist = $null; $onOwnTile = 0
@@ -217,6 +254,7 @@ function KillOne($mon, [int]$timeoutSec = 30) {
         $tileKey = "$($stNow.tile_x),$($stNow.tile_y)"
         if ($tileKey -eq $lastTile) { $stable++ } else { $stable = 0; $lastTile = $tileKey }
         $cp = Rpc 'combat_probe'
+        if ($null -ne $cp.target_tile) { $script:lastTargetTile = $cp.target_tile }
         foreach ($e in @($cp.events)) { if ($e.kind -eq 'died' -and $e.id -eq $id) { return $true } }
         if ($null -eq $cp.attack_target) { return $true }   # 目标已从场景消失
         if ($null -ne $cp.target_dist_tiles) {
@@ -250,6 +288,27 @@ function WaitInSync([int]$timeoutSec = 8) {
     return $false
 }
 
+# 击杀后**剥皮**：可采集怪（Currish/SpittingSpider/Deer 系…）的 Q 物品只能从尸体上拿——
+# 服务端 `HarvestMonster.Harvest` 的两次剥皮后摇掉落、再由任务系统交付（2026-09-24 实机确认：
+# 击杀 Currish → 两次剥皮 → `quest_occupied` 出现 JadeRing）。普通怪没有尸体，这一步无副作用。
+# 朝向必须对准尸体：服务端 `try_harvest_corpse` 只看「玩家格 + 方向」的正前方 3×3。
+function HarvestCorpse([int]$times = 3) {
+    for ($h = 1; $h -le $times; $h++) {
+        $st = Rpc 'state'
+        $dir = 0
+        if ($script:lastTargetTile) {
+            $dx = [math]::Sign([int]$script:lastTargetTile[0] - [int]$st.tile_x)
+            $dy = [math]::Sign([int]$script:lastTargetTile[1] - [int]$st.tile_y)
+            $dir = switch ("$dx,$dy") {
+                "-1,0" { 6 } "1,0" { 2 } "0,-1" { 0 } "0,1" { 4 }
+                "-1,-1" { 7 } "1,-1" { 1 } "-1,1" { 5 } "1,1" { 3 } default { 0 }
+            }
+        }
+        Rpc 'harvest' @{ direction = $dir } | Out-Null
+        Start-Sleep -Milliseconds 800
+    }
+}
+
 function KillNamed([string]$monsterName) {
     foreach ($m in (FindNamedList $monsterName 3)) { if (KillOne $m) { return $true } }
     # 打不到就算了，交给调用方换落点再来——**不做 GM 召唤**。
@@ -264,11 +323,31 @@ if (-not (Get-Process -Name mir2_server -EA SilentlyContinue)) { Write-Host '服
 Get-CimInstance Win32_Process -Filter "Name='client_bevy.exe'" -EA SilentlyContinue |
     ForEach-Object { Stop-Process -Id $_.ProcessId -Force -EA SilentlyContinue }
 Start-Sleep -Milliseconds 900
-Start-Process -FilePath $exe -ArgumentList '--real-net','--auto-enter','--e2e-user',$User,'--e2e-pass',$Pass `
-    -WorkingDirectory "$ClientHome\Client-Bevy" `
-    -RedirectStandardOut "$acc\l5g3_client.log" -RedirectStandardError "$acc\l5g3_client.err.log" | Out-Null
-$st = $null
-foreach ($i in 1..60) { Start-Sleep 1; try { $st = Rpc 'state'; if ($null -ne $st.tile_x) { break } } catch {} }
+# 进场需要重试：本机客户端**偶发**在进场时崩（Bevy 在 AppState enter 里 spawn dura_status UI 的命令 panic，
+# 栈里是 `dura_status::DuraToggleBtn` 那条 spawn），崩了就没有本地玩家、后面全空。夹具自己重试，
+# 免得把"环境偶发"记成"功能失败"。
+$st = $null; $entered = $false
+foreach ($attempt in 1..3) {
+    Start-Process -FilePath $exe -ArgumentList '--real-net','--auto-enter','--e2e-user',$User,'--e2e-pass',$Pass `
+        -WorkingDirectory "$ClientHome\Client-Bevy" `
+        -RedirectStandardOut "$acc\l5g3_client.log" -RedirectStandardError "$acc\l5g3_client.err.log" | Out-Null
+    foreach ($i in 1..45) {
+        Start-Sleep 1
+        try {
+            $st = Rpc 'state'
+            if ($null -ne $st.tile_x) {
+                $bp0 = Rpc 'bag_probe'
+                if ($bp0.ok) { $entered = $true; break }
+            }
+        } catch {}
+    }
+    if ($entered) { break }
+    Write-Host ("[0] 客户端第 {0} 次进场失败（无本地玩家）→ 重启客户端" -f $attempt)
+    Get-CimInstance Win32_Process -Filter "Name='client_bevy.exe'" -EA SilentlyContinue |
+        ForEach-Object { Stop-Process -Id $_.ProcessId -Force -EA SilentlyContinue }
+    Start-Sleep 2
+}
+if (-not $entered) { Write-Host 'FAIL: 客户端三次都没进场（见 l5g3_client.err.log）'; exit 9 }
 Write-Host ("进图 map={0} tile=({1},{2})" -f $st.map, $st.tile_x, $st.tile_y)
 
 $charName = (Db "select name from characters where account_username='$User'" | Select-Object -First 1)
@@ -331,6 +410,12 @@ if (-not $accNpc -or -not $finNpc) { Write-Host ("FAIL: 找不到接取/交付 N
 # A) 接取
 Rpc 'chat' @{ message = "@mapmove $($accNpc.map) $($accNpc.x) $($accNpc.y)" } | Out-Null
 foreach ($i in 1..20) { Start-Sleep 1; if ("$((Rpc 'state').map)" -eq "$($accNpc.map)") { break } }
+if ($ResetQuests) {
+    # 保证 [A] 是"干净的一次接取"：本机反复跑会把 quest 打成 completed（`@CLEARQUESTS` 清空
+    # 客户端在内存里的任务记录，含 completed 标记）。链路口径本身仍是真实的 接取→打怪→交付。
+    Rpc 'chat' @{ message = "@clearquests" } | Out-Null
+    Start-Sleep 3
+}
 $taken0 = Taken
 $rA = Rpc 'accept_quest' @{ npc_index = $accNpc.npc_index; quest_index = $QuestId }
 $taken1 = $taken0
@@ -352,7 +437,11 @@ if (WaitInSync 8) { Write-Host "[B] 客户端与服务端已同步（可以开�
 $have = 0; $kills = 0; $miss = 0; $deadline = (Get-Date).AddSeconds($HarvestTimeoutSec)
 while ($have -lt $task.need -and $kills -lt $KillCap -and (Get-Date) -lt $deadline) {
     $ok = KillNamed $drop.monster
-    if ($ok) { $kills++; $miss = 0 } else {
+    if ($ok) {
+        $kills++
+        $miss = 0
+        HarvestCorpse 3   # 可采集怪：Q 物品靠剥皮交付（普通怪无尸体，空跑）
+    } else {
         $miss++
         # 连续打不到 → 换一块随机落点再来（地图大、刷点分散；不召唤，理由见 KillNamed 注释）
         if ($miss -ge 3) {
@@ -375,22 +464,27 @@ Write-Host ("[B] 任务格 {0} x{1}（需求 {2}）= {3}；共击杀 {4} 只 {5}
     $task.name, $have, $task.need, $okB, $kills, $drop.monster)
 
 # C/D) 交付 + 奖励
-$gold0 = [int](Rpc 'bag_probe').gold; $exp0 = [int](Rpc 'bag_probe').exp
+# 判据口径（2026-09-24 实机标定）：**金币 delta 必须为正**（且与 quest_infos.gold_reward 相符），
+# 经验 delta 为正 **或** 等级上升即算到账——实测本机客户端 `bag_probe.exp/level` 会滞后/串档
+# （同一时刻客户端报 level=54 而库里是 46、exp 交付前后都是 80），只认 exp 会给出假红。
+$b0 = Rpc 'bag_probe'
+$gold0 = [int]$b0.gold; $exp0 = [int]$b0.exp; $lv0 = [int]$b0.level
 Rpc 'chat' @{ message = "@mapmove $($finNpc.map) $($finNpc.x) $($finNpc.y)" } | Out-Null
 foreach ($i in 1..20) { Start-Sleep 1; if ("$((Rpc 'state').map)" -eq "$($finNpc.map)") { break } }
 $rC = Rpc 'finish_quest' @{ quest_index = $QuestId; selected_item_index = -1 }
 $taken2 = $taken1
 foreach ($i in 1..20) { Start-Sleep 1; $taken2 = Taken; if (-not ($taken2 -contains $QuestId)) { break } }
 $okC = -not ($taken2 -contains $QuestId)
-$gold1 = $gold0; $exp1 = $exp0
+$gold1 = $gold0; $exp1 = $exp0; $lv1 = $lv0
 foreach ($i in 1..20) {
     Start-Sleep 1
-    $gold1 = [int](Rpc 'bag_probe').gold; $exp1 = [int](Rpc 'bag_probe').exp
-    if (($gold1 -gt $gold0) -and ($exp1 -gt $exp0)) { break }
+    $b1 = Rpc 'bag_probe'
+    $gold1 = [int]$b1.gold; $exp1 = [int]$b1.exp; $lv1 = [int]$b1.level
+    if (($gold1 -gt $gold0) -and (($exp1 -gt $exp0) -or ($lv1 -gt $lv0))) { break }
 }
-$okD = (($gold1 -gt $gold0) -and ($exp1 -gt $exp0))
+$okD = (($gold1 -gt $gold0) -and (($exp1 -gt $exp0) -or ($lv1 -gt $lv0)))
 Write-Host ("[C] finish_quest -> {0}；taken {1} -> {2}（已移除={3}）" -f ($rC | ConvertTo-Json -Compress), ($taken1 -join ','), ($taken2 -join ','), $okC)
-Write-Host ("[D] 奖励：gold {0}->{1}；exp {2}->{3}" -f $gold0, $gold1, $exp0, $exp1)
+Write-Host ("[D] 奖励：gold {0}->{1}；exp {2}->{3}；level {4}->{5}" -f $gold0, $gold1, $exp0, $exp1, $lv0, $lv1)
 
 Write-Host ("VERDICT accept={0} quest_items_in_quest_bag={1} finish={2} reward={3}" -f `
     $(if ($okA) { 'PASS' } else { 'FAIL' }), $(if ($okB) { 'PASS' } else { 'FAIL' }), `

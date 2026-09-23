@@ -194,6 +194,16 @@ pub fn in_sync_with_server(client_tile: (i32, i32), server_tile: Option<(i32, i3
     matches!(server_tile, Some(s) if s == client_tile)
 }
 
+/// `C.Harvest` 构造（2026-09-24）：方向是唯一字段——`HarvestMonster.Harvest` 用它取"正前方 3×3"里的尸体。
+pub fn build_harvest(direction: u8) -> mir2_shared::packets::client::combat::Harvest {
+    use mir2_shared::packets::base::Packet as _;
+    let _ = mir2_shared::packets::client::combat::Harvest::OPCODE;
+    mir2_shared::packets::client::combat::Harvest {
+        direction: mir2_shared::enums::MirDirection::try_from(direction % 8)
+            .unwrap_or(mir2_shared::enums::MirDirection::Up),
+    }
+}
+
 pub fn taken_quest_ids(entries: &[crate::game::dialogs::quest_log::QuestEntry]) -> Vec<i32> {
     entries.iter().filter(|e| e.taken).map(|e| e.id).collect()
 }
@@ -384,6 +394,12 @@ enum ControlCommand {
     },
     Pickup {
         object_id: u32,
+    },
+    /// 采集/剥皮（2026-09-24）：照 `C.Harvest` 发方向；可采集怪（HarvestMonster）的尸体必须走这条路
+    /// 才能拿到产出——④ ItemTasks 的 Q 物品在可采集怪身上就靠它交付（详见 combat.rs `roll_harvest_drops`）。
+    /// `direction = None` → 用客户端当前朝向。
+    Harvest {
+        direction: Option<u8>,
     },
     Chat {
         message: String,
@@ -1312,6 +1328,14 @@ fn handle_conn(mut stream: std::net::TcpStream, tx: Sender<ControlCommand>) {
                 } else {
                     json!({"error": "missing object_id"})
                 }
+            }
+            "harvest" => {
+                let direction = params
+                    .get("direction")
+                    .and_then(|v| v.as_u64())
+                    .map(|d| d as u8);
+                let _ = tx.send(ControlCommand::Harvest { direction });
+                json!({"ok": true})
             }
             "attack" => {
                 let object_id = params
@@ -2725,6 +2749,19 @@ fn apply_control_commands(
                 q.npc_state.npc_object_id = object_id;
                 net.send_packet(&mir2_shared::packets::client::npc::CallNPC { object_id, key });
             }
+            ControlCommand::Harvest { direction } => {
+                // 缺省用本地玩家当前朝向（尸体在正前方 3×3 内即可，服务端 `try_harvest_corpse` 判定）
+                let dir = match direction {
+                    Some(d) if d < 8 => d,
+                    _ => q
+                        .players
+                        .single()
+                        .map(|(_, _, anim)| anim.direction)
+                        .unwrap_or(0),
+                };
+                net.send_packet(&build_harvest(dir));
+                tracing::info!("🎮 control harvest: dir={dir}");
+            }
             ControlCommand::Pickup { object_id } => {
                 let Ok((pe, ptf, _)) = q.players.single() else {
                     continue;
@@ -3425,6 +3462,20 @@ mod tests {
             quest_cells(&vec![None, None]).is_empty(),
             "背包有货时任务格仍必须是空"
         );
+    }
+
+    /// 采集门禁（2026-09-24）：`build_harvest` 必须把方向原样带进 `C.Harvest`——可采集怪的 Q 物品
+    /// 只能靠剥皮交付（`roll_harvest_drops` 修好后），方向错了服务端那 3×3 就找不到尸体。
+    /// 阳性对照：把方向换成常量 `Up`（或丢掉 `% 8` 归一）→ 越界/错误方向断言红。
+    #[test]
+    fn build_harvest_carries_direction() {
+        use mir2_shared::enums::MirDirection;
+        assert_eq!(build_harvest(0).direction, MirDirection::Up);
+        assert_eq!(build_harvest(2).direction, MirDirection::Right);
+        assert_eq!(build_harvest(6).direction, MirDirection::Left);
+        // 越界方向必须归一而不是 panic（服务端只认 0..8）
+        assert_eq!(build_harvest(9).direction, MirDirection::UpRight);
+        assert_eq!(build_harvest(255).direction, MirDirection::UpLeft);
     }
 
     /// 移动同步门禁（2026-09-24）：`in_sync_with_server` 只在**瓦片完全相等**时给 true，
