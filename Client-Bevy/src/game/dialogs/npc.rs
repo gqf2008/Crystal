@@ -302,14 +302,19 @@ fn npc_ui_system(
         }
     }
     if !npc.visible {
-        // 对话关闭 → 当前 NPC 归零（`npc_object_id` 的文档语义就是 "0 = 未开对话"）。
-        // 不归零的话，下一次开窗（服务端推来的对话）前若有选项点击，会打到上一个 NPC 上。
-        npc.npc_object_id = 0;
         // C# 语义：`NPCDialog.Hide()` 级联只在「可见→不可见」那一帧发生
         // （C# `if (NPCDialog.Visible) NPCDialog.Hide();` 是边沿语义）——
         // 修复前是每帧强清：服务端事件/RPC 打开的仓库会被立刻再关掉
         // （交互 sweep `storage FAIL: 找不到标准关闭钮` 的根因）。
         if *npc_prev_visible {
+            // 对话关闭 → 当前 NPC 归零（`npc_object_id` 的文档语义就是 "0 = 未开对话"）。
+            // 不归零的话，下一次开窗（服务端推来的对话）前若有选项点击，会打到上一个 NPC 上。
+            // **必须边沿归零**：每帧清零会把「开窗前调用方刚写入的 id」抹掉——
+            // control npc_call/世界点击写 id → 等 NPCResponse 的若干帧里被清 0 →
+            // 开窗后点选项发 CallNPC{object_id:0}，服务端 warn「unknown object_id 0」
+            // 静默丢弃，表现为传送/仓库/买卖入口「点了没反应」（本地低延迟下响应常
+            // 抢在下一帧前到达才没大面积暴露；RPC 驱动 200ms+ 响应几乎必中）。
+            npc.npc_object_id = 0;
             if npc_goods.visible {
                 npc_goods.visible = false;
             }
@@ -1119,6 +1124,60 @@ mod tests {
             "CallNPC 必须带当前 NPC 的 object_id（0 会被服务端丢弃：NPC call for unknown object_id 0）"
         );
         let _ = DialogKind::Npc;
+    }
+
+    /// ⑥ 回归门禁（上线阻塞级，实机 l5i 跨图夹具挖出）：RPC/点击写入 `npc_object_id`
+    /// 后、`NPCResponse` 到达前的若干帧里，`npc_ui_system` 不得把 id 清 0——否则
+    /// 开窗后点选项发 `CallNPC{object_id:0}`，服务端 warn「unknown object_id 0」
+    /// 静默丢弃（传送/仓库/买卖入口「点了没反应」）。关闭边沿（可见→不可见）仍须
+    /// 归零（"0 = 未开对话"语义）。
+    ///
+    /// 阳性对照：把 `npc_object_id = 0` 移出 `if *npc_prev_visible`（恢复每帧清零）
+    /// → 第①步断言立即红。
+    #[test]
+    fn npc_object_id_zeroes_only_on_close_edge() {
+        use crate::game::dialogs::DialogManager;
+        use crate::map_renderer::GameData;
+        use crate::network::NetConnection;
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.init_resource::<NpcDialogState>();
+        app.init_resource::<crate::game::dialogs::npc_goods::NpcGoodsState>();
+        app.init_resource::<crate::game::dialogs::sell_panel::SellPanelState>();
+        app.init_resource::<crate::game::dialogs::storage::StorageState>();
+        app.init_resource::<DialogManager>();
+        app.init_resource::<crate::control::CursorProbe>();
+        app.insert_resource(NetConnection::default());
+        app.insert_resource(GameData::default());
+        app.insert_resource(bevy::input::ButtonInput::<bevy::input::mouse::MouseButton>::default());
+        app.world_mut().spawn(Window::default());
+        app.add_systems(Update, npc_ui_system);
+
+        // ① RPC 开窗竞态：对话未开（visible=false）时调用方写入 id，
+        //    连跑数帧（等响应）不得被清零
+        app.world_mut()
+            .resource_mut::<NpcDialogState>()
+            .npc_object_id = 4242;
+        for _ in 0..5 {
+            app.update();
+        }
+        assert_eq!(
+            app.world().resource::<NpcDialogState>().npc_object_id,
+            4242,
+            "开窗前调用方写入的 id 不得被每帧清零抹掉（NPCResponse 到达前的帧）"
+        );
+
+        // ② 可见→不可见边沿：必须归零（"0 = 未开对话"）
+        app.world_mut().resource_mut::<NpcDialogState>().visible = true;
+        app.update();
+        app.world_mut().resource_mut::<NpcDialogState>().visible = false;
+        app.update();
+        assert_eq!(
+            app.world().resource::<NpcDialogState>().npc_object_id,
+            0,
+            "可见→不可见边沿必须归零"
+        );
     }
 
     /// 探针光标必须能驱动 NPC 行命中（`Click`/`cursor` RPC 注入的就是它）：
