@@ -7,6 +7,41 @@ use std::path::{Path, PathBuf};
 
 use byteorder::{LittleEndian, ReadBytesExt};
 
+/// 地图缓存：`map_index → Arc<MapData>`。
+///
+/// 为什么是 `Arc`（2026-09-23，CAPACITY.md §4「7.5MB/会话」拆解）：
+/// 地图数据加载后**只读**，但 `SetMapData` 过去给每个玩家 actor 发一份
+/// `MapData` 的**全量克隆**（`cells: Vec<Vec<CellInfo>>` 整张格子表；
+/// `0.map` 700×700、`CellInfo` 8 字节 → 约 3.9MB/份，另有 700 行 Vec 头与分配开销）。
+/// 于是**每个**进入该图的会话都要复制一整张地图，实测 RSS 增量
+/// **7.4–8.05 MB/会话**（10/20 会话两次阶梯，且当时只加载了 1 张图）。
+/// 改成缓存 `Arc` 后，同一张地图在 N 个会话间只保留 1 份，
+/// 玩家侧只多一个 8 字节的引用计数指针。
+#[derive(Default)]
+pub(crate) struct MapCache(std::collections::HashMap<u16, std::sync::Arc<MapData>>);
+
+impl MapCache {
+    pub(crate) fn contains_key(&self, map_index: &u16) -> bool {
+        self.0.contains_key(map_index)
+    }
+
+    /// 只读借用（绝大多数调用方要的就是这个）——签名与 `HashMap::get` 一致，
+    /// 因此 `self.maps.get(&idx).map(|m| m.is_walkable(..))` 这类既有写法不需要改。
+    pub(crate) fn get(&self, map_index: &u16) -> Option<&MapData> {
+        self.0.get(map_index).map(|m| m.as_ref())
+    }
+
+    /// **共享句柄**：给玩家 actor 发 `SetMapData` 用。克隆的是 `Arc`（引用计数 +1），
+    /// 不是地图数据本身——这正是「不再每会话克隆整张图」的落点。
+    pub(crate) fn get_arc(&self, map_index: &u16) -> Option<std::sync::Arc<MapData>> {
+        self.0.get(map_index).cloned()
+    }
+
+    pub(crate) fn insert(&mut self, map_index: u16, map: MapData) {
+        self.0.insert(map_index, std::sync::Arc::new(map));
+    }
+}
+
 /// 地图单元信息（仅服务端需要的字段）
 #[derive(Debug, Clone)]
 pub struct CellInfo {
@@ -452,6 +487,75 @@ fn resolve_map_path(file_name: &str, data_dir: &Path) -> io::Result<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 造一张小地图（只为共享语义测试用；格子内容不重要）
+    fn tiny_map(w: i16, h: i16, file: &str) -> MapData {
+        MapData {
+            file_name: file.to_string(),
+            title: String::new(),
+            width: w,
+            height: h,
+            cells: vec![
+                vec![
+                    CellInfo {
+                        back_image: 0,
+                        walkable: true,
+                        fishing_attribute: -1,
+                    };
+                    h as usize
+                ];
+                w as usize
+            ],
+            safe_zone_rects: Vec::new(),
+            no_experience: false,
+        }
+    }
+
+    /// 门禁（2026-09-23，CAPACITY.md §4「7.5MB/会话」拆解）：地图缓存必须**共享**同一份
+    /// `MapData`，而不是每次取用都克隆一整张（`SetMapData` 过去正是这么干的）。
+    ///
+    /// 阳性对照（落地时实做）：把 `MapCache::get_arc` 改成
+    /// `Some(std::sync::Arc::new((**m).clone()))`（= 每次都克隆）→ 本测试的
+    /// `Arc::ptr_eq` 立即红。
+    #[test]
+    fn map_cache_shares_one_arc_per_map() {
+        let mut cache = MapCache::default();
+        cache.insert(1, tiny_map(4, 4, "0.map"));
+        cache.insert(2, tiny_map(2, 2, "1.map"));
+
+        let a = cache.get_arc(&1).expect("slot 1");
+        let b = cache.get_arc(&1).expect("slot 1 again");
+        let c = cache.get_arc(&2).expect("slot 2");
+        assert!(
+            std::sync::Arc::ptr_eq(&a, &b),
+            "同一张图的两次取句柄必须指向同一份数据（共享，不是克隆）"
+        );
+        assert!(!std::sync::Arc::ptr_eq(&a, &c), "不同地图不能是同一份");
+        // 缓存自己 + a + b = 3 个强引用：克隆的是引用计数，不是格子表
+        assert_eq!(std::sync::Arc::strong_count(&a), 3);
+        // 借用路径（`get`）与句柄路径（`get_arc`）看到的是同一份数据
+        assert_eq!(cache.get(&1).map(|m| (m.width, m.height)), Some((4, 4)));
+        assert_eq!((a.width, a.height), (4, 4));
+    }
+
+    /// 门禁（算术对得上）：`0.map` 是 700×700、`CellInfo` 8 字节 → 单份格子表 3.92MB，
+    /// 与实测「每会话 +7.4–8.05MB」同量级——这正是「每会话克隆一张图」的代价来源。
+    /// 数字若漂了（改了 CellInfo 布局或地图尺寸），这条会红，逼着重新核对结论。
+    #[test]
+    fn full_map_grid_matches_per_session_growth() {
+        assert_eq!(
+            std::mem::size_of::<CellInfo>(),
+            8,
+            "CellInfo 布局变了要重算"
+        );
+        let grid_bytes = std::mem::size_of::<CellInfo>() * 700 * 700;
+        assert_eq!(grid_bytes, 3_920_000, "700×700 格子表 = 3.92MB");
+        let mut cache = MapCache::default();
+        cache.insert(1, tiny_map(700, 700, "0.map"));
+        let a = cache.get_arc(&1).unwrap();
+        assert_eq!(a.cells.len(), 700);
+        assert_eq!(a.cells[0].len(), 700);
+    }
 
     #[test]
     fn test_type_100_map_parsing() {

@@ -3241,14 +3241,22 @@ impl Message<FishingCastRequest> for WorldActor {
 
         // C# FishingCast：前方 3 格 + 水格（Cell.FishingAttribute >= 0）
         let (fx, fy) = point_move(state.x, state.y, state.direction, 3);
-        let Some(map_data) = self.maps.get(&state.map_index).cloned() else {
-            return;
-        };
-        if !map_data.is_valid(fx, fy) || map_data.fishing_attribute(fx, fy) < 0 {
+        // 只借不克隆：这里过去 `.cloned()` 会为**一次抛竿检查**复制整张地图
+        // （700×700 约 3.9MB，见 `MapCache` 注释）。
+        let is_water = self
+            .maps
+            .get(&state.map_index)
+            .map(|m| m.is_valid(fx, fy) && m.fishing_attribute(fx, fy) >= 0)
+            .unwrap_or(false);
+        if !is_water {
             send_system_message(&self.gate_ref, msg.session_id, "这里不是水域，无法钓鱼");
             return;
         }
-        let cell_attribute = map_data.fishing_attribute(fx, fy);
+        let cell_attribute = self
+            .maps
+            .get(&state.map_index)
+            .map(|m| m.fishing_attribute(fx, fy))
+            .unwrap_or(-1);
 
         // C# FishingCast：鱼钩必需（rod.Slots[Hook] == null → NeedHook；#2352）
         if rod_item.slots.first().and_then(|s| s.as_ref()).is_none() {

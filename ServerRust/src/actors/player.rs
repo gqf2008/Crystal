@@ -18,6 +18,7 @@ use crate::gate::actor::{GateActor, SendToClient};
 use crate::maps::loader::MapData;
 use crate::util::wire::build_packet_bytes;
 use mir2_shared::packets::Packet;
+use std::sync::Arc;
 
 /// 玩家已学习的魔法/技能
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -723,7 +724,8 @@ pub struct PlayerActor {
     /// WorldActor 引用（#283：升级时通知广播 ObjectLeveled）
     world_ref: ActorRef<crate::actors::world::WorldActor>,
     /// 当前地图数据（用于边界+障碍物校验）
-    map_data: Option<MapData>,
+    /// 当前地图数据（**共享句柄**：N 个同图会话共用 1 份，见 `MapCache`）
+    map_data: Option<Arc<MapData>>,
 }
 
 /// M44：Buff 类型 → 客户端 tag（与 Client-Bevy buff.rs 名称表对应）
@@ -1111,7 +1113,7 @@ impl PlayerActor {
     }
 
     /// 设置地图数据
-    pub fn set_map_data(&mut self, map: MapData) {
+    pub fn set_map_data(&mut self, map: Arc<MapData>) {
         self.state.no_experience_map = map.no_experience;
         self.map_data = Some(map);
     }
@@ -1369,7 +1371,8 @@ pub struct GetPlayerState;
 
 /// 设置地图数据
 pub struct SetMapData {
-    pub map: MapData,
+    /// 共享句柄（**不再**按会话克隆整张地图）
+    pub map: Arc<MapData>,
 }
 
 /// 设置经验倍率

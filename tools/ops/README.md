@@ -83,6 +83,20 @@ pwsh tools/ops/health_report.ps1 -LogFile ops_out/server.log -ProcessName mir2_s
 实测结论（详见 `CAPACITY.md`）：登录路径 200 并发仍零失败（p95 2.96s）；
 **世界路径拐点在 10→20 会话之间**（20 会话起 `gate mailbox full` 上万条 = 世界→客户端扇出打满背压）。
 
+## 5b. 内存阶梯：`memory_ramp.ps1`
+
+与 `capacity_ramp.ps1` 的区别：**只按 PID 管控自己启动的服务端**（不按进程名 `Stop-Process`），
+所以可以在同一台机器上保留别的服务端实例；采样每 2s 一次、取保持期最大值（`Process` 属性必须
+`Refresh()`，否则整轮都读到同一个陈旧值——踩过）。
+
+```powershell
+# A/B：同一份代码 stash 前后各 build 一次 release，分别跑
+pwsh tools/ops/memory_ramp.ps1 -DeployDir <deploy> -ExePath <exe> -StepsCsv 10,20 `
+     -Tag before -OutFile tools/ops/out/memory_before.json
+```
+
+用途与结论见 `CAPACITY.md` §4.2（7.5MB/会话拆解）。
+
 ## 6. 故障注入：`fault_injection.ps1`（+ `latency_proxy.py`）
 
 | 场景 | 做法 | 判据 | 实测 |
