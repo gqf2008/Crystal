@@ -975,9 +975,19 @@ fn chat_size_system(
     chat: Res<ChatState>,
     images: Res<Assets<Image>>,
     mut applied: Local<Option<usize>>,
-    mut panel: Query<(&mut Sprite, &ChatSizeImages), With<ChatPanelBg>>,
-    mut lines: Query<(&mut Transform, &mut Visibility, &ChatLine)>,
-    mut scroll: Query<(&mut Transform, &ChatScrollBtn), Without<ChatLine>>,
+    // B0001：面板查询现在也拿 &mut Transform，必须与下面的 lines 查询显式不相交
+    mut panel: Query<
+        (&mut Sprite, &mut Transform, &ChatSizeImages),
+        (
+            With<ChatPanelBg>,
+            Without<ChatLine>,
+            Without<ChatScrollBtn>,
+            Without<ChatBarBg>,
+            Without<ChatBarButton>,
+        ),
+    >,
+    mut lines: Query<(&mut Transform, &mut Visibility, &ChatLine), Without<ChatPanelBg>>,
+    mut scroll: Query<(&mut Transform, &ChatScrollBtn), (Without<ChatLine>, Without<ChatPanelBg>)>,
     mut bar_bg: Query<
         &mut Transform,
         (
@@ -985,6 +995,7 @@ fn chat_size_system(
             Without<ChatLine>,
             Without<ChatScrollBtn>,
             Without<ChatBarButton>,
+            Without<ChatPanelBg>,
         ),
     >,
     mut bar_btns: Query<
@@ -994,6 +1005,7 @@ fn chat_size_system(
             Without<ChatLine>,
             Without<ChatScrollBtn>,
             Without<ChatBarBg>,
+            Without<ChatPanelBg>,
         ),
     >,
     mut track: Query<(&mut Sprite, &ChatScrollTrack), Without<ChatPanelBg>>,
@@ -1005,10 +1017,20 @@ fn chat_size_system(
     let prev = applied.unwrap_or(0);
     *applied = Some(size);
     let top = chat_panel_top(size);
-    for (mut sp, handles) in &mut panel {
+    for (mut sp, mut tf, handles) in &mut panel {
         let img = &handles.0[size];
         if sp.image != *img {
             sp.image = img.clone();
+        }
+        // owner 缺陷④「关闭/收起时要能缩回原大小」的根因所在：
+        // 原版 `ChangeSize`（MainDialogs.cs:1192/1221）先记旧底边 `y = DisplayRectangle.Bottom`，
+        // 再 `Location = new Point(Location.X, y - Size.Height)` —— **底边固定、向上长高**。
+        // 本端此前只换图、只改 custom_size，**从不动面板自身 y**：面板锚点是 TOP_LEFT 且 y 固定在 0 档顶边，
+        // 于是升档时面板往**下**长（越过底边 739），回档时视觉上也回不到原位。
+        // 这里按档位重定位，保证「底边恒 739」且升/降档都可逆。
+        let want_y = -chat_panel_top(size);
+        if tf.translation.y != want_y {
+            tf.translation.y = want_y;
         }
         // 面板尺寸一律取 chat_panel_rect(size)（632 × 68/116/164）——
         // 不再依赖图像自然尺寸：档位图缺失时会退化成 1×1，展开态就没底了（owner 缺陷②）
@@ -2715,6 +2737,24 @@ mod whisper_partner_tests {
             sp.custom_size,
             Some(Vec2::new(632.0, 116.0)),
             "1 档面板必须是 632x116（与 chat_panel_rect 同源）"
+        );
+        // owner 缺陷④：底边固定（=739），升档向上长高 → 面板 y 必须随档位重定位
+        let panel_y = world
+            .entity(panel)
+            .get::<Transform>()
+            .unwrap()
+            .translation
+            .y;
+        assert_eq!(
+            panel_y,
+            -chat_panel_top(1),
+            "1 档面板 y 必须按底边固定重定位"
+        );
+        // 世界坐标 y 向下为负：屏幕底边 739 ⇒ 世界底边 -739（y 再往下减一个面板高）
+        assert_eq!(
+            panel_y - sp.custom_size.unwrap().y,
+            -739.0,
+            "面板底边必须恒为 739（升档向上长高，不往下长）"
         );
         // 行：0..6 可见、从新顶边 (623+1) 起排
         assert_eq!(
