@@ -399,6 +399,9 @@ FodyWeavers.xsd
 !tools/acceptance/l5g_quest_finish.ps1
 # ③ 买卖夹具：开购买页 → 买一件 → 金币 delta + 商品到手
 !tools/acceptance/l5h_buy_item.ps1
+# ② 跨图/复活夹具：两层传送菜单真换图；死亡→回城复活（含新发现的"没回绑定点地图"记录）
+!tools/acceptance/l5i_crossmap.ps1
+!tools/acceptance/l5j_revive.ps1
 
 # 客户端运行时本地设置（游戏自写自读，不入库；两个客户端都按进程 CWD 相对路径写，
 # 故用不带前导斜杠的模式覆盖任意启动目录）

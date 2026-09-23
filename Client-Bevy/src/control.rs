@@ -246,6 +246,9 @@ enum ControlCommand {
         item_index: u64,
         count: u16,
     },
+    /// ② 复活动作（现成包 `C.TownRevive`，空体）：与死亡提示框的「回城复活」按钮同一路径。
+    /// 判据是状态翻转（dead→false、hp 0→>0、位置回到绑定点），不是"点了没报错"。
+    TownRevive,
     /// ④ 任务闭环动作（现成包 `C.FinishQuest`）：交任务/领奖励。
     /// 与 `accept_quest` 同一模式——把「交任务」从任务日志窗的像素定位里解耦。
     /// 服务端仍按原版规则校验：进度必须满（无任务目标的任务视为**空进度=已完成**）、
@@ -562,6 +565,9 @@ struct ControlQueries<'w, 's> {
     progression: Query<'w, 's, &'static crate::game::player_state::Progression, With<LocalPlayer>>,
     /// `npc_goods_probe` RPC：客户端侧商品行（服务端 GoodsList 写入，判据取状态）
     goods: Res<'w, crate::game::dialogs::npc_goods::NpcGoodsState>,
+    /// `state` RPC：HP/死亡标志（复活闭环判据）
+    vitals: Query<'w, 's, &'static crate::game::player_state::Vitals, With<LocalPlayer>>,
+    state_flags: Query<'w, 's, &'static crate::game::player_state::StatusFlags, With<LocalPlayer>>,
 }
 
 /// 控制端口默认值（--control-port 未指定或非法时回退）
@@ -906,6 +912,11 @@ fn handle_conn(mut stream: std::net::TcpStream, tx: Sender<ControlCommand>) {
                 } else {
                     json!({"error": "control channel closed"})
                 }
+            }
+            // ② 回城复活（现成包 C.TownRevive）：与死亡提示框的「回城复活」按钮同一路径
+            "revive_town" => {
+                let _ = tx.send(ControlCommand::TownRevive);
+                json!({"ok": true, "action": "town_revive"})
             }
             // ③ 商店：npc_goods_probe（只读商品行）/ buy_item {item_index, count}
             "npc_goods_probe" => {
@@ -2126,6 +2137,13 @@ fn apply_control_commands(
                     "y": ptf.translation.y,
                     "tile_x": tile.0,
                     "tile_y": tile.1,
+                    // 2 跨图闭环判据：换图后这里必须变成目标地图名（此前只能从日志 MapChanged 读，
+                    // 判据不是状态源；`desired_map` 由网络 MapChanged 写入）
+                    "map": game_data.desired_map.clone().unwrap_or_default(),
+                    // 复活闭环判据：dead 翻转 + hp 归零/回升
+                    "hp": q.vitals.single().map(|v| v.hp).unwrap_or(-1),
+                    "max_hp": q.vitals.single().map(|v| v.max_hp).unwrap_or(-1),
+                    "dead": q.state_flags.single().map(|f| f.dead).unwrap_or(false),
                     "direction": anim.direction,
                     "chat_input_active": chat.input_active,
                     "chat_input_text": chat.input_text,
@@ -2398,6 +2416,11 @@ fn apply_control_commands(
                 // 与商品窗「购买」按钮发的**同一个包**（C# 客户端 BuyItem.ItemIndex = SelectedItem.UniqueID）
                 net.send_packet(&build_buy_item(item_index, count));
                 tracing::info!("🎮 control buy_item: item={item_index} count={count}");
+            }
+            ControlCommand::TownRevive => {
+                // 与死亡提示框「回城复活」按钮发的**同一个包**（C# TownRevive，空体）
+                net.send_packet(&mir2_shared::packets::client::misc::TownRevive);
+                tracing::info!("🎮 control revive_town");
             }
             ControlCommand::MailProbe { reply } => {
                 let mails: Vec<serde_json::Value> = q
@@ -2993,6 +3016,21 @@ mod tests {
         assert_eq!(pkt.count, 3, "数量必须原样发出");
         assert_eq!(pkt.panel_type, mir2_shared::enums::PanelType::Buy);
         assert_eq!(build_buy_item(317, 1).count, 1);
+    }
+
+    /// ② 复活门禁：`revive_town` 必须发**服务端真正分派的那个 opcode**。
+    /// 服务端按 `ClientPacketIds::TownRevive` 分派（gate/actor.rs:1078），发错包会静默无反应，
+    /// 而夹具只看"死没死/活没活"是能骗过去的——所以这里直接钉 opcode。
+    ///
+    /// 阳性对照（实做）：把动作臂改发别的包（如 `ReviveHero`）→ 本测试立即红。
+    #[test]
+    fn town_revive_opcode_matches_server_dispatch() {
+        use mir2_shared::packets::base::Packet;
+        assert_eq!(
+            mir2_shared::packets::client::misc::TownRevive::OPCODE,
+            mir2_shared::enums::ClientPacketIds::TownRevive as i16,
+            "revive_town 必须发 TownRevive（服务端就按这个 opcode 分派）"
+        );
     }
 
     /// `attack_mode` RPC 的模式名解析（2026-09-22 玩家验收能力）。
