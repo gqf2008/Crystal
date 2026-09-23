@@ -200,6 +200,17 @@ pub(crate) struct PlayerRecord {
     object_id: u32,
     /// 是否已下发世界地图配置（C# WorldMapSetupSent，每连接一次）
     world_map_setup_sent: bool,
+    /// 玩家当前地图（缓存，`None` = 尚未知道，读取方回退 ask）。
+    ///
+    /// 为什么加：`broadcast_to_map` / `same_map_players` 原本对**每个**目标
+    /// `ask(GetPlayerState)` 来问"你在哪张图"——一次广播 N 次 actor 往返（20 人同图即 20 次），
+    /// 是世界侧在 ~30 会话出现 `gate mailbox full` 丢包的主要嫌疑之一。
+    ///
+    /// 为什么**不会**漏更新：换图只有一条路——`PlayerActor` 的 `SetPlayerPosition`
+    /// （其 27 处调用点分布在 social/combat/npc/session/tick/item/map_sync，但全部落到同一个 handler）。
+    /// 该 handler 每次应用 `map_index` 都会 `tell(PlayerMapChanged)` 回投本字段，
+    /// 本端只在这里写；debug 构建下读取方会与 actor 真值对拍，任何漏更新都会在调试运行里炸出来。
+    pub(crate) map_index: Option<u16>,
 }
 
 /// NPC 定义（从刷怪配置加载）
@@ -2968,13 +2979,51 @@ impl WorldActor {
             if r.session_id == exclude_session {
                 continue;
             }
-            if let Ok(Some(s)) = r.actor_ref.ask(GetPlayerState).await {
-                if s.map_index == map_index {
-                    out.push(r.clone());
-                }
+            if self.player_map_of(r).await == Some(map_index) {
+                out.push(r.clone());
             }
         }
         out
+    }
+
+    /// 玩家当前地图：优先读 `PlayerRecord.map_index` 缓存，未命中才回退 `ask`。
+    ///
+    /// 缓存由 `PlayerActor::SetPlayerPosition` 回投维护（单一漏斗，见 `PlayerMapChanged`）。
+    /// debug 构建下额外与 actor 真值对拍：任何"漏更新缓存"的路径都会在调试运行里立刻暴露，
+    /// 而 release 不付这次 ask 的代价。
+    pub(crate) async fn player_map_of(&self, r: &PlayerRecord) -> Option<u16> {
+        // debug：与 actor 真值对拍（抓漏更新缓存的换图路径），release：缓存命中就不问 actor
+        #[cfg(debug_assertions)]
+        {
+            let truth = r
+                .actor_ref
+                .ask(GetPlayerState)
+                .await
+                .ok()
+                .flatten()
+                .map(|s| s.map_index);
+            if let (Some(cached), Some(actual)) = (r.map_index, truth) {
+                debug_assert_eq!(
+                    cached, actual,
+                    "PlayerRecord.map_index 缓存与实际不符（有换图路径绕过了 SetPlayerPosition 漏斗）session={}",
+                    r.session_id
+                );
+            }
+            r.map_index.or(truth)
+        }
+        #[cfg(not(debug_assertions))]
+        {
+            if let Some(m) = r.map_index {
+                return Some(m);
+            }
+            // 缓存尚未建立（理论上只在进图前的极短窗口）→ 回退 ask，宁可慢也不能发错图
+            r.actor_ref
+                .ask(GetPlayerState)
+                .await
+                .ok()
+                .flatten()
+                .map(|s| s.map_index)
+        }
     }
 
     /// NPC 改发型/转职/变性后刷新外观（自身 UserInformation + 同图广播 ObjectPlayer）
@@ -10480,6 +10529,31 @@ fn broadcast_system_message(
 /// 广播数据给指定地图上的所有玩家（C# CurrentMap.Broadcast 语义；防跨图幽灵物品/多余流量）
 /// 邮箱死锁加固（#23 有界邮箱）：下行一律 try_send——gate 处理器内联 ask world 时，
 /// world 若阻塞等 gate 邮箱则构成循环等待；邮箱满丢包并 warn，由 gate 会话通道积满踢线兜底。
+/// 玩家换图回投（**单一漏斗**写入 `PlayerRecord.map_index`）。
+///
+/// 发送方：`PlayerActor::SetPlayerPosition`——换图的所有调用点（27 处，分布在
+/// social/combat/npc/session/tick/item/map_sync）最终都进这个 handler，所以在那里回投一次即可；
+/// 世界侧**只有这里**写这个字段，读取方见 `broadcast_to_map` / `same_map_players`。
+/// 这样既去掉了"每广播对每个目标 ask 一次"的 O(N) 往返，又不可能出现"27 处漏更新一处"的漂移。
+pub struct PlayerMapChanged {
+    pub session_id: u64,
+    pub map_index: u16,
+}
+
+impl Message<PlayerMapChanged> for WorldActor {
+    type Reply = ();
+
+    async fn handle(
+        &mut self,
+        msg: PlayerMapChanged,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        if let Some(rec) = self.players.get_mut(&msg.session_id) {
+            rec.map_index = Some(msg.map_index);
+        }
+    }
+}
+
 /// #23 下行丢包诊断：从 try_send 失败的错误中取回包首 2 字节 opcode
 /// （build_packet_bytes 布局）；非 MailboxFull/ActorNotRunning（不含原消息）返回 None。
 pub(crate) fn dropped_send_opcode(e: &kameo::error::SendError<SendToClient>) -> Option<u16> {
@@ -10514,14 +10588,22 @@ pub(crate) async fn broadcast_to_map(
     // 实测 20 个世界会话就把 GateActor 邮箱打满（`gate mailbox full` 上万条）。
     let mut targets: Vec<u64> = Vec::with_capacity(players.len());
     for (sid, rec) in players {
-        if let Ok(Some(s)) = rec
-            .actor_ref
-            .ask(crate::actors::player::GetPlayerState)
-            .await
-        {
-            if s.map_index == map_index {
-                targets.push(*sid);
-            }
+        // 地图优先读缓存（由 `PlayerActor::SetPlayerPosition` 单一漏斗回投维护，
+        // 见 `PlayerMapChanged`）：旧写法对**每个**目标 ask 一次，20 人同图即 20 次
+        // actor 往返/广播——这是世界侧 ~30 会话丢包的主要嫌疑之一。
+        // 缓存未建立（理论上只在进图前极短窗口）才回退 ask，宁可慢也不发错图。
+        let player_map = match rec.map_index {
+            Some(m) => Some(m),
+            None => rec
+                .actor_ref
+                .ask(crate::actors::player::GetPlayerState)
+                .await
+                .ok()
+                .flatten()
+                .map(|s| s.map_index),
+        };
+        if player_map == Some(map_index) {
+            targets.push(*sid);
         }
     }
     if targets.is_empty() {
