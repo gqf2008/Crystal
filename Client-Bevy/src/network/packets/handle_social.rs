@@ -651,11 +651,25 @@ pub(crate) fn handle_social(
                 });
                 let color = crate::game::effects::spell_color(p.spell as u8);
                 if p.target_id != 0 {
-                    effects.write(PendingEffect::ProjectileFromTo {
-                        source_id: p.object_id,
-                        destination_id: p.target_id,
-                        color,
-                    });
+                    // 2026-09-23：原版飞行物也是库帧动画（CreateProjectile）——有表就播真帧，
+                    // 没表才退回旧的染色方块（effects.rs 里 debug 说明）。
+                    let has_missile = mir2_shared::enums::Spell::try_from(p.spell as u8)
+                        .ok()
+                        .and_then(crate::game::spell_effects::spell_missile)
+                        .is_some();
+                    if has_missile {
+                        effects.write(PendingEffect::SpellMissile {
+                            source_id: p.object_id,
+                            destination_id: p.target_id,
+                            spell: p.spell as u8,
+                        });
+                    } else {
+                        effects.write(PendingEffect::ProjectileFromTo {
+                            source_id: p.object_id,
+                            destination_id: p.target_id,
+                            color,
+                        });
+                    }
                 } else {
                     effects.write(PendingEffect::Burst {
                         target_id: p.object_id,

@@ -75,6 +75,29 @@ impl SpellFx {
     }
 }
 
+/// 一条施法弹道（原版 `CreateProjectile(baseIndex, library, blend, count, interval, skip)`）
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct MissileFx {
+    pub library: SpellFxLibrary,
+    /// 库内起始帧
+    pub base: usize,
+    /// 帧数
+    pub frames: usize,
+    /// 每帧时长（ms）
+    pub frame_ms: u32,
+    /// 原版 `skip` 参数（本端按帧序播，先记录备查）
+    pub skip: usize,
+}
+
+/// 查表：该法术的弹道（原版 MirAction.Spell 分支里 `CreateProjectile` 的那些法术）
+pub fn spell_missile(spell: Spell) -> Option<MissileFx> {
+    let name = format!("{spell:?}");
+    SPELL_MISSILE
+        .iter()
+        .find(|(n, _)| *n == name)
+        .map(|(_, fx)| *fx)
+}
+
 // ==== SPELL_FX_BEGIN（由 Client-Bevy/tools/spell_effects_from_csharp.py 生成，勿手改）====
 /// 原版施法特效表（`Client/MirObjects/PlayerObject.cs` MirAction.Spell 分支机械生成）
 #[rustfmt::skip]  // 生成块：保持每条一行，便于 diff 与 --write 幂等
@@ -146,6 +169,26 @@ pub const SPELL_FX: &[(&str, SpellFx)] = &[
     ("MeteorShower", SpellFx { library: Magic, start: 400, frames: 10, dir_step: 0, interval_ms: 0 }),
 ];
 // ==== SPELL_FX_END ====
+// ==== SPELL_MISSILE_BEGIN（由 Client-Bevy/tools/spell_effects_from_csharp.py 生成，勿手改）====
+/// 原版施法弹道表（`Client/MirObjects/PlayerObject.cs` MirAction.Spell 分支的 CreateProjectile）
+#[rustfmt::skip]  // 生成块：保持每条一行，便于 diff 与 --write 幂等
+pub const SPELL_MISSILE: &[(&str, MissileFx)] = &[
+    ("FireBall", MissileFx { library: Magic, base: 10, frames: 6, frame_ms: 30, skip: 4 }),
+    ("GreatFireBall", MissileFx { library: Magic, base: 410, frames: 6, frame_ms: 30, skip: 4 }),
+    ("SoulFireBall", MissileFx { library: Magic, base: 1160, frames: 3, frame_ms: 30, skip: 7 }),
+    ("MassHiding", MissileFx { library: Magic, base: 1160, frames: 3, frame_ms: 30, skip: 7 }),
+    ("SoulShield", MissileFx { library: Magic, base: 1160, frames: 3, frame_ms: 30, skip: 7 }),
+    ("BlessedArmour", MissileFx { library: Magic, base: 1160, frames: 3, frame_ms: 30, skip: 7 }),
+    ("CatTongue", MissileFx { library: Magic3, base: 260, frames: 6, frame_ms: 30, skip: 4 }),
+    ("FrostCrunch", MissileFx { library: Magic2, base: 410, frames: 4, frame_ms: 30, skip: 6 }),
+    ("Curse", MissileFx { library: Magic, base: 1160, frames: 3, frame_ms: 30, skip: 7 }),
+    ("Hallucination", MissileFx { library: Magic, base: 1160, frames: 3, frame_ms: 48, skip: 7 }),
+    ("PoisonCloud", MissileFx { library: Magic, base: 1160, frames: 3, frame_ms: 30, skip: 7 }),
+    ("Plague", MissileFx { library: Magic, base: 1160, frames: 3, frame_ms: 30, skip: 7 }),
+    ("FireBounce", MissileFx { library: Magic, base: 410, frames: 6, frame_ms: 30, skip: 4 }),
+    ("MeteorShower", MissileFx { library: Magic, base: 410, frames: 6, frame_ms: 30, skip: 4 }),
+];
+// ==== SPELL_MISSILE_END ====
 
 /// 查表：按法术 + 朝向取该次施法要播的特效（原版每个 Spell 至少一条）
 pub fn spell_fx(spell: Spell, dir: u8) -> Option<SpellFx> {
@@ -176,6 +219,60 @@ pub struct SpellFxAnim {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 门禁：施法弹道表必须与原版 `PlayerObject.cs` 的 CreateProjectile 一致（抽有代表性的几例）。
+    ///
+    /// 阳性对照（落地时实做）：把 FireBall 的 base 改成 999 → 本测试立即红。
+    #[test]
+    fn missile_table_matches_csharp_create_projectile() {
+        let cases = [
+            (
+                Spell::FireBall,
+                SpellFxLibrary::Magic,
+                10usize,
+                6usize,
+                30u32,
+                4usize,
+            ),
+            (Spell::GreatFireBall, SpellFxLibrary::Magic, 410, 6, 30, 4),
+            (Spell::SoulFireBall, SpellFxLibrary::Magic, 1160, 3, 30, 7),
+            (Spell::Hallucination, SpellFxLibrary::Magic, 1160, 3, 48, 7),
+            (Spell::CatTongue, SpellFxLibrary::Magic3, 260, 6, 30, 4),
+            (Spell::FrostCrunch, SpellFxLibrary::Magic2, 410, 4, 30, 6),
+            (Spell::FireBounce, SpellFxLibrary::Magic, 410, 6, 30, 4),
+            (Spell::MeteorShower, SpellFxLibrary::Magic, 410, 6, 30, 4),
+        ];
+        for (spell, library, base, frames, frame_ms, skip) in cases {
+            let fx = spell_missile(spell).unwrap_or_else(|| panic!("{spell:?} 弹道必须在表里"));
+            assert_eq!(
+                (fx.library, fx.base, fx.frames, fx.frame_ms, fx.skip),
+                (library, base, frames, frame_ms, skip),
+                "{spell:?} 弹道与原版 CreateProjectile 不一致"
+            );
+        }
+    }
+
+    /// 门禁（结构）：弹道表里每条都必须是魔法库、帧数与帧长合理
+    #[test]
+    fn missile_table_is_structurally_sane() {
+        assert!(
+            SPELL_MISSILE.len() >= 10,
+            "原版 MirAction.Spell 分支有 14 条施法弹道"
+        );
+        for (name, fx) in SPELL_MISSILE {
+            assert!(
+                (1..=32).contains(&fx.frames),
+                "{name} 帧数不合理: {}",
+                fx.frames
+            );
+            assert!(
+                (10..=200).contains(&fx.frame_ms),
+                "{name} 帧长不合理: {}",
+                fx.frame_ms
+            );
+            assert!(fx.base < 6000, "{name} 起始帧越界: {}", fx.base);
+        }
+    }
 
     /// 门禁（本轮核心）：表必须与原版 C# 对得上——抽几个有代表性的法术逐字段比对
     /// （值全部来自 `Client/MirObjects/PlayerObject.cs` MirAction.Spell 分支）。

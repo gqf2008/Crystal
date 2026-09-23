@@ -31,6 +31,13 @@ pub enum PendingEffect {
     /// 施法特效（2026-09-23）：按原版 `PlayerObject.cs` MirAction.Spell 的表播 Magic 库帧动画
     /// （此前施法只画一个染色白方块 —— 玩家反馈「魔法效果完全不对」）。
     SpellCast { object_id: u32, spell: u8, dir: u8 },
+    /// 施法弹道（2026-09-23）：原版 `CreateProjectile(baseIndex, library, count, interval, skip)`
+    /// —— 此前飞行物也是白方块；表里没有的法术再退回占位。
+    SpellMissile {
+        source_id: u32,
+        destination_id: u32,
+        spell: u8,
+    },
 }
 
 /// 技能 → 弹道颜色（#224，参考 macroquad network_apply_system 的 Spell 映射）
@@ -100,6 +107,7 @@ impl Plugin for EffectsPlugin {
                 advance_projectiles,
                 advance_bursts,
                 advance_spell_fx,
+                advance_spell_missiles,
             )
                 .chain()
                 .after(crate::network::network_system)
@@ -210,6 +218,79 @@ fn spawn_pending_effects(
                         start_scale: 0.6,
                     },
                 ));
+            }
+            PendingEffect::SpellMissile {
+                source_id,
+                destination_id,
+                spell,
+            } => {
+                let mut from = None;
+                let mut to = None;
+                for (id, tf) in &actors {
+                    if id.0 == source_id {
+                        from = Some(Vec2::new(tf.translation.x, tf.translation.y));
+                    }
+                    if id.0 == destination_id {
+                        to = Some(Vec2::new(tf.translation.x, tf.translation.y));
+                    }
+                }
+                let (Some(from), Some(to)) = (from, to) else {
+                    continue;
+                };
+                match mir2_shared::enums::Spell::try_from(spell)
+                    .ok()
+                    .and_then(crate::game::spell_effects::spell_missile)
+                {
+                    Some(m) => {
+                        let Some(handle) = ui_image(
+                            &mut libs,
+                            &mut images,
+                            &mut cache,
+                            m.library.library(),
+                            m.base,
+                        ) else {
+                            continue;
+                        };
+                        commands.spawn((
+                            SpellMissileAnim {
+                                library: m.library,
+                                base: m.base,
+                                frames: m.frames,
+                                frame_ms: m.frame_ms as f32 / 1000.0,
+                                from,
+                                to,
+                                t: 0.0,
+                                dur: MISSILE_FLIGHT_SECS,
+                            },
+                            Sprite {
+                                image: handle,
+                                ..default()
+                            },
+                            bevy::sprite::Anchor::CENTER,
+                            Transform::from_xyz(from.x, from.y, 21.0),
+                        ));
+                    }
+                    None => {
+                        // 表里没有 → 保持旧的占位弹道（debug 里说明，不静默）
+                        debug!("施法弹道表未覆盖 spell={spell}（退回占位弹道）");
+                        let color = spell_color(spell);
+                        commands.spawn((
+                            Sprite {
+                                image: white.clone(),
+                                color: Color::srgb(color[0], color[1], color[2]),
+                                custom_size: Some(Vec2::splat(14.0)),
+                                ..default()
+                            },
+                            Transform::from_xyz(from.x, from.y, 20.0),
+                            Projectile {
+                                from,
+                                to,
+                                t: 0.0,
+                                dur: 0.35,
+                            },
+                        ));
+                    }
+                }
             }
             PendingEffect::SpellCast {
                 object_id,
@@ -359,6 +440,57 @@ fn advance_spell_fx(
     }
 }
 
+/// 施法弹道飞行时长（秒）。原版速度由 Missile 的 interval×count 与距离共同决定，
+/// 本端先用一个固定飞行时长（与旧占位弹道的 0.35s 一致），后续可按原版调优。
+pub const MISSILE_FLIGHT_SECS: f32 = 0.35;
+
+/// 施法弹道实体：一边飞一边按原版帧表循环播（C# Missile 的帧循环）
+#[derive(Component, Debug, Clone, Copy)]
+struct SpellMissileAnim {
+    library: crate::game::spell_effects::SpellFxLibrary,
+    base: usize,
+    frames: usize,
+    frame_ms: f32,
+    from: Vec2,
+    to: Vec2,
+    t: f32,
+    dur: f32,
+}
+
+/// 弹道推进：位置缓出插值 + 帧循环（帧用完从头循环，直到到达目标）
+fn advance_spell_missiles(
+    mut commands: Commands,
+    time: Res<Time>,
+    mut libs: ResMut<GameLibraries>,
+    mut images: ResMut<Assets<Image>>,
+    mut cache: ResMut<UiImageCache>,
+    mut q: Query<(Entity, &mut SpellMissileAnim, &mut Sprite, &mut Transform)>,
+) {
+    for (e, mut m, mut sprite, mut tf) in &mut q {
+        m.t += time.delta_secs();
+        let k = (m.t / m.dur).min(1.0);
+        let k2 = 1.0 - (1.0 - k) * (1.0 - k);
+        let pos = m.from.lerp(m.to, k2);
+        tf.translation.x = pos.x;
+        tf.translation.y = pos.y;
+        if m.t >= m.dur {
+            commands.entity(e).despawn();
+            continue;
+        }
+        let step = (m.t / m.frame_ms.max(0.001)).floor() as usize;
+        let frame = step % m.frames.max(1);
+        if let Some(h) = ui_image(
+            &mut libs,
+            &mut images,
+            &mut cache,
+            m.library.library(),
+            m.base + frame,
+        ) {
+            sprite.image = h;
+        }
+    }
+}
+
 /// 命中爆炸：扩散 + 淡出
 fn advance_bursts(
     mut commands: Commands,
@@ -420,16 +552,36 @@ mod tests {
             NetObjectId(4242),
             bevy::prelude::Transform::from_xyz(100.0, 200.0, 0.0),
         ));
-        world
-            .resource_mut::<bevy::prelude::Messages<PendingEffect>>()
-            .write(PendingEffect::SpellCast {
+        // 一次 run 里同时排「施法帧动画 + 弹道」两条（同一个 MessageReader 会把缓冲里的
+        // 消息全部读走；分两次 run 会因为新 reader 重读旧消息而把计数翻倍）
+        world.spawn((
+            NetObjectId(4243),
+            bevy::prelude::Transform::from_xyz(300.0, 200.0, 0.0),
+        ));
+        {
+            let mut msgs = world.resource_mut::<bevy::prelude::Messages<PendingEffect>>();
+            msgs.write(PendingEffect::SpellCast {
                 object_id: 4242,
                 spell: mir2_shared::enums::Spell::FireBall as u8,
                 dir: 0,
             });
+            msgs.write(PendingEffect::SpellMissile {
+                source_id: 4242,
+                destination_id: 4243,
+                spell: mir2_shared::enums::Spell::FireBall as u8,
+            });
+        }
         world
             .run_system_once(spawn_pending_effects)
             .expect("spawn_pending_effects 应能运行");
+        let mut mq = world.query::<&SpellMissileAnim>();
+        let missiles: Vec<&SpellMissileAnim> = mq.iter(&world).collect();
+        assert_eq!(missiles.len(), 1, "FireBall 必须生成一条弹道帧动画实体");
+        assert_eq!(
+            missiles[0].base, 10,
+            "原版 CreateProjectile(10, Magic, 6, 30, 4)"
+        );
+        assert_eq!(missiles[0].frames, 6);
 
         let mut q = world.query::<&SpellFxAnim>();
         let fx: Vec<&SpellFxAnim> = q.iter(&world).collect();
