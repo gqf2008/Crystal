@@ -131,6 +131,20 @@ pub fn build_sell_item(unique_id: u64, count: u16) -> mir2_shared::packets::clie
     mir2_shared::packets::client::npc::SellItem { unique_id, count }
 }
 
+/// 构造丢弃包：与背包「拖出去 / 丢弃确认框 Yes」同一条路径
+/// （`game/dialogs/inventory.rs` 发 `DropItem{unique_id,count,hero_inventory:false}`）。
+///
+/// 为什么需要它：① 战斗闭环的「掉落拾取」半边只靠怪物掉率（本库 Scarecrow 单杀命中掉落行的
+/// 期望 ≈0.25、Deer 只有 2 行），判据会长期停在 `N/A`；② 丢弃是**真实玩家动作**，
+/// 走它就能确定性验证「地面出现物品 → 拾取回包」这条链。
+pub fn build_drop_item(unique_id: u64, count: u32) -> mir2_shared::packets::client::item::DropItem {
+    mir2_shared::packets::client::item::DropItem {
+        unique_id,
+        count,
+        hero_inventory: false,
+    }
+}
+
 /// 已占用格列表 `(格号, 名称)`——存取闭环的夹具靠它拿到**准确的 From/To 格号**
 /// （`StoreItem`/`TakeBackItem` 的 from/to 就是格号，猜格号会得到"回包 success 但两边都不动"）。
 pub fn occupied_cells(
@@ -280,6 +294,13 @@ enum ControlCommand {
     SellItem {
         unique_id: u64,
         count: u16,
+    },
+    /// ⑨ 丢弃动作（现成包 `C.DropItem`）：与背包「拖出/丢弃确认框 Yes」同一路径。
+    /// 用于让「地面掉落 → 拾取」这条链有**确定性**入口（怪物掉率是概率的，靠打怪等掉落
+    /// 会让判据长期停在 N/A）。
+    DropItem {
+        unique_id: u64,
+        count: u32,
     },
     /// ② 复活动作（现成包 `C.TownRevive`，空体）：与死亡提示框的「回城复活」按钮同一路径。
     /// 判据是状态翻转（dead→false、hp 0→>0、位置回到绑定点），不是"点了没报错"。
@@ -1018,6 +1039,19 @@ fn handle_conn(mut stream: std::net::TcpStream, tx: Sender<ControlCommand>) {
                     json!({"error": "missing unique_id（背包实例的 unique_id，非 item_index）"})
                 } else {
                     let _ = tx.send(ControlCommand::SellItem { unique_id, count });
+                    json!({"ok": true, "unique_id": unique_id, "count": count})
+                }
+            }
+            "drop_item" => {
+                let unique_id = params
+                    .get("unique_id")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0);
+                let count = params.get("count").and_then(|v| v.as_u64()).unwrap_or(1) as u32;
+                if unique_id == 0 {
+                    json!({"error": "missing unique_id（背包实例的 unique_id）"})
+                } else {
+                    let _ = tx.send(ControlCommand::DropItem { unique_id, count });
                     json!({"ok": true, "unique_id": unique_id, "count": count})
                 }
             }
@@ -2570,6 +2604,11 @@ fn apply_control_commands(
                 net.send_packet(&build_sell_item(unique_id, count));
                 tracing::info!("🎮 control sell_item: unique_id={unique_id} count={count}");
             }
+            ControlCommand::DropItem { unique_id, count } => {
+                // 与背包拖出/丢弃确认 Yes **同一个包**（`dialogs/inventory.rs` 同款）
+                net.send_packet(&build_drop_item(unique_id, count));
+                tracing::info!("🎮 control drop_item: unique_id={unique_id} count={count}");
+            }
             ControlCommand::TownRevive => {
                 // 与死亡提示框「回城复活」按钮发的**同一个包**（C# TownRevive，空体）
                 net.send_packet(&mir2_shared::packets::client::misc::TownRevive);
@@ -3214,6 +3253,20 @@ mod tests {
         assert_eq!(pkt.unique_id, 4242, "必须是背包实例 unique_id");
         assert_eq!(pkt.count, 3, "数量必须原样发出（吞成 1 会少卖少收钱）");
         assert_eq!(build_sell_item(7, 1).count, 1);
+    }
+
+    /// ⑨ 丢弃门禁：与背包拖出/确认框 Yes 同款包体（`unique_id` 按实例定位、`hero_inventory=false`）。
+    /// 阳性对照（实做）：把 `hero_inventory` 改成 true → 本测试立即红（服务端会按英雄背包找物品，
+    /// 报"物品不存在"，而 RPC 回执仍是 ok）。
+    #[test]
+    fn build_drop_item_targets_backpack_instance() {
+        let pkt = build_drop_item(9001, 2);
+        assert_eq!(pkt.unique_id, 9001, "按背包实例 unique_id 定位");
+        assert_eq!(pkt.count, 2, "数量必须原样发出");
+        assert!(
+            !pkt.hero_inventory,
+            "控制入口只丢角色背包（英雄背包另有路径）"
+        );
     }
 
     #[test]
