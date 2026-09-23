@@ -417,6 +417,7 @@ FodyWeavers.xsd
 !tools/ops/fix_seed_account_links.py
 !tools/ops/capacity_ramp.ps1
 !tools/ops/CAPACITY.md
+!tools/ops/EXTERNAL_OPS_HANDOFF.md
 !tools/ops/fault_injection.ps1
 !tools/ops/alert_probe.ps1
 !tools/ops/latency_proxy.py
