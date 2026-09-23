@@ -124,10 +124,24 @@ impl GateActor {
             let _ = cancel.send(true);
         }
         let logged_out_username = self.session_usernames.remove(&session_id);
+        // 顶号安全（2026-09-23，CAPACITY.md §3.6 规格①）：**只有该账号最后一个绑定会话**
+        // 才有权把账号置离线。原实现是无条件置离线——同账号顶号时，旧会话的断开清理会把
+        // 新会话正在用的账号标记离线（可被再次登录顶号、且新会话登出变成空操作）。
+        // 之前的保护是「gate 在 StartGame 处理里内联摘除旧绑定」（靠邮箱 FIFO 保证顺序），
+        // 那可行但把 gate 卡在长 await 上；改成这条规则后，**顺序不再影响正确性**。
+        let offline_username =
+            should_mark_account_offline(logged_out_username.as_deref(), &self.session_usernames);
+        if logged_out_username.is_some() && offline_username.is_none() {
+            debug!(
+                "Session {} removed binding for '{}' but account still bound by another session — not marking offline",
+                session_id,
+                logged_out_username.as_deref().unwrap_or("")
+            );
+        }
         // 有界邮箱死锁加固（#23）：gate 处理器内联 ask world/account 时，world 清理
         // 又 tell(SendToClient) 回 gate（邮箱满即阻塞）构成 gate→world→gate 循环等待
         // ——对世界/账号的通知一律 fire-and-forget，gate 不内联 await
-        if let Some(username) = logged_out_username {
+        if let Some(username) = offline_username {
             if let Some(account_ref) = self.account_ref.clone() {
                 crate::util::tasks::spawn("gate.account_logout", async move {
                     let _ = account_ref
@@ -165,6 +179,26 @@ impl Default for GateActor {
 }
 
 /// 启动 TCP 监听并处理连接
+/// 会话清理时：**谁有权把账号置离线**（纯函数，便于门禁）。
+///
+/// 规则：只有「该账号的最后一个绑定会话」被清理时才置离线。
+///
+/// 背景（CAPACITY.md §3.6 规格①）：同账号顶号时，新会话接管、旧会话被踢；旧会话的断开清理
+/// 若**无条件**置离线，就会出现「新会话还在线、账号已被标记离线」——既可能被第三方再次登录顶号，
+/// 也让新会话的登出变成空操作。原实现靠「gate 在 StartGame 处理里内联摘除旧绑定 + 邮箱 FIFO
+/// 保证顺序」来规避，代价是 gate 被长 await（建号+载图+发进场序列）堵住整个邮箱。
+/// 改成这条规则后，解绑与断开的先后不再影响正确性，长 await 才能挪出去。
+pub(crate) fn should_mark_account_offline(
+    removed_username: Option<&str>,
+    remaining: &HashMap<SessionId, String>,
+) -> Option<String> {
+    let username = removed_username?;
+    if remaining.values().any(|u| u == username) {
+        return None;
+    }
+    Some(username.to_string())
+}
+
 pub async fn run_gate_listener(addr: String, actor_ref: ActorRef<GateActor>) -> anyhow::Result<()> {
     let listener = TcpListener::bind(&addr).await?;
     info!("Gate listening on {}", addr);
@@ -799,30 +833,37 @@ impl Message<ClientData> for GateActor {
                         // 必须已登录才能进入游戏
                         let username = self.session_usernames.get(&msg.session_id).cloned();
                         if let Some(username) = username {
-                            // 顶号解绑（确定性顺序）：world dup-kick 后在 reply 带回被踢
-                            // 的旧会话 id，本 handler 内联摘除其登录绑定——gate 邮箱 FIFO
-                            // 串行处理，解绑先于任何后到的 ClientDisconnected/LogOutCleanup
-                            // 落地，后者再处理时 terminate_session 已取不到旧绑定，不会把
-                            // 新会话在用的同账号误置离线（替代原 world spawn 异步 tell
-                            // UnbindSessionLogin：与已排队断开消息无 happens-before，且
-                            // 旧会话重登后迟到的解绑会误删新绑定，该消息已移除）
-                            if let Ok(reply) = world_ref
-                                .ask(crate::actors::world::StartGameRequest {
-                                    session_id: msg.session_id,
-                                    character_index,
-                                    account_username: username,
-                                })
-                                .await
-                            {
-                                if let Some(old_sid) = reply.kicked_session_id {
-                                    if self.session_usernames.remove(&old_sid).is_some() {
-                                        info!(
-                                            "Session {} login binding removed (duplicate-login kick)",
-                                            old_sid
-                                        );
-                                    }
-                                }
-                            }
+                            // 2026-09-23（CAPACITY.md §3.6）：**不再内联 await**。
+                            //
+                            // 原写法在这里 `await world_ref.ask(StartGameRequest)`——建号 + 载图 +
+                            // 发整段进场序列都在这个 await 里完成，期间 gate 邮箱只进不出；
+                            // 实测这正是单目标 `SendToClient` 丢包的根因（20 会话 3377 条，
+                            // 丢的还就是进图对象包）。
+                            //
+                            // 之所以当初必须内联：靠邮箱 FIFO 保证「顶号解绑」先于旧会话的
+                            // ClientDisconnected/LogOutCleanup 落地，否则 terminate_session 会
+                            // 把新会话在用的账号置离线。现在这条已在 `should_mark_account_offline`
+                            // 里改成「该账号最后一个绑定会话才有权置离线」，**顺序不再影响正确性**，
+                            // 因此可以 spawn 出去、用 `StartGameFinished` 回投做解绑。
+                            let gate_ref = ctx.actor_ref().clone();
+                            let session_id = msg.session_id;
+                            crate::util::tasks::spawn("gate.startgame", async move {
+                                let kicked = world_ref
+                                    .ask(crate::actors::world::StartGameRequest {
+                                        session_id,
+                                        character_index,
+                                        account_username: username,
+                                    })
+                                    .await
+                                    .ok()
+                                    .and_then(|r| r.kicked_session_id);
+                                let _ = gate_ref
+                                    .tell(StartGameFinished {
+                                        session_id,
+                                        kicked_session_id: kicked,
+                                    })
+                                    .await;
+                            });
                         } else {
                             warn!(
                                 "StartGame rejected: session {} not logged in",
@@ -1635,6 +1676,35 @@ impl Message<SendToClients> for GateActor {
                     debug!("Session {} send channel closed, cleaning up", sid);
                     self.terminate_session(*sid, true).await;
                 }
+            }
+        }
+    }
+}
+
+/// StartGame 的异步回投（见 ClientData 里 StartGame 分支的注释）。
+///
+/// gate 不再内联 await world_ref.ask(StartGameRequest)（那会把整个邮箱堵在
+/// "建号+载图+发进场序列"上，实测正是单目标丢包的根因），改为 spawn 后由本消息回来做收尾。
+/// 收尾只剩"顶号解绑"——而它现在已经不依赖顺序（见 should_mark_account_offline）。
+pub struct StartGameFinished {
+    pub session_id: SessionId,
+    pub kicked_session_id: Option<SessionId>,
+}
+
+impl Message<StartGameFinished> for GateActor {
+    type Reply = ();
+
+    async fn handle(
+        &mut self,
+        msg: StartGameFinished,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        if let Some(old_sid) = msg.kicked_session_id {
+            if self.session_usernames.remove(&old_sid).is_some() {
+                info!(
+                    "Session {} login binding removed (duplicate-login kick), new session={}",
+                    old_sid, msg.session_id
+                );
             }
         }
     }
@@ -5962,6 +6032,41 @@ fn forward_purchase_guild_territory(
 mod tests {
     /// 红绿回归（进图洪峰踢线）：SESSION_SEND_CAPACITY 必须 ≥ 8192。
     /// 2026-09-17 实机冒烟：比奇大图进图单次洪峰 ~2000 包/会话（43 NPC +
+    /// 顶号安全门禁（2026-09-23，CAPACITY.md §3.6 规格①）：
+    /// 同账号两个会话时，**旧会话先断开不得把账号置离线**；只有最后一个绑定会话断开才置离线。
+    ///
+    /// 为什么这条重要：它把「gate 必须内联 await StartGame 才能保证顺序」这个前提拆掉了——
+    /// 也正是靠它，StartGame 才敢 spawn 出去（否则旧会话的 ClientDisconnected 会把
+    /// 新会话正在用的账号标记离线：可被再次顶号、且新会话登出变成空操作）。
+    ///
+    /// 阳性对照（实做）：把 should_mark_account_offline 改成无条件 Some(username) →
+    /// 第二个断言立即红。
+    #[test]
+    fn only_last_bound_session_marks_account_offline() {
+        let mut bindings: HashMap<SessionId, String> = HashMap::new();
+        bindings.insert(1, "alice".to_string());
+        bindings.insert(2, "alice".to_string()); // 顶号：新会话接管同账号
+
+        // 旧会话(1)被顶号后断开：账号仍有会话 2 在用 → 不得置离线
+        let removed = bindings.remove(&1);
+        assert_eq!(
+            should_mark_account_offline(removed.as_deref(), &bindings),
+            None,
+            "旧会话断开不得把新会话正在用的账号置离线"
+        );
+
+        // 新会话(2)断开：这是最后一个绑定 → 才置离线
+        let removed = bindings.remove(&2);
+        assert_eq!(
+            should_mark_account_offline(removed.as_deref(), &bindings).as_deref(),
+            Some("alice"),
+            "最后一个绑定会话断开必须置离线（否则账号永远在线）"
+        );
+
+        // 从未绑定过的会话：啥也不做
+        assert_eq!(should_mark_account_offline(None, &bindings), None);
+    }
+
     /// ~1900 怪物 + 地物/门/互见），1024 容量在 localhost 都有 ~50% 概率
     /// 积满触发 "kicking slow reader" 误踢正常客户端。8192 是下限锚，
     /// 实际取 16384 留 8 倍余量。

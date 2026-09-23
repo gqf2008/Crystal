@@ -9324,9 +9324,29 @@ mod auth_regression_tests {
                 .await
                 .unwrap();
             assert!(has_session, "顶号只解绑不得断旧 TCP（会话注册须保留）");
+            // 2026-09-23（CAPACITY.md §3.6）：StartGame 不再内联 await（那会把 gate 邮箱堵在
+            // "建号+载图+发进场序列"上，实测是单目标丢包根因）；解绑改由 `StartGameFinished`
+            // 异步回投完成，因此这里**允许短暂延迟**，改为轮询等待。
+            // 仍然要求"最终必须摘除"：否则旧会话还能拿着同账号的绑定继续动作。
+            // 顺序不再影响正确性——"账号是否被误置离线"由 `should_mark_account_offline`
+            // 的"最后一个绑定才有权置离线"保证（本测试第 3 步就是在断这个不变量）。
+            let mut binding_removed = !has_username;
+            for _ in 0..50 {
+                if binding_removed {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(20)).await;
+                let (_, still_bound) = gate_ref
+                    .ask(crate::gate::actor::TestProbeSession {
+                        session_id: session_a,
+                    })
+                    .await
+                    .unwrap();
+                binding_removed = !still_bound;
+            }
             assert!(
-                !has_username,
-                "StartGame 应答时旧会话登录绑定必须已被 gate 内联摘除（确定性顺序）"
+                binding_removed,
+                "StartGame 完成后旧会话登录绑定必须被摘除（异步回投，允许约 1s 延迟）"
             );
 
             // 2) 旧客户端断开 TCP：不得触发 LogoutRequest（账号须保持在线）。
