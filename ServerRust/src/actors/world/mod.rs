@@ -1761,6 +1761,8 @@ pub(crate) struct FishingSession {
 pub struct WorldActor {
     /// Tick 计数器
     pub(crate) tick_count: u64,
+    /// 上次 INFO 心跳的时间（可观测性最小集：`heartbeat:` 行带实测 tick 间隔与滞后）
+    pub(crate) last_heartbeat_at: Option<std::time::Instant>,
     /// 当前日（unix 秒/86400；C# Envir.dailyTime，ProcessNewDay 用）
     pub(crate) current_day: i64,
     /// 在线玩家 Actor 引用（按 session_id 索引）
@@ -2506,6 +2508,7 @@ impl WorldActor {
     ) -> Self {
         Self {
             tick_count: 0,
+            last_heartbeat_at: None,
             current_day: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|d| d.as_secs() as i64 / 86_400)
@@ -8812,6 +8815,7 @@ impl Actor for WorldActor {
 
         Ok(Self {
             tick_count: 0,
+            last_heartbeat_at: None,
             current_day: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|d| d.as_secs() as i64 / 86_400)

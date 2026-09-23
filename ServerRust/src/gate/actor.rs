@@ -189,26 +189,30 @@ pub async fn run_gate_listener(addr: String, actor_ref: ActorRef<GateActor>) -> 
         // 为每个会话创建发送通道（有界，容量见 SESSION_SEND_CAPACITY）
         let (tx, mut rx) = mpsc::channel::<Vec<u8>>(SESSION_SEND_CAPACITY);
 
-        // 注册会话到 GateActor
-        let _ = actor_ref
-            .ask(SessionCreated {
-                session_id: sid,
-                sender: tx,
-                ip: peer_addr.ip().to_string(),
-            })
-            .await;
-
         let gate_ref = actor_ref.clone();
-        // 踢线/会话清理信号：terminate_session 触发后本读循环排空已排队数据并关 TCP
-        let kick_rx = actor_ref
-            .ask(TakeSessionCancel { session_id: sid })
-            .await
-            .ok()
-            .flatten();
-
         // #2606：每连接读循环也登记（生命周期 = 连接；关闭信号兜底唤醒）
         let session_shutdown = shutdown.clone();
-        crate::util::tasks::spawn("gate.session_reader", async move {
+        // 2026-09-23 压测（tools/ops/load_baseline.ps1）发现：连接建立后的「注册 + 取取消信号」
+        // 是两次 GateActor 邮箱往返，原先**在 accept 循环里 await**——意味着一个个连接排队建会话。
+        // 实测 30 并发登录时单次注册 200–330ms，登录 p95 7.8s。这里整体丢进任务，
+        // accept 循环立刻回到 accept()。会话号仍在循环里顺序分配（保持既有语义）。
+        crate::util::tasks::spawn("gate.session_setup", async move {
+            // 注册会话到 GateActor
+            let _ = gate_ref
+                .ask(SessionCreated {
+                    session_id: sid,
+                    sender: tx,
+                    ip: peer_addr.ip().to_string(),
+                })
+                .await;
+
+            // 踢线/会话清理信号：terminate_session 触发后本读循环排空已排队数据并关 TCP
+            let kick_rx = gate_ref
+                .ask(TakeSessionCancel { session_id: sid })
+                .await
+                .ok()
+                .flatten();
+
             let mut buf = Vec::with_capacity(4096);
             let mut temp = [0u8; 4096];
 
