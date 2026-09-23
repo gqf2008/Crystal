@@ -206,6 +206,14 @@ enum ControlCommand {
         npc_index: u32,
         quest_index: i32,
     },
+    /// 只读 UI 探针（2026-09-23，P3-2 用）：列出**覆盖到该逻辑坐标**的所有 UI 节点，
+    /// 带祖先链 / display / visibility / z。用途：界面瑕疵定位时直接问"这块像素是谁画的"，
+    /// 而不是靠猜组件——P3-2（行会 NOTICE 页残留 Status 页黑区）就靠它定位绘制方。
+    UiNodesAt {
+        x: f32,
+        y: f32,
+        reply: Sender<String>,
+    },
     /// ⑤ 存取动作（现成包 `C.StoreItem`=15 / `C.TakeBackItem`=16）：
     /// 等价于 C# 的「选中背包格 → 点仓库格」/反向，直接发生成包，
     /// 让存取闭环**不依赖窗口内格子像素定位**（与 `accept_quest` 同一模式）。
@@ -556,6 +564,21 @@ struct ControlQueries<'w, 's> {
         (&'static crate::game::dialogs::npc::NpcLine, &'static Node),
         With<crate::game::dialogs::npc::NpcDialogWidget>,
     >,
+    /// `ui_nodes_at` 只读探针：任意 UI 节点的布局矩形 + 显隐 + z（定位"谁画的这块像素"）
+    ui_all: Query<
+        'w,
+        's,
+        (
+            Entity,
+            &'static ComputedNode,
+            &'static UiGlobalTransform,
+            Option<&'static Name>,
+            Option<&'static Visibility>,
+            Option<&'static Node>,
+            Option<&'static ZIndex>,
+            Option<&'static crate::game::dialogs::guild::GuildPageRoot>,
+        ),
+    >,
     /// `mail_probe` RPC：客户端侧邮件列表/详情（ReceiveMail 写入，判据取状态）
     mail: Res<'w, crate::game::dialogs::mail::MailState>,
     /// 本地玩家金币（`GoldGained`/`UserInformation` 写入）——邮件收取/交易类闭环的
@@ -807,6 +830,27 @@ fn handle_conn(mut stream: std::net::TcpStream, tx: Sender<ControlCommand>) {
                 let (reply_tx, reply_rx) = bounded::<String>(1);
                 if tx
                     .send(ControlCommand::BagProbe { reply: reply_tx })
+                    .is_ok()
+                {
+                    let s = reply_rx
+                        .recv_timeout(std::time::Duration::from_secs(2))
+                        .unwrap_or_else(|_| "{}".to_string());
+                    serde_json::from_str::<Value>(&s).unwrap_or_else(|_| json!({}))
+                } else {
+                    json!({"error": "control channel closed"})
+                }
+            }
+            // 只读 UI 探针：列出覆盖该逻辑坐标的所有 UI 节点（P3-2 界面定位用）
+            "ui_nodes_at" => {
+                let x = params.get("x").and_then(|v| v.as_f64()).unwrap_or(-1.0) as f32;
+                let y = params.get("y").and_then(|v| v.as_f64()).unwrap_or(-1.0) as f32;
+                let (reply_tx, reply_rx) = bounded::<String>(1);
+                if tx
+                    .send(ControlCommand::UiNodesAt {
+                        x,
+                        y,
+                        reply: reply_tx,
+                    })
                     .is_ok()
                 {
                     let s = reply_rx
@@ -2292,6 +2336,79 @@ fn apply_control_commands(
                     Err(_) => json!({"ok": false, "error": "no local player inventory"}),
                 };
                 tracing::info!("🎮 control bag_probe: {payload}");
+                let _ = reply.send(payload.to_string());
+            }
+            ControlCommand::UiNodesAt { x, y, reply } => {
+                // 逻辑坐标 → 与 ui_picking 同口径：ComputedNode.size / UiGlobalTransform.translation 再除 scale
+                let scale = q
+                    .primary_window
+                    .single()
+                    .map(|w| w.scale_factor())
+                    .unwrap_or(1.0);
+                let mut hits: Vec<(f32, serde_json::Value)> = Vec::new();
+                for (e, cn, gtf, name, vis, node, z, page_root) in q.ui_all.iter() {
+                    let sz = cn.size() / scale;
+                    let tl = gtf.translation / scale;
+                    let (rx, ry) = (tl.x - sz.x * 0.5, tl.y - sz.y * 0.5);
+                    if x < rx || x > rx + sz.x || y < ry || y > ry + sz.y {
+                        continue;
+                    }
+                    // 祖先链（带名字，最多 8 层）——定位"挂在哪个页容器/面板下"
+                    let mut chain: Vec<String> = Vec::new();
+                    let mut cur = e;
+                    for _ in 0..8 {
+                        let Ok(co) = q.child_of.get(cur) else { break };
+                        let parent = co.parent();
+                        let pname = q
+                            .ui_all
+                            .get(parent)
+                            .ok()
+                            .and_then(|(_, _, _, n, v, nd, _, pr)| {
+                                let label = n
+                                    .map(|n| n.to_string())
+                                    .unwrap_or_else(|| format!("{parent:?}"));
+                                let disp =
+                                    nd.map(|d| format!("{:?}", d.display)).unwrap_or_default();
+                                let vv = v.map(|v| format!("{v:?}")).unwrap_or_default();
+                                let pg = q
+                                    .ui_all
+                                    .get(parent)
+                                    .ok()
+                                    .and_then(|(_, _, _, _, _, _, _, pr)| {
+                                        pr.map(|p| format!("{:?}", p.0))
+                                    })
+                                    .map(|p| format!(" page={p}"))
+                                    .unwrap_or_default();
+                                Some(format!("{label} disp={disp} vis={vv}{pg}"))
+                            })
+                            .unwrap_or_else(|| format!("{parent:?}"));
+                        chain.push(pname);
+                        cur = parent;
+                    }
+                    let zi = z.map(|z| z.0).unwrap_or(0);
+                    let area = sz.x * sz.y;
+                    hits.push((
+                        area,
+                        json!({
+                            "entity": format!("{e:?}"),
+                            "name": name.map(|n| n.to_string()),
+                            "rect": [rx, ry, sz.x, sz.y],
+                            "display": node.map(|n| format!("{:?}", n.display)),
+                            "visibility": vis.map(|v| format!("{v:?}")),
+                            "z": zi,
+                            "guild_page": page_root.map(|p| format!("{:?}", p.0)),
+                            "ancestors": chain,
+                        }),
+                    ));
+                }
+                // 小的在后（更可能盖在上面）；同面积按 z 降序
+                hits.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+                let arr: Vec<serde_json::Value> = hits.into_iter().map(|(_, v)| v).collect();
+                let payload = json!({"ok": true, "x": x, "y": y, "count": arr.len(), "nodes": arr});
+                tracing::info!(
+                    "🎮 control ui_nodes_at({x},{y}): {} 个节点",
+                    payload["count"]
+                );
                 let _ = reply.send(payload.to_string());
             }
             ControlCommand::StorageProbe { reply } => {
