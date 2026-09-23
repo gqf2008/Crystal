@@ -77,18 +77,33 @@ Write-Host ("[A2] 到死亡地图: map={0} tile=({1},{2})（绑定图期望 {3}�
 $dieTile = @($at.tile_x, $at.tile_y)
 $diedOffBindMap = ("$($at.map)" -ne $ExpectReviveMap)
 
-# B) 死亡：GM @die（C# case "DIE"：自杀）
-Rpc 'chat' @{ message = '@die' } | Out-Null
-# 轮询到真死（上限 20s，DieWaitSec 参数保留兼容但不再固定等待）：
-# 高 lag 下 TakeDamage 落到玩家邮箱会延迟，固定 5s 会假 FAIL。
+# B) 死亡：GM @die（C# case "DIE"：自杀）——**重试到判据成立**。
+#
+# 两处实机定性（2026-09-24，都在本夹具里踩到）：
+#   ① 判据只取客户端 `dead`，**不**要求 hp<=0。C# 客户端 `GameScene.Death(S.Death)` 只置
+#      `User.Dead = true`（`Client/MirScenes/GameScene.cs:3781-3789`），服务端 `PlayerObject.Die()`
+#      是直接赋值 `HP = 0`（不是 `SetHP(0)`，不发 HealthChanged），所以客户端探针的 hp 会停在
+#      死前值——把 hp<=0 写进判据会把「C# 同款行为」判成假 FAIL（实测 @die 后 dead=True、hp 仍 50005）。
+#   ② `@mapmove` 与 `@die` 是两条独立聊天包，服务端按邮箱先后处理；若传送在 @die **之后**落地，
+#      传送的状态重建会把死亡态抹掉——实测 @die 后 dead 仍 False，50s 后再发一次立即生效。
+#      所以判据要「重试到 dead」，不能发一次就当结论。
+$died = $false
 $dead = $null
-foreach ($i in 1..20) {
-    Start-Sleep 1
-    $dead = Rpc 'state'
-    if ([bool]$dead.dead -and [int]$dead.hp -le 0) { break }
+foreach ($attempt in 1..3) {
+    Rpc 'chat' @{ message = '@die' } | Out-Null
+    foreach ($i in 1..8) {
+        Start-Sleep 1
+        $dead = Rpc 'state'
+        if ([bool]$dead.dead) {
+            $died = $true
+            break
+        }
+    }
+    if ($died) { break }
+    Write-Host ("[attempt {0}] @die 未生效（dead 仍为 False）——重试" -f $attempt)
 }
 Write-Host ("[B] @die 后 hp={0}/{1} dead={2} map={3} tile=({4},{5})" -f $dead.hp, $dead.max_hp, $dead.dead, $dead.map, $dead.tile_x, $dead.tile_y)
-$died = [bool]$dead.dead
+$died = [bool]$died
 $dieMap = "$($dead.map)"
 
 # C/D) 复活
