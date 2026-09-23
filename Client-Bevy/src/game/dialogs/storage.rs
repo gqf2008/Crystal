@@ -112,6 +112,13 @@ pub struct StorageState {
     pub expiry_time: i64,
     /// 租用扩容确认框是否打开（C# `RentButton.Click` → `MirMessageBox`）
     pub rent_confirm: bool,
+    /// P3-3（#782）：本地物品名表——线包里的 `UserItem` **不带** `ItemInfo`
+    /// （见 `crate::game::item_names` 的原版依据），仓库格名字靠这张表按索引解析；
+    /// `UserInformation`（背包/装备名）与 `NewItemInfo`（按需请求的回包）都往这里写。
+    pub item_names: std::collections::HashMap<i32, String>,
+    /// P3-3：已发过 `RequestItemInfo` 的索引（按索引去重，对齐原版
+    /// `GameScene.RequestedItemInfo` 这个 `HashSet`）
+    pub requested_item_info: std::collections::HashSet<i32>,
 }
 
 impl StorageState {
@@ -153,6 +160,40 @@ impl StorageState {
     pub fn selected_on_page(&self) -> bool {
         let (start, end) = self.page_range();
         self.selected.is_some_and(|s| s >= start && s < end)
+    }
+
+    /// P3-3（#782）：仓库格的显示名——`线包自带名 → 本地物品名表 → 兜底 #id`。
+    ///
+    /// 与商城格走 `crate::game::item_names::resolve_item_name` **同一个降级链**
+    /// （#782 的验收判据）。
+    pub fn display_name(&self, item: &InvItem) -> String {
+        crate::game::item_names::resolve_item_name(&item.name, &self.item_names, item.item_index).0
+    }
+
+    /// P3-3：逐格把线包名解析成显示名（占位自愈——表里一旦到货就被纠正），
+    /// 并把「表里也没有」的索引并入去重集合
+    /// `requested_item_info`；返回**本次新增**的请求索引（调用方据此发
+    /// `RequestItemInfo`——原版 `GameScene.RequestItemInfo` 的 `index <= 0 ||
+    /// HasItemInfo || !RequestedItemInfo.Add(index)` 三条守卫等价于此）。
+    ///
+    /// 逻辑与网络/UI 解耦，门禁与阳性对照直接钉在它上面（无需 `NetConnection`）。
+    pub fn resolve_wire_item_names(&mut self) -> Vec<i32> {
+        // 表先借出，避免 `self.items` 可变借与 `self.item_names` 不可变借冲突
+        let table = std::mem::take(&mut self.item_names);
+        let requested = &mut self.requested_item_info;
+        let mut wanted = Vec::new();
+        for slot in self.items.iter_mut() {
+            let Some(item) = slot.as_mut() else { continue };
+            let (name, need) =
+                crate::game::item_names::resolve_item_name(&item.name, &table, item.item_index);
+            item.name = name;
+            // `index <= 0` 不发请求（原版同名守卫）
+            if need && item.item_index > 0 && requested.insert(item.item_index) {
+                wanted.push(item.item_index);
+            }
+        }
+        self.item_names = table;
+        wanted
     }
 }
 
@@ -1214,6 +1255,7 @@ fn storage_locked_icon_system(
 fn storage_server_events(
     mut events: MessageReader<crate::network::server_event::ServerEvent>,
     mut storage: ResMut<StorageState>,
+    net: Res<NetConnection>,
     mut mgr: ResMut<DialogManager>,
     mut inv_origin: ResMut<crate::game::dialogs::inventory::InventoryOrigin>,
     // 只推背包面板根（同 inventory_shift_right_system：子实体随根平移，
@@ -1271,6 +1313,39 @@ fn storage_server_events(
                 // 否则 (visible=false, mgr=open) 失配，RPC `dialog storage toggle`
                 // 在 (false,open)↔(true,closed) 间振荡、永远到不了 (true,true)
                 mgr.close(DialogKind::Storage);
+            }
+        }
+        if let ServerEvent::StorageOpened { .. } = ev {
+            // P3-3（#782）：仓库线包不带 `ItemInfo`（原版 `GameScene.cs:4955` 拿到
+            // `Storage` 后逐格 `Bind`），显示名要按本地物品名表解析；表里也没有的
+            // 索引按索引去重后发一次 `RequestItemInfo`（原版 `GameScene.RequestItemInfo`
+            // 的三条守卫：`index <= 0 || HasItemInfo(index) || !RequestedItemInfo.Add(index)`）。
+            for idx in storage.resolve_wire_item_names() {
+                net.send_packet(&mir2_shared::packets::client::info::RequestItemInfo {
+                    item_index: idx,
+                });
+                tracing::info!("🏬 仓库缺物品名，请求 ItemInfo: idx={}", idx);
+            }
+        }
+        // P3-3：按需请求的回包——写进表（原版 `MirScene.cs:233` NewItemInfo → ItemInfoList），
+        // 并把仍在占位的仓库格立刻刷成真名。
+        if let ServerEvent::ItemInfoReceived { index, name } = ev {
+            if crate::game::item_names::remember_item_name(&mut storage.item_names, *index, name) {
+                storage.requested_item_info.remove(index);
+                for slot in storage.items.iter_mut() {
+                    if let Some(item) = slot.as_mut() {
+                        if item.item_index == *index {
+                            item.name = name.clone();
+                        }
+                    }
+                }
+            }
+        }
+        // P3-3：背包/装备名（`UserInformation`）也进同一张表——原版那张 `ItemInfoList`
+        // 是全局的，仓库格名字能从里面直接取到，省一次往返。
+        if let ServerEvent::UserInformation { item_names, .. } = ev {
+            for (idx, name) in item_names {
+                crate::game::item_names::remember_item_name(&mut storage.item_names, *idx, name);
             }
         }
         if let ServerEvent::StoragePasswordResult { result } = ev {
@@ -1407,7 +1482,9 @@ fn storage_tooltip_system(
     };
     // 与背包一致：完整属性行（#1244 item_tooltip_lines）
     let lines = crate::game::dialogs::inventory::item_tooltip_lines(&item);
-    tooltip.update(3, true, item.name.clone(), lines, cursor.x, cursor.y);
+    // P3-3（#782）：格子里存的是线包名（常常只是 `#id`），显示前按本地表解析
+    let title = state.display_name(&item);
+    tooltip.update(3, true, title, lines, cursor.x, cursor.y);
 }
 
 /// 仓库密码面板：按钮开关 + 设置/移除/关闭 + 结果提示
@@ -1624,6 +1701,62 @@ fn storage_grid_sync_system(
 
 #[cfg(test)]
 mod tests {
+    /// 门禁（P3-3 / #782）：仓库格显示名必须走与商城同一条降级链
+    /// （`线包名 → 本地物品名表 → 需要请求 → 兜底 #id`），且「表里也没有」时
+    /// **要**发请求（不是静默显示 #id 就算完）；同一索引只请求一次。
+    ///
+    /// 阳性对照（落地时实做）：把 `resolve_wire_item_names` 里查表那一步去掉
+    /// （直接落 `#id` 且不请求）→ 本测试第一条断言立即红。
+    #[test]
+    fn storage_item_names_follow_shared_fallback_chain() {
+        use crate::game::dialogs::inventory::InvItem;
+        let mk = |name: &str, idx: i32| InvItem {
+            name: name.to_string(),
+            item_index: idx,
+            ..Default::default()
+        };
+        let mut st = super::StorageState::default();
+        st.items = vec![
+            // ① 线包自带名字（服务端补过名字的情形）：直接用，不请求
+            Some(mk("屠龙", 1268)),
+            // ② 线包无名（仓库线包的真实形态）：先占位 `#782`，并要求请求一次
+            Some(mk("", 782)),
+            // ③ 表里已有名字：用表里的，不请求
+            Some(mk("", 1001)),
+            None,
+        ];
+        crate::game::item_names::remember_item_name(&mut st.item_names, 1001, "乌木剑");
+
+        let wanted = st.resolve_wire_item_names();
+        assert_eq!(
+            wanted,
+            vec![782],
+            "只有表里也没有的索引才发请求（#782 那一格）"
+        );
+        assert_eq!(st.display_name(st.items[0].as_ref().unwrap()), "屠龙");
+        assert_eq!(
+            st.display_name(st.items[1].as_ref().unwrap()),
+            "#782",
+            "回包未到前仍是占位（原版 `ItemIndexTitle`）"
+        );
+        assert_eq!(st.display_name(st.items[2].as_ref().unwrap()), "乌木剑");
+        // 去重：同一索引再解析一次不得重复请求（原版 `RequestedItemInfo` 语义）
+        assert!(
+            st.resolve_wire_item_names().is_empty(),
+            "同一索引不得重复请求"
+        );
+
+        // `ItemInfoReceived` 到货（消费臂的等价动作）：格子立刻显示真名，且不再请求
+        assert!(crate::game::item_names::remember_item_name(
+            &mut st.item_names,
+            782,
+            "马鞍"
+        ));
+        st.requested_item_info.remove(&782);
+        assert!(st.resolve_wire_item_names().is_empty());
+        assert_eq!(st.display_name(st.items[1].as_ref().unwrap()), "马鞍");
+    }
+
     /// #2956 回归：物理关闭钮必须**双闸门同步清**（state.visible + mgr）——
     /// 只 `mgr.close` 会留 (visible=true, mgr=closed) 失配态，
     /// 此后 RPC `dialog storage toggle` 永远无法再开窗（只能 open 恢复）。
@@ -2129,6 +2262,8 @@ mod tests {
         app.init_resource::<DialogManager>();
         // #2747+：storage_server_events 回包解锁仓储锁 → 需该资源
         app.init_resource::<InvLockedSlots>();
+        // P3-3（#782）：storage_server_events 现在还会按需发 `RequestItemInfo` → 需该资源
+        app.insert_resource(NetConnection::default());
         app.insert_resource(crate::game::dialogs::inventory::InventoryOrigin(0.0, 0.0));
         app.add_systems(Update, storage_server_events);
         app

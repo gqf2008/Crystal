@@ -32,45 +32,14 @@ pub const PANEL_SIZE: (f32, f32) = (696.0, 476.0);
 /// 关闭键 `Prguse2[360..362]` @(671,4)（`GameShopDialog.cs:67-76`，无 `Size` → 原生 24x21）
 pub const CLOSE_POS: (f32, f32) = (671.0, 4.0);
 
-/// P3-3 后半条（2026-09-22）：把 `NewItemInfo` 回包写进本地物品名表。
+/// P3-3：商品名解析与物品名表写入**共用 `crate::game::item_names` 的同一对纯函数**
+/// （#782 验收判据 = 「仓库与商城走同一降级链」）——这里只保留商城侧的旧名字，
+/// 免得调用点与既有测试全改一遍：
 ///
-/// 空名字**不写**（否则会把表里的好名字覆盖成空串，`resolve_shop_name` 只能再回退 `#id`）。
-pub fn remember_item_name(
-    item_names: &mut std::collections::HashMap<i32, String>,
-    index: i32,
-    name: &str,
-) -> bool {
-    if name.is_empty() {
-        return false;
-    }
-    item_names.insert(index, name.to_string());
-    true
-}
-
-/// 商品名解析（P3-3，2026-09-22）：`it.name` → 本地物品名表 `item_names[idx]` →
-/// **需要发一次 `RequestItemInfo`** → 仍无则兜底 `#id`。
-///
-/// 依据：原版 `GameShopItem`（`Shared/Data/ItemData.cs:778`）只带 `ItemIndex` +（**不入线**的）
-/// `ItemInfo Info`，显示名由客户端本地解析；线协议里也有 `RequestItemInfo/NewItemInfo` 这一对。
-/// 本端此前直接 `format!("#{}")`，既没查本地表也没请求（`handle_progress.rs` 收到
-/// `NewItemInfo` 还只打了行日志就丢弃），于是玩家看到的就是 `#1268`。
-///
-/// 返回 `(显示名, 是否需要请求物品信息)`。纯函数，单测与阳性对照都钉在它上面。
-pub fn resolve_shop_name(
-    name: &str,
-    item_names: &std::collections::HashMap<i32, String>,
-    item_index: i32,
-) -> (String, bool) {
-    if !name.is_empty() {
-        return (name.to_string(), false);
-    }
-    if let Some(n) = item_names.get(&item_index) {
-        if !n.is_empty() {
-            return (n.clone(), false);
-        }
-    }
-    (format!("#{item_index}"), true)
-}
+/// - `resolve_shop_name` = `item_names::resolve_item_name`
+///   （线包自带名字 → 本地表 → 需要发一次 `RequestItemInfo` → 兜底 `#id`）
+/// - `remember_item_name` = `item_names::remember_item_name`
+pub use crate::game::item_names::{remember_item_name, resolve_item_name as resolve_shop_name};
 
 /// 商城商品（GameShopInfo 写入）
 #[derive(Debug, Clone, Default)]
