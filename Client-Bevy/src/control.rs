@@ -83,6 +83,23 @@ pub fn parse_nearby_radius(raw: Option<f64>) -> f32 {
     }
 }
 
+/// 构造发信包：收件人/正文/金币原样带过去，附件固定空、不贴票。
+/// 单独抽成纯函数是为了给「⑤ 邮件闭环」留一条可单测的判据——
+/// 实测踩过：动作 RPC 收下参数却把金币吞掉（发出去的信 collected 后收不到钱）。
+pub fn build_send_mail(
+    to: &str,
+    message: &str,
+    gold: u32,
+) -> mir2_shared::packets::client::mail::SendMail {
+    mir2_shared::packets::client::mail::SendMail {
+        name: to.to_string(),
+        message: message.to_string(),
+        gold,
+        items_idx: [0u64; 5],
+        stamped: false,
+    }
+}
+
 /// 已占用格列表 `(格号, 名称)`——存取闭环的夹具靠它拿到**准确的 From/To 格号**
 /// （`StoreItem`/`TakeBackItem` 的 from/to 就是格号，猜格号会得到"回包 success 但两边都不动"）。
 pub fn occupied_cells(
@@ -175,6 +192,25 @@ enum ControlCommand {
     StorageTake {
         from: i32,
         to: i32,
+    },
+    /// ⑤ 邮件动作（现成包 `C.SendMail`/`C.ReadMail`/`C.CollectParcel`）：
+    /// 与撰写/阅读窗点击路径发的是同一个包，把邮件闭环从「窗口内像素定位」里解耦。
+    /// 注意：**不能给自己发**（原版 C# 规则，服务端 `mail.rs` 直接拒绝），
+    /// 合法判据是 A→B→B 登录收取。
+    MailSend {
+        to: String,
+        message: String,
+        gold: u32,
+    },
+    MailRead {
+        mail_id: u64,
+    },
+    MailCollect {
+        mail_id: u64,
+    },
+    /// 只读邮件探针：客户端侧邮件列表/详情（判据取状态而非 UI 代理量）
+    MailProbe {
+        reply: Sender<String>,
     },
     QuestProbe {
         reply: Sender<String>,
@@ -475,6 +511,11 @@ struct ControlQueries<'w, 's> {
         (&'static crate::game::dialogs::npc::NpcLine, &'static Node),
         With<crate::game::dialogs::npc::NpcDialogWidget>,
     >,
+    /// `mail_probe` RPC：客户端侧邮件列表/详情（ReceiveMail 写入，判据取状态）
+    mail: Res<'w, crate::game::dialogs::mail::MailState>,
+    /// 本地玩家金币（`GoldGained`/`UserInformation` 写入）——邮件收取/交易类闭环的
+    /// 判据就是它的 delta，读它比读 HUD 像素或 DB 落后值都可靠
+    gold: Query<'w, 's, &'static crate::game::player_state::Gold, With<LocalPlayer>>,
 }
 
 /// 控制端口默认值（--control-port 未指定或非法时回退）
@@ -765,6 +806,59 @@ fn handle_conn(mut stream: std::net::TcpStream, tx: Sender<ControlCommand>) {
                 } else {
                     let _ = tx.send(ControlCommand::StorageTake { from, to });
                     json!({"ok": true, "action": "take", "from": from, "to": to})
+                }
+            }
+            // ⑤ 邮件动作：mail_send {to,message,gold} / mail_read {mail_id} /
+            // mail_collect {mail_id}——与撰写/阅读窗点击路径发同一个包。
+            "mail_send" => {
+                let to = params
+                    .get("to")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .trim()
+                    .to_string();
+                let message = params
+                    .get("message")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let gold = params.get("gold").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+                if to.is_empty() {
+                    json!({"error": "missing to（收件人角色名；原版规则：不能给自己发）"})
+                } else {
+                    // 回执要用收件人名，故先克隆一份进命令
+                    let _ = tx.send(ControlCommand::MailSend {
+                        to: to.clone(),
+                        message,
+                        gold,
+                    });
+                    json!({"ok": true, "action": "send", "to": to, "gold": gold})
+                }
+            }
+            "mail_read" | "mail_collect" => {
+                let mail_id = params.get("mail_id").and_then(|v| v.as_u64()).unwrap_or(0);
+                if mail_id == 0 {
+                    json!({"error": "missing mail_id"})
+                } else if method == "mail_read" {
+                    let _ = tx.send(ControlCommand::MailRead { mail_id });
+                    json!({"ok": true, "action": "read", "mail_id": mail_id})
+                } else {
+                    let _ = tx.send(ControlCommand::MailCollect { mail_id });
+                    json!({"ok": true, "action": "collect", "mail_id": mail_id})
+                }
+            }
+            "mail_probe" => {
+                let (reply_tx, reply_rx) = bounded::<String>(1);
+                if tx
+                    .send(ControlCommand::MailProbe { reply: reply_tx })
+                    .is_ok()
+                {
+                    let s = reply_rx
+                        .recv_timeout(std::time::Duration::from_secs(2))
+                        .unwrap_or_else(|_| "{}".to_string());
+                    serde_json::from_str::<Value>(&s).unwrap_or_else(|_| json!({}))
+                } else {
+                    json!({"error": "control channel closed"})
                 }
             }
             "accept_quest" => {
@@ -2071,6 +2165,8 @@ fn apply_control_commands(
                         "quest_total": inv.quest_inventory.len(),
                         "weight": inv.weight,
                         "max_weight": inv.max_weight,
+                        // 金币：交易/存取/邮件收取闭环的 delta 判据
+                        "gold": q.gold.single().map(|g| g.0).unwrap_or(0),
                         // 格号 → 名称：夹具据此挑存取源格（不用猜）
                         "occupied": occupied_cells(&inv.items)
                             .into_iter()
@@ -2152,6 +2248,42 @@ fn apply_control_commands(
                 // 与 storage.rs 点击路径发的**同一个包**（仓库格 → 背包格）
                 net.send_packet(&mir2_shared::packets::client::item::TakeBackItem { from, to });
                 tracing::info!("🎮 control storage_take: from={from} to={to}");
+            }
+            ControlCommand::MailSend { to, message, gold } => {
+                // 与撰写窗「发送」按钮发的**同一个包**（C# MailComposeParcelDialog）
+                net.send_packet(&build_send_mail(&to, &message, gold));
+                tracing::info!("🎮 control mail_send: to={to} gold={gold}");
+            }
+            ControlCommand::MailRead { mail_id } => {
+                net.send_packet(&mir2_shared::packets::client::mail::ReadMail { mail_id });
+                tracing::info!("🎮 control mail_read: id={mail_id}");
+            }
+            ControlCommand::MailCollect { mail_id } => {
+                net.send_packet(&mir2_shared::packets::client::mail::CollectParcel { mail_id });
+                tracing::info!("🎮 control mail_collect: id={mail_id}");
+            }
+            ControlCommand::MailProbe { reply } => {
+                let mails: Vec<serde_json::Value> = q
+                    .mail
+                    .mails
+                    .iter()
+                    .map(|m| {
+                        json!({
+                            "mail_id": m.mail_id, "sender": m.sender, "subject": m.subject,
+                            "unread": m.unread, "gold": m.gold, "collected": m.collected,
+                        })
+                    })
+                    .collect();
+                let detail = q.mail.detail.as_ref().map(|d| {
+                    json!({
+                        "mail_id": d.mail_id, "sender": d.sender, "subject": d.subject,
+                        "body": d.body, "gold": d.gold, "items": d.items, "collected": d.collected,
+                    })
+                });
+                let payload =
+                    json!({ "ok": true, "count": mails.len(), "mails": mails, "detail": detail });
+                tracing::info!("🎮 control mail_probe: {} mails", mails.len());
+                let _ = reply.send(payload.to_string());
             }
             ControlCommand::QuestProbe { reply } => {
                 let ids = taken_quest_ids(&q.quest_log.quests);
@@ -2670,6 +2802,26 @@ mod tests {
             vec![(1, "Saddle".to_string()), (3, "Gold".to_string())],
             "必须保留真实格号（1 与 3），不能压缩成 0/1"
         );
+    }
+
+    /// ⑤ 邮件闭环门禁：`mail_send` 构造的包必须**原样**带上收件人/正文/金币，
+    /// 附件为空且不贴票（附件与贴票另有 UI 路径，这里不碰）。
+    ///
+    /// 为什么值得一测：服务端按 `name` 找收件人、按 `gold` 入箱；动作 RPC 若把金币吞成 0，
+    /// 收件人 collected 翻转后**收不到钱**，而日志看上去"发送成功"——闭环判据（金币 delta）
+    /// 会给出假红，查很久才发现是夹具/动作侧吞参数。
+    ///
+    /// 阳性对照（实做）：把 `gold` 改成常量 0 → 本测试立即红。
+    #[test]
+    fn build_send_mail_carries_recipient_message_and_gold() {
+        let pkt = build_send_mail("bevy2char", "e2e 邮件正文", 123);
+        assert_eq!(pkt.name, "bevy2char");
+        assert_eq!(pkt.message, "e2e 邮件正文");
+        assert_eq!(pkt.gold, 123, "金币必须原样发出（否则收件人收不到钱）");
+        assert_eq!(pkt.items_idx, [0u64; 5], "本动作不带附件");
+        assert!(!pkt.stamped, "本动作不贴票");
+        // 空收件人由 RPC 层拒绝（服务端按 name 查人，空名只会静默失败）
+        assert!(pkt.name.is_empty() || !pkt.name.trim().is_empty());
     }
 
     /// `attack_mode` RPC 的模式名解析（2026-09-22 玩家验收能力）。

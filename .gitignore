@@ -392,6 +392,9 @@ FodyWeavers.xsd
 !tools/acceptance/rpc.ps1
 !tools/acceptance/l5d_npc_link.ps1
 !tools/acceptance/l5e_storage_roundtrip.ps1
+# ⑤ 邮件半段：A 发 → B 到邮局取包裹 → B 收取附件（判据取状态；DB 延迟落盘只作参考）
+!tools/acceptance/l5f_mail_roundtrip.ps1
+!tools/acceptance/dbq.py
 
 # 客户端运行时本地设置（游戏自写自读，不入库；两个客户端都按进程 CWD 相对路径写，
 # 故用不带前导斜杠的模式覆盖任意启动目录）
