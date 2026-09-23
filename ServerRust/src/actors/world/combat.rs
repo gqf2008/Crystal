@@ -2550,6 +2550,21 @@ impl Message<TownReviveRequest> for WorldActor {
             "TownRevive: {} revived at map {} ({}, {})",
             state.name, revive_map, spawn_x, spawn_y
         );
+        // 2026-09-23 玩家验收挖出的缺陷修复：`RevivePlayer` 只写 hp/坐标，**没有应用 map_index**，
+        // 也没有任何换图路径——绑定点在别的地图时，玩家会被放到「死亡地图上的绑定点坐标」
+        // （实测：绑定点 map1('0')@(288,616)、死亡点 map2('2')@(500,485)，复活后落在 map2@(288,616)：
+        // 坐标准确、地图不对）。C# 原版 TownRevive 是 `Teleport(bindMap, bindX, bindY)`，即真的切图。
+        //
+        // 复用统一传送核心（与 @mapmove / NPC MOVE 同一条路径）：同图只发 UserLocation，
+        // 跨图补发 MapChanged/MapInformation/UserLocation 并重发新图对象。
+        // 刻意**不走** `npc_script::teleport_player`：它带 RequiredGroup 门槛，而复活绝不能被组队条件挡住。
+        // 顺序也有讲究：**先**发 HealthChanged/Revived 让客户端清掉死亡态，**再**换图——
+        // 反过来（先换图）实测客户端会在仍标记"死亡"的情况下重建场景，本地玩家实体被
+        // despawn 后残留的 MoveTween/Sitting 命令打到旧实体（`Entity despawned`），
+        // 结果是客户端本地玩家实体彻底消失（state 读不到 tile）。C# 原版也是
+        // `Dead = false` 之后才 `Teleport(bindMap,...)`。
+        super::map_sync::teleport_core(self, msg.session_id, revive_map, spawn_x, spawn_y, 4).await;
+        super::npc_script::apply_map_entry_rules(self, msg.session_id).await;
     }
 }
 

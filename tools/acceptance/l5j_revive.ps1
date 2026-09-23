@@ -8,7 +8,19 @@
 param(
     [string]$User = 'test',
     [string]$Pass = '123456',
-    [int]$DieWaitSec = 5
+    [int]$DieWaitSec = 5,
+    # 复活必须回到**绑定点地图**（C# TownRevive = Teleport(bindMap,bindX,bindY)）。
+    # 2026-09-23 实测缺陷：只搬坐标不换图 → 人留在死亡地图上。判据因此显式断言 map 与坐标。
+    # bevychar 的绑定：bind_map_index=1 → map 文件名 '0'(BichonProvince) @ (288,616)。
+    [string]$ExpectReviveMap = '0',
+    [int]$ExpectReviveX = 288,
+    [int]$ExpectReviveY = 616,
+    [int]$LandingTolerance = 3,
+    # 死亡点强制换到**与绑定点不同的地图**再自杀——否则"人已经站在绑定点上"，
+    # 复活就算不切图也会通过（判据失去意义）。默认 map 文件名 '2' = SerpentValley。
+    [string]$DieMap = '2',
+    [int]$DieX = 500,
+    [int]$DieY = 485
 )
 $ErrorActionPreference = 'Continue'
 $env:PATH = 'D:\toolchains\msys64\ucrt64\bin;D:\toolchains\libpinyin-install\bin;' + $env:PATH
@@ -23,6 +35,16 @@ function Rpc([string]$m, [hashtable]$q = @{}) {
     $s.Write($b, 0, $b.Length); $s.Flush()
     $r = New-Object IO.StreamReader($s); $l = $r.ReadLine(); $c.Close(); ($l | ConvertFrom-Json).result
 }
+function Wait-State([int]$TimeoutSec = 20) {
+    # 换图后客户端会重建场景（本地玩家实体短暂不存在 → state 返回空），判据必须等它稳定，
+    # 否则会把"正在加载"读成"复活失败"（假红）。
+    for ($i = 0; $i -lt $TimeoutSec; $i++) {
+        $s = Rpc 'state'
+        if ($null -ne $s -and $null -ne $s.tile_x -and "$($s.map)" -ne '') { return $s }
+        Start-Sleep 1
+    }
+    return (Rpc 'state')
+}
 
 if (-not (Get-Process -Name mir2_server -EA SilentlyContinue)) { Write-Host '服务端未运行'; exit 9 }
 Get-CimInstance Win32_Process -Filter "Name='client_bevy.exe'" -EA SilentlyContinue |
@@ -35,28 +57,40 @@ $st = $null
 foreach ($i in 1..60) { Start-Sleep 1; try { $st = Rpc 'state'; if ($null -ne $st.tile_x) { break } } catch {} }
 Write-Host ("[A] 进图 map={0} tile=({1},{2}) hp={3}/{4} dead={5}" -f $st.map, $st.tile_x, $st.tile_y, $st.hp, $st.max_hp, $st.dead)
 $alive = (-not $st.dead) -and ([int]$st.hp -gt 0)
-$dieTile = @($st.tile_x, $st.tile_y)
+
+# 先把死亡点挪到与绑定点**不同的地图**（判据才有意义）
+Rpc 'chat' @{ message = "@mapmove $DieMap $DieX $DieY" } | Out-Null
+Start-Sleep 4
+$at = Rpc 'state'
+Write-Host ("[A2] 到死亡地图: map={0} tile=({1},{2})（绑定图期望 {3}）" -f $at.map, $at.tile_x, $at.tile_y, $ExpectReviveMap)
+$dieTile = @($at.tile_x, $at.tile_y)
+$diedOffBindMap = ("$($at.map)" -ne $ExpectReviveMap)
 
 # B) 死亡：GM @die（C# case "DIE"：自杀）
 Rpc 'chat' @{ message = '@die' } | Out-Null
 Start-Sleep -Seconds $DieWaitSec
 $dead = Rpc 'state'
-Write-Host ("[B] @die 后 hp={0}/{1} dead={2} tile=({3},{4})" -f $dead.hp, $dead.max_hp, $dead.dead, $dead.tile_x, $dead.tile_y)
+Write-Host ("[B] @die 后 hp={0}/{1} dead={2} map={3} tile=({4},{5})" -f $dead.hp, $dead.max_hp, $dead.dead, $dead.map, $dead.tile_x, $dead.tile_y)
 $died = [bool]$dead.dead
+$dieMap = "$($dead.map)"
 
 # C/D) 复活
 Rpc 'revive_town' | Out-Null
 Start-Sleep -Seconds 4
-$rev = Rpc 'state'
+$rev = Wait-State 20
 Write-Host ("[C] revive_town 后 hp={0}/{1} dead={2} map={3} tile=({4},{5})" -f $rev.hp, $rev.max_hp, $rev.dead, $rev.map, $rev.tile_x, $rev.tile_y)
 $revived = ((-not $rev.dead) -and ([int]$rev.hp -gt 0))
 $moved = ([int]$rev.tile_x -ne [int]$dieTile[0]) -or ([int]$rev.tile_y -ne [int]$dieTile[1])
-Write-Host ("[D] 复活后位置与死亡点不同={0}（死亡 ({1},{2}) → 复活 ({3},{4})）" -f $moved, $dieTile[0], $dieTile[1], $rev.tile_x, $rev.tile_y)
+$backToBindMap = ("$($rev.map)" -eq $ExpectReviveMap)
+$backToBindSpot = ([Math]::Abs([int]$rev.tile_x - $ExpectReviveX) -le $LandingTolerance) -and ([Math]::Abs([int]$rev.tile_y - $ExpectReviveY) -le $LandingTolerance)
+Write-Host ("[D] 死亡图={0} → 复活图={1}（期望 {2}）；落点=({3},{4})（期望≈{5},{6}）；与死亡点不同={7}" -f `
+    $dieMap, $rev.map, $ExpectReviveMap, $rev.tile_x, $rev.tile_y, $ExpectReviveX, $ExpectReviveY, $moved)
 
 $okA = [bool]$alive
-$okB = [bool]$died
+$okB = [bool]($died -and $diedOffBindMap)
 $okC = [bool]$revived
-Write-Host ("VERDICT alive_before={0} died={1} revived={2} moved_to_bind={3}" -f `
+$okD = [bool]($backToBindMap -and $backToBindSpot)
+Write-Host ("VERDICT alive_before={0} died={1} revived={2} back_to_bind_map_and_spot={3}" -f `
     $(if ($okA) { 'PASS' } else { 'FAIL' }), $(if ($okB) { 'PASS' } else { 'FAIL' }), `
-    $(if ($okC) { 'PASS' } else { 'FAIL' }), $(if ($moved) { 'PASS' } else { 'FAIL' }))
-if (-not ($okA -and $okB -and $okC)) { exit 5 }
+    $(if ($okC) { 'PASS' } else { 'FAIL' }), $(if ($okD) { 'PASS' } else { 'FAIL' }))
+if (-not ($okA -and $okB -and $okC -and $okD)) { exit 5 }
