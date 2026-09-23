@@ -614,7 +614,24 @@ impl Message<NPCCallRequest> for WorldActor {
                 // C# 格式（含 [@section]/#IF/#SAY 等指令）走新引擎
                 let joined = lines.join("\n");
                 if npc_script::is_csharp_format(&joined) {
-                    let parsed = npc_script::ParsedScript::parse(&joined);
+                    // #上线阻塞修复（2026-09-23）：DB 里的脚本页是「段体」——
+                    // 段名存在 page_name 列（如 [@MAIN]），正文本身**不含** `[@键]` 头。
+                    // 直接 parse 会得到 sections=[]（实测诊断：
+                    // `key=(1, "[@MAIN]") want="MAIN" sections=[]`），随后落到兜底问候
+                    // 「XXX：你想说什么？」→ 所有 NPC 对话都没有选项可点
+                    // （跨图菜单/买卖入口/仓库 <Access/@Storage> 全被它卡住）。
+                    // 修法：解析出空段时，用本页键补一个段头再解析一次。
+                    let mut parsed = npc_script::ParsedScript::parse(&joined);
+                    if parsed.section_names().is_empty() {
+                        let bare =
+                            current_key.trim_matches(|c: char| c == '[' || c == ']' || c == '@');
+                        let wrapped = format!("[{}]{}{}", bare, "\n", joined);
+                        parsed = npc_script::ParsedScript::parse(&wrapped);
+                        tracing::debug!(
+                            "NPC script: 段体补头后 sections={:?}",
+                            parsed.section_names()
+                        );
+                    }
                     // 目标 section：优先匹配 current_key 对应段名，否则 @main
                     let want_name = current_key
                         .trim_start_matches('[')
@@ -622,6 +639,17 @@ impl Message<NPCCallRequest> for WorldActor {
                         .trim_end_matches(']')
                         .to_string();
                     let target_section = parsed.find(&want_name).or_else(|| parsed.main_section());
+                    tracing::debug!(
+                        "NPC script diag2: lines={} joined120={:?}",
+                        lines.len(),
+                        joined.chars().take(120).collect::<String>()
+                    );
+                    tracing::debug!(
+                        "NPC script diag: key={:?} want={:?} sections={:?}",
+                        script_key,
+                        want_name,
+                        parsed.section_names()
+                    );
                     if let Some(section) = target_section {
                         let res = parsed
                             .execute_section(section, self, msg.session_id, &npc, &mut custom_vars)
