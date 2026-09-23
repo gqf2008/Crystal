@@ -18,6 +18,55 @@ use crate::actors::refine::{RefineLog, RefineStatus, RefiningItem};
 
 pub type DbPool = SqlitePool;
 
+/// 是否为「暂时性」存储错误——锁竞争（SQLite BUSY/LOCKED）那一类。
+///
+/// 判据同时看结构化错误码与消息文本：sqlx 对 SQLite 把 `SQLITE_BUSY`/`SQLITE_LOCKED`
+/// 报成 `code: 5` / `code: 6`，而调用链上错误被 anyhow 包了好几层，文本匹配是对
+/// 真实日志形态（`error returned from database: (code: 5) database is locked`）的兜底。
+pub fn is_transient_db_error(e: &anyhow::Error) -> bool {
+    if let Some(sqlx::Error::Database(db)) = e.downcast_ref::<sqlx::Error>() {
+        if let Some(code) = db.code() {
+            if code == "5" || code == "6" {
+                return true;
+            }
+        }
+    }
+    let text = e.to_string();
+    text.contains("database is locked")
+        || text.contains("database table is locked")
+        || text.contains("code: 5")
+        || text.contains("code: 6")
+}
+
+/// 落库 + 失败上报：**一次尝试**，失败时按「是否瞬时」分级记录。
+///
+/// 为什么不做重试（这是本轮实测后的结论，见 `tools/ops/README.md` §5c）：
+/// 有界重试确实能把「14s 写锁」下的失败救回来（master 1 条失败 → 加 1 次重试 0 条），
+/// 但每次尝试都要占住一条连接等 `busy_timeout=5000`；重试把占用时间从 5s 拉到 ~10s，
+/// 而**登录读路径**要排队等连接——22s 锁下实测：master 登录回复 9.5s（勉强成功），
+/// 加重试后同一会话直接超时（drill 的 J3 失败）。也就是说：为了救写，把**读/登录**挤坏了。
+/// 所以本轮只落「静默丢失 → 响亮报告」这一半（原始缺陷正是 `warn` 即放弃、无痕迹）；
+/// 重试留到能同时约束连接占用的方案（缩短每次尝试的 busy_timeout / 读写分离池）再做。
+///
+/// 瞬时错误打 `error!` + 固定前缀 `PERSIST_LOST`（可 grep / 可告警），非瞬时打 `warn!`。
+pub async fn persist_report<T, F, Fut>(what: &str, ctx: &str, op: F) -> anyhow::Result<T>
+where
+    F: FnOnce() -> Fut,
+    Fut: std::future::Future<Output = anyhow::Result<T>>,
+{
+    match op().await {
+        Ok(v) => Ok(v),
+        Err(e) => {
+            if is_transient_db_error(&e) {
+                tracing::error!("PERSIST_LOST {what} {ctx} err={e}");
+            } else {
+                tracing::warn!("persist failed {what} {ctx} err={e}");
+            }
+            Err(e)
+        }
+    }
+}
+
 /// Initialize the SQLite database from a URL and run migrations
 pub async fn init_db_pool(db_url: &str) -> anyhow::Result<DbPool> {
     // FK 必须池级禁用：PRAGMA foreign_keys 是【每连接】设置，而 sqlx 默认给每条新连接
@@ -6215,6 +6264,48 @@ pub async fn delete_auction(pool: &DbPool, auction_id: i64) -> anyhow::Result<bo
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 门禁（2026-09-23 存储降级缺口）：瞬时锁错误必须被判为瞬时（→ 升级为 PERSIST_LOST），
+    /// 约束/结构性错误不得误判为瞬时（避免把真错误当锁竞争、让告警失去意义）。
+    ///
+    /// 阳性对照（落地时实做）：把 `is_transient_db_error` 改成恒返回 true
+    /// → 后两条断言立即红。
+    #[test]
+    fn transient_db_error_classification() {
+        assert!(
+            is_transient_db_error(&anyhow::anyhow!(
+                "error returned from database: (code: 5) database is locked"
+            )),
+            "SQLITE_BUSY 的真实日志形态必须判为瞬时"
+        );
+        assert!(
+            is_transient_db_error(&anyhow::anyhow!("database table is locked")),
+            "SQLITE_LOCKED 文本形态必须判为瞬时"
+        );
+        assert!(
+            !is_transient_db_error(&anyhow::anyhow!(
+                "error returned from database: (code: 19) constraint failed"
+            )),
+            "约束冲突不是锁竞争，不得误判为瞬时"
+        );
+        assert!(
+            !is_transient_db_error(&anyhow::anyhow!("no such table: characters")),
+            "结构性错误不得误判为瞬时"
+        );
+    }
+
+    /// 门禁：`persist_report` 成功时原样返回、失败时原样把 Err 交给调用方
+    /// （上报只加日志，不改变控制流）。
+    #[tokio::test]
+    async fn persist_report_passes_result_through() {
+        let ok: anyhow::Result<u32> = persist_report("t_ok", "unit", || async { Ok(1u32) }).await;
+        assert_eq!(ok.ok(), Some(1));
+        let err: anyhow::Result<u32> = persist_report("t_err", "unit", || async {
+            Err(anyhow::anyhow!("database is locked"))
+        })
+        .await;
+        assert!(err.is_err(), "失败仍须返回 Err 给调用方");
+    }
     use std::collections::HashMap;
 
     async fn temp_pool() -> DbPool {

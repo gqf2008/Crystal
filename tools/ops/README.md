@@ -126,6 +126,40 @@ pwsh tools/ops/storage_degrade_drill.ps1 -DeployDir <deploy> -OutFile tools/ops/
 下线路径上的部分持久化数据（本例是 pets）会静默丢失。要做的是给下线/落库路径补**有界重试
 + 失败补偿（例如失败入队、重连后补写）**，并把它做成可注入的门禁。
 
+### 5c-1. 缺口修复：静默丢失 → 响亮报告（**不做重试**，附实测依据）
+
+代码侧改动：`db::persist_report(what, ctx, op)`（`ServerRust/src/db/mod.rs`）——**一次尝试**，
+失败时按「是否瞬时锁错误」（`is_transient_db_error`：`database is locked` / `code: 5|6`）分级：
+瞬时 → `ERROR PERSIST_LOST <what> <ctx> err=...`（可 grep / 可告警）；非瞬时 → `WARN persist failed ...`。
+落点：下线/断线的 `save_character` / `player_pets` / `save_heroes` / `update_last_access`，
+以及账号的 `save_account` / `set_account_offline`（共 7 处）。
+
+**为什么不做重试**（这是本轮实做 A/B 之后的结论，不是省事）：
+
+| 方案 | 14s 写锁 | 22s 写锁 | 登录读路径（J3） |
+|---|---|---|---|
+| master（单次尝试 + warn） | 1 条写失败 | 2 条写失败 | 1.6s / 9.5s（勉强成功） |
+| 加重试（1 次退避，实测） | **0 条写失败** ✅ | PERSIST_LOST | 7.1s，22s 锁下**超时失败** ❌ |
+| 重试 + 账号写挪后台任务 | 0 条写失败 | PERSIST_LOST | 22s 锁下仍失败 ❌ |
+| **本轮采用：单次 + 响亮报告** | 1 条失败（但 ERROR + 可告警） | PERSIST_LOST | **1.6s（与 master 一致）** ✅ |
+
+机理：每次尝试都要占住一条连接等 `busy_timeout=5000`；重试把占用从 5s 拉到 ~10s，
+而**登录读路径**要排队等连接/等锁 → 为了救写把**读**挤坏了（22s 锁下同一会话直接超时）。
+所以本轮只落「不再静默」这一半；**重试留到能同时约束连接占用的方案再做**（见下）。
+
+**已验证**：本地 `cargo test --lib` 828 passed（含 `transient_db_error_classification`、
+`persist_report_passes_result_through` 两条门禁，阳性对照实做：把 `is_transient_db_error`
+改成恒 true → 后两条断言立红）；`cargo fmt -- --check` / `cargo clippy --lib -- -D warnings` 干净；
+drill A/B：14s 锁下与 master **行为等价**（同样的 1 条失败），差别只在日志级别与固定前缀。
+
+**下一轮要做的持久化可靠性工作**（本轮没做，别当已完成）：
+
+1. **缩短每次尝试的 busy_timeout** 或**读写分离连接池**，让「重试」不再牺牲登录读路径；
+   之后重试才谈得上收益（目标：长锁下既零丢失、登录也不超时）。
+2. **离线补偿队列**：真正失败时把待写数据落盘/入队，恢复后补写（本轮只做到「响亮报告」）。
+3. 登录读路径在长写锁下的延迟本身要单独定位（master 也出现过 9.5s 的登录回复；
+   候选：连接获取排队、`list_character_summaries` 读、WAL checkpoint）。
+
 ## 6. 故障注入：`fault_injection.ps1`（+ `latency_proxy.py`）
 
 | 场景 | 做法 | 判据 | 实测 |
