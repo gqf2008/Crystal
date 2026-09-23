@@ -633,6 +633,19 @@ pub(crate) fn mine_drop_succeeds(
     roll < drop_rate + mine_rate_percent + guild_mine_rate
 }
 
+/// 掉落条目的「落地」判断（C# `MonsterObject.Drop` :1130-1141 同序）：
+/// ① 先给任务系统（`CheckGroupQuestItem`）；被收下就**不落地**；
+/// ② `QuestRequired` 条目没人需要时也**不落地**（原版就是 `continue`，残留在地上会被别人捡走）；
+/// ③ 其余才落地。
+///
+/// 为什么单提成函数（2026-09-24 实机缺陷）：旧写法把 `if drop.quest_required { continue; }` 放在
+/// 循环**最开头**，于是任务物品（Q 行）压根没进到 `try_give_quest_item` ——
+/// ItemTasks 任务（如 quest 30 JadeRing）的任务格永远是空，派生出来的现象就是
+/// 「连杀 10 只 Currish（p=0.33）任务格仍为 0」。
+pub(crate) fn drop_should_land(quest_given: bool, quest_required: bool) -> bool {
+    !quest_given && !quest_required
+}
+
 /// C# HarvestMonster.Harvest AttemptDrop：逐条 roll（跳过 QuestRequired/组子条目/金币；Meat Quality 简化 0）
 pub(crate) fn roll_harvest_drops(
     drops: &[crate::db::MonsterDropInfo],
@@ -8905,11 +8918,12 @@ mod spell_geometry_tests {
 mod tests {
     use super::{
         archer_state_penalty, attack_disabled_by_poison, cast_disabled_by_poison,
-        cast_out_of_range, find_attack_skill, logout_blocked, magic_get_power, nearest_k_chebyshev,
-        player_attack_speed_ms, range_attack_min_reduction, range_attack_out_of_range,
-        range_flight_ticks, ranged_chance_to_hit, should_grant_cast_exp, slaying_roll_procs,
-        turn_undead_threshold, ATTACK_SKILL_SPELLS, DAMAGE_DURA_ARMOR_SLOTS, LOGOUT_DELAY_MS,
-        SPELL_CROSS_HALFMOON, SPELL_FIREBALL, SPELL_HALFMOON, SPELL_METEOR_SHOWER, SPELL_SLAYING,
+        cast_out_of_range, drop_should_land, find_attack_skill, logout_blocked, magic_get_power,
+        nearest_k_chebyshev, player_attack_speed_ms, range_attack_min_reduction,
+        range_attack_out_of_range, range_flight_ticks, ranged_chance_to_hit, should_grant_cast_exp,
+        slaying_roll_procs, turn_undead_threshold, ATTACK_SKILL_SPELLS, DAMAGE_DURA_ARMOR_SLOTS,
+        LOGOUT_DELAY_MS, SPELL_CROSS_HALFMOON, SPELL_FIREBALL, SPELL_HALFMOON, SPELL_METEOR_SHOWER,
+        SPELL_SLAYING,
     };
     use crate::actors::inventory::EquipmentSlot;
     use crate::actors::player::PlayerMagic;
@@ -9208,5 +9222,24 @@ mod tests {
         assert!(DAMAGE_DURA_ARMOR_SLOTS.contains(&EquipmentSlot::BraceletR));
         assert!(DAMAGE_DURA_ARMOR_SLOTS.contains(&EquipmentSlot::Shoes));
         assert!(DAMAGE_DURA_ARMOR_SLOTS.contains(&EquipmentSlot::Necklace));
+    }
+
+    /// 门禁（2026-09-24 实机缺陷）：**任务物品（Q 行）必须先过任务系统，且没人需要时不落地**。
+    ///
+    /// 旧写法把 `if drop.quest_required { continue; }` 摆在掉落循环最开头，Q 行根本没机会进
+    /// `try_give_quest_item`（C# `CheckGroupQuestItem`）——ItemTasks 任务（如 quest 30 JadeRing）
+    /// 的任务格永远是空。实机现象：连杀 10 只 Currish（Q 掉率 0.33）任务格仍为 0。
+    ///
+    /// 阳性对照（实做）：把实现改成 `!quest_given`（忽略 quest_required）→ 第 3 条断言立即红。
+    #[test]
+    fn drop_should_land_follows_csharp_order() {
+        // 普通物品、任务系统没要 → 落地
+        assert!(drop_should_land(false, false));
+        // 任务系统收下（给了队伍成员）→ 不落地
+        assert!(!drop_should_land(true, false));
+        // Q 行任务物品、没人需要 → 不落地（原版就是 continue，别留在能被别人捡走的地上）
+        assert!(!drop_should_land(false, true));
+        // 任务系统收下的 Q 行 → 同样不落地
+        assert!(!drop_should_land(true, true));
     }
 }

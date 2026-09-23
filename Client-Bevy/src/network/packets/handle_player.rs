@@ -136,6 +136,7 @@ pub(crate) fn handle_player(
                     // ---- 会话状态（网络层保留直写） ----
                     session.local_player_id = Some(p.object_id);
                     session.self_position = Some((p.location_x, p.location_y, p.direction as u8));
+                    session.last_server_position = Some((p.location_x, p.location_y));
 
                     // ---- UI 数据：广播 ServerEvent，由各模块消费 ----
                     let magics: Vec<mir2_shared::data::client_data::ClientMagic> = p.magics.clone();
@@ -244,6 +245,7 @@ pub(crate) fn handle_player(
                         p.direction
                     );
                     session.self_position = Some((p.location_x, p.location_y, p.direction as u8));
+                    session.last_server_position = Some((p.location_x, p.location_y));
                 }
                 Err(e) => {
                     tracing::warn!("⚠️ UserLocation 解析失败: {}", e);

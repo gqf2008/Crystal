@@ -5263,7 +5263,9 @@ impl WorldActor {
         }
         let drops = match self.monster_drops.get(&monster.monster_index) {
             Some(d) if !d.is_empty() => d.clone(),
-            _ => return,
+            _ => {
+                return;
+            }
         };
 
         let count_mul = drop_count_multiplier(monster.is_boss, monster.is_elite);
@@ -5317,10 +5319,6 @@ impl WorldActor {
             _ => (0.0, 0.0),
         };
         for drop in &drops {
-            // C# Drop()：QuestRequired 条目普通掉落跳过（任务系统发放）
-            if drop.quest_required {
-                continue;
-            }
             // #1002：组子条目由父组统一处理
             if drop.group_parent_id != 0 {
                 continue;
@@ -5414,15 +5412,18 @@ impl WorldActor {
                 drop.min_count.saturating_mul(count_mul)
             };
             let adjusted = (count as f64 * global_drop_mul * player_drop_mul).round() as u16;
-            // #1004：任务物品优先给击杀者/组队成员（C# CheckGroupQuestItem），入背包+进度，不落地
-            if self
+            // #1004：任务物品优先给击杀者/组队成员（C# CheckGroupQuestItem），入**任务格**+进度
+            let quest_given = self
                 .try_give_quest_item(monster, drop.item_index, adjusted.max(1))
-                .await
-            {
-                continue;
-            }
-            self.spawn_single_drop(monster, drop.item_index, adjusted.max(1))
                 .await;
+            // C# MonsterObject.Drop:1130-1141 的顺序：先给任务系统（上一步），然后——
+            // · 任务系统收下 → 不落地；· `QuestRequired` 条目没人需要 → 也不落地；· 其余才落地。
+            // 旧写法把 `if drop.quest_required { continue; }` 放在循环最开头，Q 行根本进不到上一步，
+            // 于是 ItemTasks 任务（如 quest 30 JadeRing）的任务格永远是空——2026-09-24 连杀 10 只实测。
+            if drop_should_land(quest_given, drop.quest_required) {
+                self.spawn_single_drop(monster, drop.item_index, adjusted.max(1))
+                    .await;
+            }
         }
 
         // #1005：精英稀有度加成已在上方主循环 item/gold factor 应用（C# AttemptDrop 语义），
