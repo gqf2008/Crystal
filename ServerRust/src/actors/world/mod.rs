@@ -4392,6 +4392,8 @@ impl WorldActor {
         .await
         .is_err()
         {
+            // owner 拍板：失败一律反馈到客户端（本函数只有 session_id，直接用它）
+            notify_persist_failure(&self.gate_ref, session_id, "player_pets", "phase=logout");
             // 失败不丢：进补偿队列，等存储恢复后在世界 tick 上补写
             self.pending_persists
                 .enqueue(persist_queue::PendingWrite::Pets {
@@ -10462,6 +10464,21 @@ pub(crate) fn send_quest_output_message(
             session_id
         );
     }
+}
+
+/// 落库失败的客户端可见通知（owner 2026-09-24 拍板：失败一律直接反馈到客户端）。
+/// 服务端仍保留 `PERSIST_LOST` 日志；这里补的是「玩家自己能看到」的那一半。
+pub(crate) fn notify_persist_failure(
+    gate_ref: &ActorRef<GateActor>,
+    session_id: u64,
+    what: &str,
+    phase: &str,
+) {
+    send_system_message(
+        gate_ref,
+        session_id,
+        &db::persist_failure_notice(what, phase),
+    );
 }
 
 pub(crate) fn send_system_message(gate_ref: &ActorRef<GateActor>, session_id: u64, message: &str) {
