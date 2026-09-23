@@ -74,6 +74,10 @@ pub struct GateActor {
     social_ref: Option<ActorRef<crate::actors::social::SocialActor>>,
     /// 最大并发连接数(Phase 1.1:防止资源耗尽;从 cfg.network.max_connections 设置)
     max_connections: usize,
+    /// 出站统计开关（`MIR2_EGRESS_STATS=1`）：仅记账、零行为改变
+    egress_enabled: bool,
+    /// 每会话出站累计（包个数 × 尺寸），会话收尾时打一行 `EGRESS_STATS`
+    egress_stats: HashMap<SessionId, crate::util::egress_stats::EgressStats>,
 }
 
 impl GateActor {
@@ -92,6 +96,8 @@ impl GateActor {
             world_ref: None,
             social_ref: None,
             max_connections: 1024,
+            egress_enabled: crate::util::egress_stats::egress_stats_enabled(),
+            egress_stats: HashMap::new(),
         }
     }
 
@@ -117,6 +123,13 @@ impl GateActor {
         self.pending_password_change.remove(&session_id);
         // 登出标记随会话清理一并清位（LogOutCleanup 路径的正常出口）
         self.logging_out.remove(&session_id);
+        // 出站统计（`MIR2_EGRESS_STATS=1`）：会话收尾时把该会话的载荷构成打成一行，
+        // 供入场路径定量（CAPACITY.md §4 的「包个数 × 尺寸」）。仅读账，不改行为。
+        if self.egress_enabled {
+            if let Some(stats) = self.egress_stats.remove(&session_id) {
+                info!("EGRESS_STATS session={} {}", session_id, stats.summary(8));
+            }
+        }
         // 踢线实效化：通知读循环退出并关闭 TCP——旧实现只删映射，读循环存活，
         // 被踢连接可继续发 ClientData（靠入口拦截兜底）、关了 TCP 也因
         // ClientDisconnected 守卫早退导致 is_online 永卡
@@ -1622,6 +1635,13 @@ impl Message<SendToClient> for GateActor {
             );
             return;
         };
+        // 出站统计（`MIR2_EGRESS_STATS=1`）：关掉开关时只多一次 bool 判断
+        if self.egress_enabled {
+            self.egress_stats
+                .entry(msg.session_id)
+                .or_default()
+                .record(&msg.data);
+        }
         debug!(
             "SendToClient: session={} bytes={}",
             msg.session_id,

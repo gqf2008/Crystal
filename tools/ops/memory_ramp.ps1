@@ -22,17 +22,37 @@ $Steps = @($StepsCsv.Split(',') | ForEach-Object { [int]$_.Trim() } | Where-Obje
 $ops = Split-Path -Parent $MyInvocation.MyCommand.Path
 $rows = @()
 
+# 日志目录必须先存在：`Start-Process -RedirectStandardOutput` 指向不存在的目录会直接启动失败，
+# 而失败只表现为一屏 PowerShell 报错 + 每档 ready=false（2026-09-24 实测踩到）
+New-Item -ItemType Directory -Force -Path (Join-Path $ops 'out') | Out-Null
+
+# 端口单一真源：把部署副本的 gate 端口对齐到 -Port。
+# 不对齐就会出现「服务端去抢 7000（开发机在用时 bind 失败）→ 日志里没有 'Gate listening'
+# → 本脚本记 ready=false」这种**静默作废**的标定。
+$cfgPath = Join-Path $DeployDir 'config/server.toml'
+if (-not (Test-Path $cfgPath)) {
+    Write-Host "FATAL: 部署副本缺少 $cfgPath，无法对齐 gate 端口（拒绝产出无效标定）"
+    exit 2
+}
+$cfgText = Get-Content $cfgPath -Raw
+$aligned = [regex]::Replace($cfgText, 'listen_addr\s*=\s*"[^"]*"', "listen_addr = `"0.0.0.0:$Port`"")
+if ($aligned -ne $cfgText) { Set-Content -Path $cfgPath -Value $aligned -NoNewline -Encoding utf8 }
+
 foreach ($n in $Steps) {
     $log = Join-Path $ops "out/mem_${Tag}_$n.log"
     $env:RUST_LOG = 'crystal_server=info'
     $proc = Start-Process -FilePath $ExePath -WorkingDirectory $DeployDir `
-        -RedirectStandardOutput $log -RedirectStandardError (Join-Path $ops "out/mem_${Tag}_$n.err.log") -PassThru
+        -RedirectStandardOutput $log -RedirectStandardError (Join-Path $ops "out/mem_${Tag}_$n.err.log") -PassThru -WindowStyle Hidden
     $ready = $false
     for ($i = 0; $i -lt 90; $i++) {
         Start-Sleep 1
         if ((Get-Content $log -ErrorAction SilentlyContinue) -match 'Gate listening') { $ready = $true; break }
     }
-    if (-not $ready) { $rows += [pscustomobject]@{ sessions = $n; ready = $false }; Stop-Process -Id $proc.Id -Force -EA SilentlyContinue; continue }
+    if (-not $ready) {
+        Write-Host "FATAL: 服务端 90s 内未就绪（未见 'Gate listening'）——本轮标定作废，日志：$log"
+        if ($proc) { Stop-Process -Id $proc.Id -Force -EA SilentlyContinue }
+        exit 2
+    }
     # 进图前（无会话）——注意：地图是懒加载的，这里通常还没加载地图
     # 注意：Process 对象会缓存属性值，读数前必须 Refresh，否则整轮阶梯都读到同一个陈旧值
     $proc.Refresh()
