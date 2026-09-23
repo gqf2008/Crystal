@@ -341,7 +341,7 @@ struct ControlQueries<'w, 's> {
         ),
         (With<GroundItem>, Without<LocalPlayer>),
     >,
-    dialog_roots: Query<'w, 's, (&'static DialogRoot, &'static Node, &'static Visibility)>,
+    dialog_roots: Query<'w, 's, (&'static DialogRoot, &'static Node, &'static Visibility, &'static ComputedNode, &'static UiGlobalTransform)>,
     /// dialog_rect RPC：标准关闭钮定位（theme::CloseButton 标记 + 布局后矩形）
     close_buttons: Query<
         'w,
@@ -1574,7 +1574,7 @@ fn apply_control_commands(
             }
             ControlCommand::GetVisible { reply } => {
                 let mut map: std::collections::BTreeMap<String, usize> = Default::default();
-                for (root, _node, vis) in &q.dialog_roots {
+                for (root, _node, vis, ..) in &q.dialog_roots {
                     if *vis == Visibility::Visible {
                         *map.entry(format!("{:?}", root.0)).or_insert(0) += 1;
                     }
@@ -1680,10 +1680,10 @@ fn apply_control_commands(
                     for _ in 0..32 {
                         let Ok(co) = q.child_of.get(cur) else { break };
                         let parent = co.parent();
-                        let pv = q.dialog_roots.get(parent).ok().map(|(_, _, v)| *v);
+                        let pv = q.dialog_roots.get(parent).ok().map(|(_, _, v, ..)| *v);
                         let pv2 = q.all_visibility.get(parent).ok().copied();
                         anc.push_str(&format!(" >{parent:?} vis={pv2:?}"));
-                        if let Ok((root, _n, rvis)) = q.dialog_roots.get(parent) {
+                        if let Ok((root, _n, rvis, ..)) = q.dialog_roots.get(parent) {
                             chain = format!("{:?}/{:?}", root.0, rvis);
                             break;
                         }
@@ -1708,11 +1708,16 @@ fn apply_control_commands(
                     let mut cur = btn;
                     let mut owner: Option<DialogKind> = None;
                     let mut root_node: Option<&Node> = None;
+                    // 布局后矩形（已除 scale）：存数值避免借用生命周期问题
+                    let mut root_rect_live: Option<(f32, f32, f32, f32)> = None;
                     for _ in 0..32 {
-                        if let Ok((root, n, vis)) = q.dialog_roots.get(cur) {
+                        if let Ok((root, n, vis, cn, gtf)) = q.dialog_roots.get(cur) {
                             if *vis == Visibility::Visible {
                                 owner = Some(root.0);
                                 root_node = Some(n);
+                                let sz = cn.size() / scale;
+                                let tl = gtf.translation / scale;
+                                root_rect_live = Some((tl.x - sz.x * 0.5, tl.y - sz.y * 0.5, sz.x, sz.y));
                             }
                             break;
                         }
@@ -1724,9 +1729,16 @@ fn apply_control_commands(
                         let size = node.size();
                         // rx/ry/rw/rh：根面板的逻辑矩形（拖动测试取空区按点此，
                         // 不可靠的纯法宝关闭钮坐标测不了空白背景）
-                        let (rx, ry, rw, rh) = root_node
-                            .map(|n| crate::game::dialogs::node_rect(n))
-                            .unwrap_or((0.0, 0.0, 0.0, 0.0));
+                        // P3-2b/⑤ 共同前置（2026-09-23）：根矩形必须取**布局后**的矩形。
+                        // 旧写法走 `node_rect(&Node)`（CSS left/top），对靠布局定位的根（如 NPC 窗）
+                        // 恒返回 (0,0) → 行级点击落到屏幕左上（跨图与开仓库都栽在这）。
+                        // 现改用 ComputedNode::size + UiGlobalTransform::translation（与 ui_picking 同坐标系，÷scale=逻辑）。
+                        let (rx, ry, rw, rh) = match root_rect_live {
+                            Some(r) => r,
+                            _ => root_node
+                                .map(|n| crate::game::dialogs::node_rect(n))
+                                .unwrap_or((0.0, 0.0, 0.0, 0.0)),
+                        };
                         found = Some(json!({
                             "ok": true, "kind": format!("{kind:?}"),
                             "cx": c.x, "cy": c.y, "w": size.x, "h": size.y,
