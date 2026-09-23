@@ -7277,6 +7277,16 @@ impl Message<SetPlayerPosition> for PlayerActor {
         self.state.direction = msg.direction;
         if let Some(mi) = msg.map_index {
             self.state.map_index = mi;
+            // 世界侧的 `PlayerRecord.map_index` 缓存**只在这里维护**（单一漏斗）。
+            // 换图的所有调用点（27 处）最终都进这个 handler，因此这里回投一次即可保证
+            // 广播/同图筛选读到的地图与 actor 真值一致——见 WorldActor::PlayerMapChanged 的文档。
+            let _ = self
+                .world_ref
+                .tell(crate::actors::world::PlayerMapChanged {
+                    session_id: self.state.session_id,
+                    map_index: mi,
+                })
+                .try_send();
         }
         if let Some(mounted) = msg.is_mounted {
             self.state.is_mounted = mounted;

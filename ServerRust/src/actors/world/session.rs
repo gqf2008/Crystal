@@ -880,6 +880,8 @@ impl Message<StartGameRequest> for WorldActor {
                 last_colour: 0,
                 object_id: loaded_state.object_id,
                 world_map_setup_sent: false,
+                // 进图时的地图（换图后由 PlayerActor 的 SetPlayerPosition 回投维护）
+                map_index: Some(loaded_state.map_index),
             },
         );
 

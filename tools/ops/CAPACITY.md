@@ -99,6 +99,35 @@ CPU 密集）且在 AccountActor 串行处理——100/200 并发登录 p95 1.36
 （O(N) 邮箱往返，20 人同图即 20 次 ask/广播），加上 `StartGame` 由 WorldActor 串行建号发图。
 这两项是下一轮的明确目标（③ 缓存 `map_index` 进 `PlayerRecord`；② 拆 `StartGame`）。
 
+### 3.4 ③ map_index 缓存（去掉每目标 ask）之后
+
+改法：`PlayerRecord.map_index` 缓存 + **单一漏斗**维护——`PlayerActor::SetPlayerPosition` 每次应用
+`map_index` 就 `tell(PlayerMapChanged)` 回投世界侧（换图的所有 27 处调用点最终都进这个 handler，
+所以不可能"漏更新一处"）；读取方 `broadcast_to_map` / `same_map_players` 命中缓存即不问 actor，
+未命中才回退 ask；debug 构建下仍与 actor 真值对拍（漏更新会在调试运行里炸出来）。
+
+| 并发 | 成功（① 后 → ③ 后） | 丢包（① 后 → ③ 后） |
+|---|---|---|
+| 20 | 20/20 → **20/20** | 0 → 668 |
+| 30 | 22/30 → **28~30/30** | 337 → 229 |
+| 50 | 30/50 → **28~31/50** | 3443 → 301 |
+
+**这是一次真实取舍，数据两条都摆出来**：③ 去掉了 O(N) 往返、会话成功率明显上升
+（30 会话由 22/30 到 28~30/30），但第一轮测出**丢包也上升**（20 会话 0→992、30 会话 337→3910）
+——因为原先每个目标的 ask 起了**意外的节流**作用，去掉后生产端比 gate 出队快，gate 邮箱满即丢。
+（复用性：这正是"用错误的东西当节流器"的典型，删掉它必须同时补上正确的背压。）
+
+**jev 判定（一次校验）**：`keep_and_fix_consumer` 0.980 / 置信 0.960（`keep_and_throttle` 0.010、
+`revert_and_fix_consumer` 0.010）；并且「条目级丢包对玩家可见」p=0.740。
+故：**保留 ③**，把消费端/tick 级合并作为下一步（而不是回滚）。
+
+**下一步的真实约束（本轮新发现，必须记下来）**：消费端并非"随便加个节流就行"——
+`GateActor` 处理 `StartGame` 时**故意**内联 `await world_ref.ask(...)`，因为 gate 邮箱的 FIFO 顺序
+保证了"顶号解绑"发生在后续 `ClientDisconnected`/`LogOutCleanup` 之前（代码注释里写明这是替代
+旧异步 tell 的确定性顺序，否则会把新会话的账号误置离线）。所以 ②（把 StartGame 的建号+发图
+挪出 gate 串行路径）**不能简单 spawn 了事**，必须先定"解绑归谁做"（把 `session_usernames` 的
+所有权/顺序契约重新设计），否则会复活一个已经修过的账号离线竞态缺陷。
+
 ## 4. 内存
 
 | 状态 | RSS |
