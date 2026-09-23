@@ -740,27 +740,13 @@ impl Plugin for ControlPlugin {
             app.add_systems(PostUpdate, closebtn_vis_change_watch_post);
             app.add_systems(PostUpdate, vis_batch_watch_post);
         }
-        // 🐛 实机交互验证诊断：抓「关闭钮 Visibility 被谁写入」——on_insert 钩子打印回溯
-        #[cfg(debug_assertions)]
-        {
-            app.world_mut()
-                .register_component_hooks::<Visibility>()
-                .on_insert(|mut world, ctx| {
-                    let has_close = world
-                        .entity(ctx.entity)
-                        .contains::<crate::ui::theme::CloseButton>();
-                    if has_close {
-                        let vis = world.entity(ctx.entity).get::<Visibility>().copied();
-                        let bt = std::backtrace::Backtrace::force_capture();
-                        tracing::warn!(
-                            "🪝 closebtn {:?} Visibility INSERT {:?}\n{}",
-                            ctx.entity,
-                            vis,
-                            bt
-                        );
-                    }
-                });
-        }
+        // 注（2026-09-24 移除）：这里曾注册过一个 debug-only 的 `Visibility` on_insert 诊断钩子
+        // （抓「关闭钮 Visibility 被谁写入」，每次都 `Backtrace::force_capture()` 打全文回溯）。
+        // 它跑在 UI 实体 spawn 的命令应用路径上（`spawn_at_with_caller → trigger_on_insert`），
+        // 实机上层**间歇 panic**：stack 结束在这条 closure 里，进程直接退出 ⇒ 客户端进游戏即崩、
+        // 没有本地玩家（夹具侧看到 `state`/`bag_probe` 全空）。同时它给每次进场刷 396KB 日志。
+        // 关闭钮的可见性问题早已在其它 PR 修掉，这条诊断不必再常驻；门禁见
+        // `spawning_close_button_ui_does_not_panic_via_component_hooks`。
     }
 }
 
@@ -3461,6 +3447,29 @@ mod tests {
         assert!(
             quest_cells(&vec![None, None]).is_empty(),
             "背包有货时任务格仍必须是空"
+        );
+    }
+
+    /// 门禁（2026-09-24 实机缺陷：客户端偶发**进场即崩**）：带 `CloseButton` 的 UI 实体 spawn 时
+    /// **不得**因为组件钩子 panic。曾经的 debug-only `Visibility` on_insert 诊断钩子（打印全文回溯）
+    /// 就挂在这条命令应用路径上，间歇 panic ⇒ 进程退出、没有本地玩家、玩家侧卡登录/黑屏。
+    /// 阳性对照：把那个钩子加回 `ControlPlugin::build` → 本测试立即红（钩子内 panic 会冒泡出来）。
+    #[test]
+    fn spawning_close_button_ui_does_not_panic_via_component_hooks() {
+        use bevy::prelude::*;
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        // 真插件（含钩子注册路径）；端口绑定失败只打日志、不影响本测试
+        app.add_plugins(ControlPlugin);
+        app.update();
+        let e = app
+            .world_mut()
+            .spawn((crate::ui::theme::CloseButton, Visibility::Visible))
+            .id();
+        app.update();
+        assert!(
+            app.world().get_entity(e).is_ok(),
+            "CloseButton + Visibility 的 spawn 必须正常落地（钩子 panic 会让这里拿不到实体）"
         );
     }
 
