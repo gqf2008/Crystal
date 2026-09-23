@@ -5381,13 +5381,13 @@ impl Message<ChatRequest> for WorldActor {
                         // @die（C# case "DIE"：自杀）
                         "DIE" => {
                             if let Ok(Some(st)) = record.actor_ref.ask(GetPlayerState).await {
+                                // C# `case "DIE": LastHitter = null; Die();`——**直接死亡**，
+                                // 不走伤害路径：走 TakeDamage{i32::MAX} 会被 Protection/MP 吸伤判定
+                                // 拦下（MP>0 + 保护装 → 只扣 MP、角色不死），实机表现为
+                                // 「@die 后 hp 仍满」，l5j 复活夹具 died=FAIL。
                                 let died = record
                                     .actor_ref
-                                    .ask(crate::actors::player::TakeDamage {
-                                        attacker_id: 0,
-                                        attacker_session: 0,
-                                        damage: i32::MAX,
-                                    })
+                                    .ask(crate::actors::player::ForceDie)
                                     .await
                                     .unwrap_or(false);
                                 if died {

@@ -1833,6 +1833,55 @@ pub struct TakeDamage {
     pub damage: i32,
 }
 
+/// C# `SpecialItemMode.Protection` 吸伤判定（`HumanObject.ChangeHP → ChangeMP`）：
+/// 装备含 Protection 且 MP>0 时，伤害全部由 MP 吸收、**不致死**。
+///
+/// 注意这**只属于伤害路径**：C# 的 GM `@die` 走 `case "DIE": Die();`
+/// （`Server/MirObjects/PlayerObject.cs:3454`）——直接死亡，不经过本判定。
+/// 评测口径：`@die` 必须对「带 Protection 且 MP>0」的角色同样致命。
+fn protection_absorbs(mp: i32, has_protection_item: bool, damage: i32) -> bool {
+    mp > 0 && damage > 0 && has_protection_item
+}
+
+/// 装备里是否有 `SpecialItemMode.Protection`（C# `SpecialMode.HasFlag`）
+fn inventory_has_protection(inventory: &PlayerInventory) -> bool {
+    inventory.equipment.iter().flatten().any(|it| {
+        it.info
+            .as_ref()
+            .map(|i| {
+                i.unique
+                    .contains(mir2_shared::enums::SpecialItemMode::PROTECTION)
+            })
+            .unwrap_or(false)
+    })
+}
+
+/// GM `@die`（C# `Server/MirObjects/PlayerObject.cs:3454` `case "DIE": LastHitter = null; Die();`）
+/// ——**直接进入死亡流程**，不经伤害/吸伤路径。
+///
+/// 为什么单开一条消息：此前 `@die` 发 `TakeDamage { damage: i32::MAX }`，会被上面的
+/// Protection/MP 吸伤判定拦下（MP>0 + 保护装 → 只扣 MP、不死），实机表现为
+/// 「GM @die 之后 hp 仍满、角色不死」，l5j 复活夹具因此 `died=FAIL`。
+pub struct ForceDie;
+
+impl Message<ForceDie> for PlayerActor {
+    type Reply = bool;
+
+    async fn handle(
+        &mut self,
+        _msg: ForceDie,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        if self.state.is_dead {
+            return false;
+        }
+        // C# `Die()` 首句即按死处理：把 HP 归零后走同一条死亡处理路径
+        // （含复活戒指早退——C# `PlayerObject.Die()` 同样先查 Revival）。
+        self.state.hp = 0;
+        self.handle_death(0).await
+    }
+}
+
 impl Message<AttackRequest> for PlayerActor {
     type Reply = Option<AttackResult>;
 
@@ -1923,16 +1972,11 @@ impl Message<TakeDamage> for PlayerActor {
         // #942：C# SpecialItemMode.Protection——装备含 Protection 且 MP>0 时伤害全部由 MP 吸收
         // （HumanObject.ChangeHP → ChangeMP(amount)，不致死；Struck 动画照常）
         if damage > 0
-            && self.state.mp > 0
-            && self.state.inventory.equipment.iter().flatten().any(|it| {
-                it.info
-                    .as_ref()
-                    .map(|i| {
-                        i.unique
-                            .contains(mir2_shared::enums::SpecialItemMode::PROTECTION)
-                    })
-                    .unwrap_or(false)
-            })
+            && protection_absorbs(
+                self.state.mp,
+                inventory_has_protection(&self.state.inventory),
+                damage,
+            )
         {
             self.state.mp = (self.state.mp - damage).max(0);
             let mut struck_body = Vec::new();
@@ -2052,112 +2096,7 @@ impl Message<TakeDamage> for PlayerActor {
         }
         // 死亡处理
         if self.state.hp <= 0 && !self.state.is_dead {
-            // C# Die()：复活戒指（SpecialItemMode.Revival）——回满血、扣 1000 耐久、5 分钟冷却
-            if let Some(ring_idx) = self.try_revival_ring() {
-                let now_ms = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .map(|d| d.as_millis() as i64)
-                    .unwrap_or(0);
-                if now_ms >= self.state.last_revival_time {
-                    let (ring_uid, ring_dura) = {
-                        let ring = self.state.inventory.equipment[ring_idx].as_mut().unwrap();
-                        ring.current_dura = ring.current_dura.saturating_sub(1000);
-                        ring.dura_changed = true;
-                        (ring.unique_id, ring.current_dura)
-                    };
-                    self.state.last_revival_time = now_ms + 300_000;
-                    self.state.hp = self.state.max_hp;
-                    // S.DuraChanged（C# Die：item.CurrentDura -= 1000）
-                    let dc = mir2_shared::packets::server::experience::DuraChanged {
-                        unique_id: ring_uid,
-                        current_dura: ring_dura,
-                    };
-                    let mut dc_body = Vec::new();
-                    if dc.write_body(&mut dc_body).is_ok() {
-                        if let Err(e) = self
-                            .gate_ref
-                            .tell(SendToClient {
-                                session_id: self.state.session_id,
-                                data: build_packet_bytes(
-                                    mir2_shared::enums::ServerPacketIds::DuraChanged as i16,
-                                    &dc_body,
-                                ),
-                            })
-                            .try_send()
-                        {
-                            warn!(
-                                "gate mailbox full: SendToClient dropped (session={} opcode={:?} err={})",
-                                self.state.session_id,
-                                crate::actors::world::dropped_send_opcode(&e),
-                                e
-                            );
-                        }
-                    }
-                    // S.HealthChanged 回满血
-                    let mut hb = Vec::new();
-                    hb.extend_from_slice(&(self.state.hp as u32).to_le_bytes());
-                    hb.extend_from_slice(&(self.state.mp as u32).to_le_bytes());
-                    if let Err(e) = self
-                        .gate_ref
-                        .tell(SendToClient {
-                            session_id: self.state.session_id,
-                            data: build_packet_bytes(
-                                mir2_shared::enums::ServerPacketIds::HealthChanged as i16,
-                                &hb,
-                            ),
-                        })
-                        .try_send()
-                    {
-                        warn!(
-                            "gate mailbox full: SendToClient dropped (session={} opcode={:?} err={})",
-                            self.state.session_id,
-                            crate::actors::world::dropped_send_opcode(&e),
-                            e
-                        );
-                    }
-                    self.send_equipment_changed();
-                    debug!(
-                        "Player {} revived by ring (dura={})",
-                        self.state.name, ring_dura
-                    );
-                    return false;
-                }
-            }
-            self.state.is_dead = true;
-            // #1319：C# Die()——清 Buff（逐 buff 下发 S.RemoveBuff）+ 毒清空 + 灰名重置
-            self.clear_death_state();
-            debug!(
-                "Player {} died (attacker={})",
-                self.state.name, msg.attacker_id
-            );
-
-            // 发送 S.Death 包给死亡玩家（C# Shared/ServerPackets.cs Death: [Location Point][Direction u8]）
-            // 之前误发空 body，客户端 read_body 解析失败 → 不进入死亡状态（#55 实测发现）
-            let mut death_body = Vec::new();
-            death_body.extend_from_slice(&self.state.x.to_le_bytes());
-            death_body.extend_from_slice(&self.state.y.to_le_bytes());
-            death_body.push(self.state.direction);
-            if let Err(e) = self
-                .gate_ref
-                .tell(SendToClient {
-                    session_id: self.state.session_id,
-                    data: build_packet_bytes(
-                        mir2_shared::enums::ServerPacketIds::Death as i16,
-                        &death_body,
-                    ),
-                })
-                .try_send()
-            {
-                warn!(
-                    "gate mailbox full: SendToClient dropped (session={} opcode={:?} err={})",
-                    self.state.session_id,
-                    crate::actors::world::dropped_send_opcode(&e),
-                    e
-                );
-            }
-            // S.ObjectDied 广播由 WorldActor 的 combat.rs 死亡分支处理（已实现）
-
-            return true;
+            return self.handle_death(msg.attacker_id).await;
         }
 
         // 发送 HealthChanged
@@ -2185,6 +2124,119 @@ impl Message<TakeDamage> for PlayerActor {
             }
         }
         false
+    }
+}
+
+impl PlayerActor {
+    /// C# `PlayerObject.Die()`（`Server/MirObjects/PlayerObject.cs:578`）——死亡处理：
+    /// 复活戒指早退 → 清死亡态（Buff/毒/灰名）→ 下发 S.Death。
+    /// 返回 true = 真的进入死亡态；false = 被复活戒指救回。
+    /// `TakeDamage`（被打死）与 GM `@die`（`ForceDie` 直接死亡）共用本方法，
+    /// 两条路径行为必须一致——C# `PlayerObject.Die()` 也是同一个 Die()。
+    async fn handle_death(&mut self, attacker_id: u32) -> bool {
+        // C# Die()：复活戒指（SpecialItemMode.Revival）——回满血、扣 1000 耐久、5 分钟冷却
+        if let Some(ring_idx) = self.try_revival_ring() {
+            let now_ms = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_millis() as i64)
+                .unwrap_or(0);
+            if now_ms >= self.state.last_revival_time {
+                let (ring_uid, ring_dura) = {
+                    let ring = self.state.inventory.equipment[ring_idx].as_mut().unwrap();
+                    ring.current_dura = ring.current_dura.saturating_sub(1000);
+                    ring.dura_changed = true;
+                    (ring.unique_id, ring.current_dura)
+                };
+                self.state.last_revival_time = now_ms + 300_000;
+                self.state.hp = self.state.max_hp;
+                // S.DuraChanged（C# Die：item.CurrentDura -= 1000）
+                let dc = mir2_shared::packets::server::experience::DuraChanged {
+                    unique_id: ring_uid,
+                    current_dura: ring_dura,
+                };
+                let mut dc_body = Vec::new();
+                if dc.write_body(&mut dc_body).is_ok() {
+                    if let Err(e) = self
+                        .gate_ref
+                        .tell(SendToClient {
+                            session_id: self.state.session_id,
+                            data: build_packet_bytes(
+                                mir2_shared::enums::ServerPacketIds::DuraChanged as i16,
+                                &dc_body,
+                            ),
+                        })
+                        .try_send()
+                    {
+                        warn!(
+                                "gate mailbox full: SendToClient dropped (session={} opcode={:?} err={})",
+                                self.state.session_id,
+                                crate::actors::world::dropped_send_opcode(&e),
+                                e
+                            );
+                    }
+                }
+                // S.HealthChanged 回满血
+                let mut hb = Vec::new();
+                hb.extend_from_slice(&(self.state.hp as u32).to_le_bytes());
+                hb.extend_from_slice(&(self.state.mp as u32).to_le_bytes());
+                if let Err(e) = self
+                    .gate_ref
+                    .tell(SendToClient {
+                        session_id: self.state.session_id,
+                        data: build_packet_bytes(
+                            mir2_shared::enums::ServerPacketIds::HealthChanged as i16,
+                            &hb,
+                        ),
+                    })
+                    .try_send()
+                {
+                    warn!(
+                        "gate mailbox full: SendToClient dropped (session={} opcode={:?} err={})",
+                        self.state.session_id,
+                        crate::actors::world::dropped_send_opcode(&e),
+                        e
+                    );
+                }
+                self.send_equipment_changed();
+                debug!(
+                    "Player {} revived by ring (dura={})",
+                    self.state.name, ring_dura
+                );
+                return false;
+            }
+        }
+        self.state.is_dead = true;
+        // #1319：C# Die()——清 Buff（逐 buff 下发 S.RemoveBuff）+ 毒清空 + 灰名重置
+        self.clear_death_state();
+        debug!("Player {} died (attacker={})", self.state.name, attacker_id);
+
+        // 发送 S.Death 包给死亡玩家（C# Shared/ServerPackets.cs Death: [Location Point][Direction u8]）
+        // 之前误发空 body，客户端 read_body 解析失败 → 不进入死亡状态（#55 实测发现）
+        let mut death_body = Vec::new();
+        death_body.extend_from_slice(&self.state.x.to_le_bytes());
+        death_body.extend_from_slice(&self.state.y.to_le_bytes());
+        death_body.push(self.state.direction);
+        if let Err(e) = self
+            .gate_ref
+            .tell(SendToClient {
+                session_id: self.state.session_id,
+                data: build_packet_bytes(
+                    mir2_shared::enums::ServerPacketIds::Death as i16,
+                    &death_body,
+                ),
+            })
+            .try_send()
+        {
+            warn!(
+                "gate mailbox full: SendToClient dropped (session={} opcode={:?} err={})",
+                self.state.session_id,
+                crate::actors::world::dropped_send_opcode(&e),
+                e
+            );
+        }
+        // S.ObjectDied 广播由 WorldActor 的 combat.rs 死亡分支处理（已实现）
+
+        true
     }
 }
 
@@ -8235,6 +8287,29 @@ fn reset_step_counter_if_idle(step_counter: &mut i32, cell_time_ms: i64, now_ms:
 
 #[cfg(test)]
 mod tests {
+    /// GM `@die` 必须**绕过** Protection/MP 吸伤：C# `Server/MirObjects/PlayerObject.cs:3454`
+    /// `case "DIE": LastHitter = null; Die();` —— 直接 `Die()`，不经伤害路径。
+    ///
+    /// 实机踩到：`@die` 原发 `TakeDamage{damage: i32::MAX}`，带 Protection 且 MP>0 的角色
+    /// 只扣 MP 不死 → 「@die 后 hp 仍满」，l5j 复活夹具 `died=FAIL`。
+    /// 本测试钉住吸伤规则本身（含 true 分支）；`ForceDie` 的端到端由 l5j 实机夹具钉住
+    /// （真实角色档就是带保护装 + MP>0 的那个）。
+    #[test]
+    fn protection_absorption_rule_is_damage_path_only() {
+        // 伤害路径：MP>0 + 保护装 → 吸伤（照 C# ChangeHP→ChangeMP，不致死）
+        assert!(super::protection_absorbs(2000, true, i32::MAX));
+        // 三要素缺一即不吸伤
+        assert!(
+            !super::protection_absorbs(0, true, i32::MAX),
+            "无 MP 不吸伤"
+        );
+        assert!(
+            !super::protection_absorbs(2000, false, i32::MAX),
+            "无保护装不吸伤"
+        );
+        assert!(!super::protection_absorbs(2000, true, 0), "非正伤害不吸伤");
+    }
+
     /// #2892 批D 单元②：C# 三种隐身（Hiding/MoonLight/DarkBody）必须是**三个不同 tag**，
     /// #2892 批D 单元②：C# 把「药水攻击加成（`Impact`，图标 249）」与「战士怒气（`Rage`，图标 49）」
     /// 分成两个 BuffType；英雄 `UltimateEnhancer` 走的 `AttackBoost` 另给「终极强化」(图标 35)。
