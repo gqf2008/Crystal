@@ -366,6 +366,26 @@ impl ParsedScript {
         self.index.get(lower).and_then(|&i| self.sections.get(i))
     }
 
+    /// 把「**只有段体、没有段头**」的 DB 脚本页补上段头，使其可被 `ParsedScript::parse` 解析。
+    ///
+    /// 背景（上线阻塞修复，2026-09-23）：`npc_scripts` 表按段存页，页名在 `page_name` 列
+    /// （如 `[@MAIN]`），**正文本身不含 `[@键]` 头**；直接 parse 得到 `sections=[]`，
+    /// 随后服务端走兜底问候「XXX：你想说什么？」——所有 NPC 对话都没有选项可点
+    /// （跨图 Service 菜单 / 买卖入口 / 仓库 <Access/@Storage> / 任务接取全被卡住）。
+    ///
+    /// `key` 允许带 `[@...]` 包裹，本函数会剥掉再包一层，避免出现 `[[@MAIN]]` 这种双括号段头。
+    pub fn wrap_section_body(key: &str, body: &str) -> String {
+        let bare = key.trim_matches(|c: char| c == '[' || c == ']' || c == '@');
+        format!("[{}]{}{}", bare, '\n', body)
+    }
+
+    /// 诊断（临时）：列出已解析脚本的全部段名（小写索引键）。
+    pub fn section_names(&self) -> Vec<String> {
+        let mut v: Vec<String> = self.index.keys().cloned().collect();
+        v.sort();
+        v
+    }
+
     /// 入口段（@main/@MAIN）
     pub fn main_section(&self) -> Option<&Section> {
         self.find("main")
@@ -5261,6 +5281,28 @@ You don't have enough Gold!
         .collect();
         let names = parse_recipe_names(&lines);
         assert_eq!(names, vec!["强效金创药", "修复油"]);
+    }
+
+    /// 门禁（2026-09-23）：段体补头必须产生**可被 find() 命中的段**。
+    ///
+    /// 阳性对照（实做）：把 `wrap_section_body` 改成原样返回 body → 本测试立即红。
+    #[test]
+    fn wrap_section_body_makes_section_findable() {
+        let body = "#SAY\nHello traveller.\n<Access/@Storage> Storage";
+        // 原始段体：解析不出任何段（这就是实机诊断 sections=[] 的成因）
+        assert!(
+            super::ParsedScript::parse(body).section_names().is_empty(),
+            "段体本身不应解析出段"
+        );
+        // 补头后可被 find("MAIN") 命中（大小写不敏感、允许带 [@ 包裹）
+        let wrapped = super::ParsedScript::wrap_section_body("[@MAIN]", body);
+        let parsed = super::ParsedScript::parse(&wrapped);
+        assert!(
+            parsed.find("MAIN").is_some(),
+            "补头后必须能命中 MAIN 段，section_names={:?}",
+            parsed.section_names()
+        );
+        assert!(parsed.find("main").is_some(), "find 应大小写不敏感");
     }
 
     #[test]
