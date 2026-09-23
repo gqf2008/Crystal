@@ -124,6 +124,13 @@ pub fn build_buy_item(item_index: u64, count: u16) -> mir2_shared::packets::clie
     }
 }
 
+/// 构造出售包：与**背包里 Alt+左键快速出售**同一条路径（`dialogs/inventory.rs:2459`
+/// 发 `SellItem{unique_id, count}`）——只多一层动作 RPC，便于验收夹具按状态判成交。
+/// `unique_id` 必须是**背包实例的 unique_id**（不是 item_index：出售按实例定位、要拆堆叠/清实例）。
+pub fn build_sell_item(unique_id: u64, count: u16) -> mir2_shared::packets::client::npc::SellItem {
+    mir2_shared::packets::client::npc::SellItem { unique_id, count }
+}
+
 /// 已占用格列表 `(格号, 名称)`——存取闭环的夹具靠它拿到**准确的 From/To 格号**
 /// （`StoreItem`/`TakeBackItem` 的 from/to 就是格号，猜格号会得到"回包 success 但两边都不动"）。
 pub fn occupied_cells(
@@ -133,6 +140,19 @@ pub fn occupied_cells(
         .iter()
         .enumerate()
         .filter_map(|(i, s)| s.as_ref().map(|it| (i, it.name.clone())))
+        .collect()
+}
+
+/// 已占用格列表 `(格号, 名称, unique_id)`——出售判据需要**背包实例 unique_id**
+/// （`C.SellItem.UniqueID` 按实例定位；拿 item_index 会卖错实例或找不到物品）。
+/// unique_id 缺失/为 0 统一记 0，夹具据此跳过该格。
+pub fn occupied_cells_with_uid(
+    items: &[Option<crate::game::dialogs::inventory::InvItem>],
+) -> Vec<(usize, String, u64)> {
+    items
+        .iter()
+        .enumerate()
+        .filter_map(|(i, s)| s.as_ref().map(|it| (i, it.name.clone(), it.unique_id)))
         .collect()
 }
 
@@ -252,6 +272,13 @@ enum ControlCommand {
     /// 服务端仍按原版校验：必须先打开购买页（`[@BUYSELL]/[@BUY]/...`）且商品在该 NPC 销售列表内。
     BuyItem {
         item_index: u64,
+        count: u16,
+    },
+    /// ③ 出售动作（现成包 `C.SellItem`）：与背包里 **Alt+左键快速出售** 同一路径
+    /// （`game/dialogs/inventory.rs` 在 `npc_goods.visible` 时发 `SellItem{unique_id,count}`）。
+    /// 服务端仍按原版校验：必须先与买卖 NPC 对话且在其 DataRange(16) 内。
+    SellItem {
+        unique_id: u64,
         count: u16,
     },
     /// ② 复活动作（现成包 `C.TownRevive`，空体）：与死亡提示框的「回城复活」按钮同一路径。
@@ -979,6 +1006,19 @@ fn handle_conn(mut stream: std::net::TcpStream, tx: Sender<ControlCommand>) {
                 } else {
                     let _ = tx.send(ControlCommand::BuyItem { item_index, count });
                     json!({"ok": true, "item_index": item_index, "count": count})
+                }
+            }
+            "sell_item" => {
+                let unique_id = params
+                    .get("unique_id")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0);
+                let count = params.get("count").and_then(|v| v.as_u64()).unwrap_or(1) as u16;
+                if unique_id == 0 {
+                    json!({"error": "missing unique_id（背包实例的 unique_id，非 item_index）"})
+                } else {
+                    let _ = tx.send(ControlCommand::SellItem { unique_id, count });
+                    json!({"ok": true, "unique_id": unique_id, "count": count})
                 }
             }
             // ④ 交任务：finish_quest {quest_index, selected_item_index?（默认 -1 = 不选奖励）}
@@ -2319,9 +2359,9 @@ fn apply_control_commands(
                         "exp": q.progression.single().map(|p| p.exp).unwrap_or(0),
                         "max_exp": q.progression.single().map(|p| p.max_exp).unwrap_or(0),
                         // 格号 → 名称：夹具据此挑存取源格（不用猜）
-                        "occupied": occupied_cells(&inv.items)
+                        "occupied": occupied_cells_with_uid(&inv.items)
                             .into_iter()
-                            .map(|(c, n)| json!({"cell": c, "name": n}))
+                            .map(|(c, n, uid)| json!({"cell": c, "name": n, "unique_id": uid}))
                             .collect::<Vec<_>>(),
                     }),
                     Err(_) => json!({"ok": false, "error": "no local player inventory"}),
@@ -2524,6 +2564,11 @@ fn apply_control_commands(
                 // 与商品窗「购买」按钮发的**同一个包**（C# 客户端 BuyItem.ItemIndex = SelectedItem.UniqueID）
                 net.send_packet(&build_buy_item(item_index, count));
                 tracing::info!("🎮 control buy_item: item={item_index} count={count}");
+            }
+            ControlCommand::SellItem { unique_id, count } => {
+                // 与背包 Alt+左键快速出售**同一个包**（`dialogs/inventory.rs` 同款）
+                net.send_packet(&build_sell_item(unique_id, count));
+                tracing::info!("🎮 control sell_item: unique_id={unique_id} count={count}");
             }
             ControlCommand::TownRevive => {
                 // 与死亡提示框「回城复活」按钮发的**同一个包**（C# TownRevive，空体）
@@ -3160,6 +3205,17 @@ mod tests {
     /// 会按单价对不上，得排查很久才想到是动作侧吞参数。
     ///
     /// 阳性对照（实做）：把 `count` 改成常量 1 → 本测试立即红。
+    #[test]
+    fn build_sell_item_carries_unique_id_and_count() {
+        // 出售按**背包实例 unique_id** 定位（不是 item_index）：拿 item_index 去卖会
+        // 卖错实例或报找不到物品，而 RPC 回执仍是 ok——所以字段必须原样钉住。
+        // 阳性对照（实做）：把 unique_id 换成 item_index（或写死 0）→ 本测试立即红。
+        let pkt = build_sell_item(4242, 3);
+        assert_eq!(pkt.unique_id, 4242, "必须是背包实例 unique_id");
+        assert_eq!(pkt.count, 3, "数量必须原样发出（吞成 1 会少卖少收钱）");
+        assert_eq!(build_sell_item(7, 1).count, 1);
+    }
+
     #[test]
     fn build_buy_item_carries_count_and_panel_type() {
         let pkt = build_buy_item(317, 3);
