@@ -1,21 +1,31 @@
 # l5g_quest_finish.ps1 — ④ 任务闭环（交付段）：接取 → 到交付 NPC 处 → FinishQuest → 奖励到账
 #
-# 选任务 27（Errands）的理由（都能对着数据核）：
-#   * Envir/Quests/27.txt 的目标段为空（无 KillTasks/ItemTasks/CarryItems/FlagTasks），
+# 任务怎么选（都能对着数据核）：候选池里的任务满足——
+#   * 目标段为空（Envir/Quests/<id>.txt 无 KillTasks/ItemTasks/CarryItems/FlagTasks 行），
 #     而服务端 `QuestLog::is_progress_complete()` 是 `progress.iter().all(current>=target)`
-#     —— 空进度**恒真**，所以它是"走到 Scout 面前即可交付"的任务。
-#   * 奖励明确：[@GoldReward] 1200（判据用金币 delta，比 exp 更直观）。
-#   * 交付 NPC 由 NPC 脚本 [QUESTS] 段决定（`-27` = 交付）：DB npc_scripts 里 npc_index=52
-#     的 [QUESTS] = ["-27","35","-37"] → npc_infos idx=52 = MongchonScout_Brian，
-#     map_infos idx=14 = '0100'(Kitchen) @ (4,10)。
+#     —— 空进度**恒真**，所以它们是"走到交付 NPC 面前即可交付"的任务。
+#   * 文件奖励 [@GoldReward]/[@ExpReward] 均 > 0（判据用 delta 不写死数值——服务端按**实例**发）。
+#   * quest_infos.required_quest = 0（无前置链）、required_class = 31（全职业）、required_min_level ≤ 31。
+#   * NPC 脚本 [QUESTS] 段有 `-<id>`（交付 NPC 可推导）。
+# 池（2026-09-23 扫 Daneo1989/Envir/Quests + DB 得出）：43,51,63,79,93,97,102,110,117
 #
-# 判据（取状态）：A) 接取前 journal 无 27 → B) accept_quest 后 taken 含 27
-#               C) 到交付 NPC 处 finish_quest → taken 不再含 27（服务端 CompleteQuest 生效）
-#               D) 奖励：gold +1200（bag_probe.gold delta）
+# 为什么不能写死一个任务：交付是**永久态**（completed_quests 落行后服务端拒再接，
+# 「该任务已完成」）——写死 27 的初版跑绿一次后第二轮起必然 accept=FAIL。
+# 所以默认 -QuestId 0 = 自动选：按池顺序挑「本角色未完成」的第一个；
+# 已接未交的（上一轮中断残留）直接续跑交付段。池耗尽会 exit 4 并提示扩池。
+#
+# 等待全是「轮询到条件」不是固定 sleep：冷服务端/密集图客户端首次生成对象要数秒
+# （实测 map 2 生成 717 个对象期间 finish_quest 完成用了 ~4s），固定 3s 会让探针
+# 读在奖励到达之前 → 假 FAIL（奖励其实到了，DB 与客户端日志可核）。
+#
+# 判据（取状态）：A) 接取后 taken 含该任务（轮询 ≤15s）
+#               C) 到交付 NPC 处 finish_quest → taken 不再含它（轮询 ≤20s，服务端 CompleteQuest 生效）
+#               D) 奖励：gold 与 exp delta 同时为正（轮询 ≤20s，bag_probe）
 param(
     [string]$User = 'test',
     [string]$Pass = '123456',
-    [int]$QuestId = 27,
+    # 0 = 自动选（默认）：按候选池挑本角色未完成的第一个；显式给任务号则用它。
+    [int]$QuestId = 0,
     # 交付点默认**从数据推导**（不手填）：NPC 脚本 [QUESTS] 段里 `-<quest>` 即"交付"，
     # 由 npc_index → npc_infos(地图/坐标) → map_infos(地图名) 三步换算。
     # 手填过一次，结果填到了「接取 NPC」上，服务端正确地回了「请到对应 NPC 处交付任务」。
@@ -23,17 +33,21 @@ param(
     [int]$FinishX = -1,
     [int]$FinishY = -1,
     # 奖励判据：不写死数值——**任务实例自身带奖励快照**（DB `quests` 行里就存着 exp/gold），
-    # 实测 quest 27 的实例是 1000/500，而它的任务文件 Envir/Quests/27.txt 写的是 1104/1200，
-    # 服务端按**实例**发放。写死文件值会得到假 FAIL，所以判据取「奖励真的到账」= 金币与经验同时为正。
+    # 服务端按实例发放。写死文件值会得到假 FAIL，所以判据取「奖励真的到账」= 金币与经验同时为正。
     [int]$MinGold = 1,
-    [int]$MinExp = 1
+    [int]$MinExp = 1,
+    # 客户端构建根（其 Client-Bevy\target\debug\client_bevy.exe）；默认 wt-p3 保持原约定。
+    [string]$ClientHome = ''
 )
 $ErrorActionPreference = 'Continue'
 $env:PATH = 'D:\toolchains\msys64\ucrt64\bin;D:\toolchains\libpinyin-install\bin;' + $env:PATH
 $env:LIBPINYIN_DIR = 'D:/toolchains/libpinyin-install'
 $acc = 'E:\Users\gxh\Documents\GitHub\Crystal\tools\acceptance'
 $wt = 'E:\Users\gxh\Documents\GitHub\Crystal-wt-p3'
-$exe = "$wt\Client-Bevy\target\debug\client_bevy.exe"
+# 客户端可用 -ClientHome 换到别的构建根：wt-p3 的构建不含 #3044（换图重建时对已
+# despawn 实体排队 insert/remove → apply_net_motions panic），跑含 @mapmove 的用例会崩。
+if (-not $ClientHome) { $ClientHome = $wt }
+$exe = "$ClientHome\Client-Bevy\target\debug\client_bevy.exe"
 
 function Rpc([string]$m, [hashtable]$q = @{}) {
     $c = New-Object Net.Sockets.TcpClient; $c.Connect('127.0.0.1', 9000); $s = $c.GetStream()
@@ -44,13 +58,16 @@ function Rpc([string]$m, [hashtable]$q = @{}) {
 function Taken { @((Rpc 'quest_probe').taken | ForEach-Object { [int]$_.id }) }
 function Gold { [int](Rpc 'bag_probe').gold }
 function Db([string]$sql) { (& python "$wt\tools\acceptance\dbq.py" $sql) }
-function FinishNpcFor([int]$qid) {
+# [QUESTS] 段语义（C# NPCScript.ParseQuests）：正数=该 NPC 可接，负数=可交。
+# 按符号精确匹配（"143" 不能误中 "-143"，反之亦然），返回 NPC 的地图/坐标。
+function NpcLinkFor([int]$qid, [bool]$wantFinish) {
     foreach ($row in Db "select npc_index, lines_json from npc_scripts where page_name='[QUESTS]'") {
         if ($row -notmatch '^\((\d+), ''(.+)''\)$') { continue }
         $npcIndex = [int]$Matches[1]
         $lines = $Matches[2] -replace "''", "'"
         $arr = $lines | ConvertFrom-Json
-        if ($arr -contains "-$qid") {
+        $hit = $arr | Where-Object { ([int]$_) -eq $(if ($wantFinish) { -$qid } else { $qid }) }
+        if ($hit) {
             $info = Db "select map_index, name, x, y from npc_infos where idx=$npcIndex" | Select-Object -First 1
             if ($info -notmatch '^\((\d+), ''(.+)'', (\d+), (\d+)\)$') { continue }
             $mapIdx = [int]$Matches[1]; $npcName = $Matches[2]; $nx = [int]$Matches[3]; $ny = [int]$Matches[4]
@@ -66,8 +83,23 @@ function FinishNpcFor([int]$qid) {
 
 if (-not (Get-Process -Name mir2_server -EA SilentlyContinue)) { Write-Host '服务端未运行'; exit 9 }
 
+# 自动选任务：池内挑「本角色未完成」的第一个（角色名从 account_username 反查）。
+$Pool = @(43, 51, 63, 79, 93, 97, 102, 110, 117)
+if ($QuestId -eq 0) {
+    $charName = (Db "select name from characters where account_username='$User'") | Select-Object -First 1
+    if ("$charName" -match "^\( '(.*)',? \)$") { $charName = $Matches[1] }
+    $charName = "$charName".Trim()
+    $completed = @{}
+    foreach ($r in (Db "select quest_index from completed_quests where character_name='$charName'")) {
+        if ("$r" -match '(\d+)') { $completed[[int]$Matches[1]] = $true }
+    }
+    foreach ($q in $Pool) { if (-not $completed.ContainsKey($q)) { $QuestId = $q; break } }
+    if ($QuestId -eq 0) { Write-Host 'FAIL: 候选池已耗尽（全部完成）——按头部注释口径扫新任务扩池'; exit 4 }
+    Write-Host ("[0] 自动选任务: quest {0}（角色 {1} 未完成；池 {2}）" -f $QuestId, $charName, ($Pool -join ','))
+}
+
 if ($FinishMap -eq '') {
-    $fin = FinishNpcFor $QuestId
+    $fin = NpcLinkFor $QuestId $true
     if (-not $fin) { Write-Host ("FAIL: 数据里找不到任务 {0} 的交付 NPC（[QUESTS] 段无 -{0}）" -f $QuestId); exit 4 }
     $FinishMap = $fin.map; $FinishX = $fin.x; $FinishY = $fin.y
     Write-Host ("[0] 交付点推导: quest {0} → NPC {1}(idx {2}) @ {3} ({4},{5})" -f $QuestId, $fin.name, $fin.npc_index, $fin.map, $fin.x, $fin.y)
@@ -76,7 +108,7 @@ Get-CimInstance Win32_Process -Filter "Name='client_bevy.exe'" -EA SilentlyConti
     ForEach-Object { Stop-Process -Id $_.ProcessId -Force -EA SilentlyContinue }
 Start-Sleep -Milliseconds 900
 Start-Process -FilePath $exe -ArgumentList '--real-net','--auto-enter','--e2e-user',$User,'--e2e-pass',$Pass `
-    -WorkingDirectory "$wt\Client-Bevy" `
+    -WorkingDirectory "$ClientHome\Client-Bevy" `
     -RedirectStandardOut "$acc\l5g_client.log" -RedirectStandardError "$acc\l5g_client.err.log" | Out-Null
 $st = $null
 foreach ($i in 1..60) { Start-Sleep 1; try { $st = Rpc 'state'; if ($null -ne $st.tile_x) { break } } catch {} }
@@ -88,10 +120,20 @@ if ($taken0 -contains $QuestId) {
     Write-Host ("[A] 任务 {0} 已在日志里（上一轮接过），跳过接取，直接走交付" -f $QuestId)
     $accepted = $true
 } else {
-    # 接取：任务 27 的接取 NPC 由 [QUESTS] 正数项决定（npc 52 的 [QUESTS] 含 -27，接取在别的 NPC/同 NPC 的 @MAIN）
+    # 有接取 NPC 关联（[QUESTS] 正数项）的任务必须先站到它旁边——服务端 #2014 校验
+    # 同图 DataRange(16)，不在范围回「请到对应 NPC 处接取任务」；无关联的（数据未配置）随处可接。
+    $accNpc = NpcLinkFor $QuestId $false
+    if ($accNpc) {
+        Write-Host ("[A] 接取 NPC={0}(idx {1}) @ {2} ({3},{4})，先传送" -f $accNpc.name, $accNpc.npc_index, $accNpc.map, $accNpc.x, $accNpc.y)
+        Rpc 'chat' @{ message = "@mapmove $($accNpc.map) $($accNpc.x) $($accNpc.y)" } | Out-Null
+        foreach ($i in 1..15) {
+            Start-Sleep 1; $sp = Rpc 'state'
+            if ($null -ne $sp.tile_x -and [math]::Abs([int]$sp.tile_x - $accNpc.x) -le 16 -and [math]::Abs([int]$sp.tile_y - $accNpc.y) -le 16) { break }
+        }
+    }
     Rpc 'accept_quest' @{ npc_index = 0; quest_index = $QuestId } | Out-Null
-    Start-Sleep -Seconds 2
-    $taken1 = Taken
+    $taken1 = @()
+    foreach ($i in 1..15) { Start-Sleep 1; $taken1 = Taken; if ($taken1 -contains $QuestId) { break } }
     Write-Host ("[A] accept_quest 后: {0}" -f ($taken1 -join ','))
     $accepted = $taken1 -contains $QuestId
 }
@@ -106,27 +148,33 @@ Start-Sleep 4
 $st2 = Rpc 'state'
 Write-Host ("[B] @mapmove {0} {1} {2} -> tile=({3},{4})" -f $FinishMap, $FinishX, $FinishY, $st2.tile_x, $st2.tile_y)
 $npc = (Rpc 'nearby' @{ radius = 3000 }).entities | Where-Object { $_.kind -eq 'npc' } | Sort-Object dist | Select-Object -First 1
-if ($npc) { Write-Host ("[B] 交付 NPC={0} id={1} dist={2}" -f $npc.name, $npc.object_id, $npc.dist) } else { Write-Host '[B] WARN: 附近没有 NPC' }
+if ($npc) { Write-Host ("[B] 交付 NPC={0} id={1} dist={2}" -f $npc.name, $npc.object_id, $npc.dist) } else { Write-Host '[B] WARN: 附近没有 NPC（客户端对象未生成完不影响服务端交付校验）' }
 if ($npc) { Rpc 'npc_call' @{ object_id = $npc.object_id; key = '[@MAIN]' } | Out-Null; Start-Sleep 2 }
 $rows = Rpc 'npc_rows'
 Write-Host ("[B] NPC 窗可见={0} 行数={1} 链接={2}" -f $rows.visible, ($rows.lines | Measure-Object).Count, (($rows.links | ForEach-Object { $_.key }) -join ','))
 
 # 交付
 Rpc 'finish_quest' @{ quest_index = $QuestId; selected_item_index = -1 } | Out-Null
-Start-Sleep -Seconds 3
+# 轮询而非固定 sleep：冷图首次生成对象时服务端完成处理要数秒（实测 ~4s），固定 3s 会假 FAIL
+$removed = $false
+foreach ($i in 1..20) { Start-Sleep 1; if (-not ((Taken) -contains $QuestId)) { $removed = $true; break } }
 $taken2 = Taken
-$gold1 = Gold
-$p = Rpc 'bag_probe'
+$p = $null
+foreach ($i in 1..20) {
+    Start-Sleep 1; $p = Rpc 'bag_probe'
+    if (([int]$p.gold - $gold0) -ge $MinGold -and ([int]$p.exp - [int]$exp0) -ge $MinExp) { break }
+}
+$gold1 = [int]$p.gold
 $goldDelta = $gold1 - $gold0
 $expDelta = [int]$p.exp - [int]$exp0
-$removed = -not ($taken2 -contains $QuestId)
 Write-Host ("[C] finish_quest 后 已接={0}（任务 {1} 已移除={2}）" -f ($taken2 -join ','), $QuestId, $removed)
 Write-Host ("[D] 奖励: gold {0}->{1} (delta={2}, 期望 >= {3})；exp {4}->{5} (delta={6}, 期望 >= {7})；level {8}->{9}" -f `
     $gold0, $gold1, $goldDelta, $MinGold, $exp0, $p.exp, $expDelta, $MinExp, $lv0, $p.level)
 
+# C/D 以 A 为前提：没接上时「日志里本来就没有它」不算交付成功（空真 PASS 会把接取失败洗绿）
 $okA = [bool]$accepted
-$okC = [bool]$removed
-$okD = (($goldDelta -ge $MinGold) -and ($expDelta -ge $MinExp))
+$okC = ($okA -and $removed)
+$okD = ($okA -and ($goldDelta -ge $MinGold) -and ($expDelta -ge $MinExp))
 Write-Host ("VERDICT accept={0} state_flip={1} reward_gold={2}" -f `
     $(if ($okA) { 'PASS' } else { 'FAIL' }), $(if ($okC) { 'PASS' } else { 'FAIL' }), $(if ($okD) { 'PASS' } else { 'FAIL' }))
 if (-not ($okA -and $okC -and $okD)) { exit 5 }
