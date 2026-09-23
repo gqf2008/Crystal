@@ -772,7 +772,7 @@ impl Message<StartGameRequest> for WorldActor {
         }
 
         // 注入地图数据（按真实 map_index 查找）
-        if let Some(map_data) = self.maps.get(&map_slot).cloned() {
+        if let Some(map_data) = self.maps.get_arc(&map_slot) {
             let _ = player_ref.ask(SetMapData { map: map_data }).await;
         }
 
@@ -1958,7 +1958,7 @@ impl Message<WorldMoveRequest> for WorldActor {
                         );
 
                         // Inject new map data into player for collision/pathfinding
-                        if let Some(map_data) = self.maps.get(&dest_slot).cloned() {
+                        if let Some(map_data) = self.maps.get_arc(&dest_slot) {
                             let _ = player_ref.ask(SetMapData { map: map_data }).await;
                         }
 

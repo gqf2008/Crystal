@@ -1783,7 +1783,7 @@ pub struct WorldActor {
     /// NPC 二手货列表（C# NPCObject.UsedGoods：npc object_id -> 过期未回购的卖出物品）
     pub(crate) used_goods: HashMap<u32, Vec<mir2_shared::data::item::UserItem>>,
     /// 已加载的地图缓存
-    pub(crate) maps: HashMap<u16, MapData>,
+    pub(crate) maps: crate::maps::loader::MapCache,
     /// GateActor 引用，用于发数据包给客户端
     pub(crate) gate_ref: ActorRef<GateActor>,
     /// 自身 ActorRef（#283：PlayerActor 升级通知回传用；on_start 设置）
@@ -2531,7 +2531,7 @@ impl WorldActor {
             players: HashMap::new(),
             buyback_items: HashMap::new(),
             used_goods: HashMap::new(),
-            maps: HashMap::new(),
+            maps: crate::maps::loader::MapCache::default(),
             gate_ref,
             self_ref: None,
             chat_items_sent: HashMap::new(),
@@ -8875,7 +8875,7 @@ impl Actor for WorldActor {
             players: HashMap::new(),
             buyback_items: HashMap::new(),
             used_goods: HashMap::new(),
-            maps: HashMap::new(),
+            maps: crate::maps::loader::MapCache::default(),
             gate_ref: args.gate_ref,
             self_ref: Some(actor_ref),
             chat_items_sent: HashMap::new(),
@@ -16661,7 +16661,7 @@ impl Message<GmGotoRequest> for WorldActor {
         };
         if let Some(mi) = self.map_infos.get(&(dest_map as i32)).cloned() {
             if self.get_or_load_map(&mi.file_name, dest_map).is_some() {
-                if let Some(map_data) = self.maps.get(&dest_map).cloned() {
+                if let Some(map_data) = self.maps.get_arc(&dest_map) {
                     if let Some(record) = self.players.get(&msg.session_id) {
                         let _ = record.actor_ref.ask(SetMapData { map: map_data }).await;
                     }

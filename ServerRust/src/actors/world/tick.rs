@@ -1093,7 +1093,7 @@ fn pet_find_hostile_target(
 fn monster_route_patrol(
     paths: &mut std::collections::HashMap<u32, Vec<(i32, i32)>>,
     path_targets: &mut std::collections::HashMap<u32, (u64, i32, i32)>,
-    maps: &std::collections::HashMap<u16, crate::maps::loader::MapData>,
+    maps: &crate::maps::loader::MapCache,
     tick_count: u64,
     monster: &mut MonsterState,
     moved_monsters: &mut Vec<(u32, i32, i32, u8)>,
@@ -4666,7 +4666,7 @@ impl WorldActor {
                     .map(|m| m.file_name.clone())
                 {
                     if self.get_or_load_map(&file, bind_map).is_some() {
-                        if let Some(map_data) = self.maps.get(&bind_map).cloned() {
+                        if let Some(map_data) = self.maps.get_arc(&bind_map) {
                             if let Some(record) = self.players.get(&sid) {
                                 let _ = record.actor_ref.ask(SetMapData { map: map_data }).await;
                             }
