@@ -810,13 +810,28 @@ impl Message<ClientData> for GateActor {
                             );
                         } else {
                             debug!("Login request: username={}", username);
+                            // 登录链路分段观测（crystal-login-latency）：这一段是 gate 等
+                            // AccountActor 的处理时间（含它内部的账号写 / 角色列表查询）。
+                            let t_ask = std::time::Instant::now();
                             let _ = account_ref
                                 .ask(crate::actors::account::LoginRequest {
                                     session_id: msg.session_id,
-                                    username,
+                                    username: username.clone(),
                                     password,
                                 })
                                 .await;
+                            let ask_ms = t_ask.elapsed().as_millis() as u64;
+                            if ask_ms >= 500 {
+                                warn!(
+                                    "LOGIN_TIMING gate_ask session={} user={} ask_ms={}",
+                                    msg.session_id, username, ask_ms
+                                );
+                            } else {
+                                debug!(
+                                    "LOGIN_TIMING gate_ask session={} user={} ask_ms={}",
+                                    msg.session_id, username, ask_ms
+                                );
+                            }
                         }
                     }
                 } else {

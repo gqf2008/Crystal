@@ -14,7 +14,7 @@ use mir2_shared::packets::Packet;
 use pbkdf2::pbkdf2_hmac;
 use rand_core::OsRng;
 use sha1::Sha1;
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 
 use crate::db::{self, DbPool};
 use crate::gate::actor::LoginResult;
@@ -548,6 +548,11 @@ impl AccountActor {
     /// 登录收尾（原 `LoginRequest` 处理的后半段）：算出封禁/强制改密标记 → 落库 → 查角色列表 → 回包。
     /// 抽出来是为了让「同步路径（账号不存在/封禁）」与「异步校验路径（PasswordVerified）」共用同一套语义。
     async fn finish_login(&mut self, session_id: u64, username: String, success: bool) {
+        // 登录链路分段耗时观测（2026-09-23，crystal-login-latency）：
+        // drill 里出现过 1.1–9.5s 的登录回复、但 A/B/C/D 探针都复现不出来，所以先把
+        // **分段数据**做扎实（账号写 vs 角色列表查询），再决定动不动结构。
+        // 正常路径只打 debug；>500ms 才 warn，避免生产日志被刷。
+        let t_login0 = std::time::Instant::now();
         let banned_until = if success {
             None
         } else {
@@ -563,24 +568,49 @@ impl AccountActor {
                 .unwrap_or(false);
 
         // 同步到数据库
+        // `save_block_ms` = 这次账号写**阻塞登录回复**的毫秒数（改成后台任务后应≈0）；
+        // 真正的落库耗时在后台任务的 debug 行里报，便于区分「登录慢」与「写慢」。
+        let mut save_block_ms = 0u64;
         if success {
             if let Some(account) = self.accounts.get(&username) {
-                // 2026-09-23：只把「静默丢失」改成「响亮报告」，**不改时序**——本轮曾试过
-                // 挪到后台任务/加重试，实测在长写锁下会把登录读路径挤出超时
-                // （见 db::persist_report 注释与 tools/ops/README.md §5c 的 A/B）。
-                db::persist_report(
-                    "account_save",
-                    &format!("phase=login account={username}"),
-                    || db::save_account(&self.db_pool, account),
-                )
-                .await
-                .ok();
+                // 2026-09-23（crystal-login-latency，实测根因）：这次账号行写**不能**挡登录回复。
+                //
+                // 20 样本探针（tools/ops/login_latency_probe.ps1）在写锁下量到：
+                //   LOGIN_TIMING account save_ms=5554 list_ms=0 total_ms=5554
+                //   LOGIN_TIMING gate_ask ask_ms=5475
+                // 即延迟 100% 来自这次 `save_account` 等满 busy_timeout(5s)；AccountActor 又是单 actor，
+                // 后面排队的登录也一起吃 5.5s（p95 5.575s vs 对照 0.028s）。读路径（list_ms=0）无罪。
+                //
+                // 为什么改成后台任务：`is_online` 已在**内存**里置位（反双开判定读的是内存表），
+                // 这次落库只是把状态/最后登录时间写回 DB 的簿记；失败有 persist_report 响亮上报，
+                // 且**不影响登录结果**。实测修复后同条件 p95 回到对照量级（见夹具判据 p95<0.2s）。
+                let pool = self.db_pool.clone();
+                let account = account.clone();
+                let name = username.clone();
+                let t_save = std::time::Instant::now();
+                crate::util::tasks::spawn("account.save_on_login", async move {
+                    let t = std::time::Instant::now();
+                    db::persist_report(
+                        "account_save",
+                        &format!("phase=login account={name}"),
+                        || db::save_account(&pool, &account),
+                    )
+                    .await
+                    .ok();
+                    debug!(
+                        "LOGIN_TIMING account_save_bg user={} ms={}",
+                        name,
+                        t.elapsed().as_millis()
+                    );
+                });
+                save_block_ms = t_save.elapsed().as_millis() as u64;
             }
         }
 
         info!("Login result for '{}': {}", username, success);
 
         // 角色列表（登录成功时查询）
+        let t_list = std::time::Instant::now();
         let characters = if success {
             match db::list_character_summaries(&self.db_pool, &username).await {
                 Ok(chars) => chars,
@@ -592,6 +622,20 @@ impl AccountActor {
         } else {
             Vec::new()
         };
+        let list_ms = t_list.elapsed().as_millis() as u64;
+        let total_ms = t_login0.elapsed().as_millis() as u64;
+        // 分段观测：正常路径 debug；慢于 500ms 升级为 warn（drill 里就是靠这类行定位的）
+        if total_ms >= 500 {
+            warn!(
+                "LOGIN_TIMING account user={} success={} save_block_ms={} list_ms={} total_ms={}",
+                username, success, save_block_ms, list_ms, total_ms
+            );
+        } else {
+            debug!(
+                "LOGIN_TIMING account user={} success={} save_block_ms={} list_ms={} total_ms={}",
+                username, success, save_block_ms, list_ms, total_ms
+            );
+        }
 
         // 将结果发回 GateActor，由 GateActor 发送协议包给客户端
         let _ = self
@@ -618,15 +662,26 @@ impl Message<LogoutRequest> for AccountActor {
     ) -> Self::Reply {
         self.logout(&msg.username);
 
-        // 同步到数据库（标记离线）
-        // 同上：只改上报级别，不改时序
-        db::persist_report(
-            "account_offline",
-            &format!("account={}", msg.username),
-            || db::set_account_offline(&self.db_pool, &msg.username),
-        )
-        .await
-        .ok();
+        // 同步到数据库（标记离线）——同样**不挡 actor**：
+        // 20 样本夹具测出 p95 5.529s、且 account 侧 finish_login 已经是 0ms，延迟全在
+        // `gate_ask`——即登录排队在前一条消息（上一个会话的 LogoutRequest）等满
+        // busy_timeout 的 `set_account_offline` 后面。内存里的 is_online 已置位，
+        // 这次落库只是簿记；失败由 persist_report 响亮上报，不影响登出结果。
+        let pool = self.db_pool.clone();
+        let name = msg.username.clone();
+        crate::util::tasks::spawn("account.set_offline", async move {
+            let t = std::time::Instant::now();
+            db::persist_report("account_offline", &format!("account={name}"), || {
+                db::set_account_offline(&pool, &name)
+            })
+            .await
+            .ok();
+            debug!(
+                "LOGIN_TIMING account_offline_bg user={} ms={}",
+                name,
+                t.elapsed().as_millis()
+            );
+        });
     }
 }
 
