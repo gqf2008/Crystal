@@ -205,10 +205,9 @@ pub(crate) fn spawn_light_chunk(
                     }
                 }
             }
-            // C# DrawLights 中心 = (格左+off_x-14+OffSetX, 格底+off_y-21)（屏幕 y 向下）→ Bevy 世界 y 取负
-            // OffSetX=10：C# DrawLights p.X 比 DrawObjects drawX 多 OffSetX，光斑需右移对齐路灯（#88）
-            let cx_w = x as f32 * TILE_WIDTH + off_x - 14.0 + LIGHT_SCREEN_OFFSET_X;
-            let cy_w = -((y + 1) as f32 * TILE_HEIGHT + off_y - 21.0);
+            // 中心一律走 `light_center`（与 C# GameScene.cs Map Lights 段同源，含 OffSetX=10）；
+            // 详见该函数文档——此前这里硬编码 `-14.0 + 10`，比原版多算了 10px（#灯）
+            let (cx_w, cy_w) = crate::map_renderer::light_center(x, y, off_x, off_y);
             // C# 灯光颜色按 Light/10：1=白 2=蓝 3=橙 4=绿，默认白；强度 0.4 避免过曝
             let (cr, cg, cb) = match l / 10 {
                 2 => (120.0, 180.0, 255.0),

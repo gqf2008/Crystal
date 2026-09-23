@@ -103,7 +103,11 @@ pub struct MapLightTexture(pub Handle<Image>);
 pub const LIGHT_SCREEN_OFFSET_X: f32 = 10.0;
 
 /// C# DXManager.Lights[i] = LightSizes[i+1]（径向渐变光斑尺寸，索引 0..9）
-pub const LIGHT_SIZES: [(f32, f32); 10] = [
+/// 原版 `DXManager.LightSizes`（`Client/MirGraphics/DXManager.cs:43-56`）**逐项照抄**——
+/// 注意它有 **11** 项、index 0 = (125,95)：本端此前漏了第 0 项，导致每个灯光都用大一号的
+/// 光斑（`light = (cell.Light % 10) * 3` 的下标整体错位一格），表现为「部分地图灯光错位」。
+pub const LIGHT_SIZES: [(f32, f32); 11] = [
+    (125.0, 95.0),
     (205.0, 156.0),
     (285.0, 217.0),
     (365.0, 277.0),
@@ -116,6 +120,27 @@ pub const LIGHT_SIZES: [(f32, f32); 10] = [
     (925.0, 703.0),
 ];
 
+/// 地图灯光的中心（世界坐标，Bevy 约定；原版 `GameScene.cs:11245-11257` 的 Map Lights 段）：
+///
+/// ```text
+/// p = (x * CellWidth, (y + 1) * CellHeight)          // 格左缘 / 格底缘（+32）
+/// if (FrontAnimationFrame > 0) p += (off_x, off_y)   // front 动画格叠加库偏移
+/// p.Offset(-(lightW / 2) - (CellWidth / 2) + 10,
+///          -(lightH / 2) - (CellHeight / 2) - 5)
+/// Draw(light, ..., p)                                 // 纹理左上角落在 p ⇒ 中心 = p + (w/2, h/2)
+/// ⇒ 中心（屏幕） = (x*CellWidth + off_x - CellWidth/2 + 10,
+///                  (y+1)*CellHeight + off_y - CellHeight/2 - 5)
+/// ```
+///
+/// 因为光斑总是以**中心**对齐，公式里 w/h 全部抵消 —— 中心与光斑大小无关（大小只决定缩放）。
+/// 本端早期版本把 `-CellWidth/2` 写成了 `-14`（那是 28×42 的老光斑半宽），又额外加了 +10，
+/// 相当于**多算了 10px**（原版的 +10 已经在上面这条公式里），于是光斑整体右偏 → 「灯光错位」。
+pub fn light_center(cell_x: usize, cell_y: usize, off_x: f32, off_y: f32) -> (f32, f32) {
+    let x =
+        cell_x as f32 * TILE_WIDTH as f32 + off_x - TILE_WIDTH as f32 / 2.0 + LIGHT_SCREEN_OFFSET_X;
+    let y = -((cell_y + 1) as f32 * TILE_HEIGHT as f32 + off_y - TILE_HEIGHT as f32 / 2.0 - 5.0);
+    (x, y)
+}
 /// 生成 C# DXManager.CreateLights 同款径向渐变纹理（白心 → 边缘透明）
 pub fn make_light_texture(assets: &mut Assets<Image>, size: u32) -> Handle<Image> {
     let mut rgba = vec![0u8; (size * size * 4) as usize];
@@ -320,5 +345,77 @@ fn div_ceil_i32(a: i32, b: i32) -> i32 {
         a / b
     } else {
         a / b + 1
+    }
+}
+
+#[cfg(test)]
+mod light_alignment_tests {
+    use super::*;
+
+    /// 门禁（owner 反馈「部分地图灯光错位」）：灯光中心必须与原版 C#「Map Lights」段同源。
+    ///
+    /// 原版 `Client/MirScenes/GameScene.cs:11245-11257`：
+    ///   p = (x*CellWidth, (y+1)*CellHeight)（+front 动画偏移）
+    ///   p.Offset(-w/2 - CellWidth/2 + 10, -h/2 - CellHeight/2 - 5)
+    ///   Draw(..., p)   // 纹理左上角落 p ⇒ 中心 = p + (w/2, h/2)，w/h 抵消
+    /// ⇒ 中心 = (x*48 + off_x - 24 + 10, -((y+1)*32 + off_y - 16 - 5))
+    ///
+    /// 阳性对照（落地时实做）：把 `light_center` 里的 `TILE_WIDTH / 2.0` 改回旧的 `14.0`
+    /// → 本测试立即红（x 会大 10px，正是「灯光错位」的成因）。
+    #[test]
+    fn light_center_matches_csharp_map_lights() {
+        for (x, y, ox, oy) in [
+            (10usize, 20usize, 0.0f32, 0.0f32),
+            (0, 0, 10.0, -6.0),
+            (288, 616, -5.0, 3.0),
+        ] {
+            let (cx, cy) = light_center(x, y, ox, oy);
+            let expect_x =
+                x as f32 * TILE_WIDTH as f32 + ox - TILE_WIDTH as f32 / 2.0 + LIGHT_SCREEN_OFFSET_X;
+            let expect_y =
+                -((y + 1) as f32 * TILE_HEIGHT as f32 + oy - TILE_HEIGHT as f32 / 2.0 - 5.0);
+            assert_eq!(
+                (cx, cy),
+                (expect_x, expect_y),
+                "格 ({x},{y}) 偏移 ({ox},{oy})"
+            );
+        }
+        // 数值锚点：格 (10,20)、无偏移 → x = 480 - 24 + 10 = 466；y = -(21*32 - 21) = -651
+        assert_eq!(light_center(10, 20, 0.0, 0.0), (466.0, -651.0));
+    }
+
+    /// 门禁：光斑尺寸表必须与原版 `DXManager.LightSizes` 逐项一致（**11** 项、index 0 = 125×95）。
+    ///
+    /// 本端此前漏了第 0 项 → 每个灯光都用大一号的光斑，这也是「灯光错位」的一部分。
+    /// 阳性对照（实做）：把第 0 项删掉（恢复旧 10 项表）→ 本测试立即红。
+    #[test]
+    fn light_sizes_match_dxmanager_table() {
+        let csharp = [
+            (125.0, 95.0),
+            (205.0, 156.0),
+            (285.0, 217.0),
+            (365.0, 277.0),
+            (445.0, 338.0),
+            (525.0, 399.0),
+            (605.0, 460.0),
+            (685.0, 521.0),
+            (765.0, 581.0),
+            (845.0, 642.0),
+            (925.0, 703.0),
+        ];
+        assert_eq!(
+            LIGHT_SIZES.len(),
+            csharp.len(),
+            "原版是 11 项（漏 index 0 会整体错位一格）"
+        );
+        for (i, (w, h)) in csharp.iter().enumerate() {
+            assert_eq!(
+                LIGHT_SIZES[i],
+                (*w, *h),
+                "第 {i} 项与原版 DXManager.LightSizes 不一致"
+            );
+        }
+        // `li = (cell.Light % 10) * 3` 最大到 9，必须能索引到（原版 11 项保证）
+        assert!(LIGHT_SIZES.len() > 9, "li 最大 9 必须可索引");
     }
 }
