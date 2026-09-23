@@ -65,6 +65,14 @@ use crate::scenes::AppState;
 ///
 /// 为什么单独抽出来：判据必须**来自状态**（`QuestLogState`），且对同一状态可重复读出同一结果。
 /// 反例是曾被证伪的 `quest_detail {id}`——它对任意 id 都回 ok，用它当"条目数"会得到恒定值。
+/// ⑤ 邮件仓库的判据内核（纯函数）：占用格数 = `Some` 的格数。
+///
+/// 判据来源是**状态**（`Inventory.items` / `StorageState.items`），不是 UI 计数标签；
+/// 同一状态连读必须一致——空/非空两态都要成立（同 quest_probe 的仪器自检口径）。
+pub fn used_slots<T>(items: &[Option<T>]) -> usize {
+    items.iter().filter(|s| s.is_some()).count()
+}
+
 pub fn taken_quest_ids(entries: &[crate::game::dialogs::quest_log::QuestEntry]) -> Vec<i32> {
     entries.iter().filter(|e| e.taken).map(|e| e.id).collect()
 }
@@ -116,6 +124,14 @@ enum ControlCommand {
     /// 接受任务（2026-09-22）：照 `auto/world.rs:122`/`:932` 的既有写法发 `C.AcceptQuest`。
     /// 真实签名是 `AcceptQuest { npc_index, quest_index }`——**需要 npc_index**，
     /// 这也是 `quest_detail {confirm:true}` 只改 UI 状态、`taken` 不变的原因（它不发这个包）。
+    /// 只读背包探针（2026-09-22）：占用/总格数 + 重量（判据取状态）
+    BagProbe {
+        reply: Sender<String>,
+    },
+    /// 只读仓库探针：占用/总格数 + 可见性/页（判据取状态）
+    StorageProbe {
+        reply: Sender<String>,
+    },
     AcceptQuest {
         npc_index: u32,
         quest_index: i32,
@@ -277,6 +293,8 @@ struct ControlQueries<'w, 's> {
     hp: Query<'w, 's, (&'static NetObjectId, &'static crate::game::combat::ActorHp)>,
     /// `quest_probe` 用：客户端侧任务日记状态（已接/已完成标记）
     quest_log: Res<'w, crate::game::dialogs::quest_log::QuestLogState>,
+    /// ⑤ 探针用：本地玩家背包组件（占用/总格数、重量）
+    bag: Query<'w, 's, &'static crate::game::player_state::Inventory, With<LocalPlayer>>,
     /// `combat_probe` 用：本地玩家状态标志——`auto_attack_system` 的 run_if 是
     /// `player_input_enabled`（= 非 dead/fishing/paralysis），命中该门控时攻击**一次都不会发**，
     /// 而日志里看不出任何异常（P1 实测踩到过）。
@@ -593,6 +611,28 @@ fn handle_conn(mut stream: std::net::TcpStream, tx: Sender<ControlCommand>) {
                     .send(ControlCommand::CombatProbe { reply: reply_tx })
                     .is_ok()
                 {
+                    let s = reply_rx
+                        .recv_timeout(std::time::Duration::from_secs(2))
+                        .unwrap_or_else(|_| "{}".to_string());
+                    serde_json::from_str::<Value>(&s).unwrap_or_else(|_| json!({}))
+                } else {
+                    json!({"error": "control channel closed"})
+                }
+            }
+            "bag_probe" => {
+                let (reply_tx, reply_rx) = bounded::<String>(1);
+                if tx.send(ControlCommand::BagProbe { reply: reply_tx }).is_ok() {
+                    let s = reply_rx
+                        .recv_timeout(std::time::Duration::from_secs(2))
+                        .unwrap_or_else(|_| "{}".to_string());
+                    serde_json::from_str::<Value>(&s).unwrap_or_else(|_| json!({}))
+                } else {
+                    json!({"error": "control channel closed"})
+                }
+            }
+            "storage_probe" => {
+                let (reply_tx, reply_rx) = bounded::<String>(1);
+                if tx.send(ControlCommand::StorageProbe { reply: reply_tx }).is_ok() {
                     let s = reply_rx
                         .recv_timeout(std::time::Duration::from_secs(2))
                         .unwrap_or_else(|_| "{}".to_string());
@@ -1882,6 +1922,33 @@ fn apply_control_commands(
                 );
                 let _ = reply.send(payload.to_string());
             }
+            ControlCommand::BagProbe { reply } => {
+                let payload = match q.bag.single() {
+                    Ok(inv) => json!({
+                        "ok": true,
+                        "used": used_slots(&inv.items),
+                        "total": inv.items.len(),
+                        "quest_used": used_slots(&inv.quest_inventory),
+                        "quest_total": inv.quest_inventory.len(),
+                        "weight": inv.weight,
+                        "max_weight": inv.max_weight,
+                    }),
+                    Err(_) => json!({"ok": false, "error": "no local player inventory"}),
+                };
+                tracing::info!("🎮 control bag_probe: {payload}");
+                let _ = reply.send(payload.to_string());
+            }
+            ControlCommand::StorageProbe { reply } => {
+                let payload = json!({
+                    "ok": true,
+                    "used": used_slots(&q.storage.items),
+                    "total": q.storage.items.len(),
+                    "visible": q.storage.visible,
+                    "page": format!("{:?}", q.storage.page),
+                });
+                tracing::info!("🎮 control storage_probe: {payload}");
+                let _ = reply.send(payload.to_string());
+            }
             ControlCommand::AcceptQuest {
                 npc_index,
                 quest_index,
@@ -2373,6 +2440,18 @@ mod tests {
     /// 阳性对照（落地时实做）：把 `filter(|e| e.taken)` 去掉（把未接条目也算进去）
     /// → 本测试立即红；恢复后绿。
     #[test]
+
+    /// ⑤ 仪器门禁（2026-09-22）：占用格数必须由状态算出，且空/非空两态可重复。
+    ///
+    /// 阳性对照：把 `filter(|s| s.is_some())` 去掉（把空格也算占用）→ 本测试立即红。
+    #[test]
+    fn used_slots_counts_only_occupied_and_is_stable() {
+        let empty: Vec<Option<u8>> = vec![None, None, None];
+        assert_eq!(used_slots(&empty), 0, "全空必须读 0");
+        let mixed: Vec<Option<u8>> = vec![None, Some(1), Some(2), None];
+        assert_eq!(used_slots(&mixed), 2, "只应数 Some");
+        assert_eq!(used_slots(&mixed), used_slots(&mixed), "同一状态连读必须一致");
+    }
     fn taken_quest_ids_is_state_sourced_and_stable() {
         use crate::game::dialogs::quest_log::QuestEntry;
         let mk = |id: i32, taken: bool, completed: bool| QuestEntry {
