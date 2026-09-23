@@ -281,6 +281,48 @@ fn apply_self_position(
     }
 }
 
+/// 安全版「延迟组件操作」：实体可能在命令落地前就被 despawn（**换图重建**就是这种情况——
+/// `MapChanged` 会整批重建场景对象，本地玩家实体也在其中）。
+///
+/// 为什么需要它（#3028 记录的真实故障）：`apply_net_motions`/`object_state` 这类系统用
+/// `commands.entity(e).insert/remove` 时捕获的是**当时的** `Entity`；若同一帧稍后另一个
+/// 系统把该实体 despawn（换图重建），命令落地时就命中失效实体：
+///
+/// ```text
+/// WARN bevy_ecs::error::handler: Encountered an error in command `<...remove<Sitting>...>`:
+///      Entity despawned: The entity with ID 18081v1 is invalid; its index now has generation 2.
+/// ```
+///
+/// 后果不止一条日志：本地玩家实体连同它的状态一起消失（`state` 探针读不到 tile，玩家视角卡死）。
+/// 这里改成 `commands.queue` + `get_entity_mut`，**在命令真正落地时**再确认实体还有效，
+/// 失效就静默跳过（语义正确：实体都没了，本来也不需要再改它）。
+///
+/// 阳性对照见 `tests::entity_command_safety`（同一条测试里同时验证「不安全写法会被抓到」，
+/// 证明这道门禁真的能红）。
+pub(crate) fn safe_insert<B: bevy::prelude::Bundle>(
+    commands: &mut bevy::prelude::Commands,
+    entity: bevy::prelude::Entity,
+    bundle: B,
+) {
+    commands.queue(move |world: &mut bevy::prelude::World| {
+        if let Ok(mut ec) = world.get_entity_mut(entity) {
+            ec.insert(bundle);
+        }
+    });
+}
+
+/// 见 [`safe_insert`]。移除失效实体上的组件同样应当静默跳过。
+pub(crate) fn safe_remove<C: bevy::prelude::Component>(
+    commands: &mut bevy::prelude::Commands,
+    entity: bevy::prelude::Entity,
+) {
+    commands.queue(move |world: &mut bevy::prelude::World| {
+        if let Ok(mut ec) = world.get_entity_mut(entity) {
+            ec.remove::<C>();
+        }
+    });
+}
+
 /// 消耗 NetMotions：给对象实体挂 MoveTween / 转向
 fn apply_net_motions(
     mut commands: Commands,
@@ -307,35 +349,43 @@ fn apply_net_motions(
             match motion {
                 NetMotion::Turn { dir, .. } => {
                     // #573：移动/转身即解除坐下（C# 坐下状态被移动打断）
-                    commands.entity(e).remove::<Sitting>();
+                    safe_remove::<Sitting>(&mut commands, e);
                     anim.direction = dir;
                     anim.action = mir2_shared::enums::MirAction::Standing;
                     anim.frame_index = 0;
                 }
                 NetMotion::Walk { x, y, dir, .. } => {
-                    commands.entity(e).remove::<Sitting>();
-                    commands.entity(e).insert(MoveTween {
-                        from,
-                        to: tile_to_world(x, y),
-                        t: 0.0,
-                        dur: 0.16,
-                        action: mir2_shared::enums::MirAction::Walking,
-                        dir,
-                    });
+                    safe_remove::<Sitting>(&mut commands, e);
+                    safe_insert(
+                        &mut commands,
+                        e,
+                        MoveTween {
+                            from,
+                            to: tile_to_world(x, y),
+                            t: 0.0,
+                            dur: 0.16,
+                            action: mir2_shared::enums::MirAction::Walking,
+                            dir,
+                        },
+                    );
                     anim.action = mir2_shared::enums::MirAction::Walking;
                     anim.direction = dir;
                     anim.frame_index = 0;
                 }
                 NetMotion::Run { x, y, dir, .. } => {
-                    commands.entity(e).remove::<Sitting>();
-                    commands.entity(e).insert(MoveTween {
-                        from,
-                        to: tile_to_world(x, y),
-                        t: 0.0,
-                        dur: 0.20,
-                        action: mir2_shared::enums::MirAction::Running,
-                        dir,
-                    });
+                    safe_remove::<Sitting>(&mut commands, e);
+                    safe_insert(
+                        &mut commands,
+                        e,
+                        MoveTween {
+                            from,
+                            to: tile_to_world(x, y),
+                            t: 0.0,
+                            dur: 0.20,
+                            action: mir2_shared::enums::MirAction::Running,
+                            dir,
+                        },
+                    );
                     anim.action = mir2_shared::enums::MirAction::Running;
                     anim.direction = dir;
                     anim.frame_index = 0;
@@ -556,6 +606,91 @@ fn advance_local_move(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 门禁（#3028「死亡态 + 换图」丢本地玩家实体）：命令落地前实体被 despawn 时，
+    /// **不得**产生 ECS 错误（错的就是这一条：`insert<MoveTween>`/`remove<Sitting>`
+    /// 命中已失效实体 → 日志刷 "Entity despawned ..." 且本地玩家实体消失）。
+    ///
+    /// 阳性对照写在同一条测试里：不安全写法（`commands.entity(e).insert(..)`）**必须**
+    /// 被同一个错误探测抓到（计数 > 0），否则说明这道门禁是假的、永远不会红。
+    #[test]
+    fn entity_command_safety_survives_despawn() {
+        use bevy::ecs::error::{BevyError, ErrorContext, ErrorHandler, FallbackErrorHandler};
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        static SINK: AtomicUsize = AtomicUsize::new(0);
+        fn sink(_e: BevyError, _c: ErrorContext) {
+            SINK.fetch_add(1, Ordering::SeqCst);
+        }
+
+        #[derive(Component)]
+        struct Mark;
+
+        #[derive(Resource)]
+        struct Target(Entity);
+
+        // unsafe_mode=true 走旧写法（阳性对照）；false 走 safe_* helper（本轮修复）
+        fn drive(unsafe_mode: bool) -> usize {
+            #[derive(Resource)]
+            struct Mode(bool);
+            let mut app = App::new();
+            app.add_plugins(MinimalPlugins);
+            app.insert_resource(FallbackErrorHandler(sink as ErrorHandler));
+            let e = app.world_mut().spawn(Mark).id();
+            app.insert_resource(Target(e));
+            app.insert_resource(Mode(unsafe_mode));
+            app.add_systems(
+                Update,
+                (
+                    // ① 换图重建语义：先 despawn；chain 的 sync point 让它在本系统之后落地
+                    |mut commands: Commands, t: Res<Target>| {
+                        commands.entity(t.0).despawn();
+                    },
+                    // ② 稍后的系统仍拿着**旧 Entity** 排队列组件操作（真实故障形态）
+                    |mut commands: Commands, t: Res<Target>, mode: Res<Mode>| {
+                        if mode.0 {
+                            commands.entity(t.0).insert(MoveTween {
+                                from: Vec2::ZERO,
+                                to: Vec2::ZERO,
+                                t: 0.0,
+                                dur: 0.16,
+                                action: mir2_shared::enums::MirAction::Walking,
+                                dir: 0,
+                            });
+                        } else {
+                            crate::game::movement::safe_insert(
+                                &mut commands,
+                                t.0,
+                                MoveTween {
+                                    from: Vec2::ZERO,
+                                    to: Vec2::ZERO,
+                                    t: 0.0,
+                                    dur: 0.16,
+                                    action: mir2_shared::enums::MirAction::Walking,
+                                    dir: 0,
+                                },
+                            );
+                            crate::game::movement::safe_remove::<Sitting>(&mut commands, t.0);
+                        }
+                    },
+                )
+                    .chain(),
+            );
+            SINK.store(0, Ordering::SeqCst);
+            app.update();
+            SINK.load(Ordering::SeqCst)
+        }
+
+        let unsafe_errors = drive(true);
+        assert!(
+            unsafe_errors > 0,
+            "阳性对照：不安全写法必须被错误探测抓到，否则这道门禁是假的"
+        );
+        let safe_errors = drive(false);
+        assert_eq!(
+            safe_errors, 0,
+            "实体被 despawn 后，safe_insert/safe_remove 不得产生 ECS 错误（#3028）"
+        );
+    }
     use crate::actor::{ActorAnim, NetObjectId};
 
     #[test]
