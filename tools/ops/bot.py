@@ -24,7 +24,9 @@ import time
 
 OP_CLIENT_VERSION = 0
 OP_KEEPALIVE = 2
+OP_NEW_ACCOUNT = 3
 OP_LOGIN = 5
+OP_NEW_CHARACTER = 6
 OP_STARTGAME = 8
 OP_LOGOUT = 9
 XOR_KEY = 0xAA  # gate/codec.rs::DEFAULT_XOR_KEY
@@ -72,19 +74,28 @@ def drain(sock: socket.socket, stop: threading.Event, out: dict) -> None:
     """后台读线程：只记录帧数/字节数，直到 stop。"""
     frames = 0
     bytes_read = 0
+    idle = 0
     try:
         while not stop.is_set():
-            opcode, body = recv_frame(sock)
+            try:
+                opcode, body = recv_frame(sock)
+            except socket.timeout:
+                # 空闲不是错误：服务端只在有事件时推送（进图时几百 KB，之后可能长时间静默）。
+                # 早期版本把空闲当 read_error → 保持型会话全被判失败（假红）。
+                idle += 1
+                continue
             frames += 1
             bytes_read += len(body) + 4
     except Exception as exc:  # 断开/超时都记下来，供错误率统计
         out["read_error"] = f"{type(exc).__name__}: {exc}"
     out["frames"] = frames
     out["bytes"] = bytes_read
+    out["idle_waits"] = idle
 
 
 def one_session(idx: int, host: str, port: int, account: str, password: str,
-                login_only: bool, hold_sec: float, timeout: float) -> dict:
+                login_only: bool, hold_sec: float, timeout: float,
+                self_provision: bool = False, char_name: str = '') -> dict:
     t0 = time.time()
     res = {"idx": idx, "account": account, "ok": False, "stage": "connect",
            "frames": 0, "bytes": 0}
@@ -102,6 +113,53 @@ def one_session(idx: int, host: str, port: int, account: str, password: str,
             if opcode == 0x0000 or body:           # 服务端用 opcode=0 回 result=1
                 break
         res["t_version_reply"] = round(time.time() - t0, 3)
+
+        if self_provision:
+            # 「新玩家」全路径：注册账号 → 登录 → 建角色 → 进图。
+            # 用途：容量标定需要**大量独立会话**（同账号重复登录会互踢，不能拿来压世界路径）。
+            res["stage"] = "new_account"
+            body = (dotnet_string(account) + dotnet_string(password)
+                    + struct.pack("<q", 0) + dotnet_string("ops bot")
+                    + dotnet_string("q") + dotnet_string("a") + dotnet_string("ops@example.invalid"))
+            sock.sendall(frame(OP_NEW_ACCOUNT, body))
+            opcode, ack = recv_frame(sock)
+            res["new_account_result"] = ack[0] if ack else -1   # 0 = 成功（C# Result 0-8）
+            res["stage"] = "login"
+            sock.sendall(frame(OP_LOGIN, dotnet_string(account) + dotnet_string(password)))
+            res["login_sent"] = round(time.time() - t0, 3)
+            opcode, body = recv_frame(sock)                     # LoginSuccess（characters）
+            res["stage"] = "new_character"
+            sock.sendall(frame(OP_NEW_CHARACTER,
+                               dotnet_string(char_name) + bytes([0, 0])))
+            opcode, ack = recv_frame(sock)
+            res["new_character_result"] = ack[0] if ack else -1
+            res["stage"] = "start_game"
+            sock.sendall(frame(OP_STARTGAME, struct.pack("<i", 0)))
+            res["start_sent"] = round(time.time() - t0, 3)
+            stop = threading.Event()
+            reader = threading.Thread(target=drain, args=(sock, stop, res), daemon=True)
+            reader.start()
+            for _ in range(max(1, int(hold_sec / 5))):
+                time.sleep(min(5, hold_sec))
+                if stop.is_set():
+                    break
+                try:
+                    sock.sendall(frame(OP_KEEPALIVE, b""))
+                except Exception:
+                    break
+            res["held_sec"] = round(time.time() - t0, 2)
+            stop.set()
+            reader.join(timeout=2)
+            try:
+                sock.sendall(frame(OP_LOGOUT, b""))
+            except Exception:
+                pass
+            ok_stages = (res.get("new_account_result") == 0 and res.get("new_character_result") == 0
+                         and res.get("read_error") is None)
+            res["ok"] = bool(ok_stages and res["frames"] > 0)
+            res["stage"] = "done"
+            return res
+
         res["stage"] = "login"
         sock.sendall(frame(OP_LOGIN, dotnet_string(account) + dotnet_string(password)))
         res["login_sent"] = round(time.time() - t0, 3)
@@ -161,6 +219,9 @@ def main() -> int:
     ap.add_argument("--hold", type=float, default=10.0, help="进图后保持秒数")
     ap.add_argument("--timeout", type=float, default=10.0)
     ap.add_argument("--login-only", action="store_true")
+    ap.add_argument("--self-provision", action="store_true",
+                    help="注册新账号+建角色+进图（容量标定要独立会话，不能复用同一账号）")
+    ap.add_argument("--char-prefix", default="OpsBot")
     ap.add_argument("--accounts", default="", help="逗号分隔账号（默认用下面 prefix+序号）")
     ap.add_argument("--account-prefix", default="smoke")
     ap.add_argument("--password", default="123456")
@@ -174,7 +235,8 @@ def main() -> int:
 
     def run(i: int) -> None:
         results[i] = one_session(i, a.host, a.port, accounts[i], a.password,
-                                 a.login_only, a.hold, a.timeout)
+                                 a.login_only, a.hold, a.timeout,
+                                 a.self_provision, f"{a.char_prefix}{i}")
 
     threads = [threading.Thread(target=run, args=(i,)) for i in range(len(accounts))]
     for t in threads:
@@ -192,6 +254,7 @@ def main() -> int:
         "login_p50_sec": round(lat[len(lat) // 2], 3) if lat else None,
         "login_p95_sec": round(lat[min(len(lat) - 1, int(len(lat) * 0.95))], 3) if lat else None,
         "login_only": a.login_only,
+        "self_provision": a.self_provision,
         "hold_sec": a.hold,
     }
     print(json.dumps({"summary": summary, "sessions": results}, ensure_ascii=False))
