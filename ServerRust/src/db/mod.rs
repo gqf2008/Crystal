@@ -42,6 +42,24 @@ pub fn is_transient_db_error(e: &anyhow::Error) -> bool {
         || text.contains("code: 6")
 }
 
+/// 落库失败时**给客户端看的文案**（owner 2026-09-24 拍板：落库失败一律直接反馈到客户端；
+/// 服务器侧暂不做保护/补偿、也不要求落盘 spool）。
+///
+/// 纯函数，便于门禁：文案必须点明「哪一步（what）在什么阶段（phase）失败」，
+/// 玩家看到的是可读提示而不是只有服务端日志。
+pub fn persist_failure_notice(what: &str, phase: &str) -> String {
+    let step = match what {
+        "player_character" => "角色存档",
+        "player_pets" => "宠物存档",
+        "heroes" => "英雄存档",
+        "last_access" => "最后下线时间",
+        "account_save" => "账号信息",
+        "account_offline" => "账号下线状态",
+        other => other,
+    };
+    format!("存档失败：{step}未能写入数据库（{phase}）。请联系管理员；本次改动可能不会被保存。")
+}
+
 /// 落库 + 失败上报：**一次尝试**，失败时按「是否瞬时」分级记录。
 ///
 /// 为什么不做重试（这是本轮实测后的结论，见 `tools/ops/README.md` §5c）：
@@ -6323,6 +6341,23 @@ mod tests {
             !is_transient_db_error(&anyhow::anyhow!("no such table: characters")),
             "结构性错误不得误判为瞬时"
         );
+    }
+
+    /// 门禁（owner 2026-09-24 拍板）：落库失败必须有**客户端可见文案**，且点明是哪一步失败。
+    /// 阳性对照（实做）：把 `persist_failure_notice` 改成返回空串 → 本测试立即红。
+    #[test]
+    fn persist_failure_notice_is_actionable() {
+        let n = persist_failure_notice("player_character", "phase=logout");
+        assert!(!n.is_empty(), "文案不能为空");
+        assert!(n.contains("存档失败"), "必须明说失败：{n}");
+        assert!(n.contains("角色存档"), "必须点名是哪一步失败：{n}");
+        assert!(
+            n.contains("phase=logout"),
+            "必须带上阶段，便于与日志对齐：{n}"
+        );
+        // 未知步骤也要能给出可读文案（不能 panic、不能丢句）
+        let u = persist_failure_notice("some_new_step", "phase=x");
+        assert!(u.contains("some_new_step") && u.contains("存档失败"));
     }
 
     /// 门禁：`persist_report` 成功时原样返回、失败时原样把 Err 交给调用方

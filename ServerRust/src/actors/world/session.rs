@@ -2667,6 +2667,13 @@ impl Message<PlayerDisconnected> for WorldActor {
                         account: record.account_username.clone(),
                         state: Box::new(state.clone()),
                     });
+                // owner 2026-09-24 拍板：落库失败一律直接反馈到客户端
+                notify_persist_failure(
+                    &self.gate_ref,
+                    msg.session_id,
+                    "player_character",
+                    "phase=disconnect",
+                );
             }
             // C# LastLogoutDate：记录最后下线时间（选角界面/安全区下线加成用）
             let now = std::time::SystemTime::now()
@@ -2686,6 +2693,13 @@ impl Message<PlayerDisconnected> for WorldActor {
                         name: record.name.clone(),
                         ts: now,
                     });
+                // owner 2026-09-24 拍板：落库失败一律直接反馈到客户端
+                notify_persist_failure(
+                    &self.gate_ref,
+                    msg.session_id,
+                    "last_access",
+                    "phase=disconnect",
+                );
             }
 
             // #1127：断线同样持久化英雄列表——save_character 会 DELETE heroes 子表但不重建，
@@ -2705,6 +2719,13 @@ impl Message<PlayerDisconnected> for WorldActor {
                         name: record.name.clone(),
                         heroes: db_heroes,
                     });
+                // owner 2026-09-24 拍板：落库失败一律直接反馈到客户端
+                notify_persist_failure(
+                    &self.gate_ref,
+                    msg.session_id,
+                    "heroes",
+                    "phase=disconnect",
+                );
             }
             // #198：移除英雄对象（与 PlayerLogOut 对齐；C# StopGame → DespawnHero）
             self.broadcast_hero_remove(record.object_id).await;
@@ -3083,6 +3104,13 @@ impl Message<PlayerLogOut> for WorldActor {
                         account: record.account_username.clone(),
                         state: Box::new(state.clone()),
                     });
+                // owner 2026-09-24 拍板：落库失败一律直接反馈到客户端
+                notify_persist_failure(
+                    &self.gate_ref,
+                    msg.session_id,
+                    "player_character",
+                    "phase=logout",
+                );
             }
             // C# LastLogoutDate：记录最后下线时间
             let now = std::time::SystemTime::now()
@@ -3102,6 +3130,13 @@ impl Message<PlayerLogOut> for WorldActor {
                         name: record.name.clone(),
                         ts: now,
                     });
+                // owner 2026-09-24 拍板：落库失败一律直接反馈到客户端
+                notify_persist_failure(
+                    &self.gate_ref,
+                    msg.session_id,
+                    "last_access",
+                    "phase=logout",
+                );
             }
 
             // #194：保存英雄列表到 DB（重启不丢；#2571 含实时 HP/MP）
@@ -3119,6 +3154,8 @@ impl Message<PlayerLogOut> for WorldActor {
                         name: record.name.clone(),
                         heroes: db_heroes,
                     });
+                // owner 2026-09-24 拍板：落库失败一律直接反馈到客户端
+                notify_persist_failure(&self.gate_ref, msg.session_id, "heroes", "phase=logout");
             }
             // #198：移除英雄对象
             self.broadcast_hero_remove(record.object_id).await;
