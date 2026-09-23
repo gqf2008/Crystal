@@ -618,6 +618,14 @@ pub(crate) fn handle_social(
         x if x == ServerPacketIds::MagicCast as i16 => {
             if let Ok(p) = MagicCast::read_body(&mut cur) {
                 tracing::info!("🪄 MagicCast: spell={:?}", p.spell);
+                // 自身施法的帧动画（同 ObjectMagic 的表）
+                if let Some(oid) = session.local_player_id {
+                    effects.write(PendingEffect::SpellCast {
+                        object_id: oid,
+                        spell: p.spell as u8,
+                        dir: session.self_position.map(|(_, _, d)| d).unwrap_or(0),
+                    });
+                }
                 // M38：有选中目标 → 生成魔法弹道特效
                 if let Some(tid) = control.attack_target {
                     effects.write(PendingEffect::Projectile {
@@ -633,6 +641,13 @@ pub(crate) fn handle_social(
             if let Ok(p) = magic_combat::ObjectMagic::read_body(&mut cur) {
                 combat_evt.write(CombatEvent::SpellCast {
                     object_id: p.object_id,
+                });
+                // 2026-09-23：施法者在原版会播一条 Magic 库帧动画（C# PlayerObject MirAction.Spell），
+                // 本端此前只画染色白方块 → 玩家反馈「魔法效果完全不对」。这里按表补上。
+                effects.write(PendingEffect::SpellCast {
+                    object_id: p.object_id,
+                    spell: p.spell as u8,
+                    dir: p.direction as u8,
                 });
                 let color = crate::game::effects::spell_color(p.spell as u8);
                 if p.target_id != 0 {
