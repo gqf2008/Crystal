@@ -55,7 +55,9 @@ pub struct NpcDialogWidget;
 pub struct NpcClose;
 
 #[derive(Component)]
-pub struct NpcLine(usize);
+/// 行号（0..8）。字段公开给 `npc_rows` 只读探针做行矩形换算——
+/// 探针必须与点击分发读同一份行原点，否则夹具算出的点击点是"另一套几何"。
+pub struct NpcLine(pub usize);
 
 /// 行渲染缓存（源文本 + 悬停态）——未变不重建，避免每帧重排（#112 同因）
 #[derive(Component, Default)]
@@ -237,7 +239,10 @@ fn npc_ui_system(
     mut mgr: ResMut<crate::game::dialogs::DialogManager>,
     net: Res<NetConnection>,
     mouse: Res<ButtonInput<MouseButton>>,
-    windows: Query<&Window>,
+    // 命中判定走统一光标来源：**探针优先**（#2767）——NPC 窗是自绘文本、
+    // 不是 bevy_ui 按钮，click/cursor RPC 注入的 PointerInput/HoverMap 到不了它，
+    // 只有探针能进这条路。无探针时读真实光标，正常游玩行为不变。
+    cursor_src: crate::control::CursorSource,
     close: Query<(Entity, &Interaction), With<NpcClose>>,
     // cascade 边沿状态：只在「可见→不可见」那一帧触发（实机交互 sweep 修正）
     mut npc_prev_visible: Local<bool>,
@@ -297,6 +302,9 @@ fn npc_ui_system(
         }
     }
     if !npc.visible {
+        // 对话关闭 → 当前 NPC 归零（`npc_object_id` 的文档语义就是 "0 = 未开对话"）。
+        // 不归零的话，下一次开窗（服务端推来的对话）前若有选项点击，会打到上一个 NPC 上。
+        npc.npc_object_id = 0;
         // C# 语义：`NPCDialog.Hide()` 级联只在「可见→不可见」那一帧发生
         // （C# `if (NPCDialog.Visible) NPCDialog.Hide();` 是边沿语义）——
         // 修复前是每帧强清：服务端事件/RPC 打开的仓库会被立刻再关掉
@@ -341,8 +349,7 @@ fn npc_ui_system(
     // 源文本/悬停未变不重建（span 子实体缓存）
     // 鼠标不在窗口内时 cursor_position()=None：文字照常渲染（仅无悬停高亮）——
     // 原实现在此 early-return，鼠标离开窗口后 NPC 文字永不渲染/更新（master 既有 bug）
-    let Ok(window) = windows.single() else { return };
-    let cursor = window.cursor_position();
+    let cursor = cursor_src.pos();
     // 各行实体当前原点（bevy_ui 面板根 @(0,0)，行 Node.left/top 即屏幕坐标）——
     // 悬停/点击/叠加标签都以它为基准
     let mut line_pos: Vec<Option<(f32, f32)>> = vec![None; npc.lines.len().max(8)];
@@ -523,7 +530,7 @@ fn npc_ui_system(
 }
 
 /// 可点击的 NPC 菜单行：[@XXX] 或 <文字/@XXX>（原版 C# 链接格式）
-fn is_clickable_npc_line(line: &str) -> bool {
+pub fn is_clickable_npc_line(line: &str) -> bool {
     let t = line.trim();
     t.starts_with("[@") || t.contains("/@")
 }
@@ -654,6 +661,91 @@ pub fn extract_npc_key(line: &str) -> String {
     }
 }
 
+/// 行命中框高（`npc_ui_system` 的 `cursor.y <= ly + 16.0`）
+pub const NPC_ROW_HIT_H: f32 = 16.0;
+/// 菜单行（`[@XXX]`，无行内标记）的整行热区宽（C# MirLabel 通栏）
+pub const NPC_MENU_HIT_W: f32 = 392.0;
+
+/// 一个可点链接的**精确命中矩形**（`npc_rows` 只读探针用）
+#[derive(Debug, Clone, PartialEq)]
+pub struct NpcLinkTarget {
+    pub row: usize,
+    /// 链接段显示文本（如 `Access`）
+    pub text: String,
+    /// 点击后发出的 key（如 `[@Storage]`）
+    pub key: String,
+    pub x0: f32,
+    pub y0: f32,
+    pub x1: f32,
+    pub y1: f32,
+}
+
+impl NpcLinkTarget {
+    pub fn center(&self) -> (f32, f32) {
+        ((self.x0 + self.x1) * 0.5, (self.y0 + self.y1) * 0.5)
+    }
+}
+
+/// 把「渲染行原点 + 行文本」换算成每条链接的命中矩形。
+///
+/// 与 `npc_ui_system` 的点击分发**共用同一套度量**（行原点 = 渲染行的 `Node.left/top`、
+/// 段宽 = `est_text_width`、行高 `NPC_ROW_HIT_H`），否则夹具点出来的坐标是"另一套几何"。
+///
+/// 存在的理由：行内链接形如 `<Access/@Storage> Storage`，**链接段只覆盖行首那段文字**，
+/// 点在同一行后半截纯文本上不会分发（C# 里每个链接是独立 NewButton，同理）。
+/// 夹具按"行中心/行右半"点会静默无反应——⑤ 开仓库 `<Access/@Storage>` 正是栽在这里，
+/// 连查数轮都误以为"链接点了没反应"。
+///
+/// `rows` = `(行号, 行左 lx, 行上 ly)`，来自 `NpcLine` + `Node` 查询。
+pub fn npc_link_targets(
+    lines: &[String],
+    off: usize,
+    rows: &[(usize, f32, f32)],
+) -> Vec<NpcLinkTarget> {
+    let mut out = Vec::new();
+    for (i, line) in lines.iter().enumerate().skip(off).take(8) {
+        if !is_clickable_npc_line(line) {
+            continue;
+        }
+        let row = i - off;
+        let Some(&(_, lx, ly)) = rows.iter().find(|(r, _, _)| *r == row) else {
+            continue;
+        };
+        let segs = parse_npc_line(line);
+        let has_markup = segs.iter().any(|s| s.color.is_some() || s.link.is_some());
+        if !has_markup {
+            // 菜单行：整行热区（与点击分发的 else 分支同宽）
+            out.push(NpcLinkTarget {
+                row,
+                text: line.trim().to_string(),
+                key: extract_npc_key(line),
+                x0: lx,
+                y0: ly,
+                x1: lx + NPC_MENU_HIT_W,
+                y1: ly + NPC_ROW_HIT_H,
+            });
+            continue;
+        }
+        let mut px = 0.0f32;
+        for seg in segs.iter() {
+            let w = est_text_width(&seg.text, NPC_LINE_FONT_PX);
+            if let Some(k) = seg.link.as_ref() {
+                out.push(NpcLinkTarget {
+                    row,
+                    text: seg.text.clone(),
+                    key: format!("[@{k}]"),
+                    x0: lx + px,
+                    y0: ly,
+                    x1: lx + px + w,
+                    y1: ly + NPC_ROW_HIT_H,
+                });
+            }
+            px += w;
+        }
+    }
+    out
+}
+
 /// 消费服务端 NPC 对话事件（网络层只广播 ServerEvent）
 fn npc_dialog_server_events(
     mut events: MessageReader<crate::network::server_event::ServerEvent>,
@@ -706,6 +798,7 @@ mod tests {
         app.init_resource::<DialogManager>();
         app.insert_resource(NetConnection::default());
         app.insert_resource(bevy::input::ButtonInput::<bevy::input::mouse::MouseButton>::default());
+        app.init_resource::<crate::control::CursorProbe>();
         app.world_mut().spawn(Window::default());
         app.add_systems(Update, npc_ui_system);
 
@@ -874,5 +967,177 @@ mod tests {
         ));
         assert!(is_clickable_npc_line("[@main]"));
         assert!(!is_clickable_npc_line("plain text"));
+    }
+
+    /// ⑤ 回归门禁（仓库/BodyGuard 门窗）：行内链接的命中矩形**只覆盖链接段本身**，
+    /// 不覆盖同行的纯文本尾巴。实测线上脚本行就是 `<Access/@Storage> Storage`——
+    /// 链接段 `Access`（x∈[8,47]）之后还跟着纯文本 ` Storage`；
+    /// 夹具按"行中心/行右半"点 (x=60) 落在尾巴上，客户端正确地不分发，
+    /// 于是被误读成"点链接没反应"。本测试把这个语义钉死，避免再退回整行热区。
+    ///
+    /// 阳性对照（实做）：把 `npc_link_targets` 里链接段的 x1 改成整行宽
+    /// （`lx + NPC_MENU_HIT_W`，即旧的整行热区语义）→ 本测试立即红。
+    #[test]
+    fn npc_link_target_covers_link_segment_only() {
+        let lines = vec!["<Access/@Storage> Storage".to_string()];
+        let targets = npc_link_targets(&lines, 0, &[(0, 8.0, 34.0)]);
+        assert_eq!(targets.len(), 1, "该行恰好一条链接");
+        let t = &targets[0];
+        assert_eq!(t.key, "[@Storage]");
+        assert_eq!((t.x0, t.y0), (8.0, 34.0));
+        // `Access` = 6 个 ASCII 半宽 = 6 × (13/2) = 39
+        assert_eq!(t.x1, 47.0, "链接段右边界 = 段宽（不含尾部纯文本）");
+        assert_eq!(t.y1, 34.0 + NPC_ROW_HIT_H);
+        // 行中心（x=60，落在 ` Storage` 上）不属于链接命中区间
+        assert!(
+            !(60.0 >= t.x0 && 60.0 <= t.x1),
+            "尾部纯文本不得算作链接热区（否则夹具会以为自己点中了链接）"
+        );
+        // 链接段中心才是可点中心
+        assert_eq!(t.center(), (27.5, 42.0));
+    }
+
+    /// 菜单行（`[@XXX]`，无行内标记）保持整行热区（C# MirLabel 通栏语义）
+    #[test]
+    fn npc_link_target_menu_line_is_whole_row() {
+        let lines = vec!["[@main]".to_string()];
+        let targets = npc_link_targets(&lines, 0, &[(0, 8.0, 34.0)]);
+        assert_eq!(targets.len(), 1);
+        assert_eq!(targets[0].key, "[@main]");
+        assert_eq!(targets[0].x1, 8.0 + NPC_MENU_HIT_W);
+    }
+
+    /// 滚动偏移外的行不产出命中矩形（点击分发同样只认 off..off+8）
+    #[test]
+    fn npc_link_target_respects_scroll_off() {
+        let lines = vec![
+            "line0".to_string(),
+            "line1".to_string(),
+            "<Access/@Storage> Storage".to_string(),
+        ];
+        assert!(npc_link_targets(&lines, 1, &[(2, 8.0, 70.0)]).is_empty());
+        let t = npc_link_targets(&lines, 0, &[(2, 8.0, 70.0)]);
+        assert_eq!(t.len(), 1);
+        assert_eq!(t[0].row, 2);
+    }
+
+    /// ⑤ 回归门禁（**上线阻塞级**）：NPC 对话里点行内选项 → 发出的 `CallNPC`
+    /// 必须带**当前 NPC 的 object_id**，且 key 是链接的 key。
+    ///
+    /// 实测缺陷（2026-09-23）：`NpcDialogState.npc_object_id` 全仓没有任何写入点（恒 0），
+    /// 于是每次点选项都发 `CallNPC{object_id: 0}`，服务端 `NPC call for unknown object_id 0`
+    /// 静默丢弃——仓库 `<Access/@Storage>`、买卖入口、传送 Service 菜单、任务接受
+    /// 全部"点了没反应"。客户端日志只有一行 `🧙 NPC 选项: ... → [@Storage]`，看着像成功。
+    ///
+    /// 阳性对照（实做）：把 `npc_call`/`interact`/世界点击三处 `npc_dialog.npc_object_id = id`
+    /// 删掉（或把点击分发改回常量 0）→ 本测试立即红（解出的 object_id == 0）。
+    #[test]
+    fn npc_link_click_sends_callnpc_with_current_npc_id() {
+        use crate::game::dialogs::{DialogKind, DialogManager};
+        use crate::map_renderer::GameData;
+        use crate::network::NetConnection;
+        use mir2_shared::packets::base::deserialize_packet;
+        use mir2_shared::packets::client::npc::CallNPC;
+
+        const NPC_ID: u32 = 4242;
+        let (tx, rx) = crossbeam_channel::unbounded::<Vec<u8>>();
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.init_resource::<NpcDialogState>();
+        app.init_resource::<crate::game::dialogs::npc_goods::NpcGoodsState>();
+        app.init_resource::<crate::game::dialogs::sell_panel::SellPanelState>();
+        app.init_resource::<crate::game::dialogs::storage::StorageState>();
+        app.init_resource::<DialogManager>();
+        app.init_resource::<crate::control::CursorProbe>();
+        app.insert_resource(NetConnection {
+            to_server: Some(tx),
+            ..Default::default()
+        });
+        app.insert_resource(GameData::default());
+        app.world_mut().spawn(Window::default());
+
+        {
+            let mut npc = app.world_mut().resource_mut::<NpcDialogState>();
+            npc.visible = true;
+            npc.npc_object_id = NPC_ID;
+            npc.lines = vec!["<Access/@Storage> Storage".to_string()];
+        }
+        // 面板根（scroll 查询用）：UiScrollList + NpcDialogWidget
+        let panel = app
+            .world_mut()
+            .spawn((
+                crate::ui::theme::UiScrollList {
+                    rect_rel: (8.0, 34.0, 400.0, 144.0),
+                    row_h: 18.0,
+                    visible: 8,
+                    total: 0,
+                    offset: 0,
+                    step: 1,
+                    track_rel: (420.0, 34.0, 4.0, 144.0),
+                    thumb: None,
+                    z: 8,
+                },
+                NpcDialogWidget,
+            ))
+            .id();
+        // 第 0 行渲染实体（原点 8,34 —— 与 spawn_npc_dialog 同式）
+        let row = app
+            .world_mut()
+            .spawn((
+                NpcLine(0),
+                NpcLineSrc::default(),
+                NpcDialogWidget,
+                Text::default(),
+                TextColor(Color::WHITE),
+                TextFont::default(),
+                Node {
+                    left: Val::Px(8.0),
+                    top: Val::Px(34.0),
+                    ..Default::default()
+                },
+            ))
+            .id();
+        app.world_mut().entity_mut(panel).add_child(row);
+
+        // 光标压在链接段 `Access` 上（x∈[8,47]）；鼠标左键刚按下
+        let mut mouse = bevy::input::ButtonInput::<bevy::input::mouse::MouseButton>::default();
+        mouse.press(bevy::input::mouse::MouseButton::Left);
+        app.insert_resource(mouse);
+        app.world_mut()
+            .resource_mut::<crate::control::CursorProbe>()
+            .pos = Some(Vec2::new(27.5, 42.0));
+        app.add_systems(Update, npc_ui_system);
+        app.update();
+
+        let frame = rx.try_recv().expect("应发出一个 CallNPC 包");
+        let mut cur = std::io::Cursor::new(frame.as_slice());
+        let pkt: CallNPC = deserialize_packet(&mut cur).expect("应是合法 CallNPC 帧");
+        assert_eq!(pkt.key, "[@Storage]", "链接 key 必须原样发出");
+        assert_eq!(
+            pkt.object_id, NPC_ID,
+            "CallNPC 必须带当前 NPC 的 object_id（0 会被服务端丢弃：NPC call for unknown object_id 0）"
+        );
+        let _ = DialogKind::Npc;
+    }
+
+    /// 探针光标必须能驱动 NPC 行命中（`Click`/`cursor` RPC 注入的就是它）：
+    /// 无探针时读真实窗口光标，有探针时**探针优先**——否则自动化里点链接永远无反应。
+    /// 阳性对照：把 `cursor_src.pos()` 换回 `window.cursor_position()` → 本测试红
+    /// （无真实光标的环境里注入坐标不生效）。
+    #[test]
+    fn cursor_probe_drives_npc_hit_test() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.init_resource::<crate::control::CursorProbe>();
+        app.world_mut().spawn(Window::default());
+        app.add_systems(Update, |src: crate::control::CursorSource| {
+            // 只验证"探针优先"这一条通道
+            assert_eq!(src.pos(), Some(Vec2::new(27.5, 42.0)));
+        });
+        app.world_mut()
+            .resource_mut::<crate::control::CursorProbe>()
+            .pos = Some(Vec2::new(27.5, 42.0));
+        app.update();
     }
 }

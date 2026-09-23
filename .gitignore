@@ -387,6 +387,11 @@ FodyWeavers.xsd
 !tools/acceptance/UI_VERIFICATION_REPORT.md
 !tools/acceptance/ui_verification_report.html
 !tools/acceptance/ui_acceptance_2961.html
+# 五闭环（买卖/战斗/任务/邮件仓库/跨图·复活）玩家验收夹具：判据全部取状态而非像素，
+# 与上面 ui_interact_sweep.ps1 同等级纳入管理（夹具错会给出假绿/假红，实测污染过覆盖数值）
+!tools/acceptance/rpc.ps1
+!tools/acceptance/l5d_npc_link.ps1
+!tools/acceptance/l5e_storage_roundtrip.ps1
 
 # 客户端运行时本地设置（游戏自写自读，不入库；两个客户端都按进程 CWD 相对路径写，
 # 故用不带前导斜杠的模式覆盖任意启动目录）

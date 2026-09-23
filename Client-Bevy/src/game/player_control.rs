@@ -487,6 +487,8 @@ fn left_click_interact_system(
     items: Query<(&NetObjectId, &Transform), (With<GroundItem>, Without<LocalPlayer>)>,
     buttons: Query<(&UiButton, &InheritedVisibility)>,
     ui: UiLockState,
+    // 点击 NPC 开对话时记录当前 NPC 的 object_id（对话内选项点击用它发 CallNPC）
+    mut npc_dialog: ResMut<crate::game::dialogs::npc::NpcDialogState>,
 ) {
     let Ok(window) = windows.single() else { return };
     let Some(cursor) = window.physical_cursor_position() else {
@@ -631,6 +633,12 @@ fn left_click_interact_system(
             }
             control.npc_id = Some(object_id);
             control.last_npc_call = now;
+            // ⑤ 上线阻塞级修复（2026-09-23）：把当前 NPC 记进对话状态——对话里的
+            // 行内选项点击（`<Access/@Storage>` 等）发 CallNPC 时用的是
+            // `NpcDialogState.npc_object_id`，而该字段此前**全仓无任何写入点**（恒 0），
+            // 服务端 `NPC call for unknown object_id 0` 直接丢弃：仓库/买卖/传送
+            // Service 菜单/任务接受全部"点了没反应"。
+            npc_dialog.npc_object_id = object_id;
             net.send_packet(&mir2_shared::packets::client::npc::CallNPC {
                 object_id,
                 key: "[@Main]".to_string(),
