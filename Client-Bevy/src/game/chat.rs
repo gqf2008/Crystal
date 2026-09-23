@@ -380,6 +380,19 @@ pub fn chat_panel_rect(size: usize) -> (f32, f32, f32, f32) {
     )
 }
 
+/// 滚动条轨道高度（owner 缺陷③「滚动条要与内容对齐」）：
+/// 原版 `CountBar.Index = 2012/2013/2014` 三档图自带高度；本端此前**从不设置轨道 custom_size**
+/// → 滑块系统一直用默认 21px，展开档位下轨道/滑块与内容区明显不对齐。
+/// 规则：有真实档位图就用它的自然高度；图缺失（占位 1×1）时按可见内容高度兜底
+/// `行数 × 13px（C# 行高）+ 8px 余量`，保证「轨道 ≥ 内容区」且随档位单调增长。
+pub fn chat_track_height(size: usize, natural_h: Option<f32>) -> f32 {
+    let content = chat_size_lines(size) as f32 * 13.0;
+    match natural_h {
+        Some(h) if h > 1.0 => h,
+        _ => content + 8.0,
+    }
+}
+
 /// 滑块拖动反查：给定鼠标屏幕 y → `scroll_up`（与 `chat_scroll_knob_y` 互为逆）。
 ///
 /// 原版 `ChatDialog.Update()`：`PositionBar.Y = 16 + (CountBar.高 - PositionBar.高) * StartIndex / (History.Count-1)`；
@@ -628,7 +641,10 @@ fn spawn_chat(
         1,
         1,
     ));
-    // #2781：三档底图（C# `ChangeSize` 换 `Index`；尺寸取图源自然尺寸）
+    // #2781：三档底图（C# `ChangeSize` 换 `Index`）
+    // owner 缺陷②：此前缺失档位图时兜底成**1×1 白图**，展开态面板被画成一个白点（看着像透明）。
+    // 现在兜底是一张不透明深色像素，并且尺寸一律由 `chat_panel_rect(size)` 决定（不再依赖图像自然尺寸）。
+    let panel_fallback = images.add(crate::map_renderer::make_image(vec![18, 18, 22, 255], 1, 1));
     let size_imgs: Vec<Handle<Image>> = CHAT_PANEL_IMAGES
         .iter()
         .map(|idx| {
@@ -639,7 +655,7 @@ fn spawn_chat(
                 LibraryName::Prguse,
                 *idx,
             )
-            .unwrap_or_else(|| white.clone())
+            .unwrap_or_else(|| panel_fallback.clone())
         })
         .collect();
     let chat_bg = size_imgs[0].clone();
@@ -654,7 +670,7 @@ fn spawn_chat(
         ]),
         Sprite {
             image: chat_bg,
-            custom_size: Some(Vec2::new(632.0, 68.0)),
+            custom_size: Some(Vec2::new(632.0, 68.0)), // 0 档；升档由 chat_size_system 按 chat_panel_rect 重设
             // C# Color.White（纹理自身 alpha）；Bevy 高 z 靠前：
             // 面板 z=2.05 低于所有内容（2.2+），内容才显示在面板上
             color: Color::WHITE,
@@ -994,12 +1010,11 @@ fn chat_size_system(
         if sp.image != *img {
             sp.image = img.clone();
         }
-        let natural = images
-            .get(img)
-            .map(|i| i.size_f32())
-            .unwrap_or(Vec2::new(632.0, 68.0));
+        // 面板尺寸一律取 chat_panel_rect(size)（632 × 68/116/164）——
+        // 不再依赖图像自然尺寸：档位图缺失时会退化成 1×1，展开态就没底了（owner 缺陷②）
+        let (_, _, w, h) = chat_panel_rect(size);
         if let Some(cs) = sp.custom_size.as_mut() {
-            *cs = natural;
+            *cs = Vec2::new(w, h);
         }
     }
     let visible_lines = chat_size_lines(size);
@@ -1035,6 +1050,11 @@ fn chat_size_system(
         let img = &handles.0[size];
         if sp.image != *img {
             sp.image = img.clone();
+        }
+        // owner 缺陷③：轨道高度必须随档位对齐内容区（此前从不设置 → 一直用默认 21px）
+        let natural_h = images.get(img).map(|i| i.size_f32().y);
+        if let Some(cs) = sp.custom_size.as_mut() {
+            cs.y = chat_track_height(size, natural_h);
         }
     }
 }
@@ -1994,6 +2014,29 @@ fn chat_server_events(
 #[cfg(test)]
 mod tests {
 
+    /// 门禁（owner 缺陷③）：轨道高度必须随档位对齐内容区，且绝不再退化成 1px
+    /// 阳性对照（实做）：把兜底改成恒 1.0 → 第 2 条断言立即红。
+    #[test]
+    fn chat_track_height_aligns_with_content() {
+        // 有真实档位图时用图像高度
+        assert_eq!(chat_track_height(0, Some(47.0)), 47.0);
+        // 图缺失（占位 1×1）时按内容兜底：行数×13 + 8，且随档位单调增
+        let h0 = chat_track_height(0, Some(1.0));
+        let h1 = chat_track_height(1, Some(1.0));
+        let h2 = chat_track_height(2, Some(1.0));
+        assert!(
+            h0 > 1.0 && h1 > h0 && h2 > h1,
+            "兜底高度必须随档位增长: {h0}/{h1}/{h2}"
+        );
+        for size in 0..=2 {
+            let content = chat_size_lines(size) as f32 * 13.0;
+            assert!(
+                chat_track_height(size, Some(1.0)) >= content,
+                "轨道高度不得小于内容区（档位 {size}）"
+            );
+        }
+    }
+
     /// 门禁：面板矩形必须覆盖**所有档位**（owner「滚动条无法滚动」的根因——此前只等于 0 档）；
     /// 阳性对照（实做）：把高度改回固定 68.0（旧硬编码）→ 1/2 档断言立即红。
     #[test]
@@ -2665,10 +2708,13 @@ mod whisper_partner_tests {
             .expect("尺寸系统应成功");
         // 面板：换图（默认句柄）+ 长高到 116（1 档）
         let sp = world.entity(panel).get::<Sprite>().unwrap();
+        // 2026-09-24 修正：面板尺寸取 `chat_panel_rect(size)`（C# ChatDialog.ChangeSize 的
+        // 632 × 68/116/164），**不再**回退成 0 档的自然尺寸——旧断言断的正是 owner 缺陷②那种
+        // 「升档后面板还是 68 高（甚至退化成 1×1）→ 展开区没底、看着透明」的行为。
         assert_eq!(
             sp.custom_size,
-            Some(Vec2::new(632.0, 68.0)),
-            "无资产时回退原尺寸"
+            Some(Vec2::new(632.0, 116.0)),
+            "1 档面板必须是 632x116（与 chat_panel_rect 同源）"
         );
         // 行：0..6 可见、从新顶边 (623+1) 起排
         assert_eq!(
