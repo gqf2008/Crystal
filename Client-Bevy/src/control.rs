@@ -100,6 +100,19 @@ pub fn build_send_mail(
     }
 }
 
+/// 构造交任务包：`quest_index` 与可选奖励下标**不得互换**（服务端按位置读字段：
+/// `[quest_index i32][selected_item_index i32]`）。抽成纯函数是为了给 ④ 留一条可单测判据——
+/// 写反了服务端会去交"下标那个任务"，症状是「交了个不相干的任务 / 报任务不存在」。
+pub fn build_finish_quest(
+    quest_index: i32,
+    selected_item_index: i32,
+) -> mir2_shared::packets::client::quest::FinishQuest {
+    mir2_shared::packets::client::quest::FinishQuest {
+        quest_index,
+        selected_item_index,
+    }
+}
+
 /// 已占用格列表 `(格号, 名称)`——存取闭环的夹具靠它拿到**准确的 From/To 格号**
 /// （`StoreItem`/`TakeBackItem` 的 from/to 就是格号，猜格号会得到"回包 success 但两边都不动"）。
 pub fn occupied_cells(
@@ -211,6 +224,14 @@ enum ControlCommand {
     /// 只读邮件探针：客户端侧邮件列表/详情（判据取状态而非 UI 代理量）
     MailProbe {
         reply: Sender<String>,
+    },
+    /// ④ 任务闭环动作（现成包 `C.FinishQuest`）：交任务/领奖励。
+    /// 与 `accept_quest` 同一模式——把「交任务」从任务日志窗的像素定位里解耦。
+    /// 服务端仍按原版规则校验：进度必须满（无任务目标的任务视为**空进度=已完成**）、
+    /// 有 finish NPC 链接时玩家必须在同图 DataRange(16) 内、背包要放得下物品奖励。
+    FinishQuest {
+        quest_index: i32,
+        selected_item_index: i32,
     },
     QuestProbe {
         reply: Sender<String>,
@@ -516,6 +537,8 @@ struct ControlQueries<'w, 's> {
     /// 本地玩家金币（`GoldGained`/`UserInformation` 写入）——邮件收取/交易类闭环的
     /// 判据就是它的 delta，读它比读 HUD 像素或 DB 落后值都可靠
     gold: Query<'w, 's, &'static crate::game::player_state::Gold, With<LocalPlayer>>,
+    /// 本地玩家等级/经验（`UserInformation`/`ExpGained` 写入）——任务奖励判据的另一半
+    progression: Query<'w, 's, &'static crate::game::player_state::Progression, With<LocalPlayer>>,
 }
 
 /// 控制端口默认值（--control-port 未指定或非法时回退）
@@ -859,6 +882,26 @@ fn handle_conn(mut stream: std::net::TcpStream, tx: Sender<ControlCommand>) {
                     serde_json::from_str::<Value>(&s).unwrap_or_else(|_| json!({}))
                 } else {
                     json!({"error": "control channel closed"})
+                }
+            }
+            // ④ 交任务：finish_quest {quest_index, selected_item_index?（默认 -1 = 不选奖励）}
+            "finish_quest" => {
+                let quest_index = params
+                    .get("quest_index")
+                    .and_then(|v| v.as_i64())
+                    .unwrap_or(0) as i32;
+                let selected_item_index = params
+                    .get("selected_item_index")
+                    .and_then(|v| v.as_i64())
+                    .unwrap_or(-1) as i32;
+                if quest_index <= 0 {
+                    json!({"error": "missing quest_index"})
+                } else {
+                    let _ = tx.send(ControlCommand::FinishQuest {
+                        quest_index,
+                        selected_item_index,
+                    });
+                    json!({"ok": true, "quest_index": quest_index, "selected_item_index": selected_item_index})
                 }
             }
             "accept_quest" => {
@@ -2167,6 +2210,10 @@ fn apply_control_commands(
                         "max_weight": inv.max_weight,
                         // 金币：交易/存取/邮件收取闭环的 delta 判据
                         "gold": q.gold.single().map(|g| g.0).unwrap_or(0),
+                        // 等级/经验：任务/打怪奖励闭环的 delta 判据
+                        "level": q.progression.single().map(|p| p.level).unwrap_or(0),
+                        "exp": q.progression.single().map(|p| p.exp).unwrap_or(0),
+                        "max_exp": q.progression.single().map(|p| p.max_exp).unwrap_or(0),
                         // 格号 → 名称：夹具据此挑存取源格（不用猜）
                         "occupied": occupied_cells(&inv.items)
                             .into_iter()
@@ -2261,6 +2308,16 @@ fn apply_control_commands(
             ControlCommand::MailCollect { mail_id } => {
                 net.send_packet(&mir2_shared::packets::client::mail::CollectParcel { mail_id });
                 tracing::info!("🎮 control mail_collect: id={mail_id}");
+            }
+            ControlCommand::FinishQuest {
+                quest_index,
+                selected_item_index,
+            } => {
+                // 与任务日志窗「交付」按钮发的**同一个包**（C# FinishQuest[quest_index][selected_item_index]）
+                net.send_packet(&build_finish_quest(quest_index, selected_item_index));
+                tracing::info!(
+                    "🎮 control finish_quest: quest={quest_index} sel={selected_item_index}"
+                );
             }
             ControlCommand::MailProbe { reply } => {
                 let mails: Vec<serde_json::Value> = q
@@ -2822,6 +2879,23 @@ mod tests {
         assert!(!pkt.stamped, "本动作不贴票");
         // 空收件人由 RPC 层拒绝（服务端按 name 查人，空名只会静默失败）
         assert!(pkt.name.is_empty() || !pkt.name.trim().is_empty());
+    }
+
+    /// ④ 任务交付门禁：`finish_quest` 的两个字段**不得互换**（服务端按位置读
+    /// `[quest_index][selected_item_index]`）。写反了会去交"下标那个任务"，
+    /// 症状是「交了个不相干任务 / 报任务不存在」，而日志看着像调用成功。
+    ///
+    /// 阳性对照（实做）：把两个字段调换 → 本测试立即红。
+    #[test]
+    fn build_finish_quest_keeps_field_order() {
+        let pkt = build_finish_quest(86, -1);
+        assert_eq!(pkt.quest_index, 86, "第一个字段必须是任务号");
+        assert_eq!(
+            pkt.selected_item_index, -1,
+            "第二个字段是可选奖励下标（-1=不选）"
+        );
+        let pkt2 = build_finish_quest(27, 2);
+        assert_eq!((pkt2.quest_index, pkt2.selected_item_index), (27, 2));
     }
 
     /// `attack_mode` RPC 的模式名解析（2026-09-22 玩家验收能力）。
