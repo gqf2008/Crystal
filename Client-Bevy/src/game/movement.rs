@@ -270,9 +270,15 @@ fn apply_self_position(
         cur.0,
         cur.1
     );
-    let dist =
-        ((tx - cur.0).abs() + (ty - cur.1).abs()).max(((tx - cur.0).abs()).max((ty - cur.1).abs()));
-    if dist > 2 {
+    // 服务器位置是**权威**：只要和本地不一致就采用（C# `GameScene.UserLocation`
+    // `Client/MirScenes/GameScene.cs:2244-2252` 就是无条件 `User.CurrentLocation = p.Location`）。
+    //
+    // 此前门限是「距离 > 2 格才校正」——**1 格偏差永远校不回来**，实机后果（2026-09-24）：
+    // 本地预测多走一格被服务端拒掉后，客户端认为在 (289,611)、服务端记的是 (289,612)；
+    // 近战按"正前方一格"结算落在空地上 → 64 次攻击全是空挥、怪物一点血不掉；
+    // 同理拾取/点 NPC 也会按错格判距离。
+    // 边界：本地正在寻路（LocalMove 非空）时前面已 return，不会与预测每帧拉扯。
+    if cur != (tx, ty) {
         let p = tile_to_world(tx, ty);
         tf.translation.x = p.x;
         tf.translation.y = p.y;
@@ -605,6 +611,48 @@ fn advance_local_move(
 
 #[cfg(test)]
 mod tests {
+    /// 回归（2026-09-24 实机挖出）：本地预测超前服务器**1 格**时，`UserLocation` 校正必须
+    /// 把本地玩家拉回服务器位置。
+    ///
+    /// 此前门限是「距离 > 2 格才校正」→ 1 格偏差永远校不回来。实机后果：客户端以为在
+    /// (289,611)、服务端记的是 (289,612)，近战按"正前方一格"结算落在空地 →
+    /// 连打 64 次全是空挥、怪物技能不掉血（`l5a_combat` 首跑即此现象）。
+    /// C# `GameScene.UserLocation`（`Client/MirScenes/GameScene.cs:2244-2252`）是**无条件采用**。
+    ///
+    /// 阳性对照（实做）：把门限改回 `dist > 2` → 本测试立即红。
+    #[test]
+    fn user_location_corrects_one_tile_desync() {
+        use crate::actor::LocalPlayer;
+        use crate::actor::NetObjectId;
+        use crate::network::SessionState;
+        use bevy::prelude::*;
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.init_resource::<SessionState>();
+        app.add_systems(Update, super::apply_self_position);
+
+        let start = super::tile_to_world(289, 611);
+        let player = app
+            .world_mut()
+            .spawn((
+                LocalPlayer,
+                NetObjectId(7),
+                Transform::from_xyz(start.x, start.y, 0.0),
+            ))
+            .id();
+        // 服务端权威位置比客户端多 1 格（本地预测多走一格、被服务端拒掉后的典型形态）
+        app.world_mut().resource_mut::<SessionState>().self_position = Some((289, 612, 0));
+        app.update();
+
+        let tf = app.world().get::<Transform>(player).unwrap();
+        assert_eq!(
+            super::world_to_tile(tf.translation.x, tf.translation.y),
+            (289, 612),
+            "1 格偏差必须被 UserLocation 校正拉回服务器位置"
+        );
+    }
+
     use super::*;
 
     /// 门禁（#3028「死亡态 + 换图」丢本地玩家实体）：命令落地前实体被 despawn 时，
