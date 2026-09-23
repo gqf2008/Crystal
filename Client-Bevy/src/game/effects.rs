@@ -406,7 +406,9 @@ fn advance_spell_fx(
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
     mut cache: ResMut<UiImageCache>,
-    actors: Query<(&NetObjectId, &Transform)>,
+    // B0001 回归：q 写 Transform 与 actors 读 Transform 冲突，进游戏即 panic（见下方门禁测试）。
+    // 跟随源/目标永远是场景角色，绝不携带 SpellFxAnim，Without 划界即可证明两查询不相交。
+    actors: Query<(&NetObjectId, &Transform), Without<crate::game::spell_effects::SpellFxAnim>>,
     mut q: Query<(
         Entity,
         &mut crate::game::spell_effects::SpellFxAnim,
@@ -590,5 +592,47 @@ mod tests {
         assert_eq!(fx[0].base, 0, "Magic[0] 起（原版 PlayerObject.cs）");
         assert_eq!(fx[0].frames, 10);
         assert_eq!(fx[0].follow_object_id, 4242, "跟随施法者");
+    }
+
+    /// B0001 接线门禁（P0，实机启动即崩挖出）：插件注册的五条特效系统放进同一调度
+    /// 连跑必须能初始化——`advance_spell_fx` 曾因 `actors` 读 Transform 与 `q` 写
+    /// Transform 未划界而在进游戏瞬间 panic（error\[B0001\]），表现为「一进游戏即崩」。
+    ///
+    /// 为什么单系统 run_system_once 拦不住：B0001 是**调度初始化期**对同系统内
+    /// 多参数的冲突校验，逐系统单跑永远遇不到；只有像插件那样注册进 Schedule 才触发。
+    ///
+    /// 阳性对照：把 `actors` 查询的 `Without<SpellFxAnim>` 去掉 → 本测试立即红
+    /// （实机已验证该 panic 真实发生，见 PR 描述）。
+    #[test]
+    fn effects_update_systems_init_without_query_conflict() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(bevy::state::app::StatesPlugin);
+        app.insert_state(crate::scenes::AppState::Game);
+        app.init_resource::<EffectsState>();
+        app.add_message::<PendingEffect>();
+        app.init_resource::<crate::game::dialogs::option::OptionState>();
+        app.insert_resource(bevy::prelude::Assets::<bevy::prelude::Image>::default());
+        app.insert_resource(crate::map_renderer::GameLibraries(
+            crate::resources::libraries::Libraries::new(
+                crate::resources::libraries::resolve_data_path(),
+            ),
+        ));
+        app.insert_resource(crate::ui::sprite_ui::UiImageCache::default());
+        // 与 EffectsPlugin 相同的五条系统、同样的链式注册（.after/run_if 与冲突校验无关，从略）
+        app.add_systems(
+            Update,
+            (
+                spawn_pending_effects,
+                advance_projectiles,
+                advance_bursts,
+                advance_spell_fx,
+                advance_spell_missiles,
+            )
+                .chain(),
+        );
+        // 首帧即完成调度初始化：有 B0001 冲突时这里直接 panic
+        app.update();
+        app.update();
     }
 }
