@@ -365,6 +365,46 @@ pub fn chat_panel_top(size: usize) -> f32 {
     CHAT_PANEL_BOTTOM - 68.0 - CHAT_SIZE_STEP * size.min(2) as f32
 }
 
+/// 面板矩形（屏幕坐标，左上原点）：**滚动命中判定的唯一来源**。
+///
+/// 为什么要有它：此前 `chat_wheel_system` / `chat_key_scroll_system` 各自硬编码
+/// `(230.0, 671.0, 632.0, 68.0)`——那只等于**0 档**的面板矩形；一旦升到 1/2 档（向上长高 48/96px），
+/// 可见面板超出该矩形，滚轮/键盘在扩展出来的区域就完全失效（owner 反馈「滚动条无法滚动」）。
+pub fn chat_panel_rect(size: usize) -> (f32, f32, f32, f32) {
+    let size = size.min(2);
+    (
+        230.0,
+        chat_panel_top(size),
+        632.0,
+        68.0 + CHAT_SIZE_STEP * size as f32,
+    )
+}
+
+/// 滑块拖动反查：给定鼠标屏幕 y → `scroll_up`（与 `chat_scroll_knob_y` 互为逆）。
+///
+/// 原版 `ChatDialog.Update()`：`PositionBar.Y = 16 + (CountBar.高 - PositionBar.高) * StartIndex / (History.Count-1)`；
+/// 本端把 `StartIndex` 换成「距最新行向上滚了几行」的 `scroll_up = max_scroll - start`。
+/// 两端夹紧（拖到顶=最旧、拖到底=最新），越界不 panic。
+pub fn chat_scroll_from_knob_y(
+    track_h: f32,
+    knob_h: f32,
+    y_screen: f32,
+    total: usize,
+    visible: usize,
+) -> usize {
+    let max_scroll = total.saturating_sub(visible);
+    if total <= 1 || max_scroll == 0 {
+        return 0;
+    }
+    let span = (track_h - knob_h).max(0.0);
+    if span <= 0.0 {
+        return 0;
+    }
+    let k = ((y_screen - 16.0) / span).clamp(0.0, 1.0);
+    let start = (k * (total - 1) as f32).round() as usize;
+    max_scroll.saturating_sub(start.min(max_scroll))
+}
+
 /// #2781：档位 → 控制栏顶边（C# SizeButton.Click：`Location.Y = ChatDialog.Top - Size.Height`）
 pub fn chat_bar_top(size: usize) -> f32 {
     CHAT_BAR_Y - CHAT_SIZE_STEP * size.min(2) as f32
@@ -530,6 +570,7 @@ impl Plugin for ChatPlugin {
                 chat_wheel_system,
                 chat_key_scroll_system,
                 chat_scroll_buttons_system,
+                chat_scroll_drag_system,
                 chat_input_system,
                 chat_input_ui_system,
                 chat_display_system,
@@ -1558,7 +1599,8 @@ fn chat_wheel_system(
     let Some(cursor) = window.cursor_position() else {
         return;
     };
-    const PANEL: (f32, f32, f32, f32) = (230.0, 671.0, 632.0, 68.0); // C# ChatDialog 区域
+    // 命中区取**当前档位**的面板矩形（此前硬编码只在 0 档成立 → 展开后滚轮失效）
+    let PANEL = chat_panel_rect(chat.size);
     if cursor.x < PANEL.0
         || cursor.x > PANEL.0 + PANEL.2
         || cursor.y < PANEL.1
@@ -1597,7 +1639,8 @@ fn chat_key_scroll_system(
     let Some(cursor) = window.cursor_position() else {
         return;
     };
-    const PANEL: (f32, f32, f32, f32) = (230.0, 671.0, 632.0, 68.0); // C# ChatDialog 区域
+    // 同上：命中区取当前档位矩形
+    let PANEL = chat_panel_rect(chat.size);
     if cursor.x < PANEL.0
         || cursor.x > PANEL.0 + PANEL.2
         || cursor.y < PANEL.1
@@ -1661,6 +1704,54 @@ fn chat_scroll_buttons_system(
             chat.scroll_up = apply_key_scroll(chat.scroll_up, max_scroll, page, kind.0);
         }
     }
+}
+
+/// 聊天滚动条**拖动**（owner 反馈「滚动条无法滚动」的第二半）：
+/// 此前 `chat_scroll_knob_system` 只把滑块画在 `scroll_up` 对应的位置，全程不读鼠标输入——
+/// 也就是说「拖滚动条」这条交互在代码里根本不存在。这里补上：按下落在轨道/滑块上 →
+/// 按 y 反查 `scroll_up`（`chat_scroll_from_knob_y`，与画滑块用的 `chat_scroll_knob_y` 互为逆）。
+fn chat_scroll_drag_system(
+    mut chat: ResMut<ChatState>,
+    windows: Query<&Window>,
+    buttons: Res<ButtonInput<MouseButton>>,
+    track: Query<(&Transform, &Sprite), With<ChatScrollTrack>>,
+    mut dragging: Local<bool>,
+) {
+    if chat.input_active {
+        *dragging = false;
+        return;
+    }
+    let Ok(window) = windows.single() else { return };
+    let Some(cursor) = window.cursor_position() else {
+        return;
+    };
+    let Ok((_, sprite)) = track.single() else {
+        return;
+    };
+    let track_h = sprite.custom_size.map(|s| s.y).unwrap_or(21.0);
+    let track_w = sprite.custom_size.map(|s| s.x).unwrap_or(8.0);
+    // 轨道矩形用**屏幕坐标常量**推出（与 spawn_chat 同源：轨道在 面板 x+622、面板顶+16）；
+    // 不用实体 Transform —— UI 相机把屏幕 y 映射成负世界 y，直接读 Transform 会算错命中区。
+    let (px, py, _, _) = chat_panel_rect(chat.size);
+    let left = px + 622.0;
+    let top = py + 16.0;
+    let inside = cursor.x >= left - 4.0
+        && cursor.x <= left + track_w + 4.0
+        && cursor.y >= top - 2.0
+        && cursor.y <= top + track_h + 2.0;
+    if buttons.just_pressed(MouseButton::Left) {
+        *dragging = inside;
+    }
+    if !buttons.pressed(MouseButton::Left) {
+        *dragging = false;
+        return;
+    }
+    if !*dragging {
+        return;
+    }
+    let total = chat.lines.len();
+    chat.scroll_up =
+        chat_scroll_from_knob_y(track_h, 14.0, cursor.y - top, total, chat.visible_lines);
 }
 
 /// 显示：按页签过滤聊天行 + 输入行（单查询避免 B0001）
@@ -1902,6 +1993,63 @@ fn chat_server_events(
 
 #[cfg(test)]
 mod tests {
+
+    /// 门禁：面板矩形必须覆盖**所有档位**（owner「滚动条无法滚动」的根因——此前只等于 0 档）；
+    /// 阳性对照（实做）：把高度改回固定 68.0（旧硬编码）→ 1/2 档断言立即红。
+    #[test]
+    fn chat_panel_rect_covers_all_size_tiers() {
+        assert_eq!(chat_panel_rect(0), (230.0, 671.0, 632.0, 68.0));
+        assert_eq!(chat_panel_rect(1), (230.0, 623.0, 632.0, 116.0));
+        assert_eq!(chat_panel_rect(2), (230.0, 575.0, 632.0, 164.0));
+        // 顶边必须与 chat_panel_top 同源；底边恒为 739（C# 底边固定）
+        for size in 0..=2 {
+            let (_, top, _, h) = chat_panel_rect(size);
+            assert_eq!(top, chat_panel_top(size));
+            assert_eq!(top + h, 739.0);
+        }
+    }
+
+    /// 门禁：滑块拖动反查必须与画滑块用的比例公式互为逆（含两端夹紧）
+    /// 阳性对照（实做）：去掉 `.clamp(0.0, 1.0)` → 最旧/最新两端断言红。
+    #[test]
+    fn knob_y_and_scroll_up_are_inverse() {
+        let (track_h, knob_h) = (21.0f32, 14.0f32);
+        let (total, visible) = (20usize, 4usize);
+        let max_scroll = total - visible; // 16
+                                          // 拖到轨道顶 = 最旧（scroll_up = max_scroll）
+        assert_eq!(
+            chat_scroll_from_knob_y(track_h, knob_h, 16.0, total, visible),
+            max_scroll
+        );
+        // 拖到轨道底 = 最新（scroll_up = 0）
+        assert_eq!(
+            chat_scroll_from_knob_y(track_h, knob_h, 16.0 + (track_h - knob_h), total, visible),
+            0
+        );
+        // 中点：start = round(0.5*19) = 10 → scroll_up = 16 - 10 = 6
+        assert_eq!(
+            chat_scroll_from_knob_y(
+                track_h,
+                knob_h,
+                16.0 + (track_h - knob_h) / 2.0,
+                total,
+                visible
+            ),
+            6
+        );
+        // 往返：把某个 scroll_up 画成 y，再反查必须回到同一个值
+        for scroll_up in [0usize, 1, 6, 15, 16] {
+            let start = max_scroll - scroll_up;
+            let y = chat_scroll_knob_y(track_h, knob_h, start, total);
+            assert_eq!(
+                chat_scroll_from_knob_y(track_h, knob_h, y, total, visible),
+                scroll_up,
+                "scroll_up={scroll_up} 往返不一致"
+            );
+        }
+        // 行数不足一屏 → 恒为 0（不 panic、不越界）
+        assert_eq!(chat_scroll_from_knob_y(track_h, knob_h, 20.0, 2, 4), 0);
+    }
     use super::*;
 
     /// #2961 项3 实机复核：聊天面板（消息行 + 输入行 + 光标）必须用**自带 CJK 字形**
