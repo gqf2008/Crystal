@@ -170,6 +170,19 @@ pub fn occupied_cells_with_uid(
         .collect()
 }
 
+/// 任务格已占用列表 `(格号, 名称, 数量)`——ItemTasks 任务的判据要落在**任务格**上：
+/// 服务端 `Q`（任务物品掉落）直接把物品放进任务格并推进进度
+/// （`world/mod.rs try_give_quest_item`），所以「任务物品到手」= 任务格里出现该物品。
+pub fn quest_cells(
+    items: &[Option<crate::game::dialogs::inventory::InvItem>],
+) -> Vec<(usize, String, u16)> {
+    items
+        .iter()
+        .enumerate()
+        .filter_map(|(i, s)| s.as_ref().map(|it| (i, it.name.clone(), it.count)))
+        .collect()
+}
+
 pub fn taken_quest_ids(entries: &[crate::game::dialogs::quest_log::QuestEntry]) -> Vec<i32> {
     entries.iter().filter(|e| e.taken).map(|e| e.id).collect()
 }
@@ -2384,6 +2397,11 @@ fn apply_control_commands(
                         "total": inv.items.len(),
                         "quest_used": used_slots(&inv.quest_inventory),
                         "quest_total": inv.quest_inventory.len(),
+                        // 任务格内容（ItemTasks 判据：任务物品是否真的进了任务格）
+                        "quest_occupied": quest_cells(&inv.quest_inventory)
+                            .into_iter()
+                            .map(|(c, n, cnt)| json!({"cell": c, "name": n, "count": cnt}))
+                            .collect::<Vec<_>>(),
                         "weight": inv.weight,
                         "max_weight": inv.max_weight,
                         // 金币：交易/存取/邮件收取闭环的 delta 判据
@@ -3349,6 +3367,46 @@ mod tests {
             "同一状态连读必须一致"
         );
     }
+
+    /// ④ 仪器门禁（2026-09-24）：ItemTasks 任务的判据必须读**任务格**（`quest_inventory`）——
+    /// 服务端 `Q` 掉落（`world/mod.rs try_give_quest_item`）把任务物品**直接放进任务格**、
+    /// 不落地也不进背包，所以「背包里有这个物品」不能当作完成任务，反之任务格为空也未必是没掉。
+    ///
+    /// 阳性对照：把 `filter_map` 换成 `map`（空格的 None 也算一格）→ 本测试立即红。
+    #[test]
+    fn quest_cells_reads_quest_bag_only_and_is_stable() {
+        use crate::game::dialogs::inventory::InvItem;
+        let mk = |name: &str, count: u16| InvItem {
+            name: name.to_string(),
+            count,
+            ..Default::default()
+        };
+        // 空态：任务格还没东西（接取前 / 掉落还没到）
+        let empty: Vec<Option<InvItem>> = vec![None, None, None];
+        assert!(quest_cells(&empty).is_empty(), "全空必须读出空");
+        // 非空态：格号是**原始下标**（任务格下标与背包无关），数量原样带出
+        let quest_bag: Vec<Option<InvItem>> = vec![None, Some(mk("RedSnakeTeeth", 2)), None];
+        assert_eq!(
+            quest_cells(&quest_bag),
+            vec![(1, "RedSnakeTeeth".to_string(), 2)],
+            "必须保留真实格号与数量"
+        );
+        // 同一状态连读两次必须一致（与实机仪器自检同口径）
+        assert_eq!(
+            quest_cells(&quest_bag),
+            quest_cells(&quest_bag),
+            "同一状态连读必须一致"
+        );
+        // 反向对照：「背包里有货」不等于「任务格里有货」——两个来源必须区分，
+        // 否则夹具会把普通背包物品当成 ItemTasks 已达成（假绿）。
+        let backpack: Vec<Option<InvItem>> = vec![Some(mk("RedSnakeTeeth", 2))];
+        assert_eq!(occupied_cells(&backpack).len(), 1, "背包侧读数不受影响");
+        assert!(
+            quest_cells(&vec![None, None]).is_empty(),
+            "背包有货时任务格仍必须是空"
+        );
+    }
+
     fn parse_attack_mode_maps_names_and_rejects_unknown() {
         use mir2_shared::enums::AttackMode;
         let cases = [
