@@ -73,6 +73,28 @@ pub fn used_slots<T>(items: &[Option<T>]) -> usize {
     items.iter().filter(|s| s.is_some()).count()
 }
 
+/// `nearby` 的扫描半径（像素）：缺省 600（与原硬编码一致）。
+/// 非正数 / NaN / 无穷一律视作缺省——`radius=0` 会让夹具"一个实体都看不到"
+/// 却看着像调用成功（假绿），比报错更难查。
+pub fn parse_nearby_radius(raw: Option<f64>) -> f32 {
+    match raw {
+        Some(v) if v.is_finite() && v > 0.0 => v as f32,
+        _ => 600.0,
+    }
+}
+
+/// 已占用格列表 `(格号, 名称)`——存取闭环的夹具靠它拿到**准确的 From/To 格号**
+/// （`StoreItem`/`TakeBackItem` 的 from/to 就是格号，猜格号会得到"回包 success 但两边都不动"）。
+pub fn occupied_cells(
+    items: &[Option<crate::game::dialogs::inventory::InvItem>],
+) -> Vec<(usize, String)> {
+    items
+        .iter()
+        .enumerate()
+        .filter_map(|(i, s)| s.as_ref().map(|it| (i, it.name.clone())))
+        .collect()
+}
+
 pub fn taken_quest_ids(entries: &[crate::game::dialogs::quest_log::QuestEntry]) -> Vec<i32> {
     entries.iter().filter(|e| e.taken).map(|e| e.id).collect()
 }
@@ -132,9 +154,27 @@ enum ControlCommand {
     StorageProbe {
         reply: Sender<String>,
     },
+    /// 只读 NPC 窗探针（2026-09-23）：每行文本 + 每条**行内链接的精确命中矩形**。
+    /// 存在理由：NPC 窗是自绘文本、行内链接形如 `<Access/@Storage> Storage`，
+    /// 链接段只覆盖行首那几个字——夹具按"行中心/行右半"点会静默无反应（⑤ 开仓库栽在这里）。
+    /// 与 `npc_ui_system` 的点击分发共用同一套几何度量（`npc::npc_link_targets`）。
+    NpcRows {
+        reply: Sender<String>,
+    },
     AcceptQuest {
         npc_index: u32,
         quest_index: i32,
+    },
+    /// ⑤ 存取动作（现成包 `C.StoreItem`=15 / `C.TakeBackItem`=16）：
+    /// 等价于 C# 的「选中背包格 → 点仓库格」/反向，直接发生成包，
+    /// 让存取闭环**不依赖窗口内格子像素定位**（与 `accept_quest` 同一模式）。
+    StorageStore {
+        from: i32,
+        to: i32,
+    },
+    StorageTake {
+        from: i32,
+        to: i32,
     },
     QuestProbe {
         reply: Sender<String>,
@@ -162,6 +202,8 @@ enum ControlCommand {
     },
     Nearby {
         reply: Sender<String>,
+        /// 扫描半径（像素）。默认 600 与原实现一致；⑮ 定位仓库 NPC 时用大半径一次列出全图实体。
+        radius: f32,
     },
     Attack {
         object_id: u32,
@@ -284,6 +326,27 @@ pub fn resolve_cursor(probe: Option<Vec2>, window: Option<Vec2>) -> Option<Vec2>
     probe.or(window)
 }
 
+/// 悬停/点击命中用的光标来源（探针优先，其次真实窗口光标）。
+///
+/// 打包成 `SystemParam` 是因为 NPC 对话系统本就顶在 16 参数上限上，再加参数编译不过。
+/// 语义与 `resolve_cursor` 一致：**正常游玩**（无探针）读真实光标，行为不变；
+/// **自动化**（click/cursor RPC 注入探针）时命中判定不再依赖"窗口有焦点"。
+/// 为什么 NPC 窗非走这条路不可：它按行/按段自绘文本（不是 bevy_ui 按钮），
+/// 命中判定自己读光标，所以 `Interaction`/`HoverMap` 那套注入**到不了它**。
+#[derive(SystemParam)]
+pub struct CursorSource<'w, 's> {
+    probe: Res<'w, CursorProbe>,
+    windows: Query<'w, 's, &'static Window>,
+}
+
+impl CursorSource<'_, '_> {
+    /// 注入的光标优先；无探针时退回真实窗口光标（无窗口/鼠标在窗外 → None）。
+    pub fn pos(&self) -> Option<Vec2> {
+        let real = self.windows.single().ok().and_then(|w| w.cursor_position());
+        resolve_cursor(self.probe.pos, real)
+    }
+}
+
 /// #2767：控制接口用到的实体查询打包（原先 16 个系统参数已是 Bevy 上限，
 /// 再加「光标探针 + 相机」就编译失败）。
 #[derive(SystemParam)]
@@ -341,7 +404,17 @@ struct ControlQueries<'w, 's> {
         ),
         (With<GroundItem>, Without<LocalPlayer>),
     >,
-    dialog_roots: Query<'w, 's, (&'static DialogRoot, &'static Node, &'static Visibility, &'static ComputedNode, &'static UiGlobalTransform)>,
+    dialog_roots: Query<
+        'w,
+        's,
+        (
+            &'static DialogRoot,
+            &'static Node,
+            &'static Visibility,
+            &'static ComputedNode,
+            &'static UiGlobalTransform,
+        ),
+    >,
     /// dialog_rect RPC：标准关闭钮定位（theme::CloseButton 标记 + 布局后矩形）
     close_buttons: Query<
         'w,
@@ -390,6 +463,17 @@ struct ControlQueries<'w, 's> {
         's,
         (&'static Camera, &'static GlobalTransform),
         (With<Camera2d>, Without<crate::ui::sprite_ui::UiEntity>),
+    >,
+    /// `npc_rows` RPC + `npc_call`/`interact` 记账：NPC 窗文本状态（行文本 = 命中判定的输入；
+    /// `npc_object_id` = 对话内选项点击发 CallNPC 的地址，必须在这里写入）
+    npc_state: ResMut<'w, crate::game::dialogs::npc::NpcDialogState>,
+    /// `npc_rows` RPC：渲染行实体 → 行原点（`Node.left/top`，与点击分发同一来源）。
+    /// 走实体而不是重算布局：夹具算出的点击点必须与客户端自己的命中判定同源。
+    npc_lines: Query<
+        'w,
+        's,
+        (&'static crate::game::dialogs::npc::NpcLine, &'static Node),
+        With<crate::game::dialogs::npc::NpcDialogWidget>,
     >,
 }
 
@@ -567,7 +651,14 @@ fn handle_conn(mut stream: std::net::TcpStream, tx: Sender<ControlCommand>) {
             }
             "nearby" => {
                 let (reply_tx, reply_rx) = bounded::<String>(1);
-                if tx.send(ControlCommand::Nearby { reply: reply_tx }).is_ok() {
+                let radius = parse_nearby_radius(params.get("radius").and_then(|v| v.as_f64()));
+                if tx
+                    .send(ControlCommand::Nearby {
+                        reply: reply_tx,
+                        radius,
+                    })
+                    .is_ok()
+                {
                     let s = reply_rx
                         .recv_timeout(std::time::Duration::from_secs(2))
                         .unwrap_or_else(|_| "{}".to_string());
@@ -621,7 +712,10 @@ fn handle_conn(mut stream: std::net::TcpStream, tx: Sender<ControlCommand>) {
             }
             "bag_probe" => {
                 let (reply_tx, reply_rx) = bounded::<String>(1);
-                if tx.send(ControlCommand::BagProbe { reply: reply_tx }).is_ok() {
+                if tx
+                    .send(ControlCommand::BagProbe { reply: reply_tx })
+                    .is_ok()
+                {
                     let s = reply_rx
                         .recv_timeout(std::time::Duration::from_secs(2))
                         .unwrap_or_else(|_| "{}".to_string());
@@ -632,13 +726,45 @@ fn handle_conn(mut stream: std::net::TcpStream, tx: Sender<ControlCommand>) {
             }
             "storage_probe" => {
                 let (reply_tx, reply_rx) = bounded::<String>(1);
-                if tx.send(ControlCommand::StorageProbe { reply: reply_tx }).is_ok() {
+                if tx
+                    .send(ControlCommand::StorageProbe { reply: reply_tx })
+                    .is_ok()
+                {
                     let s = reply_rx
                         .recv_timeout(std::time::Duration::from_secs(2))
                         .unwrap_or_else(|_| "{}".to_string());
                     serde_json::from_str::<Value>(&s).unwrap_or_else(|_| json!({}))
                 } else {
                     json!({"error": "control channel closed"})
+                }
+            }
+            "npc_rows" => {
+                // NPC 窗每行文本 + 行内链接的精确命中矩形（含建议点击点 cx/cy）
+                let (reply_tx, reply_rx) = bounded::<String>(1);
+                if tx.send(ControlCommand::NpcRows { reply: reply_tx }).is_ok() {
+                    let s = reply_rx
+                        .recv_timeout(std::time::Duration::from_secs(2))
+                        .unwrap_or_else(|_| "{}".to_string());
+                    serde_json::from_str::<Value>(&s).unwrap_or_else(|_| json!({}))
+                } else {
+                    json!({"error": "control channel closed"})
+                }
+            }
+            // ⑤ 存取动作：`from`/`to` 都是**格号**（背包格号 ↔ 仓库格号，见 bag_probe/
+            // storage_probe 的 `occupied`）。等价于 C# 的「选中背包格 → 点仓库格」
+            // 与其反向，直接发 `C.StoreItem`/`C.TakeBackItem`——把存取闭环从
+            // 「窗口内格子像素定位」里解耦出来（与 accept_quest 同一模式）。
+            "storage_store" | "storage_take" => {
+                let from = params.get("from").and_then(|v| v.as_i64()).unwrap_or(-1) as i32;
+                let to = params.get("to").and_then(|v| v.as_i64()).unwrap_or(-1) as i32;
+                if from < 0 || to < 0 {
+                    json!({"error": "missing from/to（格号，需 >= 0）"})
+                } else if method == "storage_store" {
+                    let _ = tx.send(ControlCommand::StorageStore { from, to });
+                    json!({"ok": true, "action": "store", "from": from, "to": to})
+                } else {
+                    let _ = tx.send(ControlCommand::StorageTake { from, to });
+                    json!({"ok": true, "action": "take", "from": from, "to": to})
                 }
             }
             "accept_quest" => {
@@ -1251,7 +1377,7 @@ fn control_reply(cmd: &ControlCommand) -> Option<&Sender<String>> {
         ControlCommand::GetState { reply }
         | ControlCommand::GetDialogs { reply }
         | ControlCommand::GetVisible { reply }
-        | ControlCommand::Nearby { reply }
+        | ControlCommand::Nearby { reply, .. }
         | ControlCommand::Cursor { reply, .. }
         | ControlCommand::PlayerMenu { reply, .. }
         | ControlCommand::QuestDetail { reply, .. }
@@ -1581,7 +1707,7 @@ fn apply_control_commands(
                 }
                 let _ = reply.send(format!("{map:?}"));
             }
-            ControlCommand::Nearby { reply } => {
+            ControlCommand::Nearby { reply, radius } => {
                 let Ok((_, ptf, _)) = q.players.single() else {
                     let _ = reply.send("{}".to_string());
                     continue;
@@ -1598,7 +1724,7 @@ fn apply_control_commands(
                 for (tf, name, oid) in q.monsters.iter() {
                     let d =
                         ((tf.translation.x - px).powi(2) + (tf.translation.y - py).powi(2)).sqrt();
-                    if d < 600.0 {
+                    if d < radius {
                         let vp = viewport(tf);
                         arr.push(json!({"kind": "monster", "name": name.0, "object_id": oid.0, "x": tf.translation.x, "y": tf.translation.y, "dist": (d as i32), "vp": vp.map(|(x, y)| json!({"x": x, "y": y}))}));
                     }
@@ -1606,7 +1732,7 @@ fn apply_control_commands(
                 for (tf, name, oid) in q.npcs.iter() {
                     let d =
                         ((tf.translation.x - px).powi(2) + (tf.translation.y - py).powi(2)).sqrt();
-                    if d < 600.0 {
+                    if d < radius {
                         let vp = viewport(tf);
                         arr.push(json!({"kind": "npc", "name": name.0, "object_id": oid.0, "x": tf.translation.x, "y": tf.translation.y, "dist": (d as i32), "vp": vp.map(|(x, y)| json!({"x": x, "y": y}))}));
                     }
@@ -1614,7 +1740,7 @@ fn apply_control_commands(
                 for (tf, name, oid) in q.others.iter() {
                     let d =
                         ((tf.translation.x - px).powi(2) + (tf.translation.y - py).powi(2)).sqrt();
-                    if d < 600.0 {
+                    if d < radius {
                         let vp = viewport(tf);
                         arr.push(json!({"kind": "player", "name": name.0, "object_id": oid.0, "x": tf.translation.x, "y": tf.translation.y, "dist": (d as i32), "vp": vp.map(|(x, y)| json!({"x": x, "y": y}))}));
                     }
@@ -1622,7 +1748,7 @@ fn apply_control_commands(
                 for (tf, item, oid) in q.items.iter() {
                     let d =
                         ((tf.translation.x - px).powi(2) + (tf.translation.y - py).powi(2)).sqrt();
-                    if d < 600.0 {
+                    if d < radius {
                         let vp = viewport(tf);
                         arr.push(json!({"kind": "item", "name": item.name, "object_id": oid.0, "x": tf.translation.x, "y": tf.translation.y, "dist": (d as i32), "vp": vp.map(|(x, y)| json!({"x": x, "y": y}))}));
                     }
@@ -1717,7 +1843,8 @@ fn apply_control_commands(
                                 root_node = Some(n);
                                 let sz = cn.size() / scale;
                                 let tl = gtf.translation / scale;
-                                root_rect_live = Some((tl.x - sz.x * 0.5, tl.y - sz.y * 0.5, sz.x, sz.y));
+                                root_rect_live =
+                                    Some((tl.x - sz.x * 0.5, tl.y - sz.y * 0.5, sz.x, sz.y));
                             }
                             break;
                         }
@@ -1944,6 +2071,11 @@ fn apply_control_commands(
                         "quest_total": inv.quest_inventory.len(),
                         "weight": inv.weight,
                         "max_weight": inv.max_weight,
+                        // 格号 → 名称：夹具据此挑存取源格（不用猜）
+                        "occupied": occupied_cells(&inv.items)
+                            .into_iter()
+                            .map(|(c, n)| json!({"cell": c, "name": n}))
+                            .collect::<Vec<_>>(),
                     }),
                     Err(_) => json!({"ok": false, "error": "no local player inventory"}),
                 };
@@ -1957,8 +2089,48 @@ fn apply_control_commands(
                     "total": q.storage.items.len(),
                     "visible": q.storage.visible,
                     "page": format!("{:?}", q.storage.page),
+                    "occupied": occupied_cells(&q.storage.items)
+                        .into_iter()
+                        .map(|(c, n)| json!({"cell": c, "name": n}))
+                        .collect::<Vec<_>>(),
                 });
                 tracing::info!("🎮 control storage_probe: {payload}");
+                let _ = reply.send(payload.to_string());
+            }
+            ControlCommand::NpcRows { reply } => {
+                // 行原点直接取渲染行的 Node.left/top（= 点击分发读的同一份几何）
+                let rows: Vec<(usize, f32, f32)> = q
+                    .npc_lines
+                    .iter()
+                    .map(|(line, node)| {
+                        let px = |v: Val| match v {
+                            Val::Px(v) => v,
+                            _ => 0.0,
+                        };
+                        (line.0, px(node.left), px(node.top))
+                    })
+                    .collect();
+                let targets =
+                    crate::game::dialogs::npc::npc_link_targets(&q.npc_state.lines, 0, &rows);
+                let links: Vec<serde_json::Value> = targets
+                    .iter()
+                    .map(|t| {
+                        let (cx, cy) = t.center();
+                        json!({
+                            "row": t.row, "text": t.text, "key": t.key,
+                            "x0": t.x0, "y0": t.y0, "x1": t.x1, "y1": t.y1,
+                            "cx": cx, "cy": cy,
+                        })
+                    })
+                    .collect();
+                let payload = json!({
+                    "ok": true,
+                    "visible": q.npc_state.visible,
+                    "npc_object_id": q.npc_state.npc_object_id,
+                    "lines": q.npc_state.lines,
+                    "links": links,
+                });
+                tracing::info!("🎮 control npc_rows: {} links", targets.len());
                 let _ = reply.send(payload.to_string());
             }
             ControlCommand::AcceptQuest {
@@ -1970,6 +2142,16 @@ fn apply_control_commands(
                     quest_index,
                 });
                 tracing::info!("🎮 control accept_quest: npc={npc_index} quest={quest_index}");
+            }
+            ControlCommand::StorageStore { from, to } => {
+                // 与 storage.rs 点击路径发的**同一个包**（背包格 → 仓库格）
+                net.send_packet(&mir2_shared::packets::client::item::StoreItem { from, to });
+                tracing::info!("🎮 control storage_store: from={from} to={to}");
+            }
+            ControlCommand::StorageTake { from, to } => {
+                // 与 storage.rs 点击路径发的**同一个包**（仓库格 → 背包格）
+                net.send_packet(&mir2_shared::packets::client::item::TakeBackItem { from, to });
+                tracing::info!("🎮 control storage_take: from={from} to={to}");
             }
             ControlCommand::QuestProbe { reply } => {
                 let ids = taken_quest_ids(&q.quest_log.quests);
@@ -2008,6 +2190,8 @@ fn apply_control_commands(
             ControlCommand::Interact { object_id } => {
                 control_state.npc_id = Some(object_id);
                 control_state.last_npc_call = time.elapsed_secs();
+                // 对话内选项点击靠这个字段发 CallNPC（缺了就发 object_id 0，服务端丢弃）
+                q.npc_state.npc_object_id = object_id;
                 net.send_packet(&mir2_shared::packets::client::npc::CallNPC {
                     object_id,
                     key: "[@Main]".to_string(),
@@ -2016,6 +2200,7 @@ fn apply_control_commands(
             }
             ControlCommand::NpcCall { object_id, key } => {
                 tracing::info!("🎮 control npc_call: {object_id} {key}");
+                q.npc_state.npc_object_id = object_id;
                 net.send_packet(&mir2_shared::packets::client::npc::CallNPC { object_id, key });
             }
             ControlCommand::Pickup { object_id } => {
@@ -2440,6 +2625,53 @@ mod tests {
         }
     }
 
+    /// `nearby` 半径解析门禁（2026-09-23）：缺省 600（与原硬编码一致），显式正值生效，
+    /// 非正/NaN/无穷回退 600。
+    ///
+    /// 阳性对照（实做）：把 `_ => 600.0` 改成 `_ => raw.unwrap_or(0.0) as f32`
+    /// → 本测试立即红（`None`/`0`/`-5` 会得到 0 = 一个实体都扫不到）。
+    #[test]
+    fn nearby_radius_defaults_and_rejects_nonpositive() {
+        assert_eq!(
+            parse_nearby_radius(None),
+            600.0,
+            "缺省必须与原硬编码 600 一致"
+        );
+        assert_eq!(
+            parse_nearby_radius(Some(100_000.0)),
+            100_000.0,
+            "显式半径生效"
+        );
+        assert_eq!(parse_nearby_radius(Some(1.0)), 1.0);
+        assert_eq!(
+            parse_nearby_radius(Some(0.0)),
+            600.0,
+            "radius=0 会静默扫不到实体，必须回退"
+        );
+        assert_eq!(parse_nearby_radius(Some(-5.0)), 600.0);
+        assert_eq!(parse_nearby_radius(Some(f64::NAN)), 600.0);
+        assert_eq!(parse_nearby_radius(Some(f64::INFINITY)), 600.0);
+    }
+
+    /// `occupied_cells` 门禁（2026-09-23）：格号必须是**原始下标**（存取包 from/to 用它），
+    /// 空格的 None 不得占位。阳性对照：把 `enumerate` 换成过滤后的 `.map`（丢下标）
+    /// 或把 `filter_map` 改成 `map` → 本测试红。
+    #[test]
+    fn occupied_cells_keeps_real_cell_indices() {
+        use crate::game::dialogs::inventory::InvItem;
+        let mk = |name: &str| InvItem {
+            name: name.to_string(),
+            ..Default::default()
+        };
+        let items: Vec<Option<InvItem>> = vec![None, Some(mk("Saddle")), None, Some(mk("Gold"))];
+        let got = occupied_cells(&items);
+        assert_eq!(
+            got,
+            vec![(1, "Saddle".to_string()), (3, "Gold".to_string())],
+            "必须保留真实格号（1 与 3），不能压缩成 0/1"
+        );
+    }
+
     /// `attack_mode` RPC 的模式名解析（2026-09-22 玩家验收能力）。
     ///
     /// 阳性对照（落地时实做）：把 `_ => None` 改成 `_ => Some(Peace)`（静默回退）后，
@@ -2462,7 +2694,11 @@ mod tests {
         assert_eq!(used_slots(&empty), 0, "全空必须读 0");
         let mixed: Vec<Option<u8>> = vec![None, Some(1), Some(2), None];
         assert_eq!(used_slots(&mixed), 2, "只应数 Some");
-        assert_eq!(used_slots(&mixed), used_slots(&mixed), "同一状态连读必须一致");
+        assert_eq!(
+            used_slots(&mixed),
+            used_slots(&mixed),
+            "同一状态连读必须一致"
+        );
     }
     fn taken_quest_ids_is_state_sourced_and_stable() {
         use crate::game::dialogs::quest_log::QuestEntry;
