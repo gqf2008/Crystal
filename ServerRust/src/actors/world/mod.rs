@@ -4977,7 +4977,33 @@ impl WorldActor {
         count: u16,
     ) -> bool {
         // #1016：击杀归属用 EXPOwner（C# EXPOwner），回退 target_session
-        let Some(killer) = monster.exp_owner_session.or(monster.target_session) else {
+        self.try_give_quest_item_at(
+            item_index,
+            count,
+            monster.map_index,
+            monster.x,
+            monster.y,
+            monster.exp_owner_session.or(monster.target_session),
+        )
+        .await
+    }
+
+    /// 任务物品交付内核（击杀掉落 + 剥皮掉落共用）：C# `CheckGroupQuestItem`——
+    /// 击杀者/同组同图 16 格内的未死成员，谁需要就进谁的**任务格**并推进进度；没人需要返回 false。
+    ///
+    /// 位置参数化成 `(map_index, x, y)` 是为了让**尸体**（剥皮）也能复用同一口径：
+    /// 2026-09-24 之前剥皮路径在 `roll_harvest_drops` 里把 quest_required 直接跳过，可采集怪的
+    /// 任务物品因此彻底拿不到。
+    pub(crate) async fn try_give_quest_item_at(
+        &mut self,
+        item_index: i32,
+        count: u16,
+        map_index: u16,
+        x: i32,
+        y: i32,
+        killer: Option<u64>,
+    ) -> bool {
+        let Some(killer) = killer else {
             return false;
         };
         let mut item = mir2_shared::data::item::UserItem {
@@ -4991,9 +5017,7 @@ impl WorldActor {
             item.current_dura = info.durability as u16;
         }
         enrich_item_info(&mut item, &self.item_infos);
-        let sessions = self
-            .quest_participants(killer, monster.map_index, monster.x, monster.y)
-            .await;
+        let sessions = self.quest_participants(killer, map_index, x, y).await;
         for sid in sessions {
             if let Some(record) = self.players.get(&sid) {
                 let ok = record

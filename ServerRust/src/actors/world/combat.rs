@@ -605,7 +605,29 @@ impl WorldActor {
         }
         let rolled = roll_harvest_drops(&drops, self.drop_rate, item_drop_pct);
         let mut out = Vec::new();
-        for (item_index, count) in rolled {
+        for (item_index, count, quest_required) in rolled {
+            if quest_required {
+                // 任务物品：交给任务系统（C# CheckGroupQuestItem）。收下就进任务格、没人需要就不发——
+                // 两条路都不进背包（旧写法在 roll 阶段直接 continue，等于把 Q 物品整条丢掉）。
+                let killer = corpse.exp_owner_session.or(corpse.target_session);
+                let given = self
+                    .try_give_quest_item_at(
+                        item_index,
+                        count.max(1),
+                        corpse.map_index,
+                        corpse.x,
+                        corpse.y,
+                        killer,
+                    )
+                    .await;
+                if !given {
+                    debug!(
+                        "Harvest Q item {} from '{}' not needed by any participant; discarded",
+                        item_index, corpse.name
+                    );
+                }
+                continue;
+            }
             let mut item = mir2_shared::data::item::UserItem {
                 item_index,
                 unique_id: generate_item_uid(),
@@ -646,16 +668,22 @@ pub(crate) fn drop_should_land(quest_given: bool, quest_required: bool) -> bool 
     !quest_given && !quest_required
 }
 
-/// C# HarvestMonster.Harvest AttemptDrop：逐条 roll（跳过 QuestRequired/组子条目/金币；Meat Quality 简化 0）
+/// C# HarvestMonster.Harvest AttemptDrop：逐条 roll（跳过组子条目/金币；Meat Quality 简化 0）。
+///
+/// **QuestRequired 条目也要摇**（2026-09-24 修）：旧写法在这里 `continue` 掉任务物品，而剥皮路径正是
+/// 可采集怪（Currish/SpittingSpider/Deer 系…）**唯一**的产出通道 ⇒ 这类怪的 Q 物品两条路都拿不到、
+/// ItemTasks 任务永远做不完（实测 quest 30 JadeRing：28 次真实击杀 + 剥皮后任务格仍为空）。
+/// 返回值第三项把"是否任务物品"带出去，交给调用方走任务系统
+/// （C# `HarvestMonster.Harvest:70-73`：`if (drop.QuestRequired) { if (!player.CheckGroupQuestItem(item,false)) continue; }`）。
 pub(crate) fn roll_harvest_drops(
     drops: &[crate::db::MonsterDropInfo],
     drop_rate: f64,
     item_drop_pct: i32,
-) -> Vec<(i32, u16)> {
+) -> Vec<(i32, u16, bool)> {
     let mut out = Vec::new();
     let factor = 1.0 + item_drop_pct as f64 / 100.0;
     for drop in drops {
-        if drop.quest_required || drop.group_parent_id != 0 || drop.gold > 0 {
+        if drop.group_parent_id != 0 || drop.gold > 0 {
             continue;
         }
         let chance = (drop.chance * drop_rate * factor).min(1.0);
@@ -667,7 +695,7 @@ pub(crate) fn roll_harvest_drops(
         } else {
             drop.min_count
         };
-        out.push((drop.item_index, count));
+        out.push((drop.item_index, count, drop.quest_required));
     }
     out
 }
@@ -8767,8 +8795,18 @@ mod spell_geometry_tests {
             },
         ];
         let rolled = roll_harvest_drops(&drops, 1.0, 0);
-        assert_eq!(rolled.len(), 1);
-        assert_eq!(rolled[0], (100, 2));
+        // 普通物品：必中的进、概率 0 的不进、金币条目不进、组子条目不进（由父组处理）
+        let normal: Vec<(i32, u16, bool)> = rolled.iter().copied().filter(|r| !r.2).collect();
+        assert_eq!(normal.len(), 1);
+        assert_eq!(normal[0], (100, 2, false));
+        // **QuestRequired 必须被摇出来并带标记**（门禁 2026-09-24）：旧写法在这里 continue，
+        // 可采集怪的任务物品因此永远拿不到（quest 30 JadeRing 实测 28 杀 + 剥皮后任务格为空）。
+        // 阳性对照：把 `quest_required` 加回上面的跳过条件 → 本断言立即红。
+        assert_eq!(
+            rolled.iter().copied().filter(|r| r.2).collect::<Vec<_>>(),
+            vec![(102, 1, true)],
+            "任务物品（Q 行）必须进入摇出结果并带 quest 标记，由调用方交给任务系统"
+        );
     }
 
     #[test]
