@@ -718,22 +718,13 @@ fn handle_conn(mut stream: std::net::TcpStream, tx: Sender<ControlCommand>) {
                 json!({"ok": true})
             }
             "walk_to" => {
-                // 玩家验收能力（2026-09-22）：走到世界坐标 {x,y}；也接受瓦片坐标 {tx,ty}
-                // （瓦片→世界：48px/格，与 movement::world_to_tile 的逆变换一致）。
-                // 瓦片→世界按 48px/格（movement::world_to_tile 的逆变换）
-                let world = match (
-                    params.get("x").and_then(|v| v.as_f64()),
-                    params.get("y").and_then(|v| v.as_f64()),
-                ) {
-                    (Some(x), Some(y)) => Some((x as f32, y as f32)),
-                    _ => match (
-                        params.get("tx").and_then(|v| v.as_f64()),
-                        params.get("ty").and_then(|v| v.as_f64()),
-                    ) {
-                        (Some(tx), Some(ty)) => Some(((tx as f32) * 48.0, (ty as f32) * 48.0)),
-                        _ => None,
-                    },
-                };
+                // 玩家验收能力：走到世界坐标 {x,y}；也接受瓦片坐标 {tx,ty}。
+                // 瓦片→世界的换算**必须**用 `movement::tile_to_world`（它才是
+                // `world_to_tile` 的真逆变换：x = tx*W + W/2、y = -(ty*H + H)）。
+                // 2026-09-23 修：此前这里硬编码 `(tx*48, ty*48)`，两个轴都不对
+                // （x 差半个格、y 连符号都反）——实测 `tx=178,ty=221` 被算成目标瓦片
+                // `(178,−333)`，于是 walk_to 的瓦片入口形同虚设，只能传世界像素。
+                let world = walk_world_from_params(&params);
                 match world {
                     Some((x, y)) => {
                         let run = params.get("run").and_then(|v| v.as_bool()).unwrap_or(true);
@@ -2697,9 +2688,55 @@ fn apply_control_commands(
     }
 }
 
+/// `walk_to` 的参数解析（纯函数，便于门禁）：世界坐标直接透传；
+/// 瓦片坐标走 `movement::tile_to_world`（= `world_to_tile` 的逆变换），不自己拼 48px。
+pub(crate) fn walk_world_from_params(params: &serde_json::Value) -> Option<(f32, f32)> {
+    if let (Some(x), Some(y)) = (
+        params.get("x").and_then(|v| v.as_f64()),
+        params.get("y").and_then(|v| v.as_f64()),
+    ) {
+        return Some((x as f32, y as f32));
+    }
+    let tx = params.get("tx").and_then(|v| v.as_f64())?;
+    let ty = params.get("ty").and_then(|v| v.as_f64())?;
+    let w = crate::game::movement::tile_to_world(tx as i32, ty as i32);
+    Some((w.x, w.y))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 门禁（2026-09-23 修）：`walk_to` 的瓦片入口必须与 `world_to_tile` 同源——
+    /// 传 {tx,ty} 时算出的世界坐标，反查回瓦片必须还是那对瓦片。
+    ///
+    /// 阳性对照（落地时实做）：把 `walk_world_from_params` 里的 `tile_to_world`
+    /// 换回旧的 `(tx*48, ty*48)` → 本测试立即红（反查得到 (178,-333) 这类离谱瓦片）。
+    #[test]
+    fn walk_to_tx_ty_round_trips_through_world_to_tile() {
+        use crate::game::movement::{tile_to_world, world_to_tile};
+        for (tx, ty) in [(178, 221), (0, 0), (3, 700), (699, 1)] {
+            let p = serde_json::json!({ "tx": tx, "ty": ty });
+            let (wx, wy) = walk_world_from_params(&p).expect("tx/ty 必须解析成功");
+            let expect = tile_to_world(tx, ty);
+            assert!(
+                (wx - expect.x).abs() < 0.01 && (wy - expect.y).abs() < 0.01,
+                "tx/ty 必须走 tile_to_world：({tx},{ty}) 得到 ({wx},{wy})，期望 ({},{})",
+                expect.x,
+                expect.y
+            );
+            assert_eq!(
+                world_to_tile(wx, wy),
+                (tx, ty),
+                "送进去的瓦片，反查回来必须还是它（这才是 walk_to 瓦片入口的意义）"
+            );
+        }
+        // 世界坐标仍然直接透传
+        let p = serde_json::json!({ "x": 100.0, "y": -200.0 });
+        assert_eq!(walk_world_from_params(&p), Some((100.0, -200.0)));
+        // 两者都没给 → None（调用方回 error，不静默）
+        assert_eq!(walk_world_from_params(&serde_json::json!({})), None);
+    }
 
     /// #2956：被覆盖的 click 必须收到终态回执（busy），而非让调用方 2s 超时拿 `{}`。
     /// 覆盖路径 = 第二条 click 经 commands.insert_resource 替换在途资源 → 旧值 Drop。
