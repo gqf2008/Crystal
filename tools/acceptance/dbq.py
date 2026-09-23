@@ -16,7 +16,9 @@ def main() -> int:
     con = sqlite3.connect(f"file:{DB.replace(chr(92), '/')}?mode=ro", uri=True)
     try:
         for row in con.execute(sys.argv[1]):
-            print(row)
+            # 单列直接打印裸值（`('0106',)` 这种元组形式在 PowerShell 侧解析容易出错，
+            # 夹具里已经因此把地图名读成 "('0106',)" 去过一次错误坐标）
+            print(row[0] if len(row) == 1 else row)
     except Exception as exc:
         print(f"SQL 失败: {exc}", file=sys.stderr)
         return 1
