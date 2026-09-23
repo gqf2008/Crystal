@@ -113,6 +113,17 @@ pub fn build_finish_quest(
     }
 }
 
+/// 构造购买包：`item_index` 走的是**商品行的 unique_id**（C# `BuyItem.ItemIndex = SelectedItem.UniqueID`；
+/// 常规商店服务端把 unique_id 填成 item_index，二手货才是实例 id），数量原样带过。
+/// 抽成纯函数是为了钉住「数量不会被吞成 1」——吞了会少扣钱少发货，日志却像成功。
+pub fn build_buy_item(item_index: u64, count: u16) -> mir2_shared::packets::client::npc::BuyItem {
+    mir2_shared::packets::client::npc::BuyItem {
+        item_index,
+        count,
+        panel_type: mir2_shared::enums::PanelType::Buy,
+    }
+}
+
 /// 已占用格列表 `(格号, 名称)`——存取闭环的夹具靠它拿到**准确的 From/To 格号**
 /// （`StoreItem`/`TakeBackItem` 的 from/to 就是格号，猜格号会得到"回包 success 但两边都不动"）。
 pub fn occupied_cells(
@@ -224,6 +235,16 @@ enum ControlCommand {
     /// 只读邮件探针：客户端侧邮件列表/详情（判据取状态而非 UI 代理量）
     MailProbe {
         reply: Sender<String>,
+    },
+    /// ③ 只读商店探针：客户端侧商品行（item_index/unique_id/名称/价格/数量）
+    NpcGoodsProbe {
+        reply: Sender<String>,
+    },
+    /// ③ 购买动作（现成包 `C.BuyItem`）：与商品窗「购买」按钮同一路径。
+    /// 服务端仍按原版校验：必须先打开购买页（`[@BUYSELL]/[@BUY]/...`）且商品在该 NPC 销售列表内。
+    BuyItem {
+        item_index: u64,
+        count: u16,
     },
     /// ④ 任务闭环动作（现成包 `C.FinishQuest`）：交任务/领奖励。
     /// 与 `accept_quest` 同一模式——把「交任务」从任务日志窗的像素定位里解耦。
@@ -539,6 +560,8 @@ struct ControlQueries<'w, 's> {
     gold: Query<'w, 's, &'static crate::game::player_state::Gold, With<LocalPlayer>>,
     /// 本地玩家等级/经验（`UserInformation`/`ExpGained` 写入）——任务奖励判据的另一半
     progression: Query<'w, 's, &'static crate::game::player_state::Progression, With<LocalPlayer>>,
+    /// `npc_goods_probe` RPC：客户端侧商品行（服务端 GoodsList 写入，判据取状态）
+    goods: Res<'w, crate::game::dialogs::npc_goods::NpcGoodsState>,
 }
 
 /// 控制端口默认值（--control-port 未指定或非法时回退）
@@ -882,6 +905,34 @@ fn handle_conn(mut stream: std::net::TcpStream, tx: Sender<ControlCommand>) {
                     serde_json::from_str::<Value>(&s).unwrap_or_else(|_| json!({}))
                 } else {
                     json!({"error": "control channel closed"})
+                }
+            }
+            // ③ 商店：npc_goods_probe（只读商品行）/ buy_item {item_index, count}
+            "npc_goods_probe" => {
+                let (reply_tx, reply_rx) = bounded::<String>(1);
+                if tx
+                    .send(ControlCommand::NpcGoodsProbe { reply: reply_tx })
+                    .is_ok()
+                {
+                    let s = reply_rx
+                        .recv_timeout(std::time::Duration::from_secs(2))
+                        .unwrap_or_else(|_| "{}".to_string());
+                    serde_json::from_str::<Value>(&s).unwrap_or_else(|_| json!({}))
+                } else {
+                    json!({"error": "control channel closed"})
+                }
+            }
+            "buy_item" => {
+                let item_index = params
+                    .get("item_index")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0);
+                let count = params.get("count").and_then(|v| v.as_u64()).unwrap_or(1) as u16;
+                if item_index == 0 {
+                    json!({"error": "missing item_index（商品行的 unique_id；常规商店 = item_index）"})
+                } else {
+                    let _ = tx.send(ControlCommand::BuyItem { item_index, count });
+                    json!({"ok": true, "item_index": item_index, "count": count})
                 }
             }
             // ④ 交任务：finish_quest {quest_index, selected_item_index?（默认 -1 = 不选奖励）}
@@ -2319,6 +2370,35 @@ fn apply_control_commands(
                     "🎮 control finish_quest: quest={quest_index} sel={selected_item_index}"
                 );
             }
+            ControlCommand::NpcGoodsProbe { reply } => {
+                let goods: Vec<serde_json::Value> = q
+                    .goods
+                    .goods
+                    .iter()
+                    .enumerate()
+                    .map(|(row, g)| {
+                        json!({
+                            "row": row, "item_index": g.item_index, "unique_id": g.unique_id,
+                            "name": g.name, "price": g.price, "count": g.count,
+                        })
+                    })
+                    .collect();
+                let payload = json!({
+                    "ok": true,
+                    "visible": q.goods.visible,
+                    "title": q.goods.title,
+                    "is_buyback": q.goods.is_buyback,
+                    "count": goods.len(),
+                    "goods": goods,
+                });
+                tracing::info!("🎮 control npc_goods_probe: {} rows", goods.len());
+                let _ = reply.send(payload.to_string());
+            }
+            ControlCommand::BuyItem { item_index, count } => {
+                // 与商品窗「购买」按钮发的**同一个包**（C# 客户端 BuyItem.ItemIndex = SelectedItem.UniqueID）
+                net.send_packet(&build_buy_item(item_index, count));
+                tracing::info!("🎮 control buy_item: item={item_index} count={count}");
+            }
             ControlCommand::MailProbe { reply } => {
                 let mails: Vec<serde_json::Value> = q
                     .mail
@@ -2896,6 +2976,23 @@ mod tests {
         );
         let pkt2 = build_finish_quest(27, 2);
         assert_eq!((pkt2.quest_index, pkt2.selected_item_index), (27, 2));
+    }
+
+    /// ③ 购买门禁：商品号与**数量**必须原样发出，面板类型固定 Buy。
+    /// 数量被吞成 1 的后果是「少扣钱少发货」，而回执与日志都像成功——判据（金币 delta）
+    /// 会按单价对不上，得排查很久才想到是动作侧吞参数。
+    ///
+    /// 阳性对照（实做）：把 `count` 改成常量 1 → 本测试立即红。
+    #[test]
+    fn build_buy_item_carries_count_and_panel_type() {
+        let pkt = build_buy_item(317, 3);
+        assert_eq!(
+            pkt.item_index, 317,
+            "商品号必须原样（常规商店 = 商品行 unique_id）"
+        );
+        assert_eq!(pkt.count, 3, "数量必须原样发出");
+        assert_eq!(pkt.panel_type, mir2_shared::enums::PanelType::Buy);
+        assert_eq!(build_buy_item(317, 1).count, 1);
     }
 
     /// `attack_mode` RPC 的模式名解析（2026-09-22 玩家验收能力）。
