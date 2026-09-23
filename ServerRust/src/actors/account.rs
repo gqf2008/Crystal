@@ -438,40 +438,147 @@ impl Message<LoginRequest> for AccountActor {
     async fn handle(
         &mut self,
         msg: LoginRequest,
+        ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        // 2026-09-23 容量标定（tools/ops/CAPACITY.md）：登录 p95 随并发线性增长
+        // （100→1.36s、200→2.96s，约 14ms/次），根因是**argon2id 校验在 AccountActor 里串行**——
+        // 账号校验是 CPU 密集（m=19456,t=2），却把整个 actor 邮箱堵住。
+        // 修法：**只把 CPU 校验挪出去**（spawn_blocking，吃满 blocker 线程池），
+        // 校验结果用 `PasswordVerified` 回投，状态改动与回包逻辑仍全部留在 actor 内（语义不变）。
+        if let Some(acc) = self.accounts.get(&msg.username) {
+            let now = Self::unix_now_secs();
+            if acc.banned_until > now {
+                // 封禁期内直接拒绝（与原逻辑一致，无需校验 CPU）
+                return self.finish_login(msg.session_id, msg.username, false).await;
+            }
+            let hash = acc.password_hash.clone();
+            let me = ctx.actor_ref().clone();
+            let (sid, user, pass) = (msg.session_id, msg.username.clone(), msg.password.clone());
+            crate::util::tasks::spawn("account.password_verify", async move {
+                let pw = pass.clone();
+                let (ok, needs_migration) =
+                    tokio::task::spawn_blocking(move || verify_password(&pw, &hash))
+                        .await
+                        .unwrap_or((false, false));
+                let _ = me
+                    .tell(PasswordVerified {
+                        session_id: sid,
+                        username: user,
+                        password: pass,
+                        ok,
+                        needs_migration,
+                    })
+                    .await;
+            });
+            return;
+        }
+        // 账号不存在：保留原同步路径（受 AllowNewAccount 门控的自动注册；无 argon2 以外的重活）
+        let (success, _needs_db_save) = self.login(&msg.username, &msg.password);
+        self.finish_login(msg.session_id, msg.username, success)
+            .await;
+    }
+}
+
+/// argon2 校验完成回投（见 `LoginRequest` 的分流注释）。
+pub struct PasswordVerified {
+    pub session_id: u64,
+    pub username: String,
+    pub password: String,
+    pub ok: bool,
+    pub needs_migration: bool,
+}
+
+impl Message<PasswordVerified> for AccountActor {
+    type Reply = ();
+
+    async fn handle(
+        &mut self,
+        msg: PasswordVerified,
         _ctx: &mut Context<Self, Self::Reply>,
     ) -> Self::Reply {
-        let (success, _needs_db_save) = self.login(&msg.username, &msg.password);
+        let now = Self::unix_now_secs();
+        let success = if !msg.ok {
+            // 与原 `login()` 一致：WrongPasswordCount++，>=5 封 2 分钟
+            if let Some(account) = self.accounts.get_mut(&msg.username) {
+                account.wrong_password_count = account.wrong_password_count.saturating_add(1);
+                if account.wrong_password_count >= 5 {
+                    account.banned_until = now + 120;
+                    warn!(
+                        "Account '{}' banned for 2 minutes (too many wrong passwords)",
+                        msg.username
+                    );
+                } else {
+                    warn!(
+                        "Wrong password for account: {} (attempt {})",
+                        msg.username, account.wrong_password_count
+                    );
+                }
+            }
+            false
+        } else if let Some(account) = self.accounts.get_mut(&msg.username) {
+            account.wrong_password_count = 0;
+            account.banned_until = 0;
+            if msg.needs_migration {
+                account.password_hash = hash_password(&msg.password);
+                info!(
+                    "Password hash migrated to Argon2 for account: {}",
+                    msg.username
+                );
+            }
+            if account.require_password_change {
+                warn!("Account '{}' requires password change", msg.username);
+                false
+            } else if account.is_online {
+                warn!("Account already online: {}", msg.username);
+                false
+            } else {
+                account.is_online = true;
+                info!("Account logged in: {}", msg.username);
+                true
+            }
+        } else {
+            false
+        };
+        self.finish_login(msg.session_id, msg.username, success)
+            .await;
+    }
+}
+
+impl AccountActor {
+    /// 登录收尾（原 `LoginRequest` 处理的后半段）：算出封禁/强制改密标记 → 落库 → 查角色列表 → 回包。
+    /// 抽出来是为了让「同步路径（账号不存在/封禁）」与「异步校验路径（PasswordVerified）」共用同一套语义。
+    async fn finish_login(&mut self, session_id: u64, username: String, success: bool) {
         let banned_until = if success {
             None
         } else {
-            self.banned_until(&msg.username)
+            self.banned_until(&username)
         };
         // C# RequirePasswordChange：密码正确但需强制改密（login 返回 false 且未封禁）
         let require_password_change = !success
             && banned_until.is_none()
             && self
                 .accounts
-                .get(&msg.username)
+                .get(&username)
                 .map(|a| a.require_password_change)
                 .unwrap_or(false);
 
         // 同步到数据库
         if success {
-            if let Some(account) = self.accounts.get(&msg.username) {
+            if let Some(account) = self.accounts.get(&username) {
                 if let Err(e) = db::save_account(&self.db_pool, account).await {
-                    warn!("Failed to save account '{}' on login: {}", msg.username, e);
+                    warn!("Failed to save account '{}' on login: {}", username, e);
                 }
             }
         }
 
-        info!("Login result for '{}': {}", msg.username, success);
+        info!("Login result for '{}': {}", username, success);
 
         // 角色列表（登录成功时查询）
         let characters = if success {
-            match db::list_character_summaries(&self.db_pool, &msg.username).await {
+            match db::list_character_summaries(&self.db_pool, &username).await {
                 Ok(chars) => chars,
                 Err(e) => {
-                    warn!("Failed to list characters for '{}': {}", msg.username, e);
+                    warn!("Failed to list characters for '{}': {}", username, e);
                     Vec::new()
                 }
             }
@@ -483,9 +590,9 @@ impl Message<LoginRequest> for AccountActor {
         let _ = self
             .gate_ref
             .tell(LoginResult {
-                session_id: msg.session_id,
+                session_id,
                 success,
-                username: msg.username.clone(),
+                username,
                 characters,
                 banned_until,
                 require_password_change,

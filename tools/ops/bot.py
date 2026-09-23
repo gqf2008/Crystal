@@ -179,6 +179,9 @@ def one_session(idx: int, host: str, port: int, account: str, password: str,
             # 等 LoginSuccess（读到任意一帧即认为账号路径通了），随后主动登出
             opcode, body = recv_frame(sock)
             res["login_reply_bytes"] = len(body) + 4
+            # 真延迟：从发起连接算到**收到登录回执**。此前只记 login_sent（包交给 OS 的时刻），
+            # 那是"服务端读得多快"的代理量，不是登录延迟——据此报 p95 会误导（实测两者能差 10 倍）。
+            res["login_reply_sec"] = round(time.time() - t0, 3)
             res["ok"] = True
             res["stage"] = "login_only_done"
             sock.sendall(frame(OP_LOGOUT, b""))
@@ -265,7 +268,8 @@ def main() -> int:
         t.join()
 
     ok = [r for r in results if r and r.get("ok")]
-    lat = sorted(r["login_sent"] for r in results if r and "login_sent" in r)
+    lat = sorted(r.get("login_reply_sec", r["login_sent"]) for r in results
+                 if r and "login_sent" in r)
     summary = {
         "sessions": len(accounts),
         "ok": len(ok),
