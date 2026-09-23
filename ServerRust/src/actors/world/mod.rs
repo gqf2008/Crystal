@@ -8393,6 +8393,19 @@ impl Actor for WorldActor {
             {
                 warn!("Failed to import drops from {}: {}", drop_dir.display(), e);
             }
+            // #996 的回填：`import_drops_from_dir` 在表非空时**跳过导入**，所以 #996 之前
+            // 导入过的库里 `quest_required` 全是 0 ——任务物品掉落被当成普通掉落落地，
+            // ItemTasks 进度（按任务格计数）永远不动。这里从 Drops/*.txt 的 `Q` 标记回填（幂等）。
+            if let Err(e) = db::backfill_quest_required_drops(
+                &drop_dir,
+                &monster_infos,
+                &item_name_index,
+                &args.db_pool,
+            )
+            .await
+            {
+                warn!("Failed to backfill quest_required drops: {}", e);
+            }
         }
 
         let monster_drops = match db::load_monster_drops(&args.db_pool).await {

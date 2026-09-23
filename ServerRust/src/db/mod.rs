@@ -5268,6 +5268,117 @@ pub async fn import_drops_from_dir(
 }
 
 /// Load NPC goods grouped by npc_index
+/// 回填 `monster_drops.quest_required`：`Drops/*.txt` 里 `1/10 ItemName Q` 的 `Q` 表示
+/// **任务物品掉落**（C# `MonsterInfo.cs:359-366` → `DropInfo.QuestRequired`）——这种掉落
+/// 不落地，而是直接进击杀者的**任务格**并推进 ItemTasks 进度
+/// （`world/mod.rs:5417 try_give_quest_item`）。
+///
+/// 为什么要回填：`quest_required` 的解析是 #996 才加的，而**表非空就跳过导入**
+/// （`import_drops_from_dir` 里 `existing > 100` 直接 return）——所以 #996 之前导入过的库
+/// 里这一列**全是 0**：145 条本该「进任务格」的掉落被当成普通掉落落地，玩家捡到的是背包物品，
+/// 而 ItemTasks 进度按任务格计数 → **这类任务永远做不完**（本机库实测：21238 行里 0 行带标记，
+/// 而 Drops 目录有 145 条 `Q`）。
+///
+/// 幂等**逐行**处理：行已存在且未标记 → 补标记；行**不存在** → 按脚本数值补插一行
+/// （老导入器会把 `Q` 当成物品名的一部分，解析失败后**整行丢弃**，所以老库里这些行是缺失的，
+/// 只补标记补不回来）。按 (怪物名→index, 物品名→index) 精确匹配，匹配不到的静默跳过。返回修好的行数。
+pub async fn backfill_quest_required_drops(
+    drop_dir: &Path,
+    monster_infos: &HashMap<i32, MonsterInfo>,
+    item_name_index: &HashMap<String, i32>,
+    pool: &DbPool,
+) -> anyhow::Result<usize> {
+    // 怪物名 → index（文件名即怪物名；与 import_drops_from_dir 同口径）
+    let mut monster_by_name: HashMap<String, i32> = HashMap::new();
+    for (idx, m) in monster_infos {
+        monster_by_name.insert(m.name.clone(), *idx);
+    }
+
+    let mut fixed = 0usize;
+    let entries = std::fs::read_dir(drop_dir)?;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("txt") {
+            continue;
+        }
+        let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
+            continue;
+        };
+        let Some(monster_index) = monster_by_name.get(stem).copied() else {
+            continue;
+        };
+        let Ok(text) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        for line in text.lines() {
+            let parts: Vec<&str> = line.split_whitespace().collect();
+            if parts.len() < 3 || !parts.last().is_some_and(|s| s.eq_ignore_ascii_case("q")) {
+                continue;
+            }
+            // `1/10 ItemName Q`：parts[1] 是物品名（C# 取单 token）
+            let item_name = parts[1].to_lowercase();
+            let Some(item_index) = item_name_index.get(&item_name).copied() else {
+                continue;
+            };
+            // chance：与 import_drops_from_dir 同口径（`1/6` → n/d）
+            let chance_str = parts[0];
+            let chance = if chance_str.contains('/') {
+                let frac: Vec<&str> = chance_str.split('/').collect();
+                if frac.len() == 2 {
+                    let n: f64 = frac[0].parse().unwrap_or(0.0);
+                    let d: f64 = frac[1].parse().unwrap_or(1.0);
+                    if d > 0.0 {
+                        n / d
+                    } else {
+                        0.0
+                    }
+                } else {
+                    0.0
+                }
+            } else {
+                chance_str.parse::<f64>().unwrap_or(0.0)
+            };
+
+            let exists: Option<i32> = sqlx::query_scalar(
+                "SELECT 1 FROM monster_drops WHERE monster_index = ? AND item_index = ? LIMIT 1",
+            )
+            .bind(monster_index)
+            .bind(item_index)
+            .fetch_optional(pool)
+            .await?;
+            if exists.is_some() {
+                let r = sqlx::query(
+                    "UPDATE monster_drops SET quest_required = 1 \
+                     WHERE monster_index = ? AND item_index = ? AND quest_required = 0",
+                )
+                .bind(monster_index)
+                .bind(item_index)
+                .execute(pool)
+                .await?;
+                fixed += r.rows_affected() as usize;
+            } else {
+                sqlx::query(
+                    "INSERT INTO monster_drops (monster_index, item_index, min_count, max_count, chance, gold, quest_required, group_parent_id, group_random, group_first) \
+                     VALUES (?, ?, 1, 1, ?, 0, 1, 0, 0, 0)",
+                )
+                .bind(monster_index)
+                .bind(item_index)
+                .bind(chance)
+                .execute(pool)
+                .await?;
+                fixed += 1;
+            }
+        }
+    }
+    if fixed > 0 {
+        tracing::info!(
+            "quest_required backfill: {fixed} quest-item drop rows repaired from {}",
+            drop_dir.display()
+        );
+    }
+    Ok(fixed)
+}
+
 pub async fn load_npc_goods(pool: &DbPool) -> anyhow::Result<HashMap<i32, Vec<NpcGoodsInfo>>> {
     let rows = sqlx::query("SELECT * FROM npc_goods ORDER BY npc_index")
         .fetch_all(pool)
@@ -7065,4 +7176,101 @@ mod pool_fk_off_tests {
             .expect("query");
         assert_eq!(rows.len(), 1);
     }
+}
+/// 门禁：`Q`（任务物品掉落）行在老库里是**整行缺失**的——老导入器把 `Q` 当物品名的一部分，
+/// 解析失败后 `continue` 丢掉整行。所以修复必须「行在就补标记、行不在就补行」，且二次运行幂等。
+///
+/// 阳性对照（实做）：把「不存在则 INSERT」那一段删掉 → 本测试第一段立即红（row 数不变）。
+#[tokio::test]
+async fn quest_item_drop_repair_inserts_missing_rows_and_is_idempotent() {
+    let pool = SqlitePool::connect("sqlite::memory:?cache=shared")
+        .await
+        .unwrap();
+    sqlx::query(
+        "CREATE TABLE monster_drops (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            monster_index INTEGER NOT NULL,
+            item_index INTEGER NOT NULL,
+            min_count INTEGER NOT NULL DEFAULT 1,
+            max_count INTEGER NOT NULL DEFAULT 1,
+            chance REAL NOT NULL DEFAULT 0,
+            gold INTEGER NOT NULL DEFAULT 0,
+            quest_required INTEGER NOT NULL DEFAULT 0,
+            group_parent_id INTEGER NOT NULL DEFAULT 0,
+            group_random INTEGER NOT NULL DEFAULT 0,
+            group_first INTEGER NOT NULL DEFAULT 0)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    // 老库里只留下了「非 Q」行
+    sqlx::query(
+        "INSERT INTO monster_drops (monster_index, item_index, chance) VALUES (100, 200, 0.02)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let dir = std::env::temp_dir().join(format!("crystal_drops_repair_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("Boss.txt"), "1/4 QuestThing Q\n1/50 NormalThing\n").unwrap();
+
+    let mut monster_infos: HashMap<i32, MonsterInfo> = HashMap::new();
+    monster_infos.insert(
+        100,
+        MonsterInfo {
+            index: 100,
+            name: "Boss".to_string(),
+            image: 1,
+            ai: 0,
+            effect: 0,
+            level: 1,
+            view_range: 7,
+            cool_eye: 0,
+            stats_json: String::new(),
+            stats: HashMap::new(),
+            light: 0,
+            attack_speed: 0,
+            move_speed: 0,
+            experience: 10,
+            can_push: false,
+            can_tame: false,
+            auto_rev: false,
+            undead: false,
+            can_recall: false,
+            drop_path: None,
+        },
+    );
+    let item_name_index: HashMap<String, i32> = [
+        ("questthing".to_string(), 300),
+        ("normalthing".to_string(), 200),
+    ]
+    .into_iter()
+    .collect();
+
+    // 第一次：应补插 1 行（QuestThing），并把 chance 按 1/4 落库
+    let fixed = backfill_quest_required_drops(&dir, &monster_infos, &item_name_index, &pool)
+        .await
+        .unwrap();
+    assert_eq!(fixed, 1, "缺失的 Q 行必须被补插");
+    let row: (i64, f64) = sqlx::query_as(
+        "SELECT quest_required, chance FROM monster_drops WHERE monster_index=100 AND item_index=300",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(row.0, 1, "补插的行必须带 quest_required=1");
+    assert!(
+        (row.1 - 0.25).abs() < 1e-9,
+        "chance 必须按 1/4 解析（实测 {}）",
+        row.1
+    );
+
+    // 第二次：幂等（0 行改动）
+    let again = backfill_quest_required_drops(&dir, &monster_infos, &item_name_index, &pool)
+        .await
+        .unwrap();
+    assert_eq!(again, 0, "重复运行不得再改任何行");
+    let _ = std::fs::remove_dir_all(&dir);
 }

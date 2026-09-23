@@ -5443,6 +5443,17 @@ impl Message<ChatRequest> for WorldActor {
                                     );
                                     return;
                                 }
+                                // 与启动路径同款：把 `Q`（任务物品掉落）标记回填进表（幂等）
+                                if let Err(e) = db::backfill_quest_required_drops(
+                                    &drop_dir,
+                                    &self.monster_infos,
+                                    &item_name_index,
+                                    &self.db_pool,
+                                )
+                                .await
+                                {
+                                    warn!("@reloaddrops quest_required backfill failed: {}", e);
+                                }
                             }
                             match db::load_monster_drops(&self.db_pool).await {
                                 Ok(d) => {
