@@ -10577,6 +10577,88 @@ pub(crate) fn dropped_batch_opcode(
     }
 }
 
+// ============================================================================
+// 广播背压：世界侧有界发件箱（tick 边界重投）
+// ============================================================================
+//
+// 2026-09-23 容量标定发现：去掉 `broadcast_to_map` 里"每目标 ask"之后（那是个**意外的节流器**），
+// 生产端快于 gate 出队，`gate mailbox full` 丢包从 0 涨到 上千条（条目级丢失 = 玩家可能漏见实体）。
+// 正确做法不是重新加节流，而是**把丢弃换成有界排队 + tick 边界重投**：
+//   - `try_send` 失败不再丢，改为进发件箱（有界，满了才丢并如实计数/告警）；
+//   - 每个 tick 从发件箱取一批重投，仍失败就把该条退回队首并停止本轮（保持顺序）。
+//
+// 为什么用进程级 `OnceLock` 而不是 `WorldActor` 字段：`broadcast_to_map` 是**自由函数**，
+// 全仓有 **101 处调用点**（tick.rs 60、combat.rs 21、mod.rs 12、hero.rs 5、item.rs 3），
+// 改签名要动 101 处且会在 `&self.players` / `&mut self` 之间制造借用冲突——收益不匹配风险。
+// 本服只有一个 WorldActor 实例；**若将来做多世界分片，必须改成 per-world 字段**（此处留了这条注释）。
+pub(crate) type BroadcastOutbox =
+    std::sync::Mutex<std::collections::VecDeque<(Vec<u64>, std::sync::Arc<Vec<u8>>)>>;
+
+/// 发件箱上限（条）。按"一个 tick 的广播量"估：几十会话 × 每秒几百条广播，8192 足够吸收突发。
+const BROADCAST_OUTBOX_CAP: usize = 8192;
+/// 每个 tick 最多重投多少条（避免 flush 本身又打满 gate 邮箱）。
+const BROADCAST_FLUSH_PER_TICK: usize = 256;
+
+static BROADCAST_OUTBOX: std::sync::OnceLock<BroadcastOutbox> = std::sync::OnceLock::new();
+
+pub(crate) fn broadcast_outbox() -> &'static BroadcastOutbox {
+    BROADCAST_OUTBOX.get_or_init(|| std::sync::Mutex::new(std::collections::VecDeque::new()))
+}
+
+/// 把一条广播放进发件箱；满了返回 false（调用方负责告警/计数——**不允许静默丢**）。
+pub(crate) fn enqueue_broadcast(targets: Vec<u64>, data: std::sync::Arc<Vec<u8>>) -> bool {
+    match broadcast_outbox().lock() {
+        Ok(mut q) => {
+            if q.len() >= BROADCAST_OUTBOX_CAP {
+                return false;
+            }
+            q.push_back((targets, data));
+            true
+        }
+        Err(_) => false,
+    }
+}
+
+/// 每个 tick 调用：把发件箱里的广播重投给 gate。
+/// 返回 (重投成功条数, 仍失败条数)。失败即停止本轮并保留队首顺序（下个 tick 再试）。
+pub(crate) fn flush_broadcast_outbox(gate_ref: &ActorRef<GateActor>) -> (usize, usize) {
+    let mut sent = 0usize;
+    let mut stuck = 0usize;
+    let mut pending: Vec<(Vec<u64>, std::sync::Arc<Vec<u8>>)> = Vec::new();
+    {
+        let Ok(mut q) = broadcast_outbox().lock() else {
+            return (0, 0);
+        };
+        for _ in 0..BROADCAST_FLUSH_PER_TICK {
+            match q.pop_front() {
+                Some(item) => pending.push(item),
+                None => break,
+            }
+        }
+        // 先放回去，避免在持锁期间做 try_send（gate 侧可能触发踢线等动作）
+        for item in pending.drain(..).rev() {
+            q.push_front(item);
+        }
+        // 逐条尝试：成功才真出队
+        while let Some(front) = q.front() {
+            let ok = gate_ref
+                .tell(crate::gate::actor::SendToClients {
+                    sessions: front.0.clone(),
+                    data: front.1.clone(),
+                })
+                .try_send()
+                .is_ok();
+            if !ok {
+                stuck = q.len();
+                break;
+            }
+            q.pop_front();
+            sent += 1;
+        }
+    }
+    (sent, stuck)
+}
+
 pub(crate) async fn broadcast_to_map(
     gate_ref: &ActorRef<GateActor>,
     players: &HashMap<u64, PlayerRecord>,
@@ -10609,19 +10691,34 @@ pub(crate) async fn broadcast_to_map(
     if targets.is_empty() {
         return;
     }
-    if let Err(e) = gate_ref
+    let payload = std::sync::Arc::new(data.to_vec());
+    match gate_ref
         .tell(crate::gate::actor::SendToClients {
-            sessions: targets,
-            data: std::sync::Arc::new(data.to_vec()),
+            sessions: targets.clone(),
+            data: payload.clone(),
         })
         .try_send()
     {
-        warn!(
-            "gate mailbox full: SendToClients dropped (map={} opcode={:?} err={})",
-            map_index,
-            dropped_batch_opcode(&e),
-            e
-        );
+        Ok(()) => {}
+        Err(e) => {
+            // 背压：**不丢**，进世界侧发件箱，tick 边界重投（见 BroadcastOutbox 文档）。
+            // 这是本轮补上的"正确背压"——之前那个每目标 ask 只是意外节流，删掉它必须补这个。
+            if enqueue_broadcast(targets, payload) {
+                debug!(
+                    "broadcast deferred to outbox (map={} opcode={:?} err={})",
+                    map_index,
+                    dropped_batch_opcode(&e),
+                    e
+                );
+            } else {
+                warn!(
+                    "broadcast outbox full: dropped (map={} opcode={:?}) — 发件箱上限 {} 条已满",
+                    map_index,
+                    dropped_batch_opcode(&e),
+                    BROADCAST_OUTBOX_CAP
+                );
+            }
+        }
     }
 }
 

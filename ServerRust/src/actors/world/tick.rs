@@ -8371,6 +8371,16 @@ impl Message<Tick> for WorldActor {
         // [DEBUG] 每 5 秒打一次 tick 确认 WorldActor 活着
         self.tick_count += 1;
 
+        // 广播背压重投（每 tick 一次）：把上一 tick 因 gate 邮箱满而**入队**的广播再投出去。
+        // 见 world::BroadcastOutbox 的文档——它是"删掉那个意外节流器"之后必须补上的正确背压。
+        let (resent, stuck) = crate::actors::world::flush_broadcast_outbox(&self.gate_ref);
+        if resent > 0 || stuck > 0 {
+            debug!(
+                "broadcast outbox flush: resent={} still_queued={}",
+                resent, stuck
+            );
+        }
+
         // #2398：C# Envir.Process ProcessNewDay——跨零点清每日任务 + 在线触发 [@_Daily]
         let today = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)

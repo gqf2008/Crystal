@@ -55,6 +55,11 @@ foreach ($n in $Steps) {
     $text = Get-Content $log -ErrorAction SilentlyContinue
     $mailbox = @($text | Where-Object { $_ -match 'gate mailbox full' }).Count
     $kicks = @($text | Where-Object { $_ -match 'kicking slow reader' }).Count
+    # 背压信号分离（2026-09-23）：`gate mailbox full` 现在是**单目标 SendToClient** 的丢弃；
+    # 广播路径挤不动时走世界侧发件箱（deferred），发件箱满才 outbox_full 丢。三者必须分开看，
+    # 否则"广播改排队"会被误读成"丢包更多/更少"。
+    $deferred = @($text | Where-Object { $_ -match 'broadcast deferred to outbox' }).Count
+    $outboxFull = @($text | Where-Object { $_ -match 'broadcast outbox full' }).Count
     $hb = @($text | Where-Object { $_ -match 'heartbeat: tick=' })
     $lag = @()
     foreach ($h in $hb) { if ($h -match 'lag_pct=(-?[\d.]+)') { $lag += [double]$Matches[1] } }
@@ -69,6 +74,8 @@ foreach ($n in $Steps) {
         rss_per_session_mb = [Math]::Round(($rssLoaded - $rssIdle) / [Math]::Max(1, $n), 2)
         mailbox_full = $mailbox
         slow_reader_kicks = $kicks
+        broadcast_deferred = $deferred
+        broadcast_outbox_full = $outboxFull
         heartbeats = $hb.Count
         max_abs_lag_pct = if ($lag.Count) { ($lag | ForEach-Object { [Math]::Abs($_) } | Measure-Object -Maximum).Maximum } else { $null }
     }
