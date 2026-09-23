@@ -1169,6 +1169,16 @@ pub fn generate_item_uid() -> u64 {
     NEXT_UID.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
 }
 
+/// 把全局 uid 计数器推到 `base` 之上（只升不降）。
+///
+/// 启动时由 `db::init_db_pool` 调到「已存物品最大 uid + 1」：C# 把 `NextUserItemID`
+/// 持久化（`Server/MirEnvir/Envir.cs:127/2579/2975`），本端此前每进程从 1 起，
+/// 重启后新物品会与存量物品撞号，按 uid 定位的操作（出售/修理/使用/存取）就会作用到别的物品。
+/// 用 `fetch_max` 而不是 `store`：并发分配中语义是「保证不小于 base」，把计数器降回去才是 bug。
+pub fn seed_item_uid(base: u64) {
+    NEXT_UID.fetch_max(base, std::sync::atomic::Ordering::Relaxed);
+}
+
 impl PlayerInventory {
     fn next_unique_id(&self) -> u64 {
         generate_item_uid()
@@ -1268,6 +1278,27 @@ mod tests {
         assert_eq!(grid, 0);
         assert!(uid > 0);
         assert_eq!(inv.item_count(), 1);
+    }
+
+    /// ⑨ 重启后 uid 不得与存量物品撞号：启动时把计数器推到「已存最大 uid + 1」。
+    ///
+    /// C# 靠**持久化** `NextUserItemID` 保证唯一（`Server/MirEnvir/Envir.cs:127` 声明、
+    /// `:2579` 存、`:2975` 读）；本端此前每进程从 1 起 → 实测同一背包里 3 件物品 uid 都等于 3
+    /// （不同进程各自分配的历史遗留），而按 uid 定位的出售/修理/使用/存取会因此作用到**别的物品**。
+    ///
+    /// 阳性对照（实做）：把 `seed_item_uid` 改成 no-op → 本测试立即红。
+    #[test]
+    fn seeded_uid_never_goes_backwards() {
+        // 用一个远大于其他测试分配量级的种子，避免与并行测试互相干扰
+        seed_item_uid(5_000_000);
+        let a = generate_item_uid();
+        // `seed(base)` 的语义是「下一个可分配值 ≥ base」（分配返回当前值再自增，
+        // 与 C# `n + NextUserItemID` 同口径）；启动时传的是 `saved_max + 1`，故首个新 uid 必大于存量最大值。
+        assert!(a >= 5_000_000, "种子后分配不得低于种子值（实测 {a}）");
+        // 只升不降：种子不得把计数器降回去（否则又会与已分配的值撞号）
+        seed_item_uid(1);
+        let b = generate_item_uid();
+        assert!(b > a, "seed 不得降低计数器（{b} 应 > {a}）");
     }
 
     /// #2364：可堆叠物品按 ItemInfo.StackSize 合并（C# HumanObject.AddItem；原 max_dura 误用）
