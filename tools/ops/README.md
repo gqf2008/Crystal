@@ -97,6 +97,35 @@ pwsh tools/ops/memory_ramp.ps1 -DeployDir <deploy> -ExePath <exe> -StepsCsv 10,2
 
 用途与结论见 `CAPACITY.md` §4.2（7.5MB/会话拆解）。
 
+## 5c. 运行中存储故障降级：`storage_degrade_drill.ps1` + `db_write_lock.py`
+
+`fault_injection.ps1` 的 `db_readonly` 只覆盖「**起服前**把 DB 置只读」；本项注入**运行中**的写故障：
+服务端已有会话时，另一个进程用 `BEGIN IMMEDIATE` 占住 SQLite 写锁 20s（比 `busy_timeout=5000`
+长），期间走一个完整会话，它的落库必然撞锁。
+
+```powershell
+pwsh tools/ops/storage_degrade_drill.ps1 -DeployDir <deploy> -OutFile tools/ops/out/storage_degrade.json
+```
+
+判据（J1–J4，缺一不可）：写失败后**进程仍在** / 失败被**明确记录** / 故障期间**读路径不受影响**
+（新会话仍能登录）/ 释放锁后**恢复**（新会话下线重新出现 `saved to database on logout`）。
+
+**2026-09-23 实测结果：J1–J4 全绿**（`ok=true`，`save_failure_lines=2`）。同一份日志里的时间线：
+
+| 时刻 | 事件 |
+|---|---|
+| 11:33:16.478 | `WARN account: Failed to save account 'opsload1' on login: ... database is locked` |
+| 11:33:16.481 | `Player OpsLoad1 entered world`（**写失败没有阻断登录**） |
+| 11:33:26.069 | `WARN world: Failed to save player pets for OpsLoad1: ... database is locked`（撞满 5s busy_timeout） |
+| 11:33:30.026 | `Player OpsLoad1 saved to database on logout`（锁释放后落库成功） |
+| 11:33:36.197 | 恢复后的新会话同样 `saved to database on logout` |
+
+**如实记的缺口（后续项，不是"已完成"）**：撞锁失败时是 **warn 即放弃、没有重试/补偿**——
+实测这一轮里**宠物持久化那一步是直接丢掉的**（`Failed to save player pets` 之后没有重试），
+角色本体那次是等到锁释放后才落库成功。也就是说：长时间写锁 > busy_timeout 时，
+下线路径上的部分持久化数据（本例是 pets）会静默丢失。要做的是给下线/落库路径补**有界重试
++ 失败补偿（例如失败入队、重连后补写）**，并把它做成可注入的门禁。
+
 ## 6. 故障注入：`fault_injection.ps1`（+ `latency_proxy.py`）
 
 | 场景 | 做法 | 判据 | 实测 |
