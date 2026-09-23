@@ -50,12 +50,28 @@ $baseOk = ($null -ne $base -and $base.summary.failed -eq 0)
 $linesBeforeFault = @(Get-Content $log -EA SilentlyContinue).Count
 
 # 1) 先注入写锁（20s 级），确认真拿住了
+$lockOut = Join-Path $ops 'out/storage_degrade_lock.txt'
+Remove-Item $lockOut -ErrorAction SilentlyContinue
 $lockJob = Start-Job -ScriptBlock {
-    param($ops, $DbPath, $secs)
-    & python (Join-Path $ops 'db_write_lock.py') --db $DbPath --seconds $secs
-} -ArgumentList $ops, $DbPath, $LockSeconds
-Start-Sleep 3
-$lockHeld = ((Get-Job -Id $lockJob.Id).State -eq 'Running')
+    param($ops, $DbPath, $secs, $out)
+    & python (Join-Path $ops 'db_write_lock.py') --db $DbPath --seconds $secs *> $out
+} -ArgumentList $ops, $DbPath, $LockSeconds, $lockOut
+# 判据必须是**注入了故障**，不是"job 还在跑"——`db_write_lock.py` 拿不到写锁时会打印
+# LOCK_FAILED 并以退出码 2 结束，但 job 状态可能仍是 Running/Completed 的假象（2026-09-23 踩过：
+# 一次探针里锁根本没拿到，却按"已注入"跑完了整轮，结论全废）。
+$lockHeld = $false
+for ($i = 0; $i -lt 15; $i++) {
+    Start-Sleep 1
+    $txt = Get-Content $lockOut -ErrorAction SilentlyContinue
+    if ($txt -match 'LOCK_HELD') { $lockHeld = $true; break }
+    if ($txt -match 'LOCK_FAILED') { break }
+}
+if (-not $lockHeld) {
+    Write-Host ("FAIL: 写锁未真正拿到（db_write_lock.py 输出：{0}）——本轮结论无效，不产出报告" -f ((Get-Content $lockOut -EA SilentlyContinue) -join ' '))
+    Wait-Job $lockJob -Timeout 5 | Out-Null; Remove-Job $lockJob -Force -EA SilentlyContinue
+    Stop-Process -Id $proc.Id -Force -EA SilentlyContinue
+    exit 3
+}
 
 # 2) 锁住期间走一个完整会话（进图 4s 后下线）——它的两次落库都会撞锁：
 #    账号保存（login/offline）与角色保存（logout）
@@ -96,6 +112,7 @@ $report = [ordered]@{
     db = $DbPath
     lock_seconds = $LockSeconds
     lock_acquired = $lockHeld
+    lock_output = ((Get-Content $lockOut -EA SilentlyContinue) -join ' | ')
     baseline_login_ok = $baseOk
     J1_server_alive_after_write_failure = $j1
     J2_write_failure_logged = $j2
