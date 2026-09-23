@@ -5,6 +5,7 @@ pub fn normalized_monster_name(name: &str) -> String {
     name.to_lowercase().replace(' ', "")
 }
 pub mod config;
+pub mod egress_stats;
 pub mod ini;
 pub mod tasks;
 pub mod validation;

@@ -396,7 +396,10 @@ async fn async_main() -> anyhow::Result<()> {
     // Phase 3.1: 启动 admin health check 服务器
     let admin_stats = Arc::new(crystal_server::util::admin::AdminStats::default());
     let admin_stats_clone = admin_stats.clone();
-    let admin_port = 7001; // 固定端口(后续可从 cfg 读)
+    // 与 gate 端口同源：`listen_addr` 的端口 + 1。
+    // 固定 7001 会让第二个实例（容量标定/压测常把 gate 挪到 7100 等）admin 绑定失败，
+    // 日志里只剩一行 ERROR「health check disabled」——观测面静默缺失，标定数据却照出。
+    let admin_port = crystal_server::util::admin::admin_port_for(&cfg.network.listen_addr);
     crystal_server::util::tasks::spawn("admin.server", async move {
         crystal_server::util::admin::run_admin_server(
             admin_stats_clone,

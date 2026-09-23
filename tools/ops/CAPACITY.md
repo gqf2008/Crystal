@@ -259,6 +259,53 @@ CPU 密集）且在 AccountActor 串行处理——100/200 并发登录 p95 1.36
 
 外推（本改动后、单图、单机）：`RSS ≈ 28MB + 3.5MB × 会话数` → 200 会话约 **0.73GB**（修前外推约 1.5GB）。
 
+### 4.4 入场载荷定量（2026-09-24，验收 `MIR2_EGRESS_STATS=1`）
+
+§4.3 的下一步①已落地：`ServerRust/src/util/egress_stats.rs` 按 opcode 记「包个数 × 尺寸」，
+`GateActor` 在**会话收尾**时打一行 `EGRESS_STATS session=<id> packets=.. bytes=.. top=<op>:<count>/<bytes>/<max>,..`
+（默认关闭，仅 `MIR2_EGRESS_STATS=1` 生效——热路径只多一次 bool 判断）。
+测量：`memory_ramp.ps1` 10 会话（同一 deploy 库、同机、debug 构建），逐会话读数如下：
+
+| 会话 | 帧数 | 字节 | 最大单包 |
+|---|---|---|---|
+| 10（最晚入场） | 3009 | 235.1 KB | 23.5 KB |
+| 2 / 4 / 7 / 8 / 9 | 2467–2942 | 198.9–230.3 KB | 23.5 KB |
+| 1 / 3 / 5 / 6 | 2299–2805 | 188.2–224.3 KB | 23.5 KB |
+
+同一份读数里，**每会话的载荷构成几乎完全一致**（取 top）：
+
+| opcode | 含义 | 包数 | 字节 | 最大 |
+|---|---|---|---|---|
+| 71 | `ObjectMonster` | **1912** | **106.6 KB** | 70 |
+| 30 | `Chat` | 75–775（随在线时长增长） | 6.4–66.4 KB | 91 |
+| 204 | `NewQuestInfo` | 157 | 27.9 KB | 544 |
+| 266 | `NewRecipeInfo` | 1 | 23.5 KB | 23470 |
+| 250 | `GameShopInfo` | 1 | 3.5 KB | 3511 |
+| 18 | `NewMapInfo` | 1 | 1.5–14.7 KB | 14703 |
+| 92 | `ObjectNpc` | 43 | 2.1 KB | 57 |
+
+**结论（把 §4.3 的「分配器高水位」假设落到了具体机制）**：入场出站 188–235 KB/会话里，
+**`ObjectMonster` 占帧数的 71%、字节的 45–57%**——服务端日志同一轮写着
+`Spawned 43 NPCs and 1912 monsters for session N`，即**每个会话入场都会按会话重新生成一份整图 NPC/怪物
+（`spawn_npcs_and_monsters(.., session_id, ..)`，object_id 逐会话递增）并插入世界表**。
+20 个会话同图在线时，同一张图的怪物条目就有 **1912 × 20 ≈ 38k 份**同时驻留；
+而清理只在「该地图已无其他玩家」时执行（`cleanup_map_spawns`，见 `PlayerDisconnected` / `PlayerLogOut`），
+所以一轮 20 会话期间这条曲线是**单调累积**的。以 `MonsterState`（含 `String name` + AI 状态）量级估算
+38k × ~350B ≈ **13MB**，与 §4.3 实测「cycle2 − cycle1 = +13.4MB（0.65MB/会话/轮）」吻合。
+
+**下一步（判据已明确）**：把「按会话生成整图怪物/NPC」收敛成**按地图单一真源**（或以会话为属主的
+增量挂载 + 断开时只摘自己那一份并释放容量），然后重跑本节两条测量：
+① 10/20 会话的每会话增量下降；② 双轮 cycle 的 `cycle2 − cycle1` → 接近 0。
+在拿到这两条之前，残余内存**不计入已解决**。
+
+**同轮修掉的标定夹具坑（`tools/ops/memory_ramp.ps1`）**：
+① 部署副本的 gate 端口现在会按 `-Port` 自动对齐——此前不对齐会让实例去抢 7000，
+   绑定失败的唯一表现是日志里没有 `Gate listening`，脚本却照记 `ready=false`（静默作废的标定）；
+② 就绪失败改为**硬失败（exit 2）**而不是产出一行 `ready=false`；
+③ `out/` 目录先建（`-RedirectStandardOutput` 指向不存在的目录会直接启动失败）；
+④ 服务端 admin 端口从「固定 7001」改为**跟随 gate 端口 +1**（`util::admin::admin_port_for`），
+   否则同机第二个实例的观测面会静默失效（日志只剩一行 ERROR）。
+
 ## 5. tick 健康
 
 INFO 心跳实测：2 在线 / 3824 只怪时 `interval_ms=29989 / 30008`、`lag_pct=0.0`——tick 准时。

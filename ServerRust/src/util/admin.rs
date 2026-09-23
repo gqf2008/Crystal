@@ -64,6 +64,23 @@ impl AdminStats {
 }
 
 /// 启动 admin TCP 服务器。
+/// admin 端口从 gate 监听地址推导：端口 + 1（同一份 `network.listen_addr` 单一真源）。
+///
+/// 为什么不能固定 7001：容量标定/压测会在同机跑**第二个实例**（gate 挪到 7100 等），
+/// 固定端口会让第二个实例 admin 绑定失败——日志只有一行 ERROR「health check disabled」，
+/// 观测面静默缺失而标定数据照常产出（2026-09-24 实测：`memory_ramp.ps1 -Port 7100` 的
+/// 服务日志里 admin 绑定 7001 失败、被开发机 7000 实例占用）。
+/// 解析不出端口时回退 7001（保持历史默认，不改变单实例行为）。
+pub fn admin_port_for(listen_addr: &str) -> u16 {
+    listen_addr
+        .rsplit(':')
+        .next()
+        .and_then(|p| p.trim().parse::<u16>().ok())
+        .map(|p| p.saturating_add(1))
+        .unwrap_or(7001)
+}
+
+/// 启动 admin TCP 服务器。
 ///
 /// 每次连接返回 JSON 状态然后关闭。不解析 HTTP 头(简化),
 /// 但响应包含 HTTP/1.0 头,方便 curl 直接访问。
@@ -198,5 +215,22 @@ mod tests {
         let mut buf = Vec::new();
         stream.read_to_end(&mut buf).await.expect("读响应");
         String::from_utf8_lossy(&buf).into_owned()
+    }
+
+    /// admin 端口必须随 gate 端口一起挪：固定 7001 会让同机第二个实例（标定/压测用）的
+    /// 观测面静默失效。红检：把 `saturating_add(1)` 改成不加 → 本测试立红。
+    #[test]
+    fn admin_port_follows_gate_port() {
+        assert_eq!(admin_port_for("0.0.0.0:7000"), 7001, "默认实例保持历史端口");
+        assert_eq!(
+            admin_port_for("0.0.0.0:7100"),
+            7101,
+            "标定实例必须让开 7001"
+        );
+        assert_eq!(admin_port_for("127.0.0.1:9000"), 9001);
+        // 端口溢出/非法地址：回退历史默认，且不 panic
+        assert_eq!(admin_port_for("0.0.0.0:65535"), 65535);
+        assert_eq!(admin_port_for("not-an-addr"), 7001);
+        assert_eq!(admin_port_for(""), 7001);
     }
 }
