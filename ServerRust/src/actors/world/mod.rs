@@ -10491,12 +10491,28 @@ pub(crate) fn dropped_send_opcode(e: &kameo::error::SendError<SendToClient>) -> 
     }
 }
 
+/// 批量版（`SendToClients`）的同款诊断：从共享 payload 首 2 字节取 opcode。
+pub(crate) fn dropped_batch_opcode(
+    e: &kameo::error::SendError<crate::gate::actor::SendToClients>,
+) -> Option<u16> {
+    match e {
+        kameo::error::SendError::MailboxFull(m) | kameo::error::SendError::ActorNotRunning(m) => {
+            m.data.get(..2).map(|b| u16::from_le_bytes([b[0], b[1]]))
+        }
+        _ => None,
+    }
+}
+
 pub(crate) async fn broadcast_to_map(
     gate_ref: &ActorRef<GateActor>,
     players: &HashMap<u64, PlayerRecord>,
     map_index: u16,
     data: &[u8],
 ) {
+    // 先把目标会话收齐，再**一次批量下发**（见 gate::actor::SendToClients）。
+    // 旧写法是逐会话 tell(SendToClient)：一次广播 = N 条邮箱消息 + N 份 payload 拷贝，
+    // 实测 20 个世界会话就把 GateActor 邮箱打满（`gate mailbox full` 上万条）。
+    let mut targets: Vec<u64> = Vec::with_capacity(players.len());
     for (sid, rec) in players {
         if let Ok(Some(s)) = rec
             .actor_ref
@@ -10504,23 +10520,26 @@ pub(crate) async fn broadcast_to_map(
             .await
         {
             if s.map_index == map_index {
-                if let Err(e) = gate_ref
-                    .tell(SendToClient {
-                        session_id: *sid,
-                        data: data.to_vec(),
-                    })
-                    .try_send()
-                {
-                    warn!(
-                        "gate mailbox full: SendToClient dropped (map={} session={} opcode={:?} err={})",
-                        map_index,
-                        *sid,
-                        dropped_send_opcode(&e),
-                        e
-                    );
-                }
+                targets.push(*sid);
             }
         }
+    }
+    if targets.is_empty() {
+        return;
+    }
+    if let Err(e) = gate_ref
+        .tell(crate::gate::actor::SendToClients {
+            sessions: targets,
+            data: std::sync::Arc::new(data.to_vec()),
+        })
+        .try_send()
+    {
+        warn!(
+            "gate mailbox full: SendToClients dropped (map={} opcode={:?} err={})",
+            map_index,
+            dropped_batch_opcode(&e),
+            e
+        );
     }
 }
 

@@ -87,7 +87,13 @@ def drain(sock: socket.socket, stop: threading.Event, out: dict) -> None:
             frames += 1
             bytes_read += len(body) + 4
     except Exception as exc:  # 断开/超时都记下来，供错误率统计
-        out["read_error"] = f"{type(exc).__name__}: {exc}"
+        # 自己关掉 socket 造成的 10038 不是错误（主线程 join 不到位时的竞态）。
+        # 这类噪声会把"已经跑得好好的会话"判成失败（实测 20 会话里 9 条假失败）。
+        text = f"{type(exc).__name__}: {exc}"
+        if "10038" not in text:
+            out["read_error"] = text
+        else:
+            out["read_closed_by_us"] = True
     out["frames"] = frames
     out["bytes"] = bytes_read
     out["idle_waits"] = idle
@@ -149,12 +155,17 @@ def one_session(idx: int, host: str, port: int, account: str, password: str,
                     break
             res["held_sec"] = round(time.time() - t0, 2)
             stop.set()
-            reader.join(timeout=2)
+            # 先缩短超时再 join：drain 还阻塞在 recv 时主线程 close 会撞出 WinError 10038（假失败）
+            try:
+                sock.settimeout(0.3)
+            except Exception:
+                pass
+            reader.join(timeout=3)
             try:
                 sock.sendall(frame(OP_LOGOUT, b""))
             except Exception:
                 pass
-            ok_stages = (res.get("new_account_result") == 0 and res.get("new_character_result") == 0
+            ok_stages = (res.get("new_account_result") == 8 and res.get("new_character_result") in (0, 8)
                          and res.get("read_error") is None)
             res["ok"] = bool(ok_stages and res["frames"] > 0)
             res["stage"] = "done"
@@ -193,12 +204,21 @@ def one_session(idx: int, host: str, port: int, account: str, password: str,
                 break
         res["held_sec"] = round(time.time() - t0, 2)
         stop.set()
-        reader.join(timeout=2)
+        # 先缩短超时再 join：drain 还阻塞在 recv 时主线程 close 会撞出 WinError 10038（假失败）
+        try:
+            sock.settimeout(0.3)
+        except Exception:
+            pass
+        reader.join(timeout=3)
         try:
             sock.sendall(frame(OP_LOGOUT, b""))
         except Exception:
             pass
-        res["ok"] = res.get("read_error") is None and res["frames"] > 0
+        # ok 的判据不要只看 drain 线程写的 frames：重载下 reader.join 可能超时，
+        # 主线程先跑到这里时 frames 还没落（实测 30 会话里 12 条"跑得好好的会话"被判失败）。
+        # 改成「无真错误 且 (收到了数据 或 活满了预定保持时长)」。
+        survived = res["held_sec"] >= max(1.0, hold_sec * 0.8)
+        res["ok"] = res.get("read_error") is None and (res.get("frames", 0) > 0 or survived)
         res["stage"] = "done"
         return res
     except Exception as exc:

@@ -1595,6 +1595,51 @@ impl Message<SendToClient> for GateActor {
     }
 }
 
+/// 批量下发：**同一份数据发给多个会话**（世界→客户端扇出的批量路径）。
+///
+/// 为什么需要它：广播若逐会话 `tell(SendToClient)`，就是 N 条邮箱消息 + N 份 payload 拷贝，
+/// 20 人同图即 20 倍扇出——实测 20 个世界会话就把 GateActor 邮箱打满
+/// （`gate mailbox full` 上万条，玩家侧表现为丢包/卡顿）。批量后一次广播只投递一条消息，
+/// payload 只构造一次（`Arc` 共享）。
+///
+/// 语义与逐条 `SendToClient` **保持一致**：某个会话的发送通道满/已关闭时，仍按"慢读者"
+/// 策略告警并踢线——批量不等于放宽背压保护。
+pub struct SendToClients {
+    pub sessions: Vec<SessionId>,
+    pub data: std::sync::Arc<Vec<u8>>,
+}
+
+impl Message<SendToClients> for GateActor {
+    type Reply = ();
+
+    async fn handle(
+        &mut self,
+        msg: SendToClients,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        let bytes = msg.data.len();
+        for sid in &msg.sessions {
+            let Some(tx) = self.sessions.get(sid) else {
+                continue;
+            };
+            match tx.try_send((*msg.data).clone()) {
+                Ok(()) => {}
+                Err(mpsc::error::TrySendError::Full(_)) => {
+                    warn!(
+                        "Session {} send buffer full ({} bytes dropped): kicking slow reader",
+                        sid, bytes
+                    );
+                    self.terminate_session(*sid, true).await;
+                }
+                Err(mpsc::error::TrySendError::Closed(_)) => {
+                    debug!("Session {} send channel closed, cleaning up", sid);
+                    self.terminate_session(*sid, true).await;
+                }
+            }
+        }
+    }
+}
+
 impl Message<LogOutCleanup> for GateActor {
     type Reply = ();
 
