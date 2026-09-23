@@ -239,6 +239,14 @@ pub struct SessionState {
     pub local_player_id: Option<u32>,
     /// 服务器 UserLocation 权威位置（瓦片坐标 + 朝向），由移动系统消费
     pub self_position: Option<(i32, i32, u8)>,
+    /// **最近一次**收到的服务器权威瓦片（`UserLocation`），只读留痕、不被消费。
+    ///
+    /// 为什么要留一份：`self_position` 是"待校正值"，会被移动系统 take 掉，且本地寻路期间
+    /// 整帧跳过（不消费、等路走完再应用）。验收夹具要在**攻击前**判断"服务端是否已经跟到
+    /// 客户端这一格"——客户端本地预测天然领先服务端 1 步（发包在到达那一步时才发），
+    /// 而近战由服务端按「服务端玩家格 + 客户端发来的方向」结算；原点差一格就是空挥。
+    /// 有了这份留痕，`state` 探针能给出 `in_sync`，夹具就能"等同步再打"而不是靠 sleep 猜。
+    pub last_server_position: Option<(i32, i32)>,
 }
 
 /// 行会仓库物品存取包（M32）

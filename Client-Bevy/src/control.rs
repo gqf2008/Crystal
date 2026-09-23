@@ -183,6 +183,17 @@ pub fn quest_cells(
         .collect()
 }
 
+/// 「客户端这一格 == 服务端权威那一格」——**只认瓦片相等**，`None`（还没收到过 UserLocation）
+/// 一律算不同步。
+///
+/// 为什么要有这个判据（2026-09-24 实测）：客户端本地预测天然领先服务端一步（移动包在"到达
+/// 那一步"时才发），而近战由服务端按「服务端玩家格 + 客户端发来的方向」结算
+/// （`world/combat.rs`：`target_x = result.x + MON_DIR_DX[dir]`），方向又由客户端用**自己**的
+/// 格差算 ⇒ 原点差一格，挥砍就落在空地上。夹具要"等同步再打"，就得有个不问猜测的状态源。
+pub fn in_sync_with_server(client_tile: (i32, i32), server_tile: Option<(i32, i32)>) -> bool {
+    matches!(server_tile, Some(s) if s == client_tile)
+}
+
 pub fn taken_quest_ids(entries: &[crate::game::dialogs::quest_log::QuestEntry]) -> Vec<i32> {
     entries.iter().filter(|e| e.taken).map(|e| e.id).collect()
 }
@@ -504,6 +515,9 @@ struct ControlQueries<'w, 's> {
     /// `combat_probe` 用：对象头顶血条百分比（由 `S.ObjectHealth` 写入 `ActorHp`）。
     /// 这是"攻击是否真的落到目标身上"的直接证据，不依赖视野成员变化。
     hp: Query<'w, 's, (&'static NetObjectId, &'static crate::game::combat::ActorHp)>,
+    /// `state` 用：会话里的服务器权威位置留痕（`UserLocation`）——移动同步判据见
+    /// `SessionState::last_server_position` 的注释。
+    session: Res<'w, crate::network::SessionState>,
     /// `quest_probe` 用：客户端侧任务日记状态（已接/已完成标记）
     quest_log: Res<'w, crate::game::dialogs::quest_log::QuestLogState>,
     /// ⑤ 探针用：本地玩家背包组件（占用/总格数、重量）
@@ -2271,6 +2285,12 @@ fn apply_control_commands(
                     "chat_input_text": chat.input_text,
                     "ime_enabled": ime.enabled(),
                     "ime_composing": ime.composing_text(),
+                    // 移动同步判据（2026-09-24）：客户端本地预测天然领先服务端 1 步
+                    // （移动包在"到达那一步"时才发），而近战由服务端按「服务端玩家格 + 方向」结算
+                    // ⇒ 验收夹具必须在攻击前等到 `in_sync == true`，不能用 sleep 猜。
+                    "server_tile_x": q.session.last_server_position.map(|p| p.0),
+                    "server_tile_y": q.session.last_server_position.map(|p| p.1),
+                    "in_sync": in_sync_with_server(tile, q.session.last_server_position),
                 })
                 .to_string();
                 let _ = reply.send(s);
@@ -3404,6 +3424,36 @@ mod tests {
         assert!(
             quest_cells(&vec![None, None]).is_empty(),
             "背包有货时任务格仍必须是空"
+        );
+    }
+
+    /// 移动同步门禁（2026-09-24）：`in_sync_with_server` 只在**瓦片完全相等**时给 true，
+    /// 未知（没收到过 UserLocation）必须给 false——夹具就是靠它决定"能不能挥砍"的，
+    /// 放宽成"未知也算同步"会让近战在落后一格时空挥（本轮的实测缺陷形态）。
+    ///
+    /// 阳性对照：把实现改成 `server_tile.is_some()`（不比较瓦片）→ 本测试立即红。
+    #[test]
+    fn in_sync_requires_exact_tile_match() {
+        assert!(
+            !in_sync_with_server((300, 300), None),
+            "没收到过 UserLocation 时必须判不同步"
+        );
+        assert!(
+            in_sync_with_server((300, 300), Some((300, 300))),
+            "同格才算同步"
+        );
+        assert!(
+            !in_sync_with_server((300, 300), Some((299, 300))),
+            "差一格（本地预测领先一步）必须判不同步"
+        );
+        assert!(
+            !in_sync_with_server((300, 300), Some((301, 301))),
+            "差一格斜向同样不同步"
+        );
+        // 同一输入连读必须一致（探针口径）
+        assert_eq!(
+            in_sync_with_server((412, 96), Some((412, 96))),
+            in_sync_with_server((412, 96), Some((412, 96)))
         );
     }
 

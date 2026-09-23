@@ -28,29 +28,11 @@
 #   C) 到交付 NPC 处 finish_quest → taken 不再含它
 #   D) 奖励 gold 与 exp delta 同时为正
 #
-# 仪器口径（重要）：找不到／走不到目标怪时，夹具用 GM `@recallmob <怪名> 4` 把**同种怪**召到脚边
-#   再打。这不是旁路——`spawn_monster_named` 建的是同一种 MonsterState、进同一张 monsters 表，
-#   死亡时走同一条「掉落表 → try_give_quest_item → 任务格」链路；变的只是"必须自己寻路过去"这一
-#   与掉落无关的环节。若这条链路本身没通，本夹具仍然红。
+# 仪器口径（2026-09-24 定稿）：**只用自然刷新的怪**，不做 GM 召唤。
+#   为什么不用 `@recallmob`（实测结论，别再试）：它只能把怪召到玩家**自己那一格**（带坐标的形式
+#   不生效）；同格怪近战方向差值是 (0,0)→退化成 Up，`@kill` 又只结算"正前方一格"，两条路都杀不掉。
+#   自然刷新的怪在客户端/服务端两端坐标一致、方向明确，才是可靠判据来源；找不到目标就换随机落点再来。
 #
-# ==== 2026-09-24 实测状态（如实记录，别把它当"全绿"）====
-#   ④ ItemTasks 端到端**尚未拿到证据**，只到 [A]：
-#     · [A] 接取 PASS（quest 30：`taken 1,28,46,48,76,90,142 -> …142,30`；accept_quest 返回
-#       `{"npc_index":135,"ok":true,"quest_index":30}`）。
-#     · [B] 打怪掉任务物品：**0 只**。卡点不是掉落链路，是**攻击打不中**——一次 run 实测
-#       626 个 `attack` 包、服务端事件流里 0 个 struck/damage/died。
-#     · 卡点已定性（服务端 debug 日志实证）：玩家**客户端位置比服务端多 1 格**。
-#       证据一（召唤场景）：服务端 `Attack bevychar at (103,417) dir=0 target=(103,416)` +
-#         `Attack nearby: …Currish#2102@(103,417)…`（四只召唤怪在服务端玩家格上），
-#         而客户端 `state` 读到的 tile 是 (102,417)。近战由服务端按「服务端玩家格 + 方向」
-#         结算，方向又是客户端用**自己**的格差算的 ⇒ 原点差一格 = 永远打空。
-#       证据二（无怪干扰的纯位移 A/B）：客户端 `state` = (453,117)/(454,117)，而服务端
-#         `Player bevychar moved … to (452,117)` 之后再无 moved 行。
-#     · 机制假设（下一步要验的）：客户端 `LocalMove` 在**静置 >700ms 后第一步仍发 Run**，
-#       而服务端 `can_run()`（C# HumanObject.CanRun：`_stepCounter>0 || FastRun`）会拒收这一脚，
-#       客户端却按预测把这一步算进去了；`UserLocation` 校正又在 `LocalMove` 活动期间被忽略
-#       （`movement.rs` 的注释），路径走完也没有再校正 ⇒ 漂移**不会自愈**。
-#     · 所以本夹具当前口径：**不许写 PASS**，[B]/[C]/[D] 如实记 GAP，等漂移修掉再复跑。
 param(
     [string]$User = 'test',
     [string]$Pass = '123456',
@@ -154,20 +136,47 @@ function Monsters($probe) { @($probe.entities | Where-Object { $_.kind -eq 'mons
 # (400,200)：玩家落在那儿之后 walk_to 四个邻格全报「无可行路径」，玩家一格都动不了，
 # 于是"贴上去打"必然全废、`combat_probe.target_dist_tiles` 永远停在 2-3）。
 # 判据用「真走一步」而不是"问地图"：四个邻格轮流 walk_to，位置变了才算可走。
-function EnsureMobile([string]$mapName, [int]$tries = 6) {
-    foreach ($t in 1..$tries) {
-        $st = Rpc 'state'
-        $tx = [int]$st.tile_x; $ty = [int]$st.tile_y
-        foreach ($off in @(@(1, 0), @(-1, 0), @(0, 1), @(0, -1))) {
-            $nx = $tx + $off[0]; $ny = $ty + $off[1]
-            Rpc 'walk_to' @{ x = [double]($nx * 48 + 24); y = [double](-($ny * 32 + 32)) } | Out-Null
-            Start-Sleep 2
-            $st2 = Rpc 'state'
-            if ("$($st2.tile_x),$($st2.tile_y)" -ne "$tx,$ty") { return $true }
+# 站得住吗？判据是"真走一步"：四个邻格轮流 walk_to，位置变了才算可走（问地图不算数）。
+function TestMobile {
+    $st = Rpc 'state'
+    $tx = [int]$st.tile_x; $ty = [int]$st.tile_y
+    foreach ($off in @(@(1, 0), @(-1, 0), @(0, 1), @(0, -1))) {
+        $nx = $tx + $off[0]; $ny = $ty + $off[1]
+        Rpc 'walk_to' @{ x = [double]($nx * 48 + 24); y = [double](-($ny * 32 + 32)) } | Out-Null
+        Start-Sleep 2
+        $st2 = Rpc 'state'
+        if ("$($st2.tile_x),$($st2.tile_y)" -ne "$tx,$ty") { return $true }
+    }
+    return $false
+}
+
+# 落到 (x,y) 并确认站得住（先等换图完成）
+function LandAt([string]$mapName, [int]$x, [int]$y) {
+    Rpc 'chat' @{ message = "@mapmove $mapName $x $y" } | Out-Null
+    foreach ($i in 1..12) { Start-Sleep 1; if ("$((Rpc 'state').map)" -eq "$mapName") { break } }
+    return (TestMobile)
+}
+
+# 找一块能站的地：① 先试刷点本身 ② 再试刷点四邻格（**刷点常落在封闭口袋里，而邻格往往能走**——
+# 实测 map '2' 的 Currish 刷点 (400,200) 四邻格全不可达，但 (399,199)/(401,199) 一带能走）
+# ③ 都不行才退回不带坐标的随机落点。
+function EnsureMobile([string]$mapName, [int]$baseX = -1, [int]$baseY = -1, [int]$tries = 4) {
+    if ($baseX -ge 0 -and $baseY -ge 0) {
+        foreach ($off in @(@(0, 0), @(1, 0), @(-1, 0), @(0, 1), @(0, -1))) {
+            $x = $baseX + $off[0]; $y = $baseY + $off[1]
+            if (LandAt $mapName $x $y) {
+                Write-Host ("      · 落点 ({0},{1}) 可走" -f $x, $y)
+                return $true
+            }
+            Write-Host ("      · 落点 ({0},{1}) 不可走 → 试下一个" -f $x, $y)
         }
-        Write-Host ("      · 落点 ({0},{1}) 不可走 → 换随机落点重试" -f $tx, $ty)
+    }
+    foreach ($t in 1..$tries) {
         Rpc 'chat' @{ message = "@mapmove $mapName" } | Out-Null
-        Start-Sleep 3
+        Start-Sleep 4
+        if (TestMobile) { return $true }
+        $st = Rpc 'state'
+        Write-Host ("      · 随机落点 ({0},{1}) 不可走 → 再试" -f $st.tile_x, $st.tile_y)
     }
     return $false
 }
@@ -190,13 +199,18 @@ function FindNamedList([string]$monsterName, [int]$max = 3) {
 #      `attack` 会把刚起步的走位取消；
 #   2) 只在**本地位置稳定**（连续两次采样 tile 不变）且 `target_dist_tiles ≤ 1` 时挥砍：
 #      近战由服务端按它自己视角的「正前方一格」结算，边追边打全是空挥。
+# 2026-09-24 追加第三条（本轮 626 个 attack 包零命中的直接原因）：
+#   3) **必须等 `state.in_sync == true` 再挥砍**。客户端本地预测天然领先服务端一步（移动包在
+#      "到达那一步"时才发），方向却是客户端用**自己**的格差算的，而命中由服务端按
+#      「服务端玩家格 + 方向」结算（`world/combat.rs`）。原点差一格 = 落在空地。
+#      另外目标**贴在自己这一格**（dist=0）时方向差值是 (0,0)→退化成 Up，也永远打不到。
 # 判据是 `combat_probe.events` 里 id == 目标的 `died`（服务端事件流），不是"血条看起来掉了"。
-function KillOne($mon, [int]$timeoutSec = 25) {
+function KillOne($mon, [int]$timeoutSec = 30) {
     if (-not $mon) { return $false }
     $id = [uint32]$mon.object_id
     Rpc 'attack' @{ object_id = $id } | Out-Null
     $deadline = (Get-Date).AddSeconds($timeoutSec)
-    $lastTile = $null; $stable = 0; $minDist = $null
+    $lastTile = $null; $stable = 0; $minDist = $null; $onOwnTile = 0
     while ((Get-Date) -lt $deadline) {
         Start-Sleep -Milliseconds 500
         $stNow = Rpc 'state'
@@ -208,40 +222,40 @@ function KillOne($mon, [int]$timeoutSec = 25) {
         if ($null -ne $cp.target_dist_tiles) {
             $d = [int]$cp.target_dist_tiles
             if ($null -eq $minDist -or $d -lt $minDist) { $minDist = $d }
+            # 目标与自己同格 → 方向 (0,0) 退化，永远打不到，别在这只上耗时间
+            if ($d -eq 0) { $onOwnTile++ } else { $onOwnTile = 0 }
+            if ($onOwnTile -ge 16) {
+                Write-Host ("      · 目标 {0} 一直贴在自己这一格（方向退化），放弃这只" -f $id)
+                return $false
+            }
         }
-        if ($stable -ge 2 -and $null -ne $cp.target_dist_tiles -and [int]$cp.target_dist_tiles -le 1) {
+        if ($stNow.in_sync -and $stable -ge 2 -and $null -ne $cp.target_dist_tiles `
+                -and [int]$cp.target_dist_tiles -eq 1) {
             Rpc 'attack' @{ object_id = $id } | Out-Null
         }
     }
-    Write-Host ("      · 目标 {0} 超时（最近贴到 {1} 格）→ 换下一只/改召唤" -f $id, $minDist)
+    Write-Host ("      · 目标 {0} 超时（最近贴到 {1} 格，in_sync={2}）→ 换下一只/改召唤" -f $id, $minDist, $stNow.in_sync)
+    return $false
+}
+
+# 等「客户端这一格 == 服务端权威那一格」：移动刚停下时本地预测可能还领先一步，
+# 这一步内挥砍必空（见 KillOne 注释第 3 条）。
+function WaitInSync([int]$timeoutSec = 8) {
+    $deadline = (Get-Date).AddSeconds($timeoutSec)
+    while ((Get-Date) -lt $deadline) {
+        $st = Rpc 'state'
+        if ($st.in_sync) { return $true }
+        Start-Sleep -Milliseconds 400
+    }
     return $false
 }
 
 function KillNamed([string]$monsterName) {
     foreach ($m in (FindNamedList $monsterName 3)) { if (KillOne $m) { return $true } }
-    # 自然刷的都够不着（墙/围栏）→ 把同种怪召到**脚边**再打（`@recallmob` → spawn_monster_named，
-    # 登进同一张 monsters 表、死亡走同一条掉落链路）。它只去掉"必须自己寻路过去"这个与掉落无关的
-    # 环节；掉落/任务格链路本身若不通，本夹具仍然红。
-    # 关键一步：**召完要自己走开一格**。
-    #   ① `@recallmob <名> <数量>`（不带坐标）实测可用；带坐标的形式实测**不生效**
-    #      （发 `@recallmob Currish 2 19272 -6432` 后 nearby 里没有任何新卡在该点）。
-    #   ② 不带坐标时怪就叠在玩家**同一格**上，而近战方向由「玩家格 → 目标格」差值算，
-    #      差值 (0,0) → 方向退化成 Up → 服务端按"正前方一格"结算 ⇒ 四只同格怪贴到 0 格也 20s 打不死。
-    #   ③ 走开一格后，怪（spawn 锚在原格、AI 不追）与玩家正好差 1 格、方向明确 → 正常挥砍。
-    Write-Host ("      · 附近 {0} 只都够不着 → @recallmob {0} 4（脚边）后走开一格" -f $monsterName)
-    Rpc 'chat' @{ message = "@recallmob $monsterName 4" } | Out-Null
-    Start-Sleep 3
-    $st0 = Rpc 'state'
-    foreach ($off in @(@(-48, 0), @(48, 0), @(0, -32), @(0, 32))) {
-        Rpc 'walk_to' @{ x = [double]([int]$st0.x + $off[0]); y = [double]([int]$st0.y + $off[1]) } | Out-Null
-        Start-Sleep 2
-        $st1 = Rpc 'state'
-        if ("$($st1.tile_x),$($st1.tile_y)" -ne "$($st0.tile_x),$($st0.tile_y)") {
-            Write-Host ("      · 已走到 ({0},{1})，与脚边怪拉开 1 格" -f $st1.tile_x, $st1.tile_y)
-            break
-        }
-    }
-    foreach ($m in (FindNamedList $monsterName 4)) { if (KillOne $m 20) { return $true } }
+    # 打不到就算了，交给调用方换落点再来——**不做 GM 召唤**。
+    # 为什么不用 `@recallmob`（2026-09-24 实测结论，别再试）：它只能召到玩家**自己那一格**
+    # （带坐标的形式实测不生效），而同格怪近战方向差值是 (0,0)→退化成 Up、`@kill` 又只打
+    # 「正前方一格」，两条路都杀不掉。自然刷新的怪两端坐标一致、方向明确，才是可靠判据来源。
     return $false
 }
 
@@ -326,24 +340,30 @@ Write-Host ("[A] accept_quest -> {0}；taken {1} -> {2}（含 {3} = {4}）" -f `
     ($rA | ConvertTo-Json -Compress), ($taken0 -join ','), ($taken1 -join ','), $QuestId, $okA)
 
 # B) 打怪凑任务物品（判据 = **任务格**里出现该物品且数量达标）
-Rpc 'chat' @{ message = "@mapmove $($drop.map) $($drop.x) $($drop.y)" } | Out-Null
-foreach ($i in 1..20) { Start-Sleep 1; if ("$((Rpc 'state').map)" -eq "$($drop.map)") { break } }
-if ("$((Rpc 'state').map)" -ne "$($drop.map)") {
-    # 刷新点坐标也可能因为落图判定失败 → 退回不带坐标的随机落点（服务端 TeleportRandom 语义）
-    Write-Host ("[B] @mapmove {0} {1} {2} 未生效，改用随机落点" -f $drop.map, $drop.x, $drop.y)
-    Rpc 'chat' @{ message = "@mapmove $($drop.map)" } | Out-Null
-    foreach ($i in 1..20) { Start-Sleep 1; if ("$((Rpc 'state').map)" -eq "$($drop.map)") { break } }
-}
-if (EnsureMobile $drop.map) {
+# 落到**刷点附近**（刷点本身或它的四邻格）：这样自然刷新的目标怪大概率就在视野里，
+# 也就不必走"召唤"那条路（实测召唤出来的怪在客户端/服务端的位置口径上还有坑）。
+if (EnsureMobile $drop.map $drop.x $drop.y) {
     $stB = Rpc 'state'
     Write-Host ("[B] 落点可走（已走到 tile ({0},{1})）" -f $stB.tile_x, $stB.tile_y)
 } else {
     Write-Host ("[B] 警告：{0} 上落点始终不可走——贴上去打会失败（如实记录，不硬造）" -f $drop.map)
 }
-$have = 0; $kills = 0; $deadline = (Get-Date).AddSeconds($HarvestTimeoutSec)
+if (WaitInSync 8) { Write-Host "[B] 客户端与服务端已同步（可以开打）" } else { Write-Host "[B] 警告：8s 内没等到 in_sync" }
+$have = 0; $kills = 0; $miss = 0; $deadline = (Get-Date).AddSeconds($HarvestTimeoutSec)
 while ($have -lt $task.need -and $kills -lt $KillCap -and (Get-Date) -lt $deadline) {
     $ok = KillNamed $drop.monster
-    if ($ok) { $kills++ }
+    if ($ok) { $kills++; $miss = 0 } else {
+        $miss++
+        # 连续打不到 → 换一块随机落点再来（地图大、刷点分散；不召唤，理由见 KillNamed 注释）
+        if ($miss -ge 3) {
+            Write-Host ("      · 连续 {0} 次附近没有 {1} → 换随机落点再来" -f $miss, $drop.monster)
+            Rpc 'chat' @{ message = "@mapmove $($drop.map)" } | Out-Null
+            Start-Sleep 4
+            if (TestMobile) { Write-Host "      · 新落点可走" } else { Write-Host "      · 新落点不可走（继续，下一轮还会换）" }
+            if (-not (WaitInSync 8)) { Write-Host "      · 警告：新落点 8s 内没等到 in_sync" }
+            $miss = 0
+        }
+    }
     Start-Sleep 1
     $have = QuestCount $task.name
     if (($kills % 5) -eq 0 -or $have -ge $task.need) {
