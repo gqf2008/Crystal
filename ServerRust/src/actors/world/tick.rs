@@ -4484,6 +4484,32 @@ impl WorldActor {
                 self.players.len(),
                 self.monsters.len()
             );
+            // 可观测性最小集（tools/ops/health_report.ps1）：**INFO 级的低噪声心跳**。
+            // 为什么需要它：tick 健康度此前只有 DEBUG 行可看，而 DEBUG 本身（每只怪 AI 打点，
+            // 实测 ~175KB/s 日志）会把 tick 拖慢 4–7 倍——拿生产日志级别根本测不了 tick。
+            // 心跳每 300 ticks（名义 30s）一条，带**实测**间隔与滞后，运营据此判"服务器是否在变慢"。
+            if self.tick_count.is_multiple_of(300) {
+                let now = std::time::Instant::now();
+                let (elapsed_ms, lag_pct) = match self.last_heartbeat_at {
+                    Some(prev) => {
+                        let ms = now.duration_since(prev).as_millis() as f64;
+                        // 名义 300 ticks × 100ms = 30s
+                        (ms, ((ms - 30_000.0) / 30_000.0) * 100.0)
+                    }
+                    None => (0.0, 0.0),
+                };
+                self.last_heartbeat_at = Some(now);
+                if elapsed_ms > 0.0 {
+                    info!(
+                        "heartbeat: tick={} online={} monsters={} interval_ms={:.0} lag_pct={:.1}",
+                        self.tick_count,
+                        self.players.len(),
+                        self.monsters.len(),
+                        elapsed_ms,
+                        lag_pct
+                    );
+                }
+            }
 
             let now_unix = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
