@@ -413,6 +413,10 @@ FodyWeavers.xsd
 !tools/ops/rollback_drill.ps1
 !tools/ops/load_baseline.ps1
 !tools/ops/health_report.ps1
+!tools/ops/seed_load_accounts.py
+!tools/ops/fix_seed_account_links.py
+!tools/ops/capacity_ramp.ps1
+!tools/ops/CAPACITY.md
 
 # 客户端运行时本地设置（游戏自写自读，不入库；两个客户端都按进程 CWD 相对路径写，
 # 故用不带前导斜杠的模式覆盖任意启动目录）
