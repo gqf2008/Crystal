@@ -21,6 +21,10 @@ param(
     [string]$DieMap = '2',
     [int]$DieX = 500,
     [int]$DieY = 485,
+    # B2：**死亡态下第二次换图**的目标（默认换到另一张图，专门覆盖"死着换图"这条序列）
+    [string]$DieMap2 = '3',
+    [int]$DieX2 = 361,
+    [int]$DieY2 = 342,
     # 客户端构建根（默认 wt-p3 旧约定；其构建不含 #3044 换图 panic 修复，
     # 本夹具全程换图，实跑必须指到含修复的构建根，如 -ClientHome <worktree>）
     [string]$ClientHome = ''
@@ -106,6 +110,26 @@ Write-Host ("[B] @die 后 hp={0}/{1} dead={2} map={3} tile=({4},{5})" -f $dead.h
 $died = [bool]$died
 $dieMap = "$($dead.map)"
 
+# B2) **死亡态下换图**：换图后本地玩家实体必须仍在、状态可读、dead 仍为 true。
+#
+# 这条钉的是历史缺陷「死亡态+换图丢本地玩家实体」：#3044（master 904a82f0）把换图/重建路径上
+# 6 处捕获式 `commands.entity(e).insert/remove` 换成**落地时复查**的 safe_*，封掉了根源路径；
+# 这里在**端到端**再钉一层——2026-09-24 复核实测三种序列（死→换图 / 死→换图→复活 / 复活→再换图）
+# 都不再复现：`combat_probe.players=1`、`state` 全程可读、revive 后位置几秒内收敛到服务端权威位置。
+Rpc 'chat' @{ message = "@mapmove $DieMap2 $DieX2 $DieY2" } | Out-Null
+$dead2 = $null
+foreach ($i in 1..20) {
+    Start-Sleep 1
+    $dead2 = Rpc 'state'
+    if ("$($dead2.map)" -eq "$DieMap2") { break }
+}
+$cp2 = Rpc 'combat_probe'
+$okB2 = ($null -ne $dead2 -and $null -ne $dead2.tile_x -and [bool]$dead2.dead -and ($cp2.players -ge 1))
+Write-Host ("[B2] 死亡态换图到 {0}：map={1}（期望 {2}）tile=({3},{4}) dead={5} players={6} → {7}" -f `
+    $DieMap2, $dead2.map, $DieMap2, $dead2.tile_x, $dead2.tile_y, $dead2.dead, $cp2.players, `
+    $(if ($okB2) { 'PASS' } else { 'FAIL（本地玩家实体丢失或状态不可读）' }))
+$dieMap = "$($dead2.map)"
+
 # C/D) 复活
 Rpc 'revive_town' | Out-Null
 # 轮询到复活生效且回到绑定图（上限 25s；Wait-State 只等「状态非空」
@@ -129,7 +153,8 @@ $okA = [bool]$alive
 $okB = [bool]($died -and $diedOffBindMap)
 $okC = [bool]$revived
 $okD = [bool]($backToBindMap -and $backToBindSpot)
-Write-Host ("VERDICT alive_before={0} died={1} revived={2} back_to_bind_map_and_spot={3}" -f `
+Write-Host ("VERDICT alive_before={0} died={1} dead_mapswitch_entity_kept={2} revived={3} back_to_bind_map_and_spot={4}" -f `
     $(if ($okA) { 'PASS' } else { 'FAIL' }), $(if ($okB) { 'PASS' } else { 'FAIL' }), `
+    $(if ($okB2) { 'PASS' } else { 'FAIL' }), `
     $(if ($okC) { 'PASS' } else { 'FAIL' }), $(if ($okD) { 'PASS' } else { 'FAIL' }))
-if (-not ($okA -and $okB -and $okC -and $okD)) { exit 5 }
+if (-not ($okA -and $okB -and $okB2 -and $okC -and $okD)) { exit 5 }
