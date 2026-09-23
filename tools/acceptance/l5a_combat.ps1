@@ -158,12 +158,46 @@ for ($k = 1; $k -le $Kills; $k++) {
 # E') 确定性「地面掉落 → 拾取」：怪物掉率是概率的（本库 Scarecrow 单杀命中掉落行的期望 ≈0.25、
 #     Deer 只有 2 行），只靠打怪这条判据会长期停在 N/A。丢弃是**真实玩家动作**
 #     （背包拖出/确认框 Yes 同款包），用它造一个地面物品再拾回，让这条链每次都真跑一遍。
+#
+#     挑物品要避开**原版语义就是"丢弃即销毁"**的（本库 Saddle=145、LeatherBridle=133，都带
+#     `BindMode.DestroyOnDrop` 0x80）：那种物品丢弃**本就不落地**，服务端回 success=true 但地面
+#     不出现物品——第一版夹具没筛 bind_mode，两次都挑到 Saddle/LeatherBridle，报成「丢弃后地面
+#     没有物品」的假 FAIL（我据此开过一个缺陷线程，事后证明是夹具选错了对象，已更正收口）。
+#     这里按 item_infos.bind_mode 过滤：`DONT_DROP(0x02)`/`DESTROY_ON_DROP(0x80)` 都不要。
 $okDropGround = $false; $dropRoundTrip = $false
-$bagA = Rpc 'bag_probe'
+# 先**造一个可落地的物品**：BaseDress(M)（`item_infos.bind_mode=0`，非堆叠 → 新实例必然带独立 uid）。
+# 这样判据不依赖"背包里恰好有可丢的物品"，每次都真跑一遍。
+$bagPre = Rpc 'bag_probe'
+$preUids = @{}
+foreach ($o in $bagPre.occupied) { $preUids[[string]$o.unique_id] = $true }
+Rpc 'chat' @{ message = '@MAKE BaseDress(M) 1' } | Out-Null
+$victim = $null
+$bagA = $bagPre
+foreach ($i in 1..8) {
+    Start-Sleep 1
+    $b = Rpc 'bag_probe'
+    if ($null -eq $b) { continue }
+    $victim = $b.occupied | Where-Object { -not $preUids.ContainsKey([string]$_.unique_id) } | Select-Object -First 1
+    if ($victim) { $bagA = $b; break }
+}
+if (-not $victim) {
+    Write-Host "[E'] FAIL: @MAKE 后 8s 内背包没有出现新实例（造物通道？）"
+}
 $uidCounts = @{}
 foreach ($o in $bagA.occupied) { $uidCounts[[string]$o.unique_id] = 1 + [int]($uidCounts[[string]$o.unique_id]) }
-$victim = $bagA.occupied | Where-Object { $_.unique_id -ne 0 -and $uidCounts[[string]$_.unique_id] -eq 1 } |
-    Select-Object -First 1
+$cands = @()
+if ($victim) { $cands = @($victim) }
+foreach ($c in $cands) {
+    $bmRaw = (& python "$acc\dbq.py" "select bind_mode from item_infos where name='$($c.name)' limit 1" 2>$null)
+    $bm = 0
+    [void][int]::TryParse("$bmRaw".Trim(), [ref]$bm)
+    if (($bm -band 0x82) -ne 0) {
+        Write-Host ("[E'] 跳过 {0}（bind_mode={1} 带 DONT_DROP/DESTROY_ON_DROP，原版语义不落地）" -f $c.name, $bm)
+        continue
+    }
+    $victim = $c
+    break
+}
 if ($victim) {
     Write-Host ("[E'] 丢弃造物：格 {0} {1}（uid={2}），bag.used={3}" -f $victim.cell, $victim.name, $victim.unique_id, $bagA.used)
     Rpc 'drop_item' @{ unique_id = $victim.unique_id; count = 1 } | Out-Null
