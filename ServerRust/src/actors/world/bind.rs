@@ -117,17 +117,18 @@ impl WorldActor {
         } else {
             false
         };
-        if bind_valid {
-            (state.bind_map_index as u16, state.bind_x, state.bind_y)
-        } else {
-            let (sx, sy) = self
-                .map_infos
-                .get(&(state.map_index as i32))
-                .and_then(|mi| mi.safe_zones.iter().find(|s| s.start_point))
-                .map(|sz| (sz.x, sz.y))
-                .unwrap_or((DEFAULT_SPAWN_X, DEFAULT_SPAWN_Y));
-            (state.map_index, sx, sy)
-        }
+        let fallback = self
+            .map_infos
+            .get(&(state.map_index as i32))
+            .and_then(|mi| mi.safe_zones.iter().find(|s| s.start_point))
+            .map(|sz| (sz.x, sz.y))
+            .unwrap_or((DEFAULT_SPAWN_X, DEFAULT_SPAWN_Y));
+        // 落点地图必须来自绑定点（纯函数 + 单测见 world/revive.rs）
+        super::revive::revive_destination(
+            state.map_index,
+            bind_valid.then_some((state.bind_map_index as u16, state.bind_x, state.bind_y)),
+            fallback,
+        )
     }
 
     /// 绑定点地图数据（用于 MagicTeleport / TeleportEscape 的随机范围）

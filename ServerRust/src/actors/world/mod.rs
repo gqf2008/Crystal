@@ -24,6 +24,7 @@ mod npc_script;
 pub(crate) mod partners;
 mod quest;
 mod report;
+mod revive;
 #[allow(dead_code)]
 mod robot;
 mod session;
