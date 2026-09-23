@@ -925,7 +925,6 @@ fn spawn_guild(
                 overflow: Overflow::clip(),
                 ..default()
             },
-            BackgroundColor(Color::srgba(0.10, 0.10, 0.13, 0.95)),
             ZIndex(2),
             GuildNoticeField,
             TextInputField(2),
@@ -935,6 +934,16 @@ fn spawn_guild(
             // 公告正文，点「编辑」才可改）。原先写死 `Visibility::Hidden` 且**全仓无人再置显**
             // → 公告页永远一片空白（实机截图 z_guild_notice.png，服务端已下发 13 行公告）。
             // 页面之外不会漏出：非当前页由 `UiRootDisplay` 收成 `Display::None`。
+            //
+            // P3-2 修复（2026-09-23）：**这里原先还有一层自造的 `BackgroundColor(0.10,0.10,0.13,0.95)`**
+            // —— 玩家看到的就是公告页那块「空黑区」。核对原版：`Client/MirScenes/Dialogs/GuildDialog.cs:222-231`
+            // 构造该文本框只给了 `ForeColour = Color.White` / `Size(322,330)` / `Location(13,1)`，
+            // **没有 `BackColour`**（同文件 `MembersRecruitName` 要底色时才显式写
+            // `BackColour = Color.FromArgb(255,25,25,25)`，反证"没写=无底"）；C# 的 `MirTextBox`
+            // 也只在自己有 BackColour 时才填。故这层底属移植自造，删除后由行会面板美术透出，与 C# 一致。
+            // 定位过程：`ui_nodes_at(470,240)` 在该点命中 z=2 的 322×330 节点（本实体）与 z=9 的
+            // 316×202 子节点（正文），祖先链显示二者都在 `page=Notice` 容器内 —— 排除了
+            // 「隐藏的 Status 页漏渲染」这一旧假设（页容器显隐机制本身正常，已有门禁覆盖）。
         ))
         .with_children(|ic| {
             ic.spawn((
@@ -3490,6 +3499,48 @@ mod tests {
             LIST_WHEEL_RECT.2 >= MEMBER_COL_NAME + 200.0,
             "命中区必须比旧的 (125,30,200,270) 大"
         );
+    }
+
+    /// P3-2 门禁（2026-09-23）：公告页的正文文本框**不得有不透明底色**。
+    ///
+    /// 原版依据：`Client/MirScenes/Dialogs/GuildDialog.cs:222-231` 构造 `Notice = new MirTextBox()`
+    /// 只设 `ForeColour = Color.White` / `Size(322,330)` / `Location(13,1)`，**未设 `BackColour`**；
+    /// 同文件 `MembersRecruitName` 需要底色时是显式写的（`BackColour = Color.FromArgb(255,25,25,25)`）。
+    /// 本端曾在公告文本框上自造 `BackgroundColor(0.10,0.10,0.13,0.95)` —— 玩家看到的就是那块空黑区
+    /// （`ui_nodes_at(470,240)` 定位到 z=2 的 322×330 节点就是它）。
+    ///
+    /// 阳性对照（实做）：把那层 `BackgroundColor(...)` 加回去 → 本门禁立即红。
+    #[test]
+    fn guild_notice_text_field_has_no_opaque_background() {
+        use crate::resources::libraries::Libraries;
+        use bevy::ecs::system::RunSystemOnce;
+
+        if !crate::resources::libraries::data_assets_present() {
+            eprintln!("skip guild_notice_text_field_has_no_opaque_background: 无 Data 资产（CI 只 checkout 仓库）");
+            return;
+        }
+        let mut world = World::new();
+        world.insert_resource(GameLibraries(Libraries::new("Data")));
+        world.insert_resource(Assets::<Image>::default());
+        world.insert_resource(Assets::<Font>::default());
+        world.insert_resource(UiFont::default());
+        world.insert_resource(UiCjkFont::default());
+        world
+            .run_system_once(spawn_guild)
+            .expect("spawn_guild 应成功");
+
+        let mut q = world.query_filtered::<Option<&BackgroundColor>, With<GuildNoticeField>>();
+        let fields: Vec<Option<&BackgroundColor>> = q.iter(&world).collect();
+        assert_eq!(fields.len(), 1, "公告页应有且仅有一个正文文本框");
+        for bg in fields {
+            if let Some(bg) = bg {
+                assert_eq!(
+                    bg.0.alpha(),
+                    0.0,
+                    "公告正文文本框不得有不透明底色（原版 MirTextBox 未设 BackColour）"
+                );
+            }
+        }
     }
 
     /// #2985 B2（P1 回归）：六个页容器必须挂 `UiRootDisplay`。
