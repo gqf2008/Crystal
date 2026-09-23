@@ -193,7 +193,8 @@ fn apply_object_state_events(
                             commands.entity(e).insert(Sitting);
                         } else if !sitting {
                             // #1354：起身——恢复站立动作并移除坐下标记
-                            commands.entity(e).remove::<Sitting>();
+                            // #3028：换图重建可能已 despawn 该实体 → 落地时复查（见 movement::safe_remove）
+                            crate::game::movement::safe_remove::<Sitting>(&mut commands, e);
                             a.action = mir2_shared::enums::MirAction::Standing;
                             a.frame_index = 0;
                         }
