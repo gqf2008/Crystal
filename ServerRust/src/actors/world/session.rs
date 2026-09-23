@@ -2660,31 +2660,52 @@ impl Message<PlayerDisconnected> for WorldActor {
             .is_ok()
             {
                 info!("Player {} saved to database on disconnect", record.name);
+            } else {
+                // 失败不丢：整份快照进补偿队列（只在失败路径 clone，正常路径零开销）
+                self.pending_persists
+                    .enqueue(super::persist_queue::PendingWrite::Character {
+                        account: record.account_username.clone(),
+                        state: Box::new(state.clone()),
+                    });
             }
             // C# LastLogoutDate：记录最后下线时间（选角界面/安全区下线加成用）
             let now = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|d| d.as_secs() as i64)
                 .unwrap_or(0);
-            db::persist_report(
+            if db::persist_report(
                 "last_access",
                 &format!("phase=disconnect player={}", record.name),
                 || db::update_last_access(&self.db_pool, &record.name, now),
             )
             .await
-            .ok();
+            .is_err()
+            {
+                self.pending_persists
+                    .enqueue(super::persist_queue::PendingWrite::LastAccess {
+                        name: record.name.clone(),
+                        ts: now,
+                    });
+            }
 
             // #1127：断线同样持久化英雄列表——save_character 会 DELETE heroes 子表但不重建，
             // 若断线路径不补 save_heroes，英雄会在重启/再登录后永久丢失（与 PlayerLogOut 对齐）；
             // #2571：出战英雄实时 HP/MP 一并落库（残血/残蓝重登恢复）
             let db_heroes: Vec<db::DbHero> = self.db_heroes_snapshot(msg.session_id);
-            db::persist_report(
+            if db::persist_report(
                 "heroes",
                 &format!("phase=disconnect player={}", record.name),
                 || db::save_heroes(&self.db_pool, &record.name, &db_heroes),
             )
             .await
-            .ok();
+            .is_err()
+            {
+                self.pending_persists
+                    .enqueue(super::persist_queue::PendingWrite::Heroes {
+                        name: record.name.clone(),
+                        heroes: db_heroes,
+                    });
+            }
             // #198：移除英雄对象（与 PlayerLogOut 对齐；C# StopGame → DespawnHero）
             self.broadcast_hero_remove(record.object_id).await;
 
@@ -3055,29 +3076,50 @@ impl Message<PlayerLogOut> for WorldActor {
             .is_ok()
             {
                 info!("Player {} saved to database on logout", record.name);
+            } else {
+                // 失败不丢：整份快照进补偿队列（只在失败路径 clone，正常路径零开销）
+                self.pending_persists
+                    .enqueue(super::persist_queue::PendingWrite::Character {
+                        account: record.account_username.clone(),
+                        state: Box::new(state.clone()),
+                    });
             }
             // C# LastLogoutDate：记录最后下线时间
             let now = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|d| d.as_secs() as i64)
                 .unwrap_or(0);
-            db::persist_report(
+            if db::persist_report(
                 "last_access",
                 &format!("phase=logout player={}", record.name),
                 || db::update_last_access(&self.db_pool, &record.name, now),
             )
             .await
-            .ok();
+            .is_err()
+            {
+                self.pending_persists
+                    .enqueue(super::persist_queue::PendingWrite::LastAccess {
+                        name: record.name.clone(),
+                        ts: now,
+                    });
+            }
 
             // #194：保存英雄列表到 DB（重启不丢；#2571 含实时 HP/MP）
             let db_heroes: Vec<db::DbHero> = self.db_heroes_snapshot(msg.session_id);
-            db::persist_report(
+            if db::persist_report(
                 "heroes",
                 &format!("phase=logout player={}", record.name),
                 || db::save_heroes(&self.db_pool, &record.name, &db_heroes),
             )
             .await
-            .ok();
+            .is_err()
+            {
+                self.pending_persists
+                    .enqueue(super::persist_queue::PendingWrite::Heroes {
+                        name: record.name.clone(),
+                        heroes: db_heroes,
+                    });
+            }
             // #198：移除英雄对象
             self.broadcast_hero_remove(record.object_id).await;
 

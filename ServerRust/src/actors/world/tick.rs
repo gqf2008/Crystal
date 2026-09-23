@@ -8381,6 +8381,10 @@ impl Message<Tick> for WorldActor {
             );
         }
 
+        // 落库失败补偿（每 tick 有界补写）：见 world::persist_queue 的文档——
+        // 写锁长于 busy_timeout 时数据不再丢，等存储恢复后在这些 tick 上补写。
+        self.flush_pending_persists().await;
+
         // #2398：C# Envir.Process ProcessNewDay——跨零点清每日任务 + 在线触发 [@_Daily]
         let today = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)

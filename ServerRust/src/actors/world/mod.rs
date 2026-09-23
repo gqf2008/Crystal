@@ -22,6 +22,7 @@ mod market;
 mod npc;
 mod npc_script;
 pub(crate) mod partners;
+mod persist_queue;
 mod quest;
 mod report;
 mod revive;
@@ -1783,6 +1784,9 @@ pub struct WorldActor {
     /// NPC 二手货列表（C# NPCObject.UsedGoods：npc object_id -> 过期未回购的卖出物品）
     pub(crate) used_goods: HashMap<u32, Vec<mir2_shared::data::item::UserItem>>,
     /// 已加载的地图缓存
+    /// 落库失败补偿队列（2026-09-23，#3045 的后续项）：写失败的数据留下来，
+    /// 等存储恢复后在世界 tick 上有界补写。见 `persist_queue` 模块文档。
+    pub(crate) pending_persists: persist_queue::PendingPersists,
     pub(crate) maps: crate::maps::loader::MapCache,
     /// GateActor 引用，用于发数据包给客户端
     pub(crate) gate_ref: ActorRef<GateActor>,
@@ -2531,6 +2535,7 @@ impl WorldActor {
             players: HashMap::new(),
             buyback_items: HashMap::new(),
             used_goods: HashMap::new(),
+            pending_persists: persist_queue::PendingPersists::default(),
             maps: crate::maps::loader::MapCache::default(),
             gate_ref,
             self_ref: None,
@@ -4327,6 +4332,32 @@ impl WorldActor {
     }
 
     /// 登出持久化驯服宠物（仅保留存活且 master 匹配的；C# Info.Pets 登出保存）
+    /// 每 tick 调一次：把补偿队列里失败的落库有界补写几条（见 `persist_queue`）。
+    ///
+    /// 只打印「真补上了」与「放弃了」两类（重试中的状态用 debug，避免每 tick 刷 info）。
+    pub(crate) async fn flush_pending_persists(&mut self) {
+        if self.pending_persists.is_empty() {
+            return;
+        }
+        let queued_before = self.pending_persists.len();
+        let stats = self.pending_persists.flush(&self.db_pool).await;
+        if stats.ok > 0 || stats.dropped > 0 {
+            info!(
+                "PERSIST_REPLAY tick ok={} dropped={} queued={} (was {})",
+                stats.ok,
+                stats.dropped,
+                self.pending_persists.len(),
+                queued_before
+            );
+        } else if stats.retried > 0 {
+            debug!(
+                "PERSIST_REPLAY tick still failing retried={} queued={}",
+                stats.retried,
+                self.pending_persists.len()
+            );
+        }
+    }
+
     pub(crate) async fn persist_tamed_pets(&mut self, session_id: u64, player_name: &str) {
         let alive: Vec<TamedPetInfo> = self
             .tamed_pets
@@ -4355,11 +4386,19 @@ impl WorldActor {
         // 2026-09-23：失败不再静默（见 db::persist_report 注释）——此前是 warn 即放弃，
         // 实测在下线撞长写锁时**直接丢掉**这次宠物持久化；瞬时锁错误现在打
         // `PERSIST_LOST`（error 级，可 grep / 可告警）。
-        db::persist_report("player_pets", &format!("player={player_name}"), || {
+        if db::persist_report("player_pets", &format!("player={player_name}"), || {
             db::save_player_pets(&self.db_pool, player_name, &alive)
         })
         .await
-        .ok();
+        .is_err()
+        {
+            // 失败不丢：进补偿队列，等存储恢复后在世界 tick 上补写
+            self.pending_persists
+                .enqueue(persist_queue::PendingWrite::Pets {
+                    name: player_name.to_string(),
+                    pets: alive,
+                });
+        }
     }
 
     /// 下线驱散宠物/召唤物（C# PlayerObject.StopGame：Pets 逐只 RemoveObject+Despawn）。
@@ -8880,6 +8919,7 @@ impl Actor for WorldActor {
             players: HashMap::new(),
             buyback_items: HashMap::new(),
             used_goods: HashMap::new(),
+            pending_persists: persist_queue::PendingPersists::default(),
             maps: crate::maps::loader::MapCache::default(),
             gate_ref: args.gate_ref,
             self_ref: Some(actor_ref),

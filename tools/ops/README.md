@@ -152,11 +152,42 @@ pwsh tools/ops/storage_degrade_drill.ps1 -DeployDir <deploy> -OutFile tools/ops/
 改成恒 true → 后两条断言立红）；`cargo fmt -- --check` / `cargo clippy --lib -- -D warnings` 干净；
 drill A/B：14s 锁下与 master **行为等价**（同样的 1 条失败），差别只在日志级别与固定前缀。
 
+### 5c-2. 失败入队 + 恢复补写（补偿队列）：把「可告警」变成「不丢」
+
+`ServerRust/src/actors/world/persist_queue.rs`（新模块）：
+落库失败的数据不再丢——进队列，等存储恢复后在世界 tick 上有界补写。
+
+- **为什么是队列 + 每 tick 有界 flush**（而不是原地重试）：原地重试会把连接占用从 5s 拉到 ~10s，
+  把登录读挤到超时（§5c-1 的实测）；队列把重试挪到世界自己的 tick 上，每 tick 只试
+  [`FLUSH_PER_TICK`]=2 条，代价摊平且可观测（`PERSIST_REPLAY` / `PERSIST_DROPPED` 日志）。
+- **去重**：同 `(玩家, 类型)` 只留**最新**一份快照（后写胜过先写是正确语义），所以同一个人反复
+  失败不会把队列撑爆。
+- **轮转**：本轮失败的条目挪到队尾——否则队首两条一直失败会把后面所有玩家的补写饿死。
+- **上限与放弃**：队列 ≤128 条、单条 ≤20 次尝试；超限/超次数都 `error! PERSIST_DROPPED`
+  （**响亮**丢弃，不静默）。角色快照一条几十 KB，128 条约数 MB 量级，只在存储故障时才会用满。
+- **覆盖范围**：角色全量（`player_character`，含背包/仓库/任务/邮件）、英雄列表、驯服宠物、
+  最后下线时间。账号行（`account_save`/`account_offline`）**刻意不入队**——它是簿记，
+  每次登录都会重写，入队收益低。
+
+**门禁（4 条，`persist_queue::tests`）**：失败必须留队 + 轮转不吃饿死 / 超次数响亮丢弃 /
+同玩家同类型去重 / 容量上限丢最旧。阳性对照实做：把失败分支的 `deferred.push(item)` 删掉
+（失败即丢）→ 前两条门禁立即红，撤回后绿。
+
+**实机证据（drill，22s 写锁）**：
+
+```
+ERROR db: PERSIST_LOST player_pets player=OpsLoad1 err=... database is locked     ← 写失败（够响亮）
+INFO  world::persist_queue: PERSIST_REPLAY ok player_pets player=OpsLoad1 attempts=1  ← 锁释放后补写成功
+INFO  world: PERSIST_REPLAY tick ok=1 dropped=0 queued=0 (was 1)                  ← 队列清空
+```
+
+也就是说：**此前会丢的那条宠物持久化，现在补回来了**。
+
 **下一轮要做的持久化可靠性工作**（本轮没做，别当已完成）：
 
 1. **缩短每次尝试的 busy_timeout** 或**读写分离连接池**，让「重试」不再牺牲登录读路径；
    之后重试才谈得上收益（目标：长锁下既零丢失、登录也不超时）。
-2. **离线补偿队列**：真正失败时把待写数据落盘/入队，恢复后补写（本轮只做到「响亮报告」）。
+2. ~~离线补偿队列~~ **已做（§5c-2）**：失败入队 + 每 tick 有界补写；实机验证宠物持久化补回。
 3. 登录读路径在长写锁下的延迟本身要单独定位（master 也出现过 9.5s 的登录回复；
    候选：连接获取排队、`list_character_summaries` 读、WAL checkpoint）。
 
