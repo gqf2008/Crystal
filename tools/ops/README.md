@@ -191,6 +191,33 @@ INFO  world: PERSIST_REPLAY tick ok=1 dropped=0 queued=0 (was 1)                
 3. 登录读路径在长写锁下的延迟本身要单独定位（master 也出现过 9.5s 的登录回复；
    候选：连接获取排队、`list_character_summaries` 读、WAL checkpoint）。
 
+## 5d. 写锁下的登录时延：`login_latency_probe.ps1`（带阈值夹具）
+
+判据（缺一不可）：L1 写锁**真注入**（等注入器输出 `LOCK_HELD`，拿不到直接退出码 3、不产出结论）；
+L2 持锁 20 样本 p95 < 1.0s；L3 对照 p95 同样达标；L4 持锁 p50 < 0.3s。
+
+```powershell
+pwsh tools/ops/login_latency_probe.ps1 -DeployDir <deploy> -ExePath <mir2_server.exe> `
+     -OutFile tools/ops/out/login_latency.json
+```
+
+**递进定位（同一夹具、30s 写锁、每档 20 样本）——每一步都靠分段日志而不是猜**：
+
+| 版本 | 持锁 p50 | 持锁 p95 | 结论 |
+|---|---|---|---|
+| 修前（master f6fa868d） | 0.023s | **5.575s** | `LOGIN_TIMING account … save_ms=5554 list_ms=0` → 根因① `finish_login` 的 `save_account` 在 AccountActor 里 await 等满 busy_timeout |
+| 把账号登录写挪后台 | 0.023s | 5.529s | account 侧 0ms 了，但 `gate_ask` 仍 5.5s → 根因② 排在前一条消息后面：登出路径的 `set_account_offline` 同样在 actor 里 await |
+| 再挪账号离线写 | 0.027s | 5.122s | 露出根因③：`list_ms≈5.1s` —— 被锁住的写**每条占住一条池连接 5s**，登录节奏下耗尽连接池，登录的读取不到连接（跨进程纯读只要 0.001s，读本身无罪） |
+| 预热门（min=max=8） | 0.022s | 5.234s | 预热不够：连接仍会被"占用" |
+| **连接 busy_timeout 收到 500ms** | **0.029s** | **0.382s** | 占用上界 = 0.5s → 登录延迟上界随之钉住；`>=500ms` 的 LOGIN_TIMING 归零 |
+
+**最终状态（夹具实跑，exit 0）**：`control p50=0.021 / p95=0.025`，
+`locked p50=0.029 / p95=0.382 / max=0.382`，`login_timing_warn_ge_500ms=0`。
+
+**残留（未做，另评）**：p95 的 0.38s 就是"一次写尝试的等待"；要再下去需要**读写分离池**
+（读连接永不被写占用）或把簿记写做成真正的异步队列（现在只是"不挡 actor + 快速失败"）。
+另：`LOGIN_TIMING` 分段日志保留在代码里（正常 debug、慢于 500ms 才 warn），下次出现登录抖动可直接看分段。
+
 ## 6. 故障注入：`fault_injection.ps1`（+ `latency_proxy.py`）
 
 | 场景 | 做法 | 判据 | 实测 |

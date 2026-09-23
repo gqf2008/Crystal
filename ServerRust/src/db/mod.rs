@@ -18,6 +18,10 @@ use crate::actors::refine::{RefineLog, RefineStatus, RefiningItem};
 
 pub type DbPool = SqlitePool;
 
+/// 连接池大小（固定）：等于 `min_connections`，配合启动预热做到「运行期不再新建连接」。
+/// 见 `init_db_pool` 里关于写锁 + 取连接的注释。
+pub const DB_POOL_CONNECTIONS: u32 = 8;
+
 /// 是否为「暂时性」存储错误——锁竞争（SQLite BUSY/LOCKED）那一类。
 ///
 /// 判据同时看结构化错误码与消息文本：sqlx 对 SQLite 把 `SQLITE_BUSY`/`SQLITE_LOCKED`
@@ -76,8 +80,35 @@ pub async fn init_db_pool(db_url: &str) -> anyhow::Result<DbPool> {
     let options = db_url
         .parse::<sqlx::sqlite::SqliteConnectOptions>()?
         .foreign_keys(false)
-        .busy_timeout(std::time::Duration::from_secs(5));
-    let pool = SqlitePool::connect_with(options).await?;
+        // 显式声明 WAL（与文件头里已持久化的模式一致），避免任何"要不要改模式"的隐式行为
+        .journal_mode(sqlx::sqlite::SqliteJournalMode::Wal)
+        .synchronous(sqlx::sqlite::SqliteSynchronous::Normal)
+        // 500ms（不是默认 5s）：写锁期间每一条被挡住的写都会**占住一条池连接**等这么长时间，
+        // 登录是 ~1s 一个的节奏 → 5s 的连接占用会累积并耗尽连接池，把登录读挤到 5s+
+        // （2026-09-23 `login_latency_probe.ps1`：p95 5.2s，其中 list_ms≈5.2s，而跨进程纯读 0.001s）。
+        // 收到 500ms 后：单条写占用连接的上界就是 0.5s，登录延迟上界随之被钉住；
+        // 失败的写有 `persist_report`（响亮）与世界侧补偿队列兜底。
+        .busy_timeout(std::time::Duration::from_millis(500));
+    let pool = sqlx::sqlite::SqlitePoolOptions::new()
+        .min_connections(DB_POOL_CONNECTIONS)
+        .max_connections(DB_POOL_CONNECTIONS)
+        .acquire_timeout(std::time::Duration::from_secs(30))
+        .connect_with(options)
+        .await?;
+    // 预热连接池：把 min..max 条连接**一次性建好**，运行期（尤其存储故障期间）不再需要新建。
+    //
+    // 依据（2026-09-23，`tools/ops/login_latency_probe.ps1`）：30s 写锁下 20 样本里
+    // `LOGIN_TIMING account … list_ms≈5.1s`，而同条件**跨进程**读同一张表只要 0.001s
+    // （读本身不阻塞，WAL 语义正常）。差别在于服务端这条读需要"取一条连接"，
+    // 而池里当时没有空闲连接、临时新建 → 新建/取连接这一段撞上写锁等满 busy_timeout。
+    // 预热 + min_connections 之后，故障期间不再新建连接。
+    {
+        let mut warm = Vec::with_capacity(DB_POOL_CONNECTIONS as usize);
+        for _ in 0..DB_POOL_CONNECTIONS {
+            warm.push(pool.acquire().await?);
+        }
+        drop(warm);
+    }
 
     // Phase 1.2: SQLite WAL 模式 + 同步策略调优(生产级持久化)
     //   WAL = Write-Ahead Logging,允许并发读不阻塞写,显著提升高负载性能
