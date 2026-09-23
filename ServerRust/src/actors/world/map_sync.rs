@@ -97,28 +97,46 @@ impl WorldActor {
         }
 
         // ---- 2. 新图 NPC/怪物生成下发（C# GetObjectsPassive）----
-        let spawn_ctx = SpawnContext {
-            map_info: self.map_infos.get(&dest_info_idx),
-            monster_infos: &self.monster_infos,
-            npc_infos: &self.npc_infos,
-            dragon_info: self.dragon_info.as_ref(),
-            rarity: self.rarity_cfg.clone(),
-            routes: &self.routes,
+        // 地图级生成物单真源（对齐 C# Map.Objects）：目标图已物化时只按既有
+        // object_id 重放给本会话（与 StartGame 路径同款理由与注释）。
+        let reused_map_spawns = self.map_spawns_ready.contains(&dest_map_index);
+        let new_monsters = if reused_map_spawns {
+            send_map_spawns_to_session(
+                &self.gate_ref,
+                session_id,
+                dest_map_index,
+                &self.npcs,
+                &self.monsters,
+            );
+            Vec::new()
+        } else {
+            let spawn_ctx = SpawnContext {
+                map_info: self.map_infos.get(&dest_info_idx),
+                monster_infos: &self.monster_infos,
+                npc_infos: &self.npc_infos,
+                dragon_info: self.dragon_info.as_ref(),
+                rarity: self.rarity_cfg.clone(),
+                routes: &self.routes,
+            };
+            let (npcs, monsters) = spawn_npcs_and_monsters(
+                self.gate_ref.clone(),
+                &self.spawn_dir,
+                dest_file,
+                dest_map_index,
+                session_id,
+                &mut self.next_object_id,
+                &spawn_ctx,
+                self.maps.get(&dest_map_index),
+            )
+            .await;
+            if !(npcs.is_empty() && monsters.is_empty()) {
+                self.map_spawns_ready.insert(dest_map_index);
+            }
+            for npc in npcs {
+                self.npcs.insert(npc.object_id, npc);
+            }
+            monsters
         };
-        let (new_npcs, new_monsters) = spawn_npcs_and_monsters(
-            self.gate_ref.clone(),
-            &self.spawn_dir,
-            dest_file,
-            dest_map_index,
-            session_id,
-            &mut self.next_object_id,
-            &spawn_ctx,
-            self.maps.get(&dest_map_index),
-        )
-        .await;
-        for npc in new_npcs {
-            self.npcs.insert(npc.object_id, npc);
-        }
         // 征服旗子 NPC（C# ConquestGuildFlagInfo.Spawn；per-session 生成）
         let new_flags = spawn_conquest_flags(
             self.gate_ref.clone(),
@@ -134,14 +152,20 @@ impl WorldActor {
         }
         // 装饰物同步（C# GetObjectsPassive 含 DecoObject）
         self.sync_decos_on_map(session_id, dest_map_index).await;
-        // 先收集精英广播信息（move 前遍历）
-        let elite_broadcasts: Vec<String> = new_monsters
-            .iter()
-            .filter(|m| m.rarity > 0)
-            .map(|m| m.name.clone())
-            .collect();
-        for monster in new_monsters {
-            self.monsters.insert(monster.object_id, monster);
+        // 先收集精英广播信息（move 前遍历）；复用分支下怪物是既有对象，不重复广播
+        let elite_broadcasts: Vec<String> = if reused_map_spawns {
+            Vec::new()
+        } else {
+            new_monsters
+                .iter()
+                .filter(|m| m.rarity > 0)
+                .map(|m| m.name.clone())
+                .collect()
+        };
+        if !reused_map_spawns {
+            for monster in new_monsters {
+                self.monsters.insert(monster.object_id, monster);
+            }
         }
         // 初始生成精英广播
         for name in &elite_broadcasts {

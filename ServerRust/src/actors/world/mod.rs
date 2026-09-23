@@ -1190,6 +1190,9 @@ pub(crate) struct ConquestFlagNpc {
 pub(crate) struct NpcState {
     pub object_id: u32,
     pub name: String,
+    /// NPC 外观（C# ObjectNpc.Image / NPCInfo.Image）——地图级单真源下，
+    /// 后续进场的会话要按**既有** NpcState 重新序列化 ObjectNpc，故必须留档
+    pub image: u16,
     pub x: i32,
     pub y: i32,
     pub direction: u8,
@@ -1871,6 +1874,11 @@ pub struct WorldActor {
     pub(crate) last_mail_time: HashMap<u64, i64>,
     /// 活跃 NPC（按 object_id 索引）
     pub(crate) npcs: HashMap<u32, NpcState>,
+    /// 已物化地图级生成物的地图集合（对齐 C# `Map.Objects` 单一真源）：
+    /// 这些地图的 spawn 配置已按地图生成过一次，后续进场的会话只按**既有**
+    /// object_id 重新序列化下发，不再各自生成一份（否则 20 会话同图 =
+    /// 20 份整图怪物/NPC，既泄漏内存又让两个玩家打不到同一只怪）。
+    pub(crate) map_spawns_ready: std::collections::HashSet<u16>,
     /// 征服旗子 NPC（per-session 生成；object_id → 状态，供易主时广播更新）
     pub(crate) conquest_flags: HashMap<u32, ConquestFlagNpc>,
     /// 装饰物对象（@DECO 生成；object_id → 状态，进图同步）
@@ -2576,6 +2584,7 @@ impl WorldActor {
             player_pet_modes: HashMap::new(),
             last_mail_time: HashMap::new(),
             npcs: HashMap::new(),
+            map_spawns_ready: std::collections::HashSet::new(),
             conquest_flags: HashMap::new(),
             deco_objects: HashMap::new(),
             respawn_queue: HashMap::new(),
@@ -5472,6 +5481,7 @@ impl WorldActor {
         let npc = NpcState {
             object_id: 0,
             name: "DefaultNPC".to_string(),
+            image: 0,
             x: st.x,
             y: st.y,
             direction: 0,
@@ -8958,6 +8968,7 @@ impl Actor for WorldActor {
             player_pet_modes: HashMap::new(),
             last_mail_time: HashMap::new(),
             npcs: HashMap::new(),
+            map_spawns_ready: std::collections::HashSet::new(),
             conquest_flags: HashMap::new(),
             deco_objects: HashMap::new(),
             respawn_queue: HashMap::new(),
@@ -13668,6 +13679,108 @@ fn build_object_monster_packet_extra(
     build_packet_bytes(ServerPacketIds::ObjectMonster as i16, &body)
 }
 
+/// 出站下发（与既有 spawn 路径同一 idiom：try_send + 满箱 warn）
+fn try_send_to_client(gate_ref: &ActorRef<GateActor>, session_id: u64, data: Vec<u8>) {
+    if let Err(e) = gate_ref.tell(SendToClient { session_id, data }).try_send() {
+        warn!(
+            "gate mailbox full: SendToClient dropped (session={} opcode={:?} err={})",
+            session_id,
+            dropped_send_opcode(&e),
+            e
+        );
+    }
+}
+
+impl WorldActor {
+    /// 该地图已物化 NPC 的 `(db_index → object_id)`（#2867 任务定义回填 npc_index 用；
+    /// 复用既有生成物时不复制对象，只取这两个标量）
+    pub(crate) fn npc_object_ids_on_map(&self, map_index: u16) -> Vec<(i32, u32)> {
+        let mut v: Vec<(i32, u32)> = self
+            .npcs
+            .values()
+            .filter(|n| n.map_index == map_index)
+            .map(|n| (n.db_index, n.object_id))
+            .collect();
+        v.sort_unstable_by_key(|(_, oid)| *oid);
+        v
+    }
+}
+
+/// 把某地图**已物化**的 NPC/怪物按既有 object_id 下发给一个会话。
+///
+/// 对齐 C# `GetObjectsPassive`：新进场玩家看到的是**同一批**对象（同 object_id），
+/// 而不是新生成的一批——否则两个玩家同图会各自看到 1912 只"自己的"怪，
+/// 打不到同一只（且 20 会话 = 38k 条目常驻，见 CAPACITY.md §4.3 的 +13.4MB/轮）。
+/// 与首次生成的区别只在：不改 object_id、不重新 roll 稀有度、不重复入 world 表。
+fn send_map_spawns_to_session(
+    gate_ref: &ActorRef<GateActor>,
+    session_id: u64,
+    map_index: u16,
+    npcs: &HashMap<u32, NpcState>,
+    monsters: &HashMap<u32, MonsterState>,
+) {
+    // 按 object_id 升序下发（HashMap 迭代序不确定，排序后包序可复现）
+    let mut npc_ids: Vec<u32> = npcs
+        .values()
+        .filter(|n| n.map_index == map_index)
+        .map(|n| n.object_id)
+        .collect();
+    npc_ids.sort_unstable();
+    for id in npc_ids {
+        let Some(npc) = npcs.get(&id) else { continue };
+        let packet = build_object_npc_packet(
+            &NpcSpawn {
+                name: npc.name.clone(),
+                image: npc.image,
+                x: npc.x,
+                y: npc.y,
+                direction: npc.direction,
+                db_index: npc.db_index,
+            },
+            npc.object_id,
+        );
+        try_send_to_client(gate_ref, session_id, packet);
+    }
+    let mut monster_ids: Vec<u32> = monsters
+        .values()
+        .filter(|m| m.map_index == map_index)
+        .map(|m| m.object_id)
+        .collect();
+    monster_ids.sort_unstable();
+    for id in monster_ids {
+        let Some(m) = monsters.get(&id) else { continue };
+        let spawn = MonsterSpawn {
+            name: m.name.clone(),
+            image: m.image,
+            monster_index: m.monster_index,
+            x: m.x,
+            y: m.y,
+            direction: m.direction,
+            hp: m.max_hp,
+            min_dmg: m.min_dmg,
+            max_dmg: m.max_dmg,
+            xp: m.xp,
+            map_index: m.map_index,
+            count: 1,
+            spread: m.spawn_spread,
+            route: Vec::new(),
+        };
+        try_send_to_client(
+            gate_ref,
+            session_id,
+            build_object_monster_packet(&spawn, m.object_id, &m.name),
+        );
+        // #1701：稀有怪名字颜色（C# MonsterRarityData.NameColour）；既有对象要一并重放
+        if m.rarity > 0 {
+            try_send_to_client(
+                gate_ref,
+                session_id,
+                build_object_colour_changed_packet(m.object_id, rarity_name_colour(m.rarity)),
+            );
+        }
+    }
+}
+
 /// 发送地图上的 NPC 和怪物给新玩家，返回 NPC 和怪物列表
 async fn spawn_npcs_and_monsters(
     gate_ref: ActorRef<GateActor>,
@@ -13715,6 +13828,7 @@ async fn spawn_npcs_and_monsters(
         npcs.push(NpcState {
             object_id,
             name: npc.name.clone(),
+            image: npc.image,
             x: npc.x,
             y: npc.y,
             direction: npc.direction,

@@ -480,6 +480,7 @@ pub(crate) async fn execute_robot_section(world: &mut WorldActor, section: &Sect
     let npc = NpcState {
         object_id: 0,
         name: "Robot".to_string(),
+        image: 0,
         x: 0,
         y: 0,
         direction: 0,

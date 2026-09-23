@@ -6813,6 +6813,7 @@ mod tests {
         let npc_near = NpcState {
             object_id: 1,
             name: "n".into(),
+            image: 0,
             x: 110,
             y: 110,
             direction: 0,
@@ -6824,6 +6825,7 @@ mod tests {
         let npc_far = NpcState {
             object_id: 2,
             name: "n".into(),
+            image: 0,
             x: 120,
             y: 100,
             direction: 0,
@@ -6835,6 +6837,7 @@ mod tests {
         let npc_other_map = NpcState {
             object_id: 3,
             name: "n".into(),
+            image: 0,
             x: 100,
             y: 100,
             direction: 0,

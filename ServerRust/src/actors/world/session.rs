@@ -1196,24 +1196,59 @@ impl Message<StartGameRequest> for WorldActor {
             rarity: self.rarity_cfg.clone(),
             routes: &self.routes,
         };
-        let (new_npcs, new_monsters) = spawn_npcs_and_monsters(
-            self.gate_ref.clone(),
-            &spawn_dir,
-            &map_file,
-            loaded_state.map_index,
-            msg.session_id,
-            &mut self.next_object_id,
-            &spawn_ctx,
-            self.maps.get(&map_slot),
-        )
-        .await;
-        // #2867：先记录本会话生成出来的 NPC（db_index → object_id），供任务定义回填 npc_index
-        let spawned_npcs: Vec<(i32, u32)> = new_npcs
-            .iter()
-            .map(|npc| (npc.db_index, npc.object_id))
-            .collect();
-        for npc in new_npcs {
-            self.npcs.insert(npc.object_id, npc);
+        // 地图级生成物单真源（对齐 C# `Map.Objects`）：该图已物化过生成物时，
+        // 本会话只按既有 object_id 重放，不再各自生成一份——否则同图两个玩家
+        // 会各自看到 1912 只"自己的"怪（打不到同一只），且会话数×整图条目常驻内存。
+        let spawn_map_index = loaded_state.map_index;
+        let reused_map_spawns = self.map_spawns_ready.contains(&spawn_map_index);
+        let (new_npcs, new_monsters) = if reused_map_spawns {
+            send_map_spawns_to_session(
+                &self.gate_ref,
+                msg.session_id,
+                spawn_map_index,
+                &self.npcs,
+                &self.monsters,
+            );
+            info!(
+                "Map {} spawns reused for session {} (npcs={} monsters={})",
+                spawn_map_index,
+                msg.session_id,
+                self.npc_object_ids_on_map(spawn_map_index).len(),
+                self.monsters
+                    .values()
+                    .filter(|m| m.map_index == spawn_map_index)
+                    .count()
+            );
+            (Vec::new(), Vec::new())
+        } else {
+            spawn_npcs_and_monsters(
+                self.gate_ref.clone(),
+                &spawn_dir,
+                &map_file,
+                spawn_map_index,
+                msg.session_id,
+                &mut self.next_object_id,
+                &spawn_ctx,
+                self.maps.get(&map_slot),
+            )
+            .await
+        };
+        // 空配置（测试 harness 无刷怪配置 / 该图真的没有刷怪点）不置「已物化」标记，
+        // 否则该图的后续会话会以为生成物已存在而永远不发。
+        let materialized = !(new_npcs.is_empty() && new_monsters.is_empty());
+        // #2867：先记录本会话可见的 NPC（db_index → object_id），供任务定义回填 npc_index
+        let spawned_npcs: Vec<(i32, u32)> = if reused_map_spawns {
+            self.npc_object_ids_on_map(spawn_map_index)
+        } else {
+            new_npcs
+                .iter()
+                .map(|npc| (npc.db_index, npc.object_id))
+                .collect()
+        };
+        if !reused_map_spawns {
+            for npc in new_npcs {
+                self.npcs.insert(npc.object_id, npc);
+            }
         }
         // #2867：任务定义（NewQuestInfo）必须在 NPC 生成之后下发，npc_index/finish_npc_index
         // 才会是本会话的 NPC object_id（C# `QuestInfo.NpcIndex = LoadedObjectID`）
@@ -1287,14 +1322,24 @@ impl Message<StartGameRequest> for WorldActor {
                 info!("WorldMapSetup: sent to session {}", msg.session_id);
             }
         }
-        // 先收集精英广播信息（move 前遍历）
-        let elite_broadcasts: Vec<String> = new_monsters
-            .iter()
-            .filter(|m| m.rarity > 0)
-            .map(|m| m.name.clone())
-            .collect();
-        for monster in new_monsters {
-            self.monsters.insert(monster.object_id, monster);
+        // 先收集精英广播信息（move 前遍历）。复用分支下这些怪物是**既有**对象，
+        // 既已入 world 表也不能重复广播「一只 X 出现」。
+        let elite_broadcasts: Vec<String> = if reused_map_spawns {
+            Vec::new()
+        } else {
+            new_monsters
+                .iter()
+                .filter(|m| m.rarity > 0)
+                .map(|m| m.name.clone())
+                .collect()
+        };
+        if materialized {
+            self.map_spawns_ready.insert(spawn_map_index);
+        }
+        if !reused_map_spawns {
+            for monster in new_monsters {
+                self.monsters.insert(monster.object_id, monster);
+            }
         }
 
         // 初始生成精英广播
@@ -2083,20 +2128,38 @@ impl Message<WorldMoveRequest> for WorldActor {
                             routes: &self.routes,
                         };
                         let dest_file_clone = dest_file.clone();
-                        let (new_npcs, new_monsters) = spawn_npcs_and_monsters(
-                            self.gate_ref.clone(),
-                            &self.spawn_dir,
-                            &dest_file_clone,
-                            dest_map_index as u16,
-                            msg.session_id,
-                            &mut self.next_object_id,
-                            &spawn_ctx,
-                            self.maps.get(&(dest_map_index as u16)),
-                        )
-                        .await;
-                        for npc in new_npcs {
-                            self.npcs.insert(npc.object_id, npc);
-                        }
+                        // 地图级生成物单真源：目标图已物化则重放既有对象（见 StartGame 路径同款注释）
+                        let dest_map_u16 = dest_map_index as u16;
+                        let reused_map_spawns = self.map_spawns_ready.contains(&dest_map_u16);
+                        let new_monsters = if reused_map_spawns {
+                            send_map_spawns_to_session(
+                                &self.gate_ref,
+                                msg.session_id,
+                                dest_map_u16,
+                                &self.npcs,
+                                &self.monsters,
+                            );
+                            Vec::new()
+                        } else {
+                            let (npcs, monsters) = spawn_npcs_and_monsters(
+                                self.gate_ref.clone(),
+                                &self.spawn_dir,
+                                &dest_file_clone,
+                                dest_map_u16,
+                                msg.session_id,
+                                &mut self.next_object_id,
+                                &spawn_ctx,
+                                self.maps.get(&dest_map_u16),
+                            )
+                            .await;
+                            if !(npcs.is_empty() && monsters.is_empty()) {
+                                self.map_spawns_ready.insert(dest_map_u16);
+                            }
+                            for npc in npcs {
+                                self.npcs.insert(npc.object_id, npc);
+                            }
+                            monsters
+                        };
                         // 征服旗子 NPC（C# ConquestGuildFlagInfo.Spawn；per-session 生成）
                         let new_flags = spawn_conquest_flags(
                             self.gate_ref.clone(),
@@ -2113,13 +2176,19 @@ impl Message<WorldMoveRequest> for WorldActor {
                         // 装饰物同步（C# GetObjectsPassive 含 DecoObject）
                         self.sync_decos_on_map(msg.session_id, dest_map_index as u16)
                             .await;
-                        let elite_broadcasts: Vec<String> = new_monsters
-                            .iter()
-                            .filter(|m| m.rarity > 0)
-                            .map(|m| m.name.clone())
-                            .collect();
-                        for monster in new_monsters {
-                            self.monsters.insert(monster.object_id, monster);
+                        let elite_broadcasts: Vec<String> = if reused_map_spawns {
+                            Vec::new()
+                        } else {
+                            new_monsters
+                                .iter()
+                                .filter(|m| m.rarity > 0)
+                                .map(|m| m.name.clone())
+                                .collect()
+                        };
+                        if !reused_map_spawns {
+                            for monster in new_monsters {
+                                self.monsters.insert(monster.object_id, monster);
+                            }
                         }
 
                         // 初始生成精英广播
@@ -2901,6 +2970,7 @@ impl Message<TestInjectNpcOnPlayerMap> for WorldActor {
                 NpcState {
                     object_id: msg.object_id,
                     name: "TestNpc".to_string(),
+                    image: 0,
                     x: 0,
                     y: 0,
                     direction: 0,
@@ -2924,6 +2994,89 @@ impl Message<TestNpcCount> for WorldActor {
         _ctx: &mut Context<Self, Self::Reply>,
     ) -> Self::Reply {
         self.npcs.len()
+    }
+}
+
+/// 测试探针：当前**世界级**怪物总数（地图级生成物单真源回归断言用，只读）。
+/// 同名怪物的多份按会话副本会用不同 object_id 同时驻留，故此计数直接反映重复。
+pub struct TestMonsterCount;
+
+impl Message<TestMonsterCount> for WorldActor {
+    type Reply = usize;
+
+    async fn handle(
+        &mut self,
+        _msg: TestMonsterCount,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        self.monsters.len()
+    }
+}
+
+/// 测试探针：给指定地图注入一份「只有怪物刷新点」的合成地图配置
+/// （测试 harness 的 spawn_dir=None 且 map_infos 为空，走不到真实刷怪路径）。
+/// 注入后该地图的进图路径会真实地按 TOML/DB 同款流程物化怪物。
+pub struct TestInjectMapSpawnConfig {
+    pub map_index: i32,
+    pub monster_count: i32,
+}
+
+impl Message<TestInjectMapSpawnConfig> for WorldActor {
+    type Reply = ();
+
+    async fn handle(
+        &mut self,
+        msg: TestInjectMapSpawnConfig,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        const TEST_MONSTER_INDEX: i32 = 9_900_001;
+        self.monster_infos.insert(
+            TEST_MONSTER_INDEX,
+            db::MonsterInfo {
+                index: TEST_MONSTER_INDEX,
+                name: "测试怪".to_string(),
+                image: 1,
+                ai: 0,
+                effect: 0,
+                level: 1,
+                view_range: 7,
+                cool_eye: 0,
+                stats_json: String::new(),
+                stats: std::collections::HashMap::new(),
+                light: 0,
+                attack_speed: 0,
+                move_speed: 0,
+                experience: 10,
+                can_push: false,
+                can_tame: false,
+                auto_rev: false,
+                undead: false,
+                can_recall: false,
+                drop_path: None,
+            },
+        );
+        let mi = db::MapInfo {
+            index: msg.map_index,
+            file_name: msg.map_index.to_string(),
+            title: "测试图".to_string(),
+            respawns: vec![db::MapRespawnInfo {
+                map_index: msg.map_index,
+                monster_index: TEST_MONSTER_INDEX,
+                x: 100,
+                y: 100,
+                count: msg.monster_count,
+                spread: 0,
+                delay: 0,
+                direction: 0,
+                route_path: None,
+                random_delay: 0,
+                respawn_index: 0,
+                save_respawn_time: false,
+                respawn_ticks: 0,
+            }],
+            ..Default::default()
+        };
+        self.map_infos.insert(msg.map_index, mi);
     }
 }
 
@@ -3256,6 +3409,8 @@ impl WorldActor {
         for id in &mon_ids {
             self.monsters.remove(id);
         }
+        // 生成物已随空地一起释放 → 清掉「已物化」标记，下次进图重新生成一份
+        self.map_spawns_ready.remove(&map_index);
         info!(
             "Map {} spawns cleaned (npcs={} monsters={})",
             map_index, npc_count, mon_count
@@ -8454,6 +8609,7 @@ mod auth_regression_tests {
 
     use crate::actors::account::AccountActor;
     use crate::actors::social::{SocialActor, SocialActorArgs, SocialActorConfig};
+    use crate::actors::world::session::{TestInjectMapSpawnConfig, TestMonsterCount};
     use crate::actors::world::{WorldActor, WorldActorArgs};
     use crate::db;
     use crate::gate::actor::{ClientData, GateActor, SessionCreated, SetAccountRef, SetWorldRef};
@@ -9297,6 +9453,185 @@ mod auth_regression_tests {
                 texts.iter().any(|t| t.contains("踢下线")),
                 "旧客户端必须收到被踢通知，got: {:?}",
                 texts
+            );
+        });
+    }
+
+    /// 第二个账号在同一条 gate/world 上进图（非顶号：账号与角色名都不同）。
+    /// harness 的 login_and_enter_game_full 会各自新建 world，无法构造「同图两玩家」，
+    /// 这里补一段只走 gate 包序列的辅助（复用 A 已 SetAccountRef/SetWorldRef 的 gate）。
+    async fn enter_game_as(
+        gate_ref: &GateActorRef,
+        session_id: u64,
+        account: &str,
+        char_name: &str,
+        rx: &mut RxChannel,
+    ) {
+        let mut cv_body = Vec::new();
+        let hash = b"test";
+        cv_body.extend_from_slice(&(hash.len() as i32).to_le_bytes());
+        cv_body.extend_from_slice(hash);
+        let _ = gate_ref
+            .ask(ClientData {
+                session_id,
+                data: build_packet_bytes(
+                    mir2_shared::enums::ClientPacketIds::ClientVersion as i16,
+                    &cv_body,
+                ),
+            })
+            .await;
+
+        let mut login_body = Vec::new();
+        let _ = mir2_shared::binary::write_dotnet_string(&mut login_body, account);
+        let _ = mir2_shared::binary::write_dotnet_string(&mut login_body, "testpass");
+        let _ = gate_ref
+            .ask(ClientData {
+                session_id,
+                data: build_packet_bytes(
+                    mir2_shared::enums::ClientPacketIds::Login as i16,
+                    &login_body,
+                ),
+            })
+            .await;
+        assert!(
+            wait_opcode_body(
+                rx,
+                mir2_shared::enums::ServerPacketIds::LoginSuccess as i16,
+                3
+            )
+            .await
+            .is_some(),
+            "LoginSuccess（第二账号）"
+        );
+
+        let mut nc_body = Vec::new();
+        let _ = mir2_shared::binary::write_dotnet_string(&mut nc_body, char_name);
+        nc_body.push(0u8);
+        nc_body.push(0u8);
+        let _ = gate_ref
+            .ask(ClientData {
+                session_id,
+                data: build_packet_bytes(
+                    mir2_shared::enums::ClientPacketIds::NewCharacter as i16,
+                    &nc_body,
+                ),
+            })
+            .await;
+        assert!(
+            wait_opcode_body(
+                rx,
+                mir2_shared::enums::ServerPacketIds::NewCharacterSuccess as i16,
+                3
+            )
+            .await
+            .is_some(),
+            "NewCharacterSuccess（第二账号）"
+        );
+
+        let _ = gate_ref
+            .ask(ClientData {
+                session_id,
+                data: build_packet_bytes(
+                    mir2_shared::enums::ClientPacketIds::StartGame as i16,
+                    &0i32.to_le_bytes().to_vec(),
+                ),
+            })
+            .await;
+        assert!(
+            wait_opcode_body(rx, mir2_shared::enums::ServerPacketIds::StartGame as i16, 5)
+                .await
+                .is_some(),
+            "StartGame（第二账号）"
+        );
+    }
+
+    /// 排空通道并收集 ObjectMonster 的 object_id（进图/换图下发用）
+    async fn collect_object_monster_ids(rx: &mut RxChannel) -> Vec<u32> {
+        let mut ids = Vec::new();
+        while let Ok(Some(data)) = tokio::time::timeout(Duration::from_millis(800), rx.recv()).await
+        {
+            if data.len() >= 8
+                && i16::from_le_bytes([data[2], data[3]])
+                    == mir2_shared::enums::ServerPacketIds::ObjectMonster as i16
+            {
+                ids.push(u32::from_le_bytes([data[4], data[5], data[6], data[7]]));
+            }
+        }
+        ids
+    }
+
+    /// 红绿回归（地图级生成物单真源，对齐 C# `Map.Objects` / `GetObjectsPassive`）：
+    /// 同一张图已经有活的生成物时，第二个会话进场**不得再生成一份整图怪物**——
+    /// 否则两个玩家各自看到 N 只"自己的"怪（object_id 不同，打不到同一只），
+    /// 且 20 会话同图 = 20 份整图条目常驻（CAPACITY.md §4.3 实测 +13.4MB/轮）。
+    ///
+    /// 红检：去掉进图路径的 `map_spawns_ready` 复用分支（退回每会话生成）→
+    /// `TestMonsterCount` 立即从 3 变 6，本测试 FAILED。
+    #[test]
+    fn e2e_same_map_second_session_reuses_spawns() {
+        let rt = big_stack_runtime();
+        rt.block_on(async {
+            let session_a = 60u64;
+            let (gate_ref, mut rx_a) = setup_gate_and_session(session_a).await;
+            let world_ref = login_and_enter_game(&gate_ref, session_a, &mut rx_a).await;
+
+            // harness 无 spawn 配置：给 map 0 注入「3 只怪」的合成配置
+            let _ = world_ref
+                .ask(TestInjectMapSpawnConfig {
+                    map_index: 0,
+                    monster_count: 3,
+                })
+                .await;
+
+            // 第二个账号（非顶号）进入同一张图 → 首次物化该图生成物
+            let session_b = 61u64;
+            let (tx_b, mut rx_b) = mpsc::channel::<Vec<u8>>(4096);
+            let _ = gate_ref
+                .ask(SessionCreated {
+                    session_id: session_b,
+                    sender: tx_b,
+                    ip: "127.0.0.1".to_string(),
+                })
+                .await;
+            enter_game_as(&gate_ref, session_b, "testuser2", "TestChar2", &mut rx_b).await;
+
+            let count_first = world_ref.ask(TestMonsterCount).await.unwrap();
+            assert_eq!(
+                count_first, 3,
+                "首个进图的会话应物化 3 只怪（注入配置生效）"
+            );
+            let ids_b = collect_object_monster_ids(&mut rx_b).await;
+            assert_eq!(
+                ids_b.len(),
+                3,
+                "第二个会话应收到 3 个 ObjectMonster，got {:?}",
+                ids_b
+            );
+
+            // 第三个账号再进同一张图 → 必须**复用**已有的 3 只（同一批 object_id）
+            let session_c = 62u64;
+            let (tx_c, mut rx_c) = mpsc::channel::<Vec<u8>>(4096);
+            let _ = gate_ref
+                .ask(SessionCreated {
+                    session_id: session_c,
+                    sender: tx_c,
+                    ip: "127.0.0.1".to_string(),
+                })
+                .await;
+            enter_game_as(&gate_ref, session_c, "testuser3", "TestChar3", &mut rx_c).await;
+
+            let count_second = world_ref.ask(TestMonsterCount).await.unwrap();
+            assert_eq!(
+                count_second, 3,
+                "同图第三个会话不得再生成一份整图怪物（地图级单真源）"
+            );
+            let mut ids_c = collect_object_monster_ids(&mut rx_c).await;
+            ids_c.sort_unstable();
+            let mut ids_b_sorted = ids_b.clone();
+            ids_b_sorted.sort_unstable();
+            assert_eq!(
+                ids_c, ids_b_sorted,
+                "两个玩家必须看到**同一批**怪（object_id 相同），否则打不到同一只"
             );
         });
     }
