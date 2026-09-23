@@ -352,12 +352,16 @@ try {
     Write-Host '--- NPC 窗关闭钮 ---'
     $npcRect = $null
     foreach ($tryIdx in 1..3) {
-        Rpc 'chat' @{ message = '@move 296 612' } | Out-Null
-        Start-Sleep 2
-        $near = Rpc 'nearby'
-        $smith = $near.entities | Where-Object { $_.name -match 'Smith' } | Select-Object -First 1
-        if (-not $smith) { Write-Host ("npc 尝试 {0}: nearby 无 Smith" -f $tryIdx); continue }
-        Rpc 'npc_call' @{ object_id = $smith.object_id; key = '[@MAIN]' } | Out-Null
+        # 锚点用 MirDB 记录且实测确认的仓库 NPC：D002 @ 174,216（同 l5d_npc_link.ps1）。
+        # 旧写法 @move 296 612 + 按名字 'Smith' 匹配：出生点根本没有 Smith 这个 NPC，
+        # 三次重试必 SKIP（2026-09-23 实测）。改为跨图传送 + 按 kind='npc' 取最近，
+        # 不依赖具体 NPC 名字。
+        Rpc 'chat' @{ message = '@mapmove D002 174 217' } | Out-Null
+        Start-Sleep 4
+        $near = Rpc 'nearby' @{ radius = 2000 }
+        $npc = $near.entities | Where-Object { $_.kind -eq 'npc' } | Sort-Object dist | Select-Object -First 1
+        if (-not $npc) { Write-Host ("npc 尝试 {0}: nearby 无 NPC" -f $tryIdx); continue }
+        Rpc 'npc_call' @{ object_id = $npc.object_id; key = '[@MAIN]' } | Out-Null
         Start-Sleep -Milliseconds 1500
         $npcRect = Rpc 'dialog_rect' @{ kind = 'npc' }
         if ($npcRect.ok) { break }
@@ -377,7 +381,7 @@ try {
             Add-Fail '(session)npc' ("NPC 会话窗点 X 后仍可见（hits=[{0}]）" -f (($click.hits) -join ' | '))
         }
     } else {
-        Add-Skip '(session)npc' '3 次 @move+npc_call 都没开出 NPC 窗（摆位/会话前置不满足）——NPC 关闭路径本轮未验证'
+        Add-Skip '(session)npc' '3 次 @mapmove+npc_call 都没开出 NPC 窗（摆位/会话前置不满足）——NPC 关闭路径本轮未验证'
     }
 
     # ---------------- hero_manage 状态窗：X 钮 ----------------
