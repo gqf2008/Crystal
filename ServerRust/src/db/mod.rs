@@ -1381,7 +1381,52 @@ pub async fn init_db_pool(db_url: &str) -> anyhow::Result<DbPool> {
     .await;
 
     info!("SQLite database initialized: {}", db_url);
+    // 物品唯一 ID 计数器种子（C# `Envir.NextUserItemID` 的等价物）。
+    //
+    // 原版把 `NextUserItemID` **持久化**（`Server/MirEnvir/Envir.cs:127` 声明、`:2579` 存、`:2975` 读），
+    // 所以物品 unique_id 跨重启也不会重复；本端此前是每进程从 1 起的原子计数器
+    // （`actors/inventory.rs` 的 `NEXT_UID`）——重启后新物品的 uid 会与存量物品**撞号**，
+    // 而按 uid 定位的操作（出售/修理/使用/存取/邮件附件）拿到重复号时会作用到**另一个物品**。
+    // 实测：`bevychar` 的背包里 3 件物品 uid 都等于 3（不同进程各自从 1 起分配的历史遗留）。
+    // 这里在库初始化后把计数器推到「已存物品最大 uid + 1」，只升不降。
+    let saved_max = max_saved_item_uid(&pool).await;
+    crate::actors::inventory::seed_item_uid(saved_max + 1);
+    info!("Item unique-id counter seeded above saved max (max_saved={saved_max})");
     Ok(pool)
+}
+
+/// 扫所有存物品的表的 `item_json.unique_id`，返回最大 uid（无数据返回 0）。
+///
+/// 表的清单写死在这里而不是反射 sqlite_master：**要一并覆盖未来新增的物品表**时，
+/// 这个函数就是唯一需要改的地方；查不存在的表会报错被忽略（老库/内存库无需迁移）。
+pub async fn max_saved_item_uid(pool: &DbPool) -> u64 {
+    const ITEM_TABLES: &[&str] = &[
+        "inventory_backpack",
+        "inventory_equipment",
+        "inventory_storage",
+        "quest_inventory_backpack",
+        "hero_inventory_backpack",
+        "hero_inventory_equipment",
+        "auctions",
+        "rentals",
+        "mail",
+    ];
+    let mut max_uid: u64 = 0;
+    for table in ITEM_TABLES {
+        // 列名不统一（mail 的附件列、rentals 的 item_json 都是默认 ''），空串与非法 JSON 直接排除
+        let sql = format!(
+            "SELECT COALESCE(MAX(json_extract(item_json, '$.unique_id')), 0) FROM {table} \
+             WHERE item_json IS NOT NULL AND item_json <> ''"
+        );
+        match sqlx::query_scalar::<_, i64>(&sql).fetch_one(pool).await {
+            Ok(v) => max_uid = max_uid.max(v.max(0) as u64),
+            Err(e) => {
+                // 表/列不存在（老库、内存库、迁移前的库）→ 跳过，不是错误
+                tracing::debug!("max_saved_item_uid: skip {table}: {e}");
+            }
+        }
+    }
+    max_uid
 }
 
 #[tokio::test]
