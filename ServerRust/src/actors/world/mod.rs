@@ -77,7 +77,7 @@ pub use mir2_shared::packets::Packet;
 pub use std::collections::{HashMap, HashSet};
 pub use std::path::{Path, PathBuf};
 pub use tokio::time::{interval, Duration};
-pub use tracing::{debug, info, warn};
+pub use tracing::{debug, error, info, warn};
 
 /// WorldActor 启动参数
 pub struct WorldActorArgs {
@@ -4352,9 +4352,14 @@ impl WorldActor {
                     .collect()
             })
             .unwrap_or_default();
-        if let Err(e) = db::save_player_pets(&self.db_pool, player_name, &alive).await {
-            warn!("Failed to save player pets for {}: {}", player_name, e);
-        }
+        // 2026-09-23：失败不再静默（见 db::persist_report 注释）——此前是 warn 即放弃，
+        // 实测在下线撞长写锁时**直接丢掉**这次宠物持久化；瞬时锁错误现在打
+        // `PERSIST_LOST`（error 级，可 grep / 可告警）。
+        db::persist_report("player_pets", &format!("player={player_name}"), || {
+            db::save_player_pets(&self.db_pool, player_name, &alive)
+        })
+        .await
+        .ok();
     }
 
     /// 下线驱散宠物/召唤物（C# PlayerObject.StopGame：Pets 逐只 RemoveObject+Despawn）。

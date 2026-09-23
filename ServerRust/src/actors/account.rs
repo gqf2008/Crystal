@@ -565,9 +565,16 @@ impl AccountActor {
         // 同步到数据库
         if success {
             if let Some(account) = self.accounts.get(&username) {
-                if let Err(e) = db::save_account(&self.db_pool, account).await {
-                    warn!("Failed to save account '{}' on login: {}", username, e);
-                }
+                // 2026-09-23：只把「静默丢失」改成「响亮报告」，**不改时序**——本轮曾试过
+                // 挪到后台任务/加重试，实测在长写锁下会把登录读路径挤出超时
+                // （见 db::persist_report 注释与 tools/ops/README.md §5c 的 A/B）。
+                db::persist_report(
+                    "account_save",
+                    &format!("phase=login account={username}"),
+                    || db::save_account(&self.db_pool, account),
+                )
+                .await
+                .ok();
             }
         }
 
@@ -612,9 +619,14 @@ impl Message<LogoutRequest> for AccountActor {
         self.logout(&msg.username);
 
         // 同步到数据库（标记离线）
-        if let Err(e) = db::set_account_offline(&self.db_pool, &msg.username).await {
-            warn!("Failed to set account '{}' offline: {}", msg.username, e);
-        }
+        // 同上：只改上报级别，不改时序
+        db::persist_report(
+            "account_offline",
+            &format!("account={}", msg.username),
+            || db::set_account_offline(&self.db_pool, &msg.username),
+        )
+        .await
+        .ok();
     }
 }
 

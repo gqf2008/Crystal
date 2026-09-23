@@ -2651,11 +2651,14 @@ impl Message<PlayerDisconnected> for WorldActor {
             // C# PlayerObject.StopGame：Pets 逐只 RemoveObject+Despawn——必须在持久化
             // （读活体 hp/exp）之后驱散，否则幽灵宠物继续打怪、重登双倍
             self.despawn_session_pets(msg.session_id).await;
-            if let Err(e) =
-                db::save_character(&self.db_pool, &state, &record.account_username).await
+            if db::persist_report(
+                "player_character",
+                &format!("phase=disconnect player={}", record.name),
+                || db::save_character(&self.db_pool, &state, &record.account_username),
+            )
+            .await
+            .is_ok()
             {
-                warn!("Failed to save player {} on disconnect: {}", record.name, e);
-            } else {
                 info!("Player {} saved to database on disconnect", record.name);
             }
             // C# LastLogoutDate：记录最后下线时间（选角界面/安全区下线加成用）
@@ -2663,23 +2666,25 @@ impl Message<PlayerDisconnected> for WorldActor {
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|d| d.as_secs() as i64)
                 .unwrap_or(0);
-            if let Err(e) = db::update_last_access(&self.db_pool, &record.name, now).await {
-                warn!(
-                    "Failed to update last_access for {} on disconnect: {}",
-                    record.name, e
-                );
-            }
+            db::persist_report(
+                "last_access",
+                &format!("phase=disconnect player={}", record.name),
+                || db::update_last_access(&self.db_pool, &record.name, now),
+            )
+            .await
+            .ok();
 
             // #1127：断线同样持久化英雄列表——save_character 会 DELETE heroes 子表但不重建，
             // 若断线路径不补 save_heroes，英雄会在重启/再登录后永久丢失（与 PlayerLogOut 对齐）；
             // #2571：出战英雄实时 HP/MP 一并落库（残血/残蓝重登恢复）
             let db_heroes: Vec<db::DbHero> = self.db_heroes_snapshot(msg.session_id);
-            if let Err(e) = db::save_heroes(&self.db_pool, &record.name, &db_heroes).await {
-                warn!(
-                    "Failed to save heroes for {} on disconnect: {}",
-                    record.name, e
-                );
-            }
+            db::persist_report(
+                "heroes",
+                &format!("phase=disconnect player={}", record.name),
+                || db::save_heroes(&self.db_pool, &record.name, &db_heroes),
+            )
+            .await
+            .ok();
             // #198：移除英雄对象（与 PlayerLogOut 对齐；C# StopGame → DespawnHero）
             self.broadcast_hero_remove(record.object_id).await;
 
@@ -3041,11 +3046,14 @@ impl Message<PlayerLogOut> for WorldActor {
                 }
             };
             // 保存玩家数据到数据库
-            if let Err(e) =
-                db::save_character(&self.db_pool, &state, &record.account_username).await
+            if db::persist_report(
+                "player_character",
+                &format!("phase=logout player={}", record.name),
+                || db::save_character(&self.db_pool, &state, &record.account_username),
+            )
+            .await
+            .is_ok()
             {
-                warn!("Failed to save player {} on logout: {}", record.name, e);
-            } else {
                 info!("Player {} saved to database on logout", record.name);
             }
             // C# LastLogoutDate：记录最后下线时间
@@ -3053,18 +3061,23 @@ impl Message<PlayerLogOut> for WorldActor {
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|d| d.as_secs() as i64)
                 .unwrap_or(0);
-            if let Err(e) = db::update_last_access(&self.db_pool, &record.name, now).await {
-                warn!(
-                    "Failed to update last_access for {} on logout: {}",
-                    record.name, e
-                );
-            }
+            db::persist_report(
+                "last_access",
+                &format!("phase=logout player={}", record.name),
+                || db::update_last_access(&self.db_pool, &record.name, now),
+            )
+            .await
+            .ok();
 
             // #194：保存英雄列表到 DB（重启不丢；#2571 含实时 HP/MP）
             let db_heroes: Vec<db::DbHero> = self.db_heroes_snapshot(msg.session_id);
-            if let Err(e) = db::save_heroes(&self.db_pool, &record.name, &db_heroes).await {
-                warn!("Failed to save heroes for {} on logout: {}", record.name, e);
-            }
+            db::persist_report(
+                "heroes",
+                &format!("phase=logout player={}", record.name),
+                || db::save_heroes(&self.db_pool, &record.name, &db_heroes),
+            )
+            .await
+            .ok();
             // #198：移除英雄对象
             self.broadcast_hero_remove(record.object_id).await;
 
