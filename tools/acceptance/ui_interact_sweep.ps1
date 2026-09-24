@@ -18,6 +18,10 @@
   恢复交互级回归的用法：UI 改动合并前跑一次，退出码非 0 就不合。
   结果 JSON（默认 tools/acceptance/ui_interact_results.json）里 gate.exit_code 与退出码一致。
 
+  实机资源串行：客户端 + e2e 账号 + 本地服务端是单例，本脚本通过 e2e_lock.ps1 拿跨进程锁
+  （等锁超时 = exit 2）。日志里的 `result=4 密码错误` 通常不是产品缺陷，而是账号被没走锁的
+  会话占着（服务端实为 `Account already online`）——那属于资源互斥，重跑夹具修不了它。
+
 .PARAMETER RepoRoot
   代码所在检出，默认 = 本脚本所在仓库根（$PSScriptRoot\..\..）。
   产物与 Data 都按它解析——**在 worktree 里跑要传 worktree 路径**：以前这里硬编码主检出
@@ -252,10 +256,16 @@ try {
     }
 
     # ---------------- 起客户端 ----------------
-    # 只清理带 --e2e-user 标记的自动化实例：共享桌面/多 agent 环境下不误杀人工会话
-    Get-CimInstance Win32_Process -Filter "Name='client_bevy.exe'" -EA SilentlyContinue |
-        Where-Object { $_.CommandLine -match '--e2e-user' } |
-        ForEach-Object { Stop-Process -Id $_.ProcessId -Force -EA SilentlyContinue }
+    # 只清理**本脚本自己这一路**（同 control-port + e2e 标记）的残留自动化实例。
+    # 本脚本已持 e2e 跨进程锁（见文件头），同端口上不该有别的活会话；按端口精确匹配，
+    # 既不误杀人工会话，也不会去打断「别的 agent 正在跑的验收」——历史写法是按进程名 + --e2e-user 全杀，
+    # 那会把别人的实机任务一起带走（对方随后报 result=4 密码错误，看起来像产品缺陷，其实是资源互斥）。
+    $stale = @(Get-CimInstance Win32_Process -Filter "Name='client_bevy.exe'" -EA SilentlyContinue |
+        Where-Object { $_.CommandLine -match '--e2e-user' -and $_.CommandLine -match "--control-port\s+$ControlPort\b" })
+    if ($stale.Count -gt 0) {
+        Write-Host ("清理同端口残留自动化客户端 PID={0}" -f (($stale | ForEach-Object { $_.ProcessId }) -join ','))
+        $stale | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -EA SilentlyContinue }
+    }
     Start-Sleep -Milliseconds 800
     $clientArgs = @('--real-net', '--auto-enter', '--control-port', "$ControlPort", '--e2e-user', $TestUser, '--e2e-pass', $TestPass)
     $clientProc = Start-Process -FilePath $ClientExe -ArgumentList $clientArgs -WorkingDirectory $ClientWorkDir `
@@ -271,7 +281,13 @@ try {
         $tail = ''
         $errLog = Join-Path $AccDir 'interact_client.err.log'
         if (Test-Path $errLog) { $tail = (Get-Content $errLog -Tail 8 -EA SilentlyContinue) -join "`n    " }
-        Stop-Gate "未进入游戏（客户端提前退出？PATH/libpinyin 缺 DLL 会 0xC0000135 静默退）`n    日志尾：`n    $tail"
+        $holdHint = ''
+        if ($tail -match 'result=4|密码错误|已在线|already online') {
+            $holdHint = "`n    提示：本脚本已持 e2e 锁，出现 result=4/已在线 ⇒ 账号被**没走锁**的旧会话占着" +
+                "（崩溃残留的客户端，或别的 agent 直接起客户端）。先确认 127.0.0.1:$ControlPort 没人应答，" +
+                "必要时重启 127.0.0.1:7000 服务端清在线态；重跑本脚本不会解决它（那是资源互斥，不是产品缺陷）。"
+        }
+        Stop-Gate "未进入游戏（客户端提前退出？PATH/libpinyin 缺 DLL 会 0xC0000135 静默退）`n    日志尾：`n    $tail$holdHint"
     }
     $enteredGame = $true
     Write-Host ("进图 tile=({0},{1})" -f $st.tile_x, $st.tile_y)
