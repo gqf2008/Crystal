@@ -94,6 +94,8 @@ impl Plugin for ObjectStatePlugin {
                 apply_hidden_alpha,
             )
                 .after(crate::network::network_system)
+                // #3089 残留②：同 combat 链——先让换图重建清旧世界，再消费对象状态事件
+                .after(crate::map_renderer::map_rebuild_system)
                 .run_if(in_state(AppState::Game)),
         );
     }

@@ -104,6 +104,9 @@ impl Plugin for ActorPlugin {
                 render::actor_name_colour_system,
             )
                 .after(crate::network::network_system)
+                // #3089 残留②：同 combat/object_state 链——名字染色/对象色事件也要排在
+                // 换图重建之后（否则可能给本帧将被 despawn 的旧实体排队写组件）
+                .after(crate::map_renderer::map_rebuild_system)
                 .run_if(in_state(crate::scenes::AppState::Game)),
         );
         // 登出/ReturnToLogin 回登录界面时清掉玩家实体（评审 CRITICAL-1）：

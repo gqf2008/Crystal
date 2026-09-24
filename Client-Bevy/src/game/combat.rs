@@ -191,6 +191,10 @@ impl Plugin for CombatPlugin {
             )
                 .chain()
                 .after(crate::network::network_system)
+                // #3089 残留②：与 map_rebuild_system（&mut World 独占系统，负责 despawn 旧图）
+                // 同帧竞序。锁死「先清旧图、后处理事件」方向后，换图帧的事件消费系统查询里
+                // 已看不到旧实体 ⇒ 不会再对「马上要被删」的实体排队命令。
+                .after(crate::map_renderer::map_rebuild_system)
                 .run_if(in_state(AppState::Game)),
         );
     }
@@ -706,39 +710,42 @@ fn apply_combat_events(
                 // C# Damage.Draw：显示在目标头顶上方约 75px（暴击 +Offset15）并向上飘 50px；
                 // actor 子实体 +y 向上（根在脚底），故起始 y 用正值、vy 向上
                 let y = if is_crit { 145.0 } else { 130.0 };
-                let mut spawned: Vec<Entity> = Vec::new();
-                commands.entity(target).with_children(|p| {
-                    spawned.push(
-                        p.spawn((
-                            Text2d::new(text.clone()),
-                            Anchor::TOP_LEFT,
-                            TextColor(color),
-                            TextFont {
-                                font: FontSource::Handle(ui_font.0.clone()),
-                                font_size: FontSize::Px(16.0),
-                                ..default()
-                            },
-                            Transform::from_xyz(0.0, y, 20.0),
-                            DamageText {
-                                vy: 50.0,
-                                life: 1.2,
-                            },
-                        ))
-                        .id(),
-                    );
-                });
-                // C# Damage.cs:36-37 OutLine=true OutLineColour=Black：伤害数字带黑色描边
-                if let Some(text_entity) = spawned.first() {
-                    crate::ui::outlined_text::outline_on(
-                        &mut commands,
-                        *text_entity,
-                        &text,
-                        ui_font.0.clone(),
-                        16.0,
+                // #3089 同族：父实体（被打的目标）可能在本帧换图重建时被 despawn
+                // ⇒ 一律走 safe_with_children；描边副本在同一个闭包内挂到飘字上
+                // （C# `Damage.cs:36-37` OutLine=true OutLineColour=Black），
+                // 这样也不需要把子实体 id 带出闭包。
+                let text_s = text.clone();
+                let font_h = ui_font.0.clone();
+                crate::game::movement::safe_with_children(&mut commands, target, move |p| {
+                    let shadow_font = font_h.clone();
+                    let mut main = p.spawn((
+                        Text2d::new(text_s.clone()),
                         Anchor::TOP_LEFT,
-                        true,
-                    );
-                }
+                        TextColor(color),
+                        TextFont {
+                            font: FontSource::Handle(font_h),
+                            font_size: FontSize::Px(16.0),
+                            ..default()
+                        },
+                        Transform::from_xyz(0.0, y, 20.0),
+                        DamageText {
+                            vy: 50.0,
+                            life: 1.2,
+                        },
+                        crate::ui::outlined_text::OutlinedText,
+                    ));
+                    main.with_children(|q| {
+                        for b in crate::ui::outlined_text::outline_shadow_bundles(
+                            &text_s,
+                            shadow_font,
+                            16.0,
+                            Anchor::TOP_LEFT,
+                            true,
+                        ) {
+                            q.spawn(b);
+                        }
+                    });
+                });
             }
         }
     }
@@ -825,13 +832,13 @@ fn actor_hp_bar_system(
         }
         if bar.is_none() {
             crate::game::movement::safe_insert(&mut commands, e, ActorHpBar);
-            // NOTE(#3089)：下面的 with_children 仍是裸写法——它的闭包借用局部句柄（需要 'static 化
-            // 才能像 safe_insert 那样延后执行），本批未改造，已记入 PR/walgit 的残留清单。
-            commands.entity(e).with_children(|p| {
+            // #3089 同族：父实体可能在本帧换图重建时被 despawn ⇒ 走 safe_with_children
+            let white_bg = white.clone();
+            crate::game::movement::safe_with_children(&mut commands, e, move |p| {
                 p.spawn((
                     HpBarBg,
                     Sprite {
-                        image: white.clone(),
+                        image: white_bg.clone(),
                         color: Color::srgb(0.0, 0.0, 0.0),
                         custom_size: Some(Vec2::new(30.0, 4.0)),
                         ..default()
@@ -842,7 +849,7 @@ fn actor_hp_bar_system(
                 p.spawn((
                     HpBarFill,
                     Sprite {
-                        image: white.clone(),
+                        image: white_bg,
                         color: Color::srgb(0.9, 0.1, 0.1),
                         custom_size: Some(Vec2::new(30.0, 4.0)),
                         ..default()
@@ -891,13 +898,13 @@ fn actor_mp_bar_system(
         }
         if bar.is_none() {
             crate::game::movement::safe_insert(&mut commands, e, ActorMpBar);
-            // NOTE(#3089)：下面的 with_children 仍是裸写法——它的闭包借用局部句柄（需要 'static 化
-            // 才能像 safe_insert 那样延后执行），本批未改造，已记入 PR/walgit 的残留清单。
-            commands.entity(e).with_children(|p| {
+            // #3089 同族：同血条，走 safe_with_children
+            let white_bg = white.clone();
+            crate::game::movement::safe_with_children(&mut commands, e, move |p| {
                 p.spawn((
                     MpBarBg,
                     Sprite {
-                        image: white.clone(),
+                        image: white_bg.clone(),
                         color: Color::srgb(0.0, 0.0, 0.0),
                         custom_size: Some(Vec2::new(30.0, 4.0)),
                         ..default()
@@ -908,7 +915,7 @@ fn actor_mp_bar_system(
                 p.spawn((
                     MpBarFill,
                     Sprite {
-                        image: white.clone(),
+                        image: white_bg,
                         color: Color::srgb(0.1, 0.4, 1.0),
                         custom_size: Some(Vec2::new(30.0, 4.0)),
                         ..default()

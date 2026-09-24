@@ -382,6 +382,33 @@ pub(crate) fn safe_despawn(commands: &mut bevy::prelude::Commands, entity: bevy:
     });
 }
 
+/// 见 [`safe_insert`]。**挂子实体**同样要防「父实体在命令落地前已被 despawn」。
+///
+/// 与 `insert/remove/despawn` 的区别（实测，勿照抄结论）：Bevy 的
+/// `EntityCommands::with_children` → `with_related_entities` 是**立即执行**的——它只是把
+/// 子实体的 `spawn((bundle, ChildOf(parent)))` 排进命令队列，**不会**对父实体做任何操作，
+/// 所以命中失效父实体时**不 panic**；代价是**留下孤儿子实体**（血条/伤害飘字挂在已消失的对象上）。
+/// 本出口的作用就是「父实体没了就别生成孤儿」，与 [`safe_insert`] 等保持同一个出口概念。
+///
+/// 闭包类型用 **World 版** `ChildSpawner`（`EntityWorldMut::with_children` 的参数类型），
+/// 因此调用方写法与原来的 `p.spawn((..))` 完全一致，只把 `commands.entity(e)` 换成本函数。
+///
+/// 阳性对照见 `tests::entity_command_safety_survives_despawn`：
+/// 裸 `with_children` 必须留下孤儿子实体（错误处理计数仍为 0），本出口必须留 0。
+pub(crate) fn safe_with_children<F>(
+    commands: &mut bevy::prelude::Commands,
+    parent: bevy::prelude::Entity,
+    spawn_children: F,
+) where
+    F: FnOnce(&mut bevy::ecs::hierarchy::ChildSpawner) + Send + Sync + 'static,
+{
+    commands.queue(move |world: &mut bevy::prelude::World| {
+        if let Ok(mut ec) = world.get_entity_mut(parent) {
+            ec.with_children(spawn_children);
+        }
+    });
+}
+
 /// 消耗 NetMotions：给对象实体挂 MoveTween / 转向
 fn apply_net_motions(
     mut commands: Commands,
@@ -730,7 +757,8 @@ mod tests {
         struct Target(Entity);
 
         // unsafe_mode=true 走旧写法（阳性对照）；false 走 safe_* helper（本轮修复）
-        fn drive(unsafe_mode: bool) -> usize {
+        // 返回 (错误处理被调用次数, 孤儿 Mark 实体数)
+        fn drive(unsafe_mode: bool) -> (usize, usize) {
             #[derive(Resource)]
             struct Mode(bool);
             let mut app = App::new();
@@ -757,6 +785,10 @@ mod tests {
                                 action: mir2_shared::enums::MirAction::Walking,
                                 dir: 0,
                             });
+                            // 同族第三处：**挂子实体**（血条 / 伤害飘字）打到已 despawn 的父实体
+                            commands.entity(t.0).with_children(|p| {
+                                p.spawn(Mark);
+                            });
                         } else {
                             crate::game::movement::safe_insert(
                                 &mut commands,
@@ -771,6 +803,9 @@ mod tests {
                                 },
                             );
                             crate::game::movement::safe_remove::<Sitting>(&mut commands, t.0);
+                            crate::game::movement::safe_with_children(&mut commands, t.0, |p| {
+                                p.spawn(Mark);
+                            });
                         }
                     },
                 )
@@ -778,18 +813,31 @@ mod tests {
             );
             SINK.store(0, Ordering::SeqCst);
             app.update();
-            SINK.load(Ordering::SeqCst)
+            let sink = SINK.load(Ordering::SeqCst);
+            let orphans = app.world_mut().query::<&Mark>().iter(app.world()).count();
+            (sink, orphans)
         }
 
-        let unsafe_errors = drive(true);
+        let (unsafe_errors, unsafe_orphans) = drive(true);
         assert!(
             unsafe_errors > 0,
             "阳性对照：不安全写法必须被错误探测抓到，否则这道门禁是假的"
         );
-        let safe_errors = drive(false);
+        // Bevy 的 `EntityCommands::with_children` 是**立即执行**（`with_related_entities` 直接
+        // 把子实体 spawn 排进命令队列）⇒ 父实体已 despawn 时它**不报错**，但会留下**孤儿子实体**。
+        // 这正是它和 `insert/remove/despawn` 的区别：不是崩溃风险，而是脏实体风险。
+        assert_eq!(
+            unsafe_orphans, 1,
+            "阳性对照②：裸 with_children 会为已 despawn 的父实体生成孤儿子实体"
+        );
+        let (safe_errors, safe_orphans) = drive(false);
         assert_eq!(
             safe_errors, 0,
-            "实体被 despawn 后，safe_insert/safe_remove 不得产生 ECS 错误（#3028）"
+            "实体被 despawn 后，safe_insert/safe_remove/safe_with_children 不得产生 ECS 错误（#3028）"
+        );
+        assert_eq!(
+            safe_orphans, 0,
+            "safe_with_children 必须跳过已 despawn 的父实体（不留孤儿）"
         );
     }
     use crate::actor::{ActorAnim, NetObjectId};

@@ -75,26 +75,55 @@ pub fn outline_on(
     commands.entity(text_entity).insert(OutlinedText);
     let mut shadows = Vec::with_capacity(4);
     commands.entity(text_entity).with_children(|p| {
-        for (dx, dy) in outline_offsets(y_up) {
-            let e = p
-                .spawn((
-                    OutlineShadow,
-                    Text2d::new(text),
-                    anchor,
-                    TextFont {
-                        font: FontSource::Handle(font.clone()),
-                        font_size: FontSize::Px(size),
-                        ..default()
-                    },
-                    TextColor(OUTLINE_COLOR),
-                    Transform::from_xyz(dx, dy, -0.01),
-                    Visibility::Inherited,
-                ))
-                .id();
-            shadows.push(e);
+        for b in outline_shadow_bundles(text, font.clone(), size, anchor, y_up) {
+            shadows.push(p.spawn(b).id());
         }
     });
     shadows
+}
+
+/// 4 个描边副本的 Bundle（上/左/右/下各一份）。
+///
+/// **单一来源**：`Commands` 版（[`outline_on`]）与「延后命令」版
+/// （`game::movement::safe_with_children` 里给伤害飘字挂描边）共用这一份定义——
+/// 两处各写一遍必然漂移（仓库已有 `LESSON_两处本该一致的逻辑分开维护漂移不报错…` 的同族教训）。
+pub type OutlineShadowBundle = (
+    OutlineShadow,
+    Text2d,
+    Anchor,
+    TextFont,
+    TextColor,
+    Transform,
+    Visibility,
+);
+
+/// 生成 4 个描边副本的 Bundle（顺序 = [`outline_offsets`]，与 [`outline_on`] 完全一致）。
+#[must_use]
+pub fn outline_shadow_bundles(
+    text: &str,
+    font: Handle<Font>,
+    size: f32,
+    anchor: Anchor,
+    y_up: bool,
+) -> Vec<OutlineShadowBundle> {
+    outline_offsets(y_up)
+        .into_iter()
+        .map(|(dx, dy)| {
+            (
+                OutlineShadow,
+                Text2d::new(text),
+                anchor,
+                TextFont {
+                    font: FontSource::Handle(font.clone()),
+                    font_size: FontSize::Px(size),
+                    ..default()
+                },
+                TextColor(OUTLINE_COLOR),
+                Transform::from_xyz(dx, dy, -0.01),
+                Visibility::Inherited,
+            )
+        })
+        .collect()
 }
 
 /// 主文本内容变化 → 同步到 4 个黑色副本（C# 每帧重绘纹理，Bevy 只在变化时复制）。
