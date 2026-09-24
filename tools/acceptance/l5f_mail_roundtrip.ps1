@@ -26,15 +26,20 @@ param(
     [int]$Gold = 123,
     [string]$PostMap = '6',
     [int]$PostX = 94,
-    [int]$PostY = 157
+    [int]$PostY = 157,
+    # 客户端构建根（其 Client-Bevy\target\debug\client_bevy.exe）。
+    # 2026-09-24 补：本夹具原先**硬编码 wt-p3**，与其它 l5* 夹具不一致——
+    # 换 worktree 时不传参就会拿旧客户端跑，出假红/假绿（同批 l5a 就因此假红过一次）。
+    [string]$ClientHome = ''
 )
 $ErrorActionPreference = 'Continue'
 $env:PATH = 'D:\toolchains\msys64\ucrt64\bin;D:\toolchains\libpinyin-install\bin;' + $env:PATH
 $env:LIBPINYIN_DIR = 'D:/toolchains/libpinyin-install'
 $acc = 'E:\Users\gxh\Documents\GitHub\Crystal\tools\acceptance'
 $wt = 'E:\Users\gxh\Documents\GitHub\Crystal-wt-p3'
-$exe = "$wt\Client-Bevy\target\debug\client_bevy.exe"
-$wd = "$wt\Client-Bevy"
+if (-not $ClientHome) { $ClientHome = $wt }
+$exe = "$ClientHome\Client-Bevy\target\debug\client_bevy.exe"
+$wd = "$ClientHome\Client-Bevy"
 
 function Rpc([string]$m, [hashtable]$q = @{}) {
     $c = New-Object Net.Sockets.TcpClient; $c.Connect('127.0.0.1', 9000); $s = $c.GetStream()

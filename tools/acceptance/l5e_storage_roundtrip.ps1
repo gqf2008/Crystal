@@ -102,8 +102,12 @@ foreach ($attempt in 1..3) {
     }
     $link = $rows.links | Where-Object { $_.key -eq '[@Storage]' } | Select-Object -First 1
     if (-not $link) {
-        Write-Host ('FAIL: 没有 [@Storage] 链接；links=' + (($rows.links | ForEach-Object { $_.key }) -join ','))
-        exit 2
+        # 2026-09-24 实测：换图/重建后 object_id 过期时，`npc_object_id` 可能读回非 0 而 `links` 为空——
+        # 这与「窗没开」同属**可重试**状态，不能一读就判死（首跑就在 attempt 1 上因此假红，单独重跑即绿；
+        # 独立探针证明产品侧 [@Storage]/[@exit] 两条链接与 visible=true 都正常）。
+        Write-Host ("[attempt {0}] npc_rows 有对象但 links 为空（links={1}）——重试" -f $attempt,
+            (($rows.links | ForEach-Object { $_.key }) -join ','))
+        continue
     }
 
     # ③ 点 <Access/@Storage> → 轮询到仓库窗真开（total 非 0 才算达成前置）
