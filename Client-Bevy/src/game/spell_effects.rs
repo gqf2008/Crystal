@@ -249,6 +249,8 @@ pub struct ObjectFx {
     pub blend: bool,
     /// 原版 `if (ob.Race != ObjectType.X) return;` 的种族过滤（默认 `Any` = 不过滤）
     pub race: FxRace,
+    /// 原版 `SoundManager.PlaySound(<expr>)` 的音效 id（`None` = 该 case 原版不播）
+    pub sound: Option<u32>,
     /// 按 `EffectType` 分流的条件（原版 `if (p.EffectType == 0)`）
     pub when: FxWhen,
     pub repeat: FxRepeat,
@@ -273,6 +275,7 @@ impl ObjectFx {
         interval_ms: 0,
         blend: true,
         race: FxRace::Any,
+        sound: None,
         when: FxWhen::Always,
         repeat: FxRepeat::Once,
         target: FxTarget::Owner,
@@ -480,19 +483,19 @@ pub const RANGE_MISSILE: &[(&str, MissileFx)] = &[
 #[rustfmt::skip]  // 生成块：保持每条一行，便于 diff 与 --write 幂等
 pub const OBJECT_FX: &[(&str, &[ObjectFx])] = &[
     ("FurbolgWarriorCritical", &[
-        ObjectFx { lib: FxLib::Monster { rust: Monster::FurbolgWarrior, lib: 406 }, start: 400, frames: 6, interval_ms: 600, ..ObjectFx::DEFAULT },
+        ObjectFx { lib: FxLib::Monster { rust: Monster::FurbolgWarrior, lib: 406 }, start: 400, frames: 6, interval_ms: 600, sound: Some(20910), ..ObjectFx::DEFAULT },
     ]),
     ("FatalSword", &[
-        ObjectFx { lib: FxLib::Flat(Magic2), start: 1940, frames: 4, interval_ms: 400, ..ObjectFx::DEFAULT },
+        ObjectFx { lib: FxLib::Flat(Magic2), start: 1940, frames: 4, interval_ms: 400, sound: Some(20910), ..ObjectFx::DEFAULT },
     ]),
     ("StormEscape", &[
-        ObjectFx { lib: FxLib::Flat(Magic3), start: 610, frames: 10, interval_ms: 600, ..ObjectFx::DEFAULT },
+        ObjectFx { lib: FxLib::Flat(Magic3), start: 610, frames: 10, interval_ms: 600, sound: Some(10110), ..ObjectFx::DEFAULT },
     ]),
     ("Teleport", &[
-        ObjectFx { lib: FxLib::Flat(Magic), start: 1600, frames: 10, interval_ms: 600, ..ObjectFx::DEFAULT },
+        ObjectFx { lib: FxLib::Flat(Magic), start: 1600, frames: 10, interval_ms: 600, sound: Some(10110), ..ObjectFx::DEFAULT },
     ]),
     ("Healing", &[
-        ObjectFx { lib: FxLib::Flat(Magic), start: 370, frames: 10, interval_ms: 800, ..ObjectFx::DEFAULT },
+        ObjectFx { lib: FxLib::Flat(Magic), start: 370, frames: 10, interval_ms: 800, sound: Some(20611), ..ObjectFx::DEFAULT },
     ]),
     ("RedMoonEvil", &[
         ObjectFx { lib: FxLib::Monster { rust: Monster::RedMoonEvil, lib: 62 }, start: 32, frames: 6, interval_ms: 400, blend: false, ..ObjectFx::DEFAULT },
@@ -501,14 +504,14 @@ pub const OBJECT_FX: &[(&str, &[ObjectFx])] = &[
         ObjectFx { lib: FxLib::Flat(Magic2), start: 380, frames: 6, interval_ms: 800, ..ObjectFx::DEFAULT },
     ]),
     ("MPEater", &[
-        ObjectFx { lib: FxLib::Flat(Magic2), start: 2411, frames: 19, interval_ms: 1900, target: FxTarget::EffectType, ..ObjectFx::DEFAULT },
+        ObjectFx { lib: FxLib::Flat(Magic2), start: 2411, frames: 19, interval_ms: 1900, target: FxTarget::EffectType, sound: Some(20910), ..ObjectFx::DEFAULT },
         ObjectFx { lib: FxLib::Flat(Magic2), start: 2400, frames: 9, interval_ms: 900, ..ObjectFx::DEFAULT },
     ]),
     ("Bleeding", &[
         ObjectFx { lib: FxLib::Flat(Magic3), start: 60, frames: 3, interval_ms: 400, ..ObjectFx::DEFAULT },
     ]),
     ("Hemorrhage", &[
-        ObjectFx { lib: FxLib::Flat(Magic3), start: 0, frames: 4, interval_ms: 400, ..ObjectFx::DEFAULT },
+        ObjectFx { lib: FxLib::Flat(Magic3), start: 0, frames: 4, interval_ms: 400, sound: Some(21040), ..ObjectFx::DEFAULT },
         ObjectFx { lib: FxLib::Flat(Magic3), start: 28, frames: 6, interval_ms: 600, ..ObjectFx::DEFAULT },
         ObjectFx { lib: FxLib::Flat(Magic3), start: 46, frames: 8, interval_ms: 800, ..ObjectFx::DEFAULT },
     ]),
@@ -517,7 +520,7 @@ pub const OBJECT_FX: &[(&str, &[ObjectFx])] = &[
     ]),
     ("MagicShieldDown", &[]),
     ("GreatFoxSpirit", &[
-        ObjectFx { lib: FxLib::Monster { rust: Monster::GreatFoxSpirit, lib: 134 }, start: 375, rand_step: 20, rand_count: 3, frames: 20, interval_ms: 1400, ..ObjectFx::DEFAULT },
+        ObjectFx { lib: FxLib::Monster { rust: Monster::GreatFoxSpirit, lib: 134 }, start: 375, rand_step: 20, rand_count: 3, frames: 20, interval_ms: 1400, sound: Some(1345), ..ObjectFx::DEFAULT },
     ]),
     ("Entrapment", &[
         ObjectFx { lib: FxLib::Flat(Magic2), start: 1010, frames: 10, interval_ms: 1500, ..ObjectFx::DEFAULT },
@@ -531,30 +534,30 @@ pub const OBJECT_FX: &[(&str, &[ObjectFx])] = &[
         ObjectFx { lib: FxLib::Flat(Magic3), start: 1890, race: FxRace::PlayerOnly, frames: 10, interval_ms: 2000, repeat: FxRepeat::UntilDown(AuraGroup::ElementalBarrier), ..ObjectFx::DEFAULT },
     ]),
     ("ElementalBarrierDown", &[
-        ObjectFx { lib: FxLib::Flat(Magic3), start: 1910, race: FxRace::PlayerOnly, frames: 7, interval_ms: 1400, ..ObjectFx::DEFAULT },
+        ObjectFx { lib: FxLib::Flat(Magic3), start: 1910, race: FxRace::PlayerOnly, frames: 7, interval_ms: 1400, sound: Some(21315), ..ObjectFx::DEFAULT },
     ]),
     // DelayedExplosion：C# 的 `effectid < 0` 支路是同一段动画的 stage=0（本端按 stage 取帧段，effect_type=0 时帧段相同），故只保留 stage 那条
     ("DelayedExplosion", &[
         ObjectFx { lib: FxLib::Flat(Magic3), start: 1590, step_effect_type: 10, frames: 8, interval_ms: 1200, repeat: FxRepeat::StageNot2, ..ObjectFx::DEFAULT },
     ]),
     ("AwakeningSuccess", &[
-        ObjectFx { lib: FxLib::Flat(Magic3), start: 900, frames: 16, interval_ms: 1600, delay_from_packet: true, ..ObjectFx::DEFAULT },
+        ObjectFx { lib: FxLib::Flat(Magic3), start: 900, frames: 16, interval_ms: 1600, delay_from_packet: true, sound: Some(50002), ..ObjectFx::DEFAULT },
         ObjectFx { lib: FxLib::Flat(Magic3), start: 840, frames: 16, interval_ms: 1600, blend: false, delay_from_packet: true, ..ObjectFx::DEFAULT },
     ]),
     ("AwakeningFail", &[
-        ObjectFx { lib: FxLib::Flat(Magic3), start: 920, frames: 9, interval_ms: 900, delay_from_packet: true, ..ObjectFx::DEFAULT },
+        ObjectFx { lib: FxLib::Flat(Magic3), start: 920, frames: 9, interval_ms: 900, delay_from_packet: true, sound: Some(50003), ..ObjectFx::DEFAULT },
         ObjectFx { lib: FxLib::Flat(Magic3), start: 860, frames: 9, interval_ms: 900, blend: false, delay_from_packet: true, ..ObjectFx::DEFAULT },
     ]),
     ("AwakeningHit", &[
-        ObjectFx { lib: FxLib::Flat(Magic3), start: 880, frames: 5, interval_ms: 500, delay_from_packet: true, ..ObjectFx::DEFAULT },
+        ObjectFx { lib: FxLib::Flat(Magic3), start: 880, frames: 5, interval_ms: 500, delay_from_packet: true, sound: Some(50001), ..ObjectFx::DEFAULT },
         ObjectFx { lib: FxLib::Flat(Magic3), start: 820, frames: 5, interval_ms: 500, blend: false, delay_from_packet: true, ..ObjectFx::DEFAULT },
     ]),
     ("AwakeningMiss", &[
-        ObjectFx { lib: FxLib::Flat(Magic3), start: 890, frames: 5, interval_ms: 500, delay_from_packet: true, ..ObjectFx::DEFAULT },
+        ObjectFx { lib: FxLib::Flat(Magic3), start: 890, frames: 5, interval_ms: 500, delay_from_packet: true, sound: Some(50000), ..ObjectFx::DEFAULT },
         ObjectFx { lib: FxLib::Flat(Magic3), start: 830, frames: 5, interval_ms: 500, blend: false, delay_from_packet: true, ..ObjectFx::DEFAULT },
     ]),
     ("TurtleKing", &[
-        ObjectFx { lib: FxLib::Monster { rust: Monster::TurtleKing, lib: 187 }, start: 922, rand_step: 12, rand_count: 2, frames: 12, interval_ms: 1200, ..ObjectFx::DEFAULT },
+        ObjectFx { lib: FxLib::Monster { rust: Monster::TurtleKing, lib: 187 }, start: 922, rand_step: 12, rand_count: 2, frames: 12, interval_ms: 1200, sound: Some(20351), ..ObjectFx::DEFAULT },
     ]),
     ("Behemoth", &[
         ObjectFx { lib: FxLib::Monster { rust: Monster::Behemoth, lib: 158 }, start: 788, frames: 10, interval_ms: 1500, target: FxTarget::OwnerLocation, ..ObjectFx::DEFAULT },
@@ -920,6 +923,23 @@ mod tests {
         assert_eq!((tk.start, tk.rand_step, tk.rand_count), (922, 12, 2));
         let gf = one("GreatFoxSpirit");
         assert_eq!((gf.start, gf.rand_step, gf.rand_count), (375, 20, 3));
+        // 音效 id（C# `SoundManager.PlaySound(...)`，由生成器机械提取；未接前一律 None）
+        assert_eq!(
+            t.sound,
+            Some(10110),
+            "Teleport → SoundList.Teleport = 10110"
+        );
+        assert_eq!(gf.sound, Some(1345), "GreatFoxSpirit → Monster(134)*10+5");
+        assert_eq!(
+            ed.sound,
+            Some(21315),
+            "ElementalBarrierDown → 20000+131*10+5"
+        );
+        assert_eq!(
+            eu.sound, None,
+            "ElementalBarrierUp 原版不播（PlaySound 只在 Down）"
+        );
+        assert_eq!(s.sound, None, "MagicShieldUp 原版不播音效");
         // 随机档的取帧（纯函数）：rand=0 → start；rand=1 → start+step
         assert_eq!(tk.base_frame(0, 0, 0), 922);
         assert_eq!(tk.base_frame(0, 0, 1), 934);

@@ -57,6 +57,37 @@ impl SoundBank {
     pub fn file_for(&self, id: u32) -> Option<PathBuf> {
         self.map.get(&id).map(|f| self.root.join(f))
     }
+
+    /// C# `SoundManager.PlaySound(index)` 的解析规则（`MirSounds/SoundManager.cs:85-92`）：
+    /// 先查 `SoundList.Indexes`（= `SoundList.lst` 的 id→文件名映射）；**表里没有**时按公式拼文件名：
+    ///   `index > 20000` → `M{(index-20000)/10}-{index%10}.wav`
+    ///   否则            → `{index/10:03}-{index%10}.wav`
+    /// 本端此前只用 `SoundList.lst`，所以**所有靠公式命名的音效**（法术/怪物段，如 `20000+Spell*10+k`）
+    /// 一律解析失败、静默无声——`Sound/` 目录里这些 wav 其实存在。
+    /// 返回 `None` 表示两种命名都不存在该文件（数据缺失，调用方按静默处理）。
+    pub fn file_for_or_formula(&self, id: u32) -> Option<PathBuf> {
+        if let Some(p) = self.file_for(id) {
+            if p.exists() {
+                return Some(p);
+            }
+        }
+        let name = csharp_sound_file_name(id);
+        let p = self.root.join(name);
+        if p.exists() {
+            Some(p)
+        } else {
+            None
+        }
+    }
+}
+
+/// C# 的"按 id 拼文件名"规则（`SoundManager.cs:87-89`），单独抽出来便于单测钉住。
+pub fn csharp_sound_file_name(id: u32) -> String {
+    if id > 20000 {
+        format!("M{}-{}.wav", (id - 20000) / 10, id % 10)
+    } else {
+        format!("{:03}-{}.wav", id / 10, id % 10)
+    }
 }
 
 /// 全局音效音量（0-100 百分比，C# Settings.Volume；option_view_system 同步）
@@ -469,7 +500,7 @@ pub fn play_sound(
     bank: &SoundBank,
     id: u32,
 ) {
-    let Some(path) = bank.file_for(id) else {
+    let Some(path) = bank.file_for_or_formula(id) else {
         return;
     };
     let Ok(bytes) = std::fs::read(&path) else {
@@ -499,7 +530,7 @@ pub fn play_sound_cached(
     let handle = if let Some(h) = cache.map.get(&id) {
         h.clone()
     } else {
-        let Some(path) = bank.file_for(id) else {
+        let Some(path) = bank.file_for_or_formula(id) else {
             return;
         };
         let Ok(bytes) = std::fs::read(&path) else {
@@ -875,5 +906,18 @@ mod tests {
         assert_eq!(player_flinch_sound(1), 10139); // FemaleFlinch
         assert_eq!(player_die_sound(0), 10144); // MaleDie
         assert_eq!(player_die_sound(1), 10145); // FemaleDie
+    }
+
+    /// 门禁：文件名规则必须与 C# `SoundManager.PlaySound` 一字不差（`MirSounds/SoundManager.cs:87-89`）：
+    /// `index > 20000` → `M{(index-20000)/10}-{index%10}.wav`；否则 `{index/10:000}-{index%10}.wav`。
+    /// **阳性对照**：把 `>` 改成 `>=`、或把除法/取模互换 → 立即红。
+    #[test]
+    fn csharp_sound_file_name_matches_sound_manager_formula() {
+        assert_eq!(csharp_sound_file_name(20002), "M0-2.wav");
+        assert_eq!(csharp_sound_file_name(21315), "M131-5.wav");
+        assert_eq!(csharp_sound_file_name(20000), "2000-0.wav"); // 20000 不满足 `> 20000`
+        assert_eq!(csharp_sound_file_name(10110), "1011-0.wav"); // SoundList.Teleport
+        assert_eq!(csharp_sound_file_name(30), "003-0.wav");
+        assert_eq!(csharp_sound_file_name(10001), "1000-1.wav");
     }
 }
