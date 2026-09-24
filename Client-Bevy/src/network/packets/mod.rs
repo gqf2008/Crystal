@@ -264,6 +264,8 @@ fn parse_receive_mail(payload: &[u8]) -> Option<(MailEntry, Option<MailDetail>)>
                 gold,
                 collected,
                 locked,
+                // #3120 ①：行图标要 `Items[0].Info.Image`，别在转换处丢附件
+                items: items.clone(),
             },
             Some(MailDetail {
                 mail_id,
@@ -289,7 +291,29 @@ fn parse_receive_mail(payload: &[u8]) -> Option<(MailEntry, Option<MailDetail>)>
         let collected = cur.read_u8().ok()? != 0;
         let locked = cur.read_u8().ok()? != 0;
         let gold = cur.read_u32::<LittleEndian>().ok()?;
-        let _item_count = cur.read_u8().ok()?;
+        let item_count = cur.read_u8().ok()? as usize;
+        // #3120 ①：列表条目格式也带附件（与 `parse_content` 同构）——行图标要用 `Items[0].Info.Image`。
+        // 此前这里只读计数、不读条目（依赖"计数恒 0"），一旦服务端带上附件就会整体解析失败（静默变空列表）。
+        let mut items = Vec::new();
+        for _ in 0..item_count {
+            let _uid = cur.read_u64::<LittleEndian>().ok()?;
+            let _idx = cur.read_u32::<LittleEndian>().ok()?;
+            let image = cur.read_u16::<LittleEndian>().ok()?;
+            let name = read_dotnet_string(&mut cur).ok()?;
+            let count = cur.read_u16::<LittleEndian>().ok()?;
+            let cd = cur.read_u16::<LittleEndian>().ok()?;
+            let md = cur.read_u16::<LittleEndian>().ok()?;
+            items.push(crate::game::dialogs::mail::MailAttachment {
+                name,
+                image,
+                count,
+                dura_ratio: if md > 0 {
+                    Some(cd as f32 / md as f32)
+                } else {
+                    None
+                },
+            });
+        }
         if payload.len() as u64 != cur.position() {
             return None;
         }
@@ -302,6 +326,7 @@ fn parse_receive_mail(payload: &[u8]) -> Option<(MailEntry, Option<MailDetail>)>
                 gold,
                 collected,
                 locked,
+                items,
             },
             None,
         ))
