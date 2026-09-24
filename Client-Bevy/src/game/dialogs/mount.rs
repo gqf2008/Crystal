@@ -52,6 +52,112 @@ pub const MOUNT_PORTRAIT_START_5SLOT: usize = 1330;
 pub const MOUNT_PORTRAIT_POS_4SLOT: (f32, f32) = (110.0, 250.0);
 pub const MOUNT_PORTRAIT_POS_5SLOT: (f32, f32) = (0.0, 70.0);
 
+/// C# `MountDialog.SwitchType`（`Client/MirScenes/Dialogs/MountDialog.cs:163-195`）的两档几何。
+///
+/// 缺陷（#3107，实机 sweep `mount` 红）：本端此前**只切了面板图与立绘**，关闭/帮助/骑乘三个按钮、
+/// 标签宽度、格子偏移都写死在 5 孔档 ⇒ 4 孔坐骑（面板 `Prguse[160]` 只有 272 宽）下关闭钮落在
+/// (297,3)、**排到面板右缘之外**，被 `Overflow::clip()` 裁掉 → 点 X 关不掉窗口。
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct MountTier {
+    /// 面板图（C# `Index`）：4 孔 `Prguse[160]`（272×378）、5 孔 `Prguse[167]`（324×377）
+    pub panel_index: usize,
+    /// 立绘起始帧（C# `StartIndex`）
+    pub portrait_start: usize,
+    /// 立绘位置（C# `MountImage.Location`）
+    pub portrait_pos: (f32, f32),
+    /// 名称/忠诚度标签宽度（C# `MountName.Size.Width`）
+    pub label_w: f32,
+    /// 骑乘按钮三帧（C# `MountButton.Index/HoverIndex/PressedIndex`）
+    pub ride_frames: (usize, usize, usize),
+    /// 骑乘按钮位置（C# `MountButton.Location`）
+    pub ride_pos: (f32, f32),
+    /// 关闭钮位置（C# `CloseButton.Location`）
+    pub close_pos: (f32, f32),
+    /// 帮助钮位置（C# `HelpButton.Location`）
+    pub help_pos: (f32, f32),
+    /// 五个格子的整体偏移（C# `x/y`，两档分别是 (1,1) 与 (0,0)）
+    pub cell_offset: (f32, f32),
+    /// 第 5 格（C# `MountSlot.Mask`）是否可见：4 孔档隐藏
+    pub mask_visible: bool,
+}
+
+/// 4 孔档（`MountDialog.cs:165-179`）。
+pub const MOUNT_TIER_4: MountTier = MountTier {
+    panel_index: 160,
+    portrait_start: MOUNT_PORTRAIT_START_4SLOT,
+    portrait_pos: MOUNT_PORTRAIT_POS_4SLOT,
+    label_w: 208.0,
+    ride_frames: (164, 165, 166),
+    ride_pos: (210.0, 70.0),
+    close_pos: (245.0, 3.0),
+    help_pos: (221.0, 3.0),
+    cell_offset: (1.0, 1.0),
+    mask_visible: false,
+};
+
+/// 5 孔档（`MountDialog.cs:180-194`，也是本端此前的写死值）。
+pub const MOUNT_TIER_5: MountTier = MountTier {
+    panel_index: 167,
+    portrait_start: MOUNT_PORTRAIT_START_5SLOT,
+    portrait_pos: MOUNT_PORTRAIT_POS_5SLOT,
+    label_w: 260.0,
+    ride_frames: (155, 156, 157),
+    ride_pos: (262.0, 70.0),
+    close_pos: (297.0, 3.0),
+    help_pos: (274.0, 3.0),
+    cell_offset: (0.0, 0.0),
+    mask_visible: true,
+};
+
+/// 孔数 → 档位。C# 只 `switch` 4 与 5 两档；其它（含未装坐骑的 0）按 5 孔档处理，
+/// 与「本端此前恒 5 孔档」的既有行为一致（不引入新的未定义分支）。
+#[must_use]
+pub fn mount_tier(slot_count: usize) -> MountTier {
+    if slot_count == 4 {
+        MOUNT_TIER_4
+    } else {
+        MOUNT_TIER_5
+    }
+}
+
+/// 五个坐骑格的 x（C# `MountDialog.cs:197-201`：36/90/144/198/252，再加档位偏移）。
+pub const MOUNT_CELL_X: [f32; 5] = [36.0, 90.0, 144.0, 198.0, 252.0];
+pub const MOUNT_CELL_Y: f32 = 323.0;
+
+/// 档位 → 运行期要写进 UI 的布局（**纯函数**：门禁直接断言它，系统只负责把它写进 Node；
+/// 这样门禁测的是「系统真正用的那份数据」，不是与实现无关的常量副本）。
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct MountLayout {
+    pub close_pos: (f32, f32),
+    pub help_pos: (f32, f32),
+    pub ride_pos: (f32, f32),
+    /// 标签居中点（C# 标签 `Size` 受档位影响，`DrawFormat = HCenter` ⇒ cx = 30 + w/2）
+    pub label_cx: f32,
+    pub label_w: f32,
+    /// 五个格子的左上角（含档位偏移）
+    pub cell_pos: [(f32, f32); 5],
+    pub mask_visible: bool,
+    pub panel_index: usize,
+    pub portrait_start: usize,
+    pub portrait_pos: (f32, f32),
+}
+
+#[must_use]
+pub fn mount_layout(tier: MountTier) -> MountLayout {
+    MountLayout {
+        close_pos: tier.close_pos,
+        help_pos: tier.help_pos,
+        ride_pos: tier.ride_pos,
+        label_cx: LABEL_LEFT + tier.label_w / 2.0,
+        label_w: tier.label_w,
+        cell_pos: MOUNT_CELL_X.map(|x| (x + tier.cell_offset.0, MOUNT_CELL_Y + tier.cell_offset.1)),
+        mask_visible: tier.mask_visible,
+        panel_index: tier.panel_index,
+        portrait_start: tier.portrait_start,
+        portrait_pos: tier.portrait_pos,
+    }
+}
+
 /// 立绘帧号（纯函数，便于门禁）：`mount_shape < 0`（未装坐骑）⇒ `None`（原版不播动画）。
 pub fn mount_portrait_frame(start_index: usize, mount_shape: i16, frame: usize) -> Option<usize> {
     if mount_shape < 0 {
@@ -79,6 +185,11 @@ pub struct MountClose;
 
 #[derive(Component)]
 pub struct MountRide;
+
+/// 帮助钮（C# `MountDialog.HelpButton`）：本身无点击行为，但**位置随档位切换**
+/// （4 孔 (221,3) / 5 孔 (274,3)）——#3107。
+#[derive(Component)]
+pub struct MountHelp;
 
 #[derive(Component)]
 pub struct MountPanel;
@@ -109,9 +220,144 @@ impl Plugin for MountPlugin {
         app.add_systems(OnExit(AppState::Game), cleanup_mount);
         app.add_systems(
             Update,
-            (mount_ui_system,).chain().run_if(in_state(AppState::Game)),
+            (mount_ui_system, mount_tier_layout_system)
+                .chain()
+                .run_if(in_state(AppState::Game)),
         );
     }
+}
+
+/// #3107：把 [`mount_layout`] 的档位几何写进 UI（关闭/帮助/骑乘钮位置与骑乘帧、标签宽度与居中点、
+/// 五个格子的偏移与第 5 格显隐、面板图与立绘）。
+///
+/// 单独成系统而不是塞进 `mount_ui_system`：后者已 14 个 SystemParam，逼近 16 上限；
+/// 且本系统只在**档位变化**时写入（`Local` 去抖），不引入每帧写 Node 的开销。
+fn mount_tier_layout_system(
+    mut libs: ResMut<GameLibraries>,
+    mut images: ResMut<Assets<Image>>,
+    loadout_q: Query<&crate::game::player_state::Loadout>,
+    mgr: Res<crate::game::dialogs::DialogManager>,
+    mut buttons: Query<
+        (
+            &mut Node,
+            &mut ImageNode,
+            Option<&MountClose>,
+            Option<&MountHelp>,
+            Option<&MountRide>,
+        ),
+        (
+            Or<(With<MountClose>, With<MountHelp>, With<MountRide>)>,
+            // 与下面两个 &mut Node 查询保持「可证不相交」（B0001 硬要求）
+            Without<MountNameText>,
+            Without<MountLoyaltyText>,
+            Without<MountGearCell>,
+        ),
+    >,
+    mut labels: Query<
+        &mut Node,
+        (
+            Or<(With<MountNameText>, With<MountLoyaltyText>)>,
+            Without<MountGearCell>,
+            Without<MountClose>,
+            Without<MountHelp>,
+            Without<MountRide>,
+        ),
+    >,
+    mut cells: Query<
+        (&mut Node, &mut Visibility, &MountGearCell),
+        (
+            Without<MountNameText>,
+            Without<MountLoyaltyText>,
+            Without<MountClose>,
+            Without<MountHelp>,
+            Without<MountRide>,
+        ),
+    >,
+    mut applied: Local<Option<MountTier>>,
+) {
+    if !mgr.is_open(DialogKind::Mount) {
+        *applied = None; // 关窗时复位，下次打开重新按当时孔数写一遍
+        return;
+    }
+    let slot_count = loadout_q
+        .single()
+        .ok()
+        .and_then(|l| l.slots.get(10))
+        .and_then(|s| s.as_ref())
+        .map(|m| m.slots.len())
+        .unwrap_or(0);
+    let tier = mount_tier(slot_count);
+    if applied.as_ref() == Some(&tier) {
+        return;
+    }
+    *applied = Some(tier);
+    let layout = mount_layout(tier);
+
+    for (mut node, mut img, close, help, ride) in &mut buttons {
+        let pos = if close.is_some() {
+            layout.close_pos
+        } else if help.is_some() {
+            layout.help_pos
+        } else if ride.is_some() {
+            layout.ride_pos
+        } else {
+            continue;
+        };
+        if node.left != Val::Px(pos.0) {
+            node.left = Val::Px(pos.0);
+        }
+        if node.top != Val::Px(pos.1) {
+            node.top = Val::Px(pos.1);
+        }
+        // 骑乘钮三帧随档位换图（C# `MountButton.Index/HoverIndex/PressedIndex`）
+        if ride.is_some() {
+            if let Some(h) = load_lib_image(
+                &mut libs,
+                &mut images,
+                LibraryName::Prguse,
+                tier.ride_frames.0,
+            ) {
+                if img.image != h {
+                    img.image = h;
+                }
+            }
+        }
+    }
+    for mut node in &mut labels {
+        if node.width != Val::Px(layout.label_w) {
+            node.width = Val::Px(layout.label_w);
+        }
+        if node.left != Val::Px(LABEL_LEFT) {
+            node.left = Val::Px(LABEL_LEFT);
+        }
+    }
+    for (mut node, mut vis, cell) in &mut cells {
+        if let Some(pos) = layout.cell_pos.get(cell.0) {
+            if node.left != Val::Px(pos.0) {
+                node.left = Val::Px(pos.0);
+            }
+            if node.top != Val::Px(pos.1) {
+                node.top = Val::Px(pos.1);
+            }
+        }
+        // 第 5 格 = C# `MountSlot.Mask`：4 孔档 `Visible = false`
+        let want = if cell.0 == 4 && !layout.mask_visible {
+            Visibility::Hidden
+        } else {
+            Visibility::Visible
+        };
+        if *vis != want {
+            *vis = want;
+        }
+    }
+    tracing::info!(
+        "🐴 坐骑窗按孔数套用档位几何: slots={} panel=Prguse[{}] close=({},{}) label_w={}",
+        slot_count,
+        layout.panel_index,
+        layout.close_pos.0,
+        layout.close_pos.1,
+        layout.label_w
+    );
 }
 
 fn cleanup_mount(mut commands: Commands, roots: Query<Entity, With<DialogRoot>>) {
@@ -196,7 +442,7 @@ fn spawn_mount(
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 258),
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 259),
         ) {
-            spawn_icon_button(p, n, h, pr, 274.0, 3.0, 24.0, 21.0, 10);
+            spawn_icon_button(p, n, h, pr, 274.0, 3.0, 24.0, 21.0, 10).insert(MountHelp);
         }
         // 坐骑装备格 5 个 @(36/90/144/198/252, 323)
         // 坐骑立绘（C# `MountDialog.MountImage`）：位置/帧号在 `mount_ui_system` 里按
@@ -482,6 +728,66 @@ mod tests {
             160.0,
             "居中锚点 = 30 + 260/2（C# HCenter）"
         );
+    }
+
+    /// 门禁（#3107，实机 sweep `mount` 红）：两档几何必须逐项等于 C# `MountDialog.SwitchType`
+    /// （`Client/MirScenes/Dialogs/MountDialog.cs:163-195`）。
+    ///
+    /// 这测的是**系统真正消费的那份数据**——`mount_tier_layout_system` 直接调用 [`mount_layout`]，
+    /// 不是与实现无关的常量副本（对比：只断言「常量 == 字面量」的自证式门禁，把实现改坏也不会红）。
+    ///
+    /// 阳性对照（实做）：把 `mount_tier` 改成恒返回 `MOUNT_TIER_5`（= 修复前写死 5 孔档的行为）
+    /// → 下面 4 孔档的 6 条断言立即红。
+    #[test]
+    fn mount_tier_layout_matches_csharp_switch_type() {
+        // ---- 4 孔档 ----
+        let l4 = mount_layout(mount_tier(4));
+        assert_eq!(l4.close_pos, (245.0, 3.0), "4 孔档 CloseButton.Location");
+        assert_eq!(l4.help_pos, (221.0, 3.0), "4 孔档 HelpButton.Location");
+        assert_eq!(l4.ride_pos, (210.0, 70.0), "4 孔档 MountButton.Location");
+        assert_eq!(l4.label_w, 208.0, "4 孔档 MountName.Size.Width");
+        assert_eq!(l4.label_cx, 134.0, "4 孔档居中锚点 = 30 + 208/2");
+        assert_eq!(
+            l4.cell_pos,
+            [
+                (37.0, 324.0),
+                (91.0, 324.0),
+                (145.0, 324.0),
+                (199.0, 324.0),
+                (253.0, 324.0)
+            ],
+            "4 孔档格子偏移 (x,y) = (1,1)"
+        );
+        assert!(!l4.mask_visible, "4 孔档 Mask 格隐藏");
+        assert_eq!(l4.panel_index, 160, "4 孔档面板 Prguse[160]");
+        assert_eq!(l4.portrait_start, 1170, "4 孔档 StartIndex");
+        assert_eq!(l4.portrait_pos, (110.0, 250.0), "4 孔档立绘位置");
+
+        // ---- 5 孔档 ----
+        let l5 = mount_layout(mount_tier(5));
+        assert_eq!(l5.close_pos, (297.0, 3.0), "5 孔档 CloseButton.Location");
+        assert_eq!(l5.help_pos, (274.0, 3.0), "5 孔档 HelpButton.Location");
+        assert_eq!(l5.ride_pos, (262.0, 70.0), "5 孔档 MountButton.Location");
+        assert_eq!(l5.label_w, 260.0, "5 孔档 MountName.Size.Width");
+        assert_eq!(l5.label_cx, 160.0, "5 孔档居中锚点 = 30 + 260/2");
+        assert_eq!(l5.cell_pos[0], (36.0, 323.0), "5 孔档首格 (36,323)");
+        assert_eq!(l5.cell_pos[4], (252.0, 323.0), "5 孔档 Mask 格 (252,323)");
+        assert!(l5.mask_visible, "5 孔档 Mask 格可见");
+        assert_eq!(l5.panel_index, 167, "5 孔档面板 Prguse[167]");
+        assert_eq!(l5.portrait_start, 1330, "5 孔档 StartIndex");
+        assert_eq!(l5.portrait_pos, (0.0, 70.0), "5 孔档立绘位置");
+
+        // 两档必须真的不同（否则「切档」是空操作）——这正是 #3107 的缺陷形态
+        assert_ne!(l4.close_pos, l5.close_pos, "两档关闭钮位置必须不同");
+        assert_ne!(
+            l4.close_pos.0, 297.0,
+            "4 孔档不得沿用 5 孔档的 297（会落到面板外被裁掉）"
+        );
+
+        // 其它孔数（含未装坐骑的 0）保持既有 5 孔档行为，不引入未定义分支
+        assert_eq!(mount_tier(0), MOUNT_TIER_5);
+        assert_eq!(mount_tier(5), MOUNT_TIER_5);
+        assert_eq!(mount_tier(6), MOUNT_TIER_5);
     }
 
     /// 门禁（owner 队列 `mount-image-preview`）：坐骑立绘三件事照 C#——
