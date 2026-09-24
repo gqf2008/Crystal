@@ -58,9 +58,32 @@ Get-CsEdits            # 列出镜像 UI 的 WinForms 文本框（定位输入�
 py -3.12 .\shot_diff.py a.png b.png [x0,y0,x1,y1]
 ```
 
+### 2.1 键盘路径：锁屏也能进游戏（2026-09-24 实测跑通）
+
+`csharp_kbd_login.ps1` 全程只用键盘消息（无需鼠标），已实测走通
+**登录 → 角色选择 → 进入游戏 → F9 背包 / F10 装备 / F11 技能**：
+
+```powershell
+pwsh -NoProfile -File .\csharp_kbd_login.ps1 -SandboxRoot <沙箱目录> -Account 333 -Password <pw>
+```
+
+依据（原版 C# 源码）：
+
+- `Client/MirScenes/LoginScene.cs:481` `LoginDialog.TextBox_KeyPress`：账户/密码框回车 → `OKButton.InvokeMouseClick(null)`；
+- `Client/MirScenes/SelectScene.cs:219` `SelectScene_KeyPress`：回车且 START 可用 → `StartGame()`，用 `Characters[_selected]`（`_selected` 默认 0）→ **有角色时无需点选**；
+- 键位来自 `Mir2Config`/`KeyBinds.ini`：`F9` 背包、`F10` 装备、`F11` 技能（另有 `Ctrl+I/C/S` 等第二键位）。
+
+账号准备（**只对沙箱副本**）：`dbtool setpw <accountId> <newPassword>` 用原版
+`AccountInfo.Password` setter 改密码后 `SaveAccounts()`。注意 `setpw` 会重写 `Server.MirADB`，
+且离线 `LoadDB()` 会把 `Server.MirDB` 写坏（见下）——工具已内置 `Server.MirDB` 备份/还原保护。
+
+实测证据：服务端日志出现 `User logging in` → `User logged in` → `<角色名> has connected`；
+截图 `kbd_01_select`（SELECT 界面，两角色）、`kbd_02_ingame`（BichonProvince，坐标 277,609）、
+`ingame_F9_inventory`、`ingame_F10_equipment`、`ingame_F11_skills`。
+
 ## 3. 已知限制（2026-09-24 实测）
 
-**会话被锁屏（`LockScreenBackstopFrame` 覆盖桌面）时，原版客户端的菜单/对话框点不动**：
+**会话被锁屏（`LockScreenBackstopFrame` 覆盖桌面）时，鼠标点不动——但键盘路径可用（见 §2.1）**：
 
 - 真实输入（`mouse_event`/`SetCursorPos`）落到锁屏，不落客户端；桌面级 `CopyFromScreen` 只得到纯色；
 - 注入窗口消息可以到达客户端：`WM_MOUSEMOVE` 能让按钮变 hover、`WM_KEYDOWN/UP` 能触发 `CMain_KeyUp`（截图就是这么触发的）；
@@ -69,9 +92,8 @@ py -3.12 .\shot_diff.py a.png b.png [x0,y0,x1,y1]
   （`Client/MirControls/MirScene.cs`、`MirControl.cs:849`），**MouseDown/Up 不产生 Click** →
   锁屏状态下无法自动点击菜单/对话框。
 
-因此：**要做逐窗 A/B（商城/背包/行会等），需要先解锁工作站或重连该 console 会话**，再跑本驱动脚本。
-锁屏期间仍可用的路径：键盘驱动的登录（`LoginDialog.TextBox_KeyPress`：账户/密码框里回车 =
-`OKButton.InvokeMouseClick`，见 `Client/MirScenes/LoginScene.cs:481`）。
+结论：**锁屏期间用键盘路径（§2.1）做 A/B；需要纯鼠标操作的窗口（商城买卖、NPC 菜单点行等）
+仍要解锁工作站/重连 console 会话**后再跑 `Click-Image`。
 
 ## 4. 存档导出（dbtool）
 
@@ -92,3 +114,20 @@ dotnet run --project .\dbtool\dbtool.csproj -c Release -- <沙箱>\Server dump S
 - 离线单独调用时 `MapInfoList`/`ItemInfoList`/`MonsterInfoList`/`NPCInfoList`/`QuestInfoList`/`GameShopList`
   计数为 0（这些由服务端自身初始化路径装载，不在 `LoadDB()` 里）→ 导出里的物品名解析为空；
   需要靠服务端进程内的状态导出物品名称。
+
+## 5. 两个会把沙箱文件改坏的坑（实测）
+
+1. **原版启动器会删文件**：`Client/Forms/AMain.cs:137 CleanUp()` 按「补丁清单」删掉目录里
+   不在清单内的文件（`NeedFile()` 对空清单恒为 false）。补丁站不可达时清单为空 → 会删掉
+   `Client.runtimeconfig.json`/`Client.deps.json`/`KeyBinds.ini`/`Language.ini`/各 DLL 等，
+   之后客户端报 .NET apphost 启动失败。**因此沙箱里必须 `[Launcher] Enabled=False`；
+   也不要在真实安装目录里跑这个启动器**。沙箱大目录用 junction 时更要小心：
+   `CleanUp()` 用 `SearchOption.AllDirectories` 会沿 junction 走进真实美术目录。
+   （本次实测：真实安装目录 `Client\Data` 1449 文件 / 7277.9 MB、`Map` 1624 / 833.3 MB、
+   `Sound` 1608 / 436.2 MB，事后复核**未被删除**。）
+2. **离线 `LoadDB()` 会重写 `Server.MirDB`**：一次 `export`/`setpw` 就把它从 540,512 字节
+   压到 240 字节，服务端随后启动即报 `0 Maps Loaded` /
+   `Cannot start server without atleast 1 Map and StartPoint`。`dbtool` 现已内置
+   `Server.MirDB.offline-bak` 备份/还原（每次运行都会还原成原版字节）。
+   另外 `SaveAccounts()` 重写的 `Server.MirADB` 比原文件小（20455 → 12685 字节），
+   做真实数据演练前请先复制一份存档。
