@@ -16,8 +16,12 @@ use crate::ui::sprite_ui::{ui_image, UiImageCache};
 /// 待生成特效（网络事件 → 渲染，按 target object_id 定位）
 #[derive(Message, Debug, Clone, Copy)]
 pub enum PendingEffect {
-    /// 魔法弹道：从玩家飞向目标
-    Projectile { target_id: u32, color: [f32; 3] },
+    /// 魔法弹道：从玩家飞向目标。`fx` 有值时按原版帧表播（远程攻击的箭矢），否则退回染色方块。
+    Projectile {
+        target_id: u32,
+        color: [f32; 3],
+        fx: Option<crate::game::spell_effects::MissileFx>,
+    },
     /// 命中爆炸：在目标位置扩散
     Burst { target_id: u32, color: [f32; 3] },
     /// 世界对象弹道：从 source 对象飞向 destination 对象（#224 ObjectProjectile/ObjectMagic/ObjectRangeAttack）
@@ -25,6 +29,7 @@ pub enum PendingEffect {
         source_id: u32,
         destination_id: u32,
         color: [f32; 3],
+        fx: Option<crate::game::spell_effects::MissileFx>,
     },
     /// 地图坐标特效：在指定世界坐标生成爆炸（#230 MapEffect）
     BurstAt { x: f32, y: f32, color: [f32; 3] },
@@ -54,6 +59,31 @@ pub(crate) fn spell_color(spell: u8) -> [f32; 3] {
         Ok(Spell::HalfMoon) => [1.0, 1.0, 0.7],
         Ok(Spell::ShoulderDash) => [0.8, 0.8, 0.8],
         _ => [1.0, 1.0, 0.4],
+    }
+}
+
+/// `S.RangeAttack`（本地玩家远程攻击）→ 弹道特效：**原版帧表优先**
+/// （C# `PlayerObject.cs` MirAction.AttackRange1/2/3 的 `CreateProjectile`），
+/// 表未覆盖的技能才退回占位色块。这是该映射的**单一出口**，门禁直接打这里。
+pub fn range_attack_projectile(target_id: u32, spell: u8) -> PendingEffect {
+    PendingEffect::Projectile {
+        target_id,
+        color: spell_color(spell),
+        fx: crate::game::spell_effects::range_missile(spell),
+    }
+}
+
+/// `S.ObjectRangeAttack`（其他玩家/怪物远程攻击）→ 弹道特效（同上，单一出口）
+pub fn object_range_attack_projectile(
+    source_id: u32,
+    destination_id: u32,
+    spell: u8,
+) -> PendingEffect {
+    PendingEffect::ProjectileFromTo {
+        source_id,
+        destination_id,
+        color: spell_color(spell),
+        fx: crate::game::spell_effects::range_missile(spell),
     }
 }
 
@@ -148,31 +178,51 @@ fn spawn_pending_effects(
         }
         state.spawned += 1;
         match e {
-            PendingEffect::Projectile { target_id, color } => {
+            PendingEffect::Projectile {
+                target_id,
+                color,
+                fx,
+            } => {
                 let Some((_, tf)) = actors.iter().find(|(id, _)| id.0 == target_id) else {
                     continue;
                 };
                 let to = Vec2::new(tf.translation.x, tf.translation.y);
-                commands.spawn((
-                    Sprite {
-                        image: white.clone(),
-                        color: Color::srgb(color[0], color[1], color[2]),
-                        custom_size: Some(Vec2::splat(14.0)),
-                        ..default()
-                    },
-                    Transform::from_xyz(player_pos.x, player_pos.y, 20.0),
-                    Projectile {
-                        from: player_pos,
+                // 远程攻击（S.RangeAttack）：有原版帧表就播帧动画弹道
+                let frame_missile_spawned = match fx {
+                    Some(m) => spawn_frame_missile(
+                        &mut commands,
+                        &mut libs,
+                        &mut images,
+                        &mut cache,
+                        m,
+                        player_pos,
                         to,
-                        t: 0.0,
-                        dur: 0.28,
-                    },
-                ));
+                    ),
+                    None => false,
+                };
+                if !frame_missile_spawned {
+                    commands.spawn((
+                        Sprite {
+                            image: white.clone(),
+                            color: Color::srgb(color[0], color[1], color[2]),
+                            custom_size: Some(Vec2::splat(14.0)),
+                            ..default()
+                        },
+                        Transform::from_xyz(player_pos.x, player_pos.y, 20.0),
+                        Projectile {
+                            from: player_pos,
+                            to,
+                            t: 0.0,
+                            dur: 0.28,
+                        },
+                    ));
+                }
             }
             PendingEffect::ProjectileFromTo {
                 source_id,
                 destination_id,
                 color,
+                fx,
             } => {
                 let mut from = None;
                 let mut to = None;
@@ -187,21 +237,36 @@ fn spawn_pending_effects(
                 let (Some(from), Some(to)) = (from, to) else {
                     continue;
                 };
-                commands.spawn((
-                    Sprite {
-                        image: white.clone(),
-                        color: Color::srgb(color[0], color[1], color[2]),
-                        custom_size: Some(Vec2::splat(14.0)),
-                        ..default()
-                    },
-                    Transform::from_xyz(from.x, from.y, 20.0),
-                    Projectile {
+                // 其他对象的远程攻击（S.ObjectRangeAttack）：同样优先用原版帧表
+                let frame_missile_spawned = match fx {
+                    Some(m) => spawn_frame_missile(
+                        &mut commands,
+                        &mut libs,
+                        &mut images,
+                        &mut cache,
+                        m,
                         from,
                         to,
-                        t: 0.0,
-                        dur: 0.35,
-                    },
-                ));
+                    ),
+                    None => false,
+                };
+                if !frame_missile_spawned {
+                    commands.spawn((
+                        Sprite {
+                            image: white.clone(),
+                            color: Color::srgb(color[0], color[1], color[2]),
+                            custom_size: Some(Vec2::splat(14.0)),
+                            ..default()
+                        },
+                        Transform::from_xyz(from.x, from.y, 20.0),
+                        Projectile {
+                            from,
+                            to,
+                            t: 0.0,
+                            dur: 0.35,
+                        },
+                    ));
+                }
             }
             PendingEffect::BurstAt { x, y, color } => {
                 commands.spawn((
@@ -242,33 +307,15 @@ fn spawn_pending_effects(
                     .and_then(crate::game::spell_effects::spell_missile)
                 {
                     Some(m) => {
-                        let Some(handle) = ui_image(
+                        spawn_frame_missile(
+                            &mut commands,
                             &mut libs,
                             &mut images,
                             &mut cache,
-                            m.library.library(),
-                            m.base,
-                        ) else {
-                            continue;
-                        };
-                        commands.spawn((
-                            SpellMissileAnim {
-                                library: m.library,
-                                base: m.base,
-                                frames: m.frames,
-                                frame_ms: m.frame_ms as f32 / 1000.0,
-                                from,
-                                to,
-                                t: 0.0,
-                                dur: MISSILE_FLIGHT_SECS,
-                            },
-                            Sprite {
-                                image: handle,
-                                ..default()
-                            },
-                            bevy::sprite::Anchor::CENTER,
-                            Transform::from_xyz(from.x, from.y, 21.0),
-                        ));
+                            m,
+                            from,
+                            to,
+                        );
                     }
                     None => {
                         // 表里没有 → 保持旧的占位弹道（debug 里说明，不静默）
@@ -459,6 +506,41 @@ struct SpellMissileAnim {
     dur: f32,
 }
 
+/// 生成一条「按原版帧表播」的弹道实体（施法弹道与**远程攻击箭矢**共用）。
+/// 返回 `false` = 首帧取不到图（调用方自行决定是否退回占位表现）。
+fn spawn_frame_missile(
+    commands: &mut Commands,
+    libs: &mut GameLibraries,
+    images: &mut Assets<Image>,
+    cache: &mut UiImageCache,
+    m: crate::game::spell_effects::MissileFx,
+    from: Vec2,
+    to: Vec2,
+) -> bool {
+    let Some(handle) = ui_image(libs, images, cache, m.library.library(), m.base) else {
+        return false;
+    };
+    commands.spawn((
+        SpellMissileAnim {
+            library: m.library,
+            base: m.base,
+            frames: m.frames,
+            frame_ms: m.frame_ms as f32 / 1000.0,
+            from,
+            to,
+            t: 0.0,
+            dur: MISSILE_FLIGHT_SECS,
+        },
+        Sprite {
+            image: handle,
+            ..default()
+        },
+        bevy::sprite::Anchor::CENTER,
+        Transform::from_xyz(from.x, from.y, 21.0),
+    ));
+    true
+}
+
 /// 弹道推进：位置缓出插值 + 帧循环（帧用完从头循环，直到到达目标）
 fn advance_spell_missiles(
     mut commands: Commands,
@@ -592,6 +674,82 @@ mod tests {
         assert_eq!(fx[0].base, 0, "Magic[0] 起（原版 PlayerObject.cs）");
         assert_eq!(fx[0].frames, 10);
         assert_eq!(fx[0].follow_object_id, 4242, "跟随施法者");
+    }
+
+    /// 门禁（接线，不只是表）：`S.RangeAttack` 的弹道必须用**原版远程攻击帧表**
+    /// （`Client/MirObjects/PlayerObject.cs` MirAction.AttackRange1/2/3 的 CreateProjectile），
+    /// 不再是染色方块 —— 玩家看到的弓/箭矢才是原版那 5 帧。
+    ///
+    /// 阳性对照（落地时实做）：把 `handle_npc_items.rs` 里 `S.RangeAttack` 的 `fx` 传成 `None`
+    /// （或删掉 `spawn_frame_missile` 调用）→ 本测试立即红（弹道实体数为 0，只剩占位 Projectile）。
+    #[test]
+    fn range_attack_spawns_original_arrow_frames() {
+        use bevy::ecs::system::RunSystemOnce;
+        if !crate::resources::libraries::data_assets_present() {
+            eprintln!("skip range_attack_spawns_original_arrow_frames: 无 Data 资产");
+            return;
+        }
+        let mut world = bevy::prelude::World::new();
+        world.insert_resource(crate::map_renderer::GameLibraries(
+            crate::resources::libraries::Libraries::new(
+                crate::resources::libraries::resolve_data_path(),
+            ),
+        ));
+        world.insert_resource(bevy::prelude::Assets::<bevy::prelude::Image>::default());
+        world.insert_resource(crate::ui::sprite_ui::UiImageCache::default());
+        world.insert_resource(crate::game::dialogs::option::OptionState {
+            effect: true,
+            ..Default::default()
+        });
+        world.insert_resource(EffectsState::default());
+        world
+            .resource_mut::<crate::map_renderer::GameLibraries>()
+            .0
+            .ensure_initialized();
+        world.insert_resource(bevy::prelude::Messages::<PendingEffect>::default());
+        world.spawn((
+            NetObjectId(4242),
+            bevy::prelude::Transform::from_xyz(100.0, 200.0, 0.0),
+        ));
+        world.spawn((
+            NetObjectId(4243),
+            bevy::prelude::Transform::from_xyz(300.0, 200.0, 0.0),
+        ));
+        {
+            let mut msgs = world.resource_mut::<bevy::prelude::Messages<PendingEffect>>();
+            // 普通弓射（spell = 0）→ DefaultArrow；技能用 StraightShot 再验一条
+            msgs.write(crate::game::effects::range_attack_projectile(4243, 0));
+            msgs.write(crate::game::effects::range_attack_projectile(
+                4243,
+                mir2_shared::enums::Spell::StraightShot as u8,
+            ));
+        }
+        world
+            .run_system_once(spawn_pending_effects)
+            .expect("spawn_pending_effects 应能运行");
+        let mut mq = world.query::<&SpellMissileAnim>();
+        let missiles: Vec<&SpellMissileAnim> = mq.iter(&world).collect();
+        assert_eq!(
+            missiles.len(),
+            2,
+            "普通弓射 + StraightShot 各要生成一条箭矢帧动画实体（不是占位方块）"
+        );
+        let bases: Vec<usize> = missiles.iter().map(|m| m.base).collect();
+        assert!(
+            bases.contains(&1030),
+            "普通弓射必须是 Magic3[1030]（AttackRange1 的 case 5），实得 {bases:?}"
+        );
+        assert!(
+            bases.contains(&1210),
+            "StraightShot 必须是 Magic3[1210]（AttackRange2），实得 {bases:?}"
+        );
+        for m in &missiles {
+            assert_eq!(
+                m.library,
+                SpellFxLibrary::Magic3,
+                "远程攻击箭矢都在 Magic3 库"
+            );
+        }
     }
 
     /// B0001 接线门禁（P0，实机启动即崩挖出）：插件注册的五条特效系统放进同一调度

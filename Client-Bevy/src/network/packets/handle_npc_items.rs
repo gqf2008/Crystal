@@ -312,11 +312,30 @@ pub(crate) fn handle_npc_items(
         // #224：远程攻击（本地玩家 S.RangeAttack / 其他对象 S.ObjectRangeAttack）
         x if x == ServerPacketIds::RangeAttack as i16 => {
             if let Ok(p) = combat::RangeAttack::read_body(&mut cur) {
-                effects.write(PendingEffect::Projectile {
-                    target_id: p.target_id,
-                    color: crate::game::effects::spell_color(p.spell as u8),
-                });
-                tracing::info!("🏹 远程攻击: target={} spell={}", p.target_id, p.spell);
+                // 原版 `PlayerObject.cs` MirAction.AttackRange1/2/3：普通弓射 → `DefaultArrow`
+                // （Magic3[1030] ×5），技能（DoubleShot/StraightShot/…）各有自己的箭矢帧表。
+                // 表里没有的技能才退回占位方块（同一套降级链）。
+                let eff = crate::game::effects::range_attack_projectile(p.target_id, p.spell as u8);
+                effects.write(eff);
+                let fx = match eff {
+                    PendingEffect::Projectile { fx, .. } => fx,
+                    _ => None,
+                };
+                match fx {
+                    Some(m) => tracing::info!(
+                        "🏹 远程攻击弹道=原版 {:?}[{}] ×{}帧: target={} spell={}",
+                        m.library,
+                        m.base,
+                        m.frames,
+                        p.target_id,
+                        p.spell
+                    ),
+                    None => tracing::info!(
+                        "🏹 远程攻击: target={} spell={}（表未覆盖，退回占位弹道）",
+                        p.target_id,
+                        p.spell
+                    ),
+                }
             }
         }
         x if x == ServerPacketIds::ObjectRangeAttack as i16 => {
@@ -325,11 +344,11 @@ pub(crate) fn handle_npc_items(
                     object_id: p.object_id,
                     attack_type: p.attack_type,
                 });
-                effects.write(PendingEffect::ProjectileFromTo {
-                    source_id: p.object_id,
-                    destination_id: p.target_id,
-                    color: crate::game::effects::spell_color(p.spell as u8),
-                });
+                effects.write(crate::game::effects::object_range_attack_projectile(
+                    p.object_id,
+                    p.target_id,
+                    p.spell as u8,
+                ));
                 tracing::info!(
                     "🏹 对象远程攻击: id={} target={} spell={}",
                     p.object_id,

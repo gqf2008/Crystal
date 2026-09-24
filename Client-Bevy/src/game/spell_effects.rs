@@ -98,6 +98,25 @@ pub fn spell_missile(spell: Spell) -> Option<MissileFx> {
         .map(|(_, fx)| *fx)
 }
 
+/// 查表：**远程攻击**的弹道（原版 `MirAction.AttackRange1/2/3` 分支里的 `CreateProjectile`）。
+///
+/// - `spell == 0` = 普通弓射（C# `AttackRange1` 的 `case 5:`，无技能）→ `DefaultArrow`；
+/// - 其余按技能名查（StraightShot / DoubleShot / ElementalShot / SummonSnakes /
+///   Stonetrap / DelayedExplosion / CrippleShot / NapalmShot）。
+///
+/// 表里没有的技能返回 `None` → 调用方退回占位弹道（不静默）。
+pub fn range_missile(spell: u8) -> Option<MissileFx> {
+    let name = if spell == 0 {
+        "DefaultArrow".to_string()
+    } else {
+        format!("{:?}", Spell::try_from(spell).ok()?)
+    };
+    RANGE_MISSILE
+        .iter()
+        .find(|(n, _)| *n == name)
+        .map(|(_, fx)| *fx)
+}
+
 // ==== SPELL_FX_BEGIN（由 Client-Bevy/tools/spell_effects_from_csharp.py 生成，勿手改）====
 /// 原版施法特效表（`Client/MirObjects/PlayerObject.cs` MirAction.Spell 分支机械生成）
 #[rustfmt::skip]  // 生成块：保持每条一行，便于 diff 与 --write 幂等
@@ -189,6 +208,22 @@ pub const SPELL_MISSILE: &[(&str, MissileFx)] = &[
     ("MeteorShower", MissileFx { library: Magic, base: 410, frames: 6, frame_ms: 30, skip: 4 }),
 ];
 // ==== SPELL_MISSILE_END ====
+// ==== RANGE_MISSILE_BEGIN（由 Client-Bevy/tools/spell_effects_from_csharp.py 生成，勿手改）====
+/// 原版远程攻击弹道表（`Client/MirObjects/PlayerObject.cs` MirAction.AttackRange1/2/3 分支）
+/// `DefaultArrow` = 普通弓射（AttackRange1 的 `case 5:`，无技能）
+#[rustfmt::skip]  // 生成块：保持每条一行，便于 diff 与 --write 幂等
+pub const RANGE_MISSILE: &[(&str, MissileFx)] = &[
+    ("DefaultArrow", MissileFx { library: Magic3, base: 1030, frames: 5, frame_ms: 30, skip: 5 }),
+    ("StraightShot", MissileFx { library: Magic3, base: 1210, frames: 5, frame_ms: 30, skip: 5 }),
+    ("DoubleShot", MissileFx { library: Magic3, base: 1030, frames: 5, frame_ms: 30, skip: 5 }),
+    ("ElementalShot", MissileFx { library: Magic3, base: 1690, frames: 6, frame_ms: 30, skip: 4 }),
+    ("SummonSnakes", MissileFx { library: Magic3, base: 2750, frames: 5, frame_ms: 10, skip: 5 }),
+    ("Stonetrap", MissileFx { library: Magic3, base: 2750, frames: 5, frame_ms: 20, skip: 5 }),
+    ("DelayedExplosion", MissileFx { library: Magic3, base: 1030, frames: 5, frame_ms: 30, skip: 5 }),
+    ("CrippleShot", MissileFx { library: Magic3, base: 2330, frames: 5, frame_ms: 10, skip: 5 }),
+    ("NapalmShot", MissileFx { library: Magic3, base: 2530, frames: 6, frame_ms: 50, skip: 4 }),
+];
+// ==== RANGE_MISSILE_END ====
 
 /// 查表：按法术 + 朝向取该次施法要播的特效（原版每个 Spell 至少一条）
 pub fn spell_fx(spell: Spell, dir: u8) -> Option<SpellFx> {
@@ -272,6 +307,70 @@ mod tests {
             );
             assert!(fx.base < 6000, "{name} 起始帧越界: {}", fx.base);
         }
+    }
+
+    /// 门禁：**远程攻击**弹道表必须与原版 `MirAction.AttackRange1/2/3` 分支的
+    /// `CreateProjectile` 逐字段一致（`DefaultArrow` = 普通弓射的 `case 5:` 那条）。
+    ///
+    /// `CrippleShot` 的值按 C# 现场赋值解析：`1930 + exFrameStart`，`Spell.CrippleShot → 400`
+    /// ⇒ 2330（`PlayerObject.cs:2839-2841`）。
+    ///
+    /// 阳性对照（落地时实做）：把 `DefaultArrow` 的 base 改成 999 → 本测试立即红。
+    #[test]
+    fn range_missile_table_matches_csharp_attack_range() {
+        let cases = [
+            ("DefaultArrow", 1030usize, 5usize, 30u32, 5usize),
+            ("StraightShot", 1210, 5, 30, 5),
+            ("DoubleShot", 1030, 5, 30, 5),
+            ("ElementalShot", 1690, 6, 30, 4),
+            ("SummonSnakes", 2750, 5, 10, 5),
+            ("Stonetrap", 2750, 5, 20, 5),
+            ("DelayedExplosion", 1030, 5, 30, 5),
+            ("CrippleShot", 2330, 5, 10, 5),
+            ("NapalmShot", 2530, 6, 50, 4),
+        ];
+        assert_eq!(
+            RANGE_MISSILE.len(),
+            cases.len(),
+            "原版 AttackRange 分支共 9 条弓/箭矢弹道（1 条默认 + 8 个技能）"
+        );
+        for (name, base, frames, frame_ms, skip) in cases {
+            let (_, fx) = RANGE_MISSILE
+                .iter()
+                .find(|(n, _)| *n == name)
+                .unwrap_or_else(|| panic!("{name} 必须在远程弹道表里"));
+            assert_eq!(
+                (fx.library, fx.base, fx.frames, fx.frame_ms, fx.skip),
+                (SpellFxLibrary::Magic3, base, frames, frame_ms, skip),
+                "{name} 与原版 AttackRange CreateProjectile 不一致"
+            );
+        }
+    }
+
+    /// 门禁：远程弹道查表把 `spell == 0`（普通弓射）映射到 `DefaultArrow`，技能按枚举名映射，
+    /// 非远程技能（如表里没有的火球）返回 `None`（调用方据此退回占位弹道，不静默）。
+    ///
+    /// 阳性对照：把 `range_missile` 里 `spell == 0` 的特判删掉 → 本测试立即红。
+    #[test]
+    fn range_missile_lookup_covers_default_and_skills() {
+        assert_eq!(
+            range_missile(0).map(|m| m.base),
+            Some(1030),
+            "spell=0 = 普通弓射 → DefaultArrow[1030]"
+        );
+        assert_eq!(
+            range_missile(Spell::StraightShot as u8).map(|m| m.base),
+            Some(1210)
+        );
+        assert_eq!(
+            range_missile(Spell::ElementalShot as u8).map(|m| (m.base, m.frames)),
+            Some((1690, 6))
+        );
+        assert!(
+            range_missile(Spell::FireBall as u8).is_none(),
+            "火球不是远程攻击弹道（它在 MirAction.Spell 表里）"
+        );
+        assert!(range_missile(255).is_none(), "未知 spell 不应瞎映射");
     }
 
     /// 门禁（本轮核心）：表必须与原版 C# 对得上——抽几个有代表性的法术逐字段比对
