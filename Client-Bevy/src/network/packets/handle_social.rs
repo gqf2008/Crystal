@@ -647,6 +647,7 @@ pub(crate) fn handle_social(
                     effects.write(PendingEffect::Projectile {
                         target_id: tid,
                         color: [1.0, 0.6, 0.2],
+                        fx: None,
                     });
                 }
             }
@@ -684,6 +685,7 @@ pub(crate) fn handle_social(
                             source_id: p.object_id,
                             destination_id: p.target_id,
                             color,
+                            fx: None,
                         });
                     }
                 } else {
@@ -723,6 +725,7 @@ pub(crate) fn handle_social(
                     source_id: p.source,
                     destination_id: p.destination,
                     color: crate::game::effects::spell_color(p.spell as u8),
+                    fx: None,
                 });
                 tracing::info!(
                     "🎯 对象投射物: spell={:?} src={} dst={}",

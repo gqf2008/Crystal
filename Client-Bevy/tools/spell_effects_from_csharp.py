@@ -20,6 +20,8 @@ OUT_MARK_BEGIN = "// ==== SPELL_FX_BEGIN"
 OUT_MARK_END = "// ==== SPELL_FX_END ===="
 OUT_MISSILE_BEGIN = "// ==== SPELL_MISSILE_BEGIN"
 OUT_MISSILE_END = "// ==== SPELL_MISSILE_END ===="
+OUT_RANGE_BEGIN = "// ==== RANGE_MISSILE_BEGIN"
+OUT_RANGE_END = "// ==== RANGE_MISSILE_END ===="
 
 
 def parse(text):
@@ -96,6 +98,90 @@ def render_missiles(rows):
     return "\n".join(lines)
 
 
+def parse_range_missiles(text):
+    """抓 `MirAction.AttackRange{1,2,3}` 分支里的 `CreateProjectile`（弓/箭矢远程弹道）。
+
+    与 MirAction.Spell 分支不同，这里有两层 switch：外层 FrameIndex、内层 `switch (Spell)`。
+    必须做花括号深度跟踪，否则 `case Spell.Focus:` 之后的**普通弓射默认箭**
+    （`case 5: CreateProjectile(1030, ...)`，在 Spell switch 之外）会被误记到 Focus 名下。
+
+    `1930 + exFrameStart` 按 C# 现场赋值解析：`Spell.PoisonShot → 200`、`Spell.CrippleShot → 400`
+    （`PlayerObject.cs:2839-2841`）。
+    """
+    lines = text.split("\n")
+    depth = 0
+    action = None
+    spell_switch_depth = None   # 进入 `switch (Spell)` 后的深度
+    spell_switch_pending = False  # C# 是 Allman 风格：`switch (Spell)` 与 `{` 不在同一行
+    spell = None
+    out = []
+    for ln in lines:
+        stripped = ln.strip()
+        opens = ln.count("{")
+        closes = ln.count("}")
+
+        m = re.search(r"case MirAction\.(\w+):", ln)
+        if m:
+            action = m.group(1)
+            spell = None
+            spell_switch_depth = None
+        elif re.search(r"switch\s*\(\s*Spell\s*\)", ln):
+            spell_switch_pending = True
+            spell = None
+        elif stripped.startswith("case ") and spell_switch_depth is not None and depth == spell_switch_depth:
+            ms = re.match(r"case Spell\.(\w+):", stripped)
+            spell = ms.group(1) if ms else None
+
+        if spell_switch_depth is not None and depth < spell_switch_depth:
+            spell_switch_depth = None
+            spell = None
+
+        if spell_switch_pending and "{" in ln:
+            spell_switch_depth = depth + opens
+            spell_switch_pending = False
+
+        if action and action.startswith("AttackRange"):
+            mp = re.search(
+                r"CreateProjectile\(\s*([^,]+),\s*Libraries\.(\w+),\s*(?:true|false),\s*(\d+),\s*(\d+),\s*(\d+)",
+                ln,
+            )
+            if mp:
+                expr = mp.group(1).strip()
+                base = None
+                if expr.isdigit():
+                    base = int(expr)
+                else:
+                    m2 = re.fullmatch(r"(\d+)\s*\+\s*exFrameStart", expr)
+                    if m2:
+                        ex = {"PoisonShot": 200, "CrippleShot": 400}.get(spell or "", 0)
+                        base = int(m2.group(1)) + ex
+                if base is not None:
+                    key = spell if spell else "DefaultArrow"
+                    if not any(k == key for k, *_ in out):
+                        out.append(
+                            (key, mp.group(2), base, int(mp.group(3)), int(mp.group(4)), int(mp.group(5)))
+                        )
+
+        depth += opens - closes
+    return out
+
+
+def render_range_missiles(rows):
+    lines = [OUT_RANGE_BEGIN + "（由 Client-Bevy/tools/spell_effects_from_csharp.py 生成，勿手改）===="]
+    lines.append("/// 原版远程攻击弹道表（`Client/MirObjects/PlayerObject.cs` MirAction.AttackRange1/2/3 分支）")
+    lines.append("/// `DefaultArrow` = 普通弓射（AttackRange1 的 `case 5:`，无技能）")
+    lines.append("#[rustfmt::skip]  // 生成块：保持每条一行，便于 diff 与 --write 幂等")
+    lines.append("pub const RANGE_MISSILE: &[(&str, MissileFx)] = &[")
+    for spell, lib, base, count, interval, skip in rows:
+        lines.append(
+            "    (\"%s\", MissileFx { library: %s, base: %d, frames: %d, frame_ms: %d, skip: %d }),"
+            % (spell, lib, base, count, interval, skip)
+        )
+    lines.append("];")
+    lines.append(OUT_RANGE_END)
+    return "\n".join(lines)
+
+
 def rust_entries(rows):
     entries = []
     for spell, lib, st, frames, interval in rows:
@@ -137,10 +223,16 @@ def main():
     block = render(entries)
     missiles = parse_missiles(text)
     missile_block = render_missiles(missiles)
-    print("# C# MirAction.Spell 分支共 %d 条 Effect，其中魔法库条目 %d 条；施法弹道 %d 条" % (len(rows), len(entries), len(missiles)))
+    ranges = parse_range_missiles(text)
+    range_block = render_range_missiles(ranges)
+    print(
+        "# C# MirAction.Spell 分支共 %d 条 Effect，其中魔法库条目 %d 条；施法弹道 %d 条；远程攻击弹道 %d 条"
+        % (len(rows), len(entries), len(missiles), len(ranges))
+    )
     if not a.write:
         print(block)
         print(missile_block)
+        print(range_block)
         return
     out = Path("Client-Bevy/src/game/spell_effects.rs")
     txt = out.read_text(encoding="utf-8")
@@ -150,7 +242,14 @@ def main():
     i = txt.index(OUT_MISSILE_BEGIN)
     j = txt.index(OUT_MISSILE_END) + len(OUT_MISSILE_END)
     out.write_text(txt[:i] + missile_block + txt[j:], encoding="utf-8")
-    print("# 已写回 %s（特效 %d 条 / 弹道 %d 条）" % (out, len(entries), len(missiles)))
+    txt = out.read_text(encoding="utf-8")
+    i = txt.index(OUT_RANGE_BEGIN)
+    j = txt.index(OUT_RANGE_END) + len(OUT_RANGE_END)
+    out.write_text(txt[:i] + range_block + txt[j:], encoding="utf-8")
+    print(
+        "# 已写回 %s（特效 %d 条 / 施法弹道 %d 条 / 远程弹道 %d 条）"
+        % (out, len(entries), len(missiles), len(ranges))
+    )
 
 
 if __name__ == "__main__":
