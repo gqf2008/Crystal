@@ -272,6 +272,14 @@ pub struct AlwaysVisible;
 #[derive(Component)]
 pub struct NotDraggable;
 
+/// 「按下这里不起拖」的子区域（**相对所属 `DialogRoot` 面板左上角**的 x/y/w/h）。
+///
+/// 用途：**自算命中的列表/滚动区**。邮件列表行不是 `Button`（`mail_ui_system` 自己按行矩形判命中），
+/// 于是「按在某一行上、手抖轻微移动」会被 `dialog_drag_system` 当成拖整窗（#3106 残留③）。
+/// 给面板挂上本组件即声明「这块矩形内的按下不发起拖动」，其余区域（标题栏等）照旧可拖。
+#[derive(Component, Clone, Copy, Debug)]
+pub struct DragBlockArea(pub (f32, f32, f32, f32));
+
 /// 状态驱动窗口的统一桥接：服务端/脚本状态变化时同步管理栈，
 /// 让通用显隐兜底、世界输入锁与 z 序使用同一真值。
 pub fn sync_dialog_state(mgr: &mut DialogManager, kind: DialogKind, visible: bool) {
@@ -561,6 +569,7 @@ mod tests {
     /// #2797 单元②：`NotDraggable` 的根（C# `Movable = false`，如 Buff 窗）不参与拖动
     #[test]
     fn not_draggable_root_is_ignored_by_drag_system() {
+        // （见本测试下方的 `drag_block_area_suppresses_accidental_window_drag`：那条覆盖 #3106 残留③）
         let mut world = World::new();
         let mut window = Window::default();
         window.set_cursor_position(Some(Vec2::new(10.0, 10.0)));
@@ -608,6 +617,84 @@ mod tests {
         let node = world.entity(panel).get::<Node>().unwrap().clone();
         assert_eq!(node.left, Val::Px(0.0));
         assert_eq!(node.top, Val::Px(0.0));
+    }
+
+    /// #3106 残留③：挂了 [`DragBlockArea`] 的区域按下**不得**发起拖动（自算命中列表行的误拖），
+    /// 同一面板的其它区域（标题栏）仍必须能拖。
+    ///
+    /// 阳性对照写在同一条测试里：**去掉 `DragBlockArea` 后**，同一坐标按下会起拖（第三条断言）
+    /// ——证明这道门禁真的能红。
+    #[test]
+    fn drag_block_area_suppresses_accidental_window_drag() {
+        fn build(with_block: bool) -> World {
+            let mut world = World::new();
+            let mut window = Window::default();
+            window.set_cursor_position(Some(Vec2::new(150.0, 200.0))); // 落在列表行区域
+            world.spawn((window, PrimaryWindow));
+            let mut mouse = ButtonInput::<MouseButton>::default();
+            mouse.press(MouseButton::Left);
+            world.insert_resource(mouse);
+            world.insert_resource(DialogDrag::default());
+            world.insert_resource(crate::game::dialogs::inventory::InventoryOrigin(0.0, 0.0));
+            let mut panel = world.spawn((
+                DialogRoot(DialogKind::Mail),
+                Visibility::Visible,
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: Val::Px(100.0),
+                    top: Val::Px(100.0),
+                    width: Val::Px(312.0),
+                    height: Val::Px(444.0),
+                    ..default()
+                },
+                GlobalZIndex(30),
+            ));
+            if with_block {
+                // 邮件列表行区域：相对面板 (10,58) 290×330（与 mail.rs 的 UiScrollList 同矩形）
+                panel.insert(DragBlockArea((10.0, 58.0, 290.0, 330.0)));
+            }
+            world
+        }
+        fn move_cursor(world: &mut World, x: f32, y: f32) {
+            let mut windows = world.query_filtered::<&mut Window, With<PrimaryWindow>>();
+            for mut w in windows.iter_mut(world) {
+                w.set_cursor_position(Some(Vec2::new(x, y)));
+            }
+        }
+
+        // ① 块内按下 → 不起拖
+        let mut world = build(true);
+        world
+            .run_system_once(dialog_drag_system)
+            .expect("drag 系统应运行");
+        assert_eq!(
+            world.resource::<DialogDrag>().dragging,
+            None,
+            "列表行区域按下不得起拖（选信时的按下+轻微移动不该拖整窗）"
+        );
+
+        // ② 同一面板标题栏（块外）按下 → 仍要能拖
+        let mut world = build(true);
+        move_cursor(&mut world, 150.0, 110.0);
+        world
+            .run_system_once(dialog_drag_system)
+            .expect("drag 系统应运行");
+        assert_eq!(
+            world.resource::<DialogDrag>().dragging,
+            Some(DialogKind::Mail),
+            "标题栏仍必须可拖（守卫不能把整窗拖死）"
+        );
+
+        // ③ 阳性对照：没有 DragBlockArea 时，同一坐标会起拖
+        let mut world = build(false);
+        world
+            .run_system_once(dialog_drag_system)
+            .expect("drag 系统应运行");
+        assert_eq!(
+            world.resource::<DialogDrag>().dragging,
+            Some(DialogKind::Mail),
+            "阳性对照：无守卫时列表区按下会误拖（说明这条门禁能红）"
+        );
     }
 
     /// bevy_ui 拖拽：点中根面板（非按钮）→ 拖动 Node.left/top；第二帧移动鼠标 →
@@ -1184,6 +1271,9 @@ pub fn dialog_drag_system(
     mouse: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window>,
     buttons: Query<&Interaction, With<Button>>,
+    // 「按下不起拖」区域（只读 DialogRoot/可见性/矩形；**不碰 Node**，
+    // 否则与上面 `&mut Node` 的 dialogs 查询构成 B0001 冲突）
+    drag_blocks: Query<(&DialogRoot, &DragBlockArea, &Visibility)>,
     // #2797 单元②：C# `Movable = false` 的窗口（`NotDraggable`）不参与拖动/包围盒
     mut dialogs: Query<
         (Entity, &DialogRoot, &Visibility, &mut Node, &GlobalZIndex),
@@ -1232,6 +1322,24 @@ pub fn dialog_drag_system(
                 }
             }
             if let Some((kind, _)) = top {
+                // #3106 残留③：自算命中的列表区（如邮件列表行）按下时不起拖——
+                // 否则「选一封邮件」的按下+轻微移动会把整窗拖走。
+                let on_blocked = boxes.get(&kind).is_some_and(|(minx, miny, _, _, _)| {
+                    drag_blocks.iter().any(|(root, area, vis)| {
+                        if root.0 != kind || *vis != Visibility::Visible {
+                            return false;
+                        }
+                        let (bx, by, bw, bh) = area.0;
+                        let (x0, y0) = (minx + bx, miny + by);
+                        cursor.x >= x0
+                            && cursor.x <= x0 + bw
+                            && cursor.y >= y0
+                            && cursor.y <= y0 + bh
+                    })
+                });
+                if on_blocked {
+                    return;
+                }
                 let roots: Vec<Entity> = dialogs
                     .iter()
                     .filter(|(_, r, v, _, _)| *v == Visibility::Visible && r.0 == kind)
