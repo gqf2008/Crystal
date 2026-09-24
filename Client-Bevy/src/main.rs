@@ -90,6 +90,11 @@ fn main() {
             .unwrap_or(default_title)
     };
     let mut app = App::new();
+    // 渲染错误策略必须在 DefaultPlugins 之前装：RenderPlugin::build 走的是
+    // `init_resource::<RenderErrorHandler>()`，先插入者胜出。覆盖它只为一件事——
+    // 「最小化窗口」触发的那次可恢复表面配置失败不再退进程（bevy 默认策略对任何
+    // RenderError 都 AppExit::error()）。详见 src/render_error.rs。
+    client_bevy::render_error::install(&mut app);
     app.add_plugins(
         DefaultPlugins
             // assets 目录运行时解析：exe 相对优先（发布），编译期 manifest 回退（开发）
