@@ -33,6 +33,10 @@ OP_LOGOUT = 9
 # 别拿 13 去过滤收包（2026-09-24 在存储降级演练里踩过：过滤了 13，78 条 opcode=30 全被漏掉）。
 OP_CHAT = 30          # ServerPacketIds::Chat（SharedRust/src/enums.rs）
 CHAT_TYPE_SYSTEM = 5  # ChatType::System
+# 移动类（ClientPacketIds，SharedRust/src/enums.rs）：Turn=10 Walk=11 Run=12；body 只有 1 字节方向
+OP_TURN = 10
+OP_WALK = 11
+OP_RUN = 12
 XOR_KEY = 0xAA  # gate/codec.rs::DEFAULT_XOR_KEY
 
 
@@ -139,7 +143,8 @@ def drain(sock: socket.socket, stop: threading.Event, out: dict) -> None:
 
 def one_session(idx: int, host: str, port: int, account: str, password: str,
                 login_only: bool, hold_sec: float, timeout: float,
-                self_provision: bool = False, char_name: str = '') -> dict:
+                self_provision: bool = False, char_name: str = '',
+                activity: str = 'none', step_ms: int = 600) -> dict:
     t0 = time.time()
     res = {"idx": idx, "account": account, "ok": False, "stage": "connect",
            "frames": 0, "bytes": 0}
@@ -234,15 +239,41 @@ def one_session(idx: int, host: str, port: int, account: str, password: str,
         stop = threading.Event()
         reader = threading.Thread(target=drain, args=(sock, stop, res), daemon=True)
         reader.start()
-        # 进图后保持会话：定期发 KeepAlive（服务端按心跳判活）
-        for _ in range(max(1, int(hold_sec / 5))):
-            time.sleep(min(5, hold_sec))
+        # 进图后保持会话：定期发 KeepAlive（服务端按心跳判活），并按 `--activity` 走位/奔跑。
+        #
+        # 为什么要"活动负载"：纯保持连接几乎不产生**视野扇出**——真玩家每成功走一步都会
+        # `send_user_location` + 向同图其它会话广播 `ObjectWalk`，20 个同图玩家走动时的扇出
+        # 是"零活动"压不出来的（CAPACITY.md §6.1/§6.2 要判的就是这条路径）。
+        #
+        # 步频：默认 600ms = C# `HumanObject` MoveDelay（真玩家走速）；服务端下限
+        # `MIN_MOVE_INTERVAL_MS=50`（`ServerRust/src/actors/world/session.rs:1727`），
+        # 低于它会被判 `Speed hack detected` 并拒绝移动，所以 `--step-ms` 不该小于 60。
+        dirs = [2, 4, 6, 0]  # 右→下→左→上（MirDirection：Up=0 UpRight=1 Right=2 DownRight=3 Down=4 DownLeft=5 Left=6 UpLeft=7）
+        steps = 0
+        next_move = time.time()
+        last_keepalive = time.time()
+        deadline = time.time() + hold_sec
+        while time.time() < deadline:
             if stop.is_set():
                 break
-            try:
-                sock.sendall(frame(OP_KEEPALIVE, b""))
-            except Exception:
-                break
+            now = time.time()
+            if activity != 'none' and now >= next_move:
+                op = OP_RUN if activity == 'run' else OP_WALK
+                try:
+                    sock.sendall(frame(op, bytes([dirs[steps % len(dirs)]])))
+                    steps += 1
+                except Exception:
+                    break
+                next_move = now + max(0.02, step_ms / 1000.0)
+                continue
+            if now - last_keepalive >= 5:
+                try:
+                    sock.sendall(frame(OP_KEEPALIVE, b""))
+                except Exception:
+                    break
+                last_keepalive = now
+            time.sleep(0.02)
+        res["steps_sent"] = steps
         res["held_sec"] = round(time.time() - t0, 2)
         stop.set()
         # 先缩短超时再 join：drain 还阻塞在 recv 时主线程 close 会撞出 WinError 10038（假失败）
@@ -286,6 +317,11 @@ def main() -> int:
     ap.add_argument("--accounts", default="", help="逗号分隔账号（默认用下面 prefix+序号）")
     ap.add_argument("--account-prefix", default="smoke")
     ap.add_argument("--password", default="123456")
+    ap.add_argument("--activity", choices=["none", "walk", "run"], default="none",
+                    help="进图后的活动负载：none=只保持连接；walk/run=按 --step-ms 走位/奔跑"
+                         "（真玩家每步都会触发 UserLocation + 同图视野广播，是纯保持压不出的扇出路径）")
+    ap.add_argument("--step-ms", type=int, default=600,
+                    help="走位间隔毫秒（默认 600 = C# HumanObject MoveDelay；服务端下限 50ms，低于它判 speed hack）")
     a = ap.parse_args()
 
     accounts = [x for x in a.accounts.split(",") if x] or \
@@ -297,7 +333,8 @@ def main() -> int:
     def run(i: int) -> None:
         results[i] = one_session(i, a.host, a.port, accounts[i], a.password,
                                  a.login_only, a.hold, a.timeout,
-                                 a.self_provision, f"{a.char_prefix}{i}")
+                                 a.self_provision, f"{a.char_prefix}{i}",
+                                 a.activity, a.step_ms)
 
     threads = [threading.Thread(target=run, args=(i,)) for i in range(len(accounts))]
     for t in threads:
@@ -318,6 +355,11 @@ def main() -> int:
         "login_only": a.login_only,
         "self_provision": a.self_provision,
         "hold_sec": a.hold,
+        "activity": a.activity,
+        "step_ms": a.step_ms,
+        "steps_sent": sum(r.get("steps_sent", 0) for r in results if r),
+        "frames_recv": sum(r.get("frames", 0) for r in results if r),
+        "bytes_recv": sum(r.get("bytes", 0) for r in results if r),
     }
     print(json.dumps({"summary": summary, "sessions": results}, ensure_ascii=False))
     return 0 if len(ok) == len(accounts) else 1
