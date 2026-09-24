@@ -662,6 +662,9 @@ struct ControlQueries<'w, 's> {
     spell_fx: Query<'w, 's, &'static crate::game::spell_effects::SpellFxAnim>,
     /// `spell_fx_probe` 用：渲染侧存活的施法/远程弹道（库/起始帧/帧数）
     spell_missiles: Query<'w, 's, &'static crate::game::effects::SpellMissileAnim>,
+    /// `spell_fx_probe` 用：渲染侧存活的**对象特效**（`S.ObjectEffect` → 真帧动画；
+    /// 用于实机取证「护盾/治疗/传送…到底画了什么」，此前这是纯色方块）
+    object_fx: Query<'w, 's, &'static crate::game::effects::ObjectFxAnim>,
     /// dialog_rect RPC：物理→逻辑坐标换算用的窗口 scale_factor
     primary_window: Query<'w, 's, &'static Window, With<PrimaryWindow>>,
     /// dialog_rect 诊断：任意实体的 Visibility 读取（关闭钮祖先链诊断）
@@ -2615,6 +2618,17 @@ fn apply_control_commands(
                         0,
                         m.frames,
                         (m.frame_ms * 1000.0) as usize,
+                    ));
+                }
+                // 对象特效：kind 里带上 `SpellEffect` 枚举名，夹具据此判断「哪一类特效被画了」
+                for f in q.object_fx.iter() {
+                    rows.push((
+                        format!("object:{}", f.name),
+                        format!("{:?}", f.lib),
+                        f.base as u64,
+                        f.follow_object_id as u64,
+                        f.frames,
+                        (f.dur * 1000.0) as usize,
                     ));
                 }
                 rows.sort();

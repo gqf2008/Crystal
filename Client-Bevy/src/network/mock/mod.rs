@@ -1836,6 +1836,21 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                                 time: 500,
                                             },
                                         );
+                                        // 对象特效「真帧动画」的实机取证锚点（`tools/acceptance/l5w_object_fx.ps1`）：
+                                        // 上面那条 `Critical` 在 C# 里是**注释掉的 case**（表里空切片 →
+                                        // 明确不画），这里补一条**循环**的护盾光环（原版 `Repeat = true`，
+                                        // 直到 MagicShieldDown 才清），夹具才能在跨轮询里稳定观察到
+                                        // 「渲染侧真的在播 Magic[3890] 那 3 帧」而不是一次一闪而过。
+                                        send(
+                                            &to_client,
+                                            &server::magic_combat::ObjectEffect {
+                                                object_id: 100,
+                                                effect: mir2_shared::enums::SpellEffect::MagicShieldUp,
+                                                effect_type: 0,
+                                                delay_time: 0,
+                                                time: 0,
+                                            },
+                                        );
                                         send(
                                             &to_client,
                                             &server::combat::ObjectRangeAttack {

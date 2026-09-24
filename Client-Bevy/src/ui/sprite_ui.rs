@@ -10,7 +10,7 @@ use bevy::prelude::*;
 use bevy::sprite::Anchor;
 
 use crate::map_renderer::{make_image, GameLibraries};
-use crate::resources::libraries::LibraryName;
+use crate::resources::libraries::{ArrayLibType, LibraryName};
 
 #[derive(Resource, Clone, Default)]
 pub struct UiFont(pub Handle<Font>);
@@ -233,6 +233,9 @@ pub fn ui_enabled(subsystem: &str) -> bool {
 #[derive(Resource, Default)]
 pub struct UiImageCache {
     pub map: HashMap<(u8, usize), Handle<Image>>,
+    /// 数组库（怪物/NPC/装备…）缓存：`(ArrayLibType, 库索引, 帧)` → 句柄。
+    /// 与扁平库分开存，避免两套索引空间互相覆盖。
+    pub array_map: HashMap<(u8, usize, usize), Handle<Image>>,
 }
 
 /// 标记所有 UI 精灵/文本/按钮，退出场景时统一清理
@@ -342,6 +345,35 @@ pub fn ui_image(
     }
     let handle = images.add(make_image(rgba, w, h));
     cache.map.insert(key, handle.clone());
+    Some(handle)
+}
+
+/// 按**数组库**+索引加载图像（缓存），返回句柄。
+///
+/// `ui_image` 只覆盖扁平库；怪物库的特效帧（`S.ObjectEffect` 里
+/// `Libraries.Monsters[(ushort)Monster.X]` 那些：冰柱/天罚/石像/龟王/巨兽/狐灵…）
+/// 必须走数组库，索引 = `Monster` 枚举值（与 actor 渲染的 `SpriteLayer.slot` 同源）。
+pub fn ui_array_image(
+    libs: &mut GameLibraries,
+    images: &mut Assets<Image>,
+    cache: &mut UiImageCache,
+    ty: ArrayLibType,
+    index: usize,
+    image_index: usize,
+) -> Option<Handle<Image>> {
+    let key = (ty as u8, index, image_index);
+    if let Some(h) = cache.array_map.get(&key) {
+        return Some(h.clone());
+    }
+    let info = libs.0.get_array_image(ty, index, image_index)?;
+    let rgba = info.rgba.clone()?;
+    let w = info.width.max(0) as u32;
+    let h = info.height.max(0) as u32;
+    if w == 0 || h == 0 {
+        return None;
+    }
+    let handle = images.add(make_image(rgba, w, h));
+    cache.array_map.insert(key, handle.clone());
     Some(handle)
 }
 

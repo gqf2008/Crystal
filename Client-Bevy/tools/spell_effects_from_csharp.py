@@ -14,6 +14,7 @@ import re
 from pathlib import Path
 
 CS = Path("Client/MirObjects/PlayerObject.cs")
+GS = Path("Client/MirScenes/GameScene.cs")
 BEGIN_MARK = "case Spell.FireBall:"
 END_MARK = "case MirAction.Dead:"
 OUT_MARK_BEGIN = "// ==== SPELL_FX_BEGIN"
@@ -22,6 +23,11 @@ OUT_MISSILE_BEGIN = "// ==== SPELL_MISSILE_BEGIN"
 OUT_MISSILE_END = "// ==== SPELL_MISSILE_END ===="
 OUT_RANGE_BEGIN = "// ==== RANGE_MISSILE_BEGIN"
 OUT_RANGE_END = "// ==== RANGE_MISSILE_END ===="
+OUT_OBJECT_BEGIN = "// ==== OBJECT_FX_BEGIN"
+OUT_OBJECT_END = "// ==== OBJECT_FX_END ===="
+# `S.ObjectEffect` 的处理在 GameScene.cs 的 ObjectEffect 方法里，到 RangeAttack 为止
+OBJ_BEGIN_MARK = "private void ObjectEffect(S.ObjectEffect p)"
+OBJ_END_MARK = "private void RangeAttack(S.RangeAttack p)"
 
 
 def parse(text):
@@ -213,6 +219,220 @@ def render(entries):
     return "\n".join(lines)
 
 
+def _call_args(stmt, call):
+    """取出 `new <call>(...)` 的实参列表（按顶层逗号切分）。找不到返回 None。"""
+    key = "new %s(" % call
+    i = stmt.find(key)
+    if i < 0:
+        return None
+    j = i + len(key)
+    depth = 1
+    k = j
+    while k < len(stmt) and depth > 0:
+        c = stmt[k]
+        if c in "([{":
+            depth += 1
+        elif c in ")]}":
+            depth -= 1
+        k += 1
+    inner = stmt[j : k - 1]
+    args, cur, d = [], "", 0
+    for c in inner:
+        if c in "([{":
+            d += 1
+        elif c in ")]}":
+            d -= 1
+        if c == "," and d == 0:
+            args.append(cur.strip())
+            cur = ""
+        else:
+            cur += c
+    if cur.strip():
+        args.append(cur.strip())
+    return args
+
+
+def _object_fx_start(expr):
+    """C# 起始帧表达式 → Rust 字段。**未支持的形式直接报错**，绝不静默丢条目。"""
+    e = re.sub(r"\s+", " ", expr.strip())
+    if e.isdigit():
+        return {"start": int(e)}
+    m = re.fullmatch(r"(\d+) \+ \(\(int\)p\.EffectType \* (\d+)\)", e)
+    if m:
+        return {"start": int(m.group(1)), "step_effect_type": int(m.group(2))}
+    m = re.fullmatch(r"(\d+) \+ \(\(int\)ob\.Direction \* (\d+)\)", e)
+    if m:
+        return {"start": int(m.group(1)), "dir_step": int(m.group(2))}
+    m = re.fullmatch(r"(\d+) \+ \(CMain\.Random\.Next\((\d+)\) \* (\d+)\)", e)
+    if m:
+        return {
+            "start": int(m.group(1)),
+            "rand_step": int(m.group(3)),
+            "rand_count": int(m.group(2)),
+        }
+    m = re.fullmatch(r"CMain\.Random\.Next\((\d+)\) == 0 \? (\d+) : (\d+)", e)
+    if m:
+        n, lo, hi = int(m.group(1)), int(m.group(2)), int(m.group(3))
+        return {"start": lo, "rand_step": hi - lo, "rand_count": n}
+    raise ValueError("GameScene.ObjectEffect 出现未支持的起始帧表达式: %r" % expr)
+
+
+def _build_object_entry(case, stmt, cond):
+    """一条 `new Effect(...)` / `new DelayedExplosionEffect(...)` → Rust 字段串。"""
+    call = (
+        "DelayedExplosionEffect"
+        if "new DelayedExplosionEffect(" in stmt
+        else "Effect"
+    )
+    args = _call_args(stmt, call)
+    if args is None or len(args) < 5:
+        raise ValueError("无法解析 %s 的 %s 实参: %r" % (case, call, stmt))
+    m = re.search(r"Libraries\.Monsters\[\(ushort\)Monster\.(\w+)\]", stmt)
+    if m:
+        fields = ["lib: FxLib::Monster(Monster::%s)" % m.group(1)]
+    else:
+        ml = re.search(r"Libraries\.(\w+)", stmt)
+        if not ml:
+            raise ValueError("无法解析库: %r" % stmt)
+        fields = ["lib: FxLib::Flat(%s)" % ml.group(1)]
+    fields += ["%s: %s" % (k, v) for k, v in _object_fx_start(args[1]).items()]
+    if not args[2].isdigit():
+        raise ValueError("帧数不是字面量: %r" % args[2])
+    fields.append("frames: %s" % args[2])
+    if args[3].isdigit():
+        fields.append("interval_ms: %s" % args[3])
+    elif "Frame.Count * FrameInterval" in args[3]:
+        fields.append("interval_ms: 0")
+    else:
+        raise ValueError("时长表达式未支持: %r" % args[3])
+    if "Blend = false" in stmt:
+        fields.append("blend: false")
+    if cond == "zero":
+        fields.append("when: FxWhen::EffectTypeZero")
+    elif cond == "non_zero":
+        fields.append("when: FxWhen::EffectTypeNonZero")
+    if "Repeat = true" in stmt:
+        group = {
+            "MagicShieldUp": "MagicShield",
+            "ElementalBarrierUp": "ElementalBarrier",
+        }.get(case)
+        if group is None:
+            raise ValueError("Repeat = true 但光环分组未知: %s" % case)
+        fields.append("repeat: FxRepeat::UntilDown(AuraGroup::%s)" % group)
+    if "Repeat = p.Time > 0" in stmt:
+        fields.append("repeat: FxRepeat::PacketTime")
+    if call == "DelayedExplosionEffect":
+        fields.append("repeat: FxRepeat::StageNot2")
+    if "ob2.Effects.Add" in stmt:
+        fields.append("target: FxTarget::EffectType")
+    elif "ob.CurrentLocation" in stmt:
+        fields.append("target: FxTarget::OwnerLocation")
+    if "CMain.Time + p.DelayTime" in stmt:
+        fields.append("delay_from_packet: true")
+    fields.append("..ObjectFx::DEFAULT")
+    return ", ".join(fields)
+
+
+def parse_object_effects(text):
+    """抓 `GameScene.cs` 的 `ObjectEffect(S.ObjectEffect p)` switch。
+
+    返回 `([(case 名, [字段串...])...], {case 名: 备注})`。
+
+    两个 C# 分支形态在这里被显式处理（不处理就报错）：
+    - `if (p.EffectType == 0) { ... } else { ... }`（KingGuard 的 753/763）→ `FxWhen`；
+    - `DelayedExplosion` 的 `if (effectid < 0)` / `else if (effectid >= 0)` 两条语句
+      **是二选一**（不是两条同播）：只保留按 stage 取帧段的那条，另一条是 stage=0 的等价表现。
+    """
+    lines = text.split("\n")
+    start = next(i for i, l in enumerate(lines) if OBJ_BEGIN_MARK in l)
+    end = next(i for i, l in enumerate(lines) if i > start and OBJ_END_MARK in l)
+    body = lines[start:end]
+    cases = []
+    notes = {}
+    cur = None
+    cond = None
+    i = 0
+    while i < len(body):
+        # 先剥行尾注释：Critical 的 `//ob.Effects.Add(new Effect(...));` 是**被注释掉的**
+        # 代码，不剥会把一条 C# 明确不画的特效抓成表项（且 CustomEffects 不是合法库名）。
+        ln = body[i].split("//", 1)[0]
+        m = re.search(r"case SpellEffect\.(\w+):", ln)
+        if m:
+            cur = m.group(1)
+            cond = None
+            cases.append((cur, []))
+            i += 1
+            continue
+        if re.search(r"if \(p\.EffectType == 0\)", ln):
+            cond = "zero"
+            i += 1
+            continue
+        if ln.strip() == "else" and cond == "zero":
+            cond = "non_zero"
+            i += 1
+            continue
+        if "if (effectid < 0)" in ln:
+            cond = "delayed_no_prior"
+            i += 1
+            continue
+        if "else if (effectid >= 0)" in ln:
+            cond = "delayed_prior"
+            i += 1
+            continue
+        if "new Effect(" in ln or "new DelayedExplosionEffect(" in ln:
+            stmt = ln.strip()
+            depth = stmt.count("(") - stmt.count(")")
+            braces = stmt.count("{") - stmt.count("}")
+            while depth > 0 or braces > 0 or not stmt.endswith(";"):
+                i += 1
+                if i >= len(body):
+                    raise ValueError("ObjectEffect 语句未闭合: %r" % stmt)
+                nxt = body[i].split("//", 1)[0].strip()
+                stmt += " " + nxt
+                depth += nxt.count("(") - nxt.count(")")
+                braces += nxt.count("{") - nxt.count("}")
+            if cur is not None:
+                if cond == "delayed_no_prior":
+                    notes[cur] = (
+                        "C# 的 `effectid < 0` 支路是同一段动画的 stage=0"
+                        "（本端按 stage 取帧段，effect_type=0 时帧段相同），故只保留 stage 那条"
+                    )
+                else:
+                    cases[-1][1].append(_build_object_entry(cur, stmt, cond))
+            i += 1
+            continue
+        i += 1
+    return cases, notes
+
+
+def render_object_effects(cases, notes):
+    lines = [
+        OUT_OBJECT_BEGIN
+        + "（由 Client-Bevy/tools/spell_effects_from_csharp.py 生成，勿手改）===="
+    ]
+    lines.append(
+        "/// 原版对象特效表（`Client/MirScenes/GameScene.cs` 的 `ObjectEffect` switch 机械生成）"
+    )
+    lines.append(
+        "/// 空切片 = C# 明确不画；表里没有的名字 = C# 没有这个 case（调用方才退回占位表现）"
+    )
+    lines.append("#[rustfmt::skip]  // 生成块：保持每条一行，便于 diff 与 --write 幂等")
+    lines.append("pub const OBJECT_FX: &[(&str, &[ObjectFx])] = &[")
+    for name, entries in cases:
+        if name in notes:
+            lines.append("    // %s：%s" % (name, notes[name]))
+        if not entries:
+            lines.append('    ("%s", &[]),' % name)
+            continue
+        lines.append('    ("%s", &[' % name)
+        for e in entries:
+            lines.append("        ObjectFx { %s }," % e)
+        lines.append("    ]),")
+    lines.append("];")
+    lines.append(OUT_OBJECT_END)
+    return "\n".join(lines)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--write", action="store_true")
@@ -225,14 +445,23 @@ def main():
     missile_block = render_missiles(missiles)
     ranges = parse_range_missiles(text)
     range_block = render_range_missiles(ranges)
+    gs_text = GS.read_text(encoding="utf-8", errors="replace")
+    obj_cases, obj_notes = parse_object_effects(gs_text)
+    obj_block = render_object_effects(obj_cases, obj_notes)
+    obj_entries = sum(len(v) for _, v in obj_cases)
     print(
         "# C# MirAction.Spell 分支共 %d 条 Effect，其中魔法库条目 %d 条；施法弹道 %d 条；远程攻击弹道 %d 条"
         % (len(rows), len(entries), len(missiles), len(ranges))
+    )
+    print(
+        "# C# GameScene.ObjectEffect 分支共 %d 个 case、%d 条 Effect"
+        % (len(obj_cases), obj_entries)
     )
     if not a.write:
         print(block)
         print(missile_block)
         print(range_block)
+        print(obj_block)
         return
     out = Path("Client-Bevy/src/game/spell_effects.rs")
     txt = out.read_text(encoding="utf-8")
@@ -246,9 +475,13 @@ def main():
     i = txt.index(OUT_RANGE_BEGIN)
     j = txt.index(OUT_RANGE_END) + len(OUT_RANGE_END)
     out.write_text(txt[:i] + range_block + txt[j:], encoding="utf-8")
+    txt = out.read_text(encoding="utf-8")
+    i = txt.index(OUT_OBJECT_BEGIN)
+    j = txt.index(OUT_OBJECT_END) + len(OUT_OBJECT_END)
+    out.write_text(txt[:i] + obj_block + txt[j:], encoding="utf-8")
     print(
-        "# 已写回 %s（特效 %d 条 / 施法弹道 %d 条 / 远程弹道 %d 条）"
-        % (out, len(entries), len(missiles), len(ranges))
+        "# 已写回 %s（特效 %d 条 / 施法弹道 %d 条 / 远程弹道 %d 条 / 对象特效 %d 条）"
+        % (out, len(entries), len(missiles), len(ranges), obj_entries)
     )
 
 
