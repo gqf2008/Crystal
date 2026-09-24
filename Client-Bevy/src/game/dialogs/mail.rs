@@ -1118,6 +1118,16 @@ fn spawn_mail(
             z: 9,
         },
     ));
+    // #3106 残留③：列表行不是 `Button`（`mail_ui_system` 自算命中），给它这块矩形挂「按下不起拖」，
+    // 否则选信时的按下+轻微移动会把整个邮件窗拖走（独立复核实测的形态）。
+    commands
+        .entity(list)
+        .insert(crate::game::dialogs::DragBlockArea((
+            10.0,
+            mail_row_y(0),
+            290.0,
+            MAIL_ROW_H * MAIL_VISIBLE_ROWS as f32,
+        )));
 
     commands.entity(list).with_children(|p| {
         spawn_scroll_bar_ui(
