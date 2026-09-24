@@ -136,6 +136,10 @@ pub(crate) fn setup_world(
             if l == 0 || l >= 10 {
                 continue;
             }
+            // C# `if (imageIndex == -1) continue;` —— 灯只挂在前景物件上（无 Front 图的格子不画）
+            if !crate::map_renderer::map_light_on_cell(cell) {
+                continue;
+            }
             let li = ((l as usize % 10) * 3).min(9);
             let (lw, lh) = LIGHT_SIZES[li];
             // C#：若该格有 front 动画，叠加库偏移
