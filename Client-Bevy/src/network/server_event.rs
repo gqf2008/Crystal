@@ -750,6 +750,9 @@ pub enum ServerEvent {
     MailCost {
         cost: u32,
     },
+    /// #3103 MailSendRequest：邮局「邮寄」键（服务端 NPC `SendParcelKey` 空包）——
+    /// 客户端先问收件人姓名，再开待寄包裹窗（C# `GameScene.cs:6478-6490`）
+    MailSendRequest,
     /// TradeRequest：交易请求/打开（状态机由消费端根据自身状态应用）
     TradeRequested {
         name: String,

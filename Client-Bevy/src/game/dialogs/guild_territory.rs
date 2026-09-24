@@ -633,6 +633,8 @@ fn guild_territory_mail_system(
         compose.write(crate::game::dialogs::mail::ComposeMail {
             to: leader.clone(),
             message: None,
+            // C# `GuildTerritoryDialog .cs:162-168` → 写信窗
+            parcel: false,
         });
         tracing::info!("🏯 写信给领地会长 {}", leader);
     }

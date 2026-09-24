@@ -441,6 +441,8 @@ pub(crate) fn auto_friend_test(
 }
 
 /// --mail-compose-test：写邮件界面（输入框状态 → send_composed_mail → B 读取）
+/// --mail-parcel-test：待寄包裹窗（#3103 取证用——邮局路径要 `MirInputBox` 输入收件人名，
+/// 自动化没有键盘注入通道，故用探针直接切状态把窗开出来截图；不发送，8 秒后关闭）
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn auto_mail_compose_test(
     net: ResMut<client_bevy::network::NetConnection>,
@@ -456,10 +458,28 @@ pub(crate) fn auto_mail_compose_test(
     if *state != AppState::Game {
         return;
     }
+    let parcel = std::env::args().any(|a| a == "--mail-parcel-test");
     *t += time.delta_secs();
     match *stage {
         0 => {
             if *t < 8.0 {
+                return;
+            }
+            if parcel {
+                // #3103：待寄包裹窗（C# `MailComposeParcelDialog`）——只开窗，不发送
+                mgr.open(client_bevy::game::dialogs::DialogKind::Inventory);
+                mail.compose = true;
+                mail.compose_parcel = true;
+                mail.stamped = false;
+                mail.attach = vec![None; 5];
+                mail.compose_gold = 0;
+                input.texts = vec![String::new(); 7];
+                input.texts[0] = "bevy2char".to_string();
+                // 正文槽 6 = `INPUT_PARCEL_BODY`（#3103 邮件两窗私有槽位）
+                input.texts[6] = "包裹附言 M26 测试".to_string();
+                tracing::info!("[MAILPARCEL] 打开待寄包裹窗（不发送，留窗截图）");
+                *stage = 1;
+                *t = 0.0;
                 return;
             }
             // 打开邮件对话框 + 写界面（原版 C# MailDialog 写邮件流程）
@@ -467,23 +487,41 @@ pub(crate) fn auto_mail_compose_test(
                 mgr.toggle(client_bevy::game::dialogs::DialogKind::Mail);
             }
             mail.compose = true;
+            // #3103：写信窗（`MailComposeLetterDialog`，非待寄包裹窗）
+            mail.compose_parcel = false;
             mail.detail = None;
-            input.texts = vec![
-                "bevy2char".to_string(),
-                "ComposeSubject".to_string(),
-                "邮件正文 M26 测试".to_string(),
-                "100".to_string(),
-            ];
+            input.texts = vec![String::new(); 7];
+            input.texts[0] = "bevy2char".to_string();
+            // 正文槽 5 = `INPUT_LETTER_BODY`（#3103；旧值 2 会被行会公告同步清空）
+            input.texts[5] = "邮件正文 M26 测试".to_string();
             tracing::info!("[MAILCOMPOSE] 打开写邮件界面，填写收件人/主题/正文");
             *stage = 1;
             *t = 0.0;
         }
         1 => {
+            if parcel {
+                // 留窗截图窗口（8s）；超时后自己关掉，避免探针把窗永久留在屏幕上
+                if *t >= 8.0 {
+                    mail.compose = false;
+                    tracing::info!("[MAILPARCEL] 留窗时间到，关闭");
+                    *stage = 9;
+                }
+                return;
+            }
             if *t < 2.0 {
                 return;
             }
             // 与发送按钮相同的代码路径
-            client_bevy::game::dialogs::mail::send_composed_mail(&net, &input, 100, &[], false);
+            // #3103：写信窗只发 `Message`（正文），不带金币/附件/贴票（C# 两窗共用的
+            // `send_composed_mail` 现按 (to, body, gold, attach, stamped) 传参）
+            client_bevy::game::dialogs::mail::send_composed_mail(
+                &net,
+                &input.texts[0],
+                &input.texts[5],
+                0,
+                &[],
+                false,
+            );
             mail.compose = false;
             tracing::info!("[MAILCOMPOSE] 发送邮件");
             *stage = 9;

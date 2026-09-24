@@ -4495,6 +4495,11 @@ fn kind_alignment_tests(kind: client_bevy::game::dialogs::DialogKind) -> &'stati
             "panel_sprites_batch_b1_match_csharp",
             "trust_merchant_price_filter_and_mail_aligned",
         ],
+        // #3103：两张写邮件窗与邮件列表同源（`MailDialogs.cs`），由邮件批次的对齐测试覆盖
+        K::MailCompose => &[
+            "panel_sprites_batch_b1_match_csharp",
+            "trust_merchant_price_filter_and_mail_aligned",
+        ],
         K::Guild => &["panel_sprites_batch_b7_match_csharp"],
         K::Ranking => &["ranking_dialog_aligned", "ranking_children_aligned"],
         K::Report => &["report_dialog_aligned"],

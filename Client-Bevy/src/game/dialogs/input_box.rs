@@ -71,6 +71,12 @@ pub enum InputPurpose {
     /// #272：NPC 请求输入（`S.NPCRequestInput`）→ `C.NPCConfirmInput{Value, NPCID, PageName}`
     /// （C# `GameScene.cs:4266-4275`：`new MirInputBox(PleaseEnterRequiredInformation)`，OK 时发包）
     NpcConfirm { npc_id: u32, page_name: String },
+    /// #3103：写邮件收件人姓名 → 邮件模块开写信窗 / 待寄包裹窗
+    /// （C# `MailDialogs.cs:163-172` 的 `MirInputBox(EnterMailToName)` 与
+    /// `GameScene.cs:6478-6490` 的 `MirInputBox(EnterMailRecipientName)`：
+    /// OK 回调分别是 `MailComposeLetterDialog.ComposeMail(name)` 与
+    /// `MailComposeParcelDialog.ComposeMail(name)`；`parcel` 区分两者）
+    MailRecipient { parcel: bool },
 }
 
 /// 输入框状态（C# 每次 `new MirInputBox(message)` 一个新窗口；本端复用同一实体）
@@ -272,6 +278,7 @@ fn input_box_ui_system(
     mut captions: Query<&mut Text, With<InputBoxCaption>>,
     mut roots: Query<&mut Visibility, With<InputBoxRoot>>,
     mut submits: MessageReader<TextInputSubmit>,
+    mut compose_mail: MessageWriter<crate::game::dialogs::mail::ComposeMail>,
     mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
 ) {
     // 状态 → 管理栈（Modal：打开即屏蔽世界输入；C# `MirInputBox.Modal = true`）
@@ -367,6 +374,17 @@ fn input_box_ui_system(
                 });
                 tracing::info!("⌨️ [INPUTBOX] C.NPCConfirmInput npc={npc_id} page={page_name}");
             }
+            InputPurpose::MailRecipient { parcel } => {
+                // C# 两条路径的 OK 回调都只是「开写邮件窗」，网络包由窗上的发送键发：
+                // 写信窗 `ComposeMail(name)`（`MailDialogs.cs:163-172`）、
+                // 待寄窗 `ComposeMail(name) + InventoryDialog.Show()`（`GameScene.cs:6478-6490`）
+                compose_mail.write(crate::game::dialogs::mail::ComposeMail {
+                    to: body.clone(),
+                    message: None,
+                    parcel,
+                });
+                tracing::info!("✉️ [INPUTBOX] 写邮件收件人={body} parcel={parcel}");
+            }
             InputPurpose::None => {}
         }
         dismiss = true;
@@ -417,6 +435,8 @@ mod tests {
         app.insert_resource(NetConnection::default());
         app.add_message::<KeyboardInput>();
         app.add_message::<TextInputSubmit>();
+        // #3103：`MailRecipient` OK 时写 `ComposeMail`（生产由 MailPlugin 注册）
+        app.add_message::<crate::game::dialogs::mail::ComposeMail>();
         app.add_systems(Update, input_box_ui_system);
         app
     }

@@ -144,6 +144,12 @@ pub enum DialogKind {
     /// `Movable = true`）。与 `Fishing`（带钓具格的主窗 `Prguse[1340]`）**成对显隐但各自独立拖动**
     /// —— 共用 kind 会让拖动一个时把另一个也拖走（C# 两窗各自 `Movable`）。
     FishingStatus,
+    /// #3103：C# 两张**写邮件**窗（`MailComposeLetterDialog` `Title[671]` 236x300 @(100,100)、
+    /// `MailComposeParcelDialog` `Title[674]` 236x384 @(背包宽+10,0)，均 `Movable = true`，
+    /// `MailDialogs.cs:596-1010`）。独立 kind：C# 里它们是**独立可拖窗**，与邮件列表窗
+    /// （`MailListDialog` `Title[670]`）各自拖动——共用 `Mail` 会让拖邮件列表时把写邮件窗一起拖走
+    /// （owner 2026-09-24 截图里那块"飘在世界中间的写邮件面板"就是这么来的）。
+    MailCompose,
 }
 
 /// 对话框管理（打开栈，栈顶在最前）

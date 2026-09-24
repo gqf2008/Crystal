@@ -1668,6 +1668,9 @@ fn has_rpc_mapping(kind: DialogKind) -> bool {
         D::FishingStatus => false,
         // GuestTrade 刻意排除：网络 trade 会话驱动，无独立开关（见 parse_dialog_kind 文档）
         D::GuestTrade => false,
+        // #3103：两张写邮件窗与 `Mail` 成对显隐（由 `MailState.compose` / `compose_parcel` 驱动），
+        // 无独立 RPC 开关——`visible_win`/`close` 这类 RPC 仍作用于 `Mail`（列表窗）
+        D::MailCompose => false,
     }
 }
 
