@@ -22,16 +22,30 @@
   语义：
   - 锁文件 `%TEMP%\crystal_e2e_client_test.lock`（**跨 worktree、跨 agent 全局唯一**）；
   - 用 `[System.IO.File]::Open(..., FileMode::CreateNew)` 原子创建 —— 已存在即失败；
-  - 锁里记 `{pid, script, host, started}`：**持有者 PID 已死** → 立即回收（防僵尸锁）；
-    锁龄超过 `StaleSec`（默认 1800s）→ 也回收，但打一条显式 WARN（防"看起来像占着"）；
+  - 锁里记 `{pid, script, host, started}`，回收判据三条（都打显式 WARN，防"看起来像占着"）：
+    1. **持有者 PID 已死** → 立即回收（防僵尸锁）；
+    2. **PID 被复用**：同 PID 的进程**晚于**锁创建时刻才启动 ⇒ 那是另一个进程，不算持有者
+       （Windows 会复用 PID，缺这条会让死锁看起来"仍被占着"，白白等到 `StaleSec`）；
+    3. 锁龄超过 `StaleSec`（默认 1800s）→ 回收（持有者可能卡死或拿到锁后没跑到释放）。
   - 没拿到就每 5s 重试，直到 `TimeoutSec`（默认 1800s）；返回 `$false` 表示超时（调用方应 exit 2）。
 
   约定：**任何要起客户端或登录 e2e 账号的脚本/agent 都必须先拿这把锁**（含 `*.ps1` 夹具与临时取数脚本）。
+
+ 释放：能包 `try/finally` 的（`l5u`/`l5v`）显式 `Exit-E2eLock`；结构不便于包一层的夹具只调用
+  `Enter-E2eLock`——**脚本进程一退出，下一个调用者立刻按判据 1（或 2）回收**，不会卡住队列
+  （实测：两个 `l5w` 并发，后者排队 30s，前者进程退出后它即接管）。释放后锁文件残留是正常的，
+  它只是一份"最近一个持有者"的记录，不是"仍被占用"的信号。
+
+  嵌套调用（父脚本 → 子脚本）：拿到锁的进程会设环境变量 `CRYSTAL_E2E_LOCK_HELD_BY`，子进程
+  （继承环境）`Enter-E2eLock` 直接**复用父进程的锁**、不重复抢——否则会自锁到超时。
+  现实例子：`scripts/run_real_e2e.ps1 -IncludeInteractSweep` 会调用 `ui_interact_sweep.ps1`。
 #>
 
 $script:E2eLockPath = Join-Path $env:TEMP 'crystal_e2e_client_test.lock'
 $script:E2eLockHeld = $false
+$script:E2eLockInherited = $false
 $script:E2eLockPid = $PID
+$script:E2eLockEnvVar = 'CRYSTAL_E2E_LOCK_HELD_BY'
 
 function Get-E2eLockPath { $script:E2eLockPath }
 
@@ -42,6 +56,12 @@ function Enter-E2eLock {
         [int]$StaleSec = 1800,
         [int]$PollSec = 5
     )
+    # 父进程已持有（本进程是它拉起的子脚本）：复用，不重复抢
+    if ($env:CRYSTAL_E2E_LOCK_HELD_BY) {
+        $script:E2eLockInherited = $true
+        Write-Host ("[e2e-lock] 复用父进程已持有的锁（{0}）：{1}" -f $env:CRYSTAL_E2E_LOCK_HELD_BY, $ScriptName)
+        return $true
+    }
     $deadline = (Get-Date).AddSeconds($TimeoutSec)
     $waited = $false
     while ($true) {
@@ -63,6 +83,8 @@ function Enter-E2eLock {
             $fs.Flush()
             $fs.Close()
             $script:E2eLockHeld = $true
+            # 传给子进程：让嵌套调用（run_real_e2e → ui_interact_sweep）复用同一把锁
+            $env:CRYSTAL_E2E_LOCK_HELD_BY = "pid=$PID script=$ScriptName"
             if ($waited) { Write-Host ("[e2e-lock] 拿到锁（等了 {0}s）：{1}" -f [int]$waitedSeconds, $ScriptName) }
             else { Write-Host ("[e2e-lock] 拿到锁：{0}" -f $ScriptName) }
             return $true
@@ -74,15 +96,24 @@ function Enter-E2eLock {
             } catch {}
             $ownerAlive = $false
             $ageSec = 0
+            $pidReused = $false
             if ($null -ne $holder -and $null -ne $holder.pid) {
-                $ownerAlive = [bool](Get-Process -Id ([int]$holder.pid) -EA SilentlyContinue)
+                $proc = Get-Process -Id ([int]$holder.pid) -EA SilentlyContinue
+                $ownerAlive = [bool]$proc
                 if ($null -ne $holder.started) {
                     try { $ageSec = [int]((Get-Date) - [datetime]::Parse($holder.started)).TotalSeconds } catch {}
                 }
+                # PID 复用护栏：锁建于 T0，若同 PID 的进程**在 T0 之后**才启动，那是另一个进程
+                # （Windows 复用 PID）——它不是持有者，不能让队列白等 30 分钟。
+                if ($ownerAlive -and $null -ne $holder.started -and $null -ne $proc.StartTime) {
+                    try {
+                        $pidReused = ($proc.StartTime -gt ([datetime]::Parse($holder.started).AddSeconds(2)))
+                    } catch {}
+                }
             }
-            if ((-not $ownerAlive) -or ($ageSec -gt $StaleSec)) {
-                Write-Host ("[e2e-lock] 回收僵尸/超龄锁（pid={0} 存活={1} 锁龄={2}s）：{3}" -f `
-                    $holder.pid, $ownerAlive, $ageSec, $holder.script) -ForegroundColor Yellow
+            if ((-not $ownerAlive) -or $pidReused -or ($ageSec -gt $StaleSec)) {
+                Write-Host ("[e2e-lock] 回收僵尸/复用PID/超龄锁（pid={0} 存活={1} 复用PID={2} 锁龄={3}s）：{4}" -f `
+                    $holder.pid, $ownerAlive, $pidReused, $ageSec, $holder.script) -ForegroundColor Yellow
                 try { [System.IO.File]::Delete($script:E2eLockPath) } catch {}
                 continue
             }
@@ -103,6 +134,8 @@ function Enter-E2eLock {
 }
 
 function Exit-E2eLock {
+    # 子进程复用的是父进程的锁：子进程不碰锁文件
+    if ($script:E2eLockInherited) { $script:E2eLockInherited = $false; return }
     if (-not $script:E2eLockHeld) { return }
     try {
         $holder = Get-Content -LiteralPath $script:E2eLockPath -Raw -EA Stop | ConvertFrom-Json
@@ -114,5 +147,6 @@ function Exit-E2eLock {
         try { [System.IO.File]::Delete($script:E2eLockPath) } catch {}
     }
     $script:E2eLockHeld = $false
+    Remove-Item Env:$script:E2eLockEnvVar -ErrorAction SilentlyContinue
     Write-Host '[e2e-lock] 已释放'
 }

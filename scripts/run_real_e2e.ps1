@@ -48,6 +48,13 @@ param(
     [switch]$AllowStaleBinary
 )
 $ErrorActionPreference = "Stop"
+# ---- 实机资源互斥 ----------------------------------------------------------
+# 起客户端 / 登录 e2e 账号前必须先拿锁：客户端 + e2e 账号是「一次只能一组」的资源。
+# 并行时后来者登录会拿到 `result=4 密码错误`（服务端实为 Account already online）——
+# 资源互斥假红，不是产品缺陷，靠反复重跑撞「干净窗口」修不了。约定见 tools/acceptance/e2e_lock.ps1。
+# -IncludeInteractSweep 会拉起 ui_interact_sweep.ps1：它继承本进程的环境变量、复用同一把锁，不会自锁。
+. (Join-Path (Split-Path -Parent $PSScriptRoot) 'tools\acceptance\e2e_lock.ps1')
+if (-not (Enter-E2eLock -ScriptName 'run_real_e2e' -TimeoutSec 1800)) { exit 2 }
 $repo = Split-Path -Parent $PSScriptRoot
 if (-not $ServerExe) { $ServerExe = Join-Path $repo "ServerRust\target\debug\mir2_server.exe" }
 if (-not $ClientExe) { $ClientExe = Join-Path $repo "Client-Bevy\target\debug\client_bevy.exe" }
