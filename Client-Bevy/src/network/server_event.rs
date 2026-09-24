@@ -918,6 +918,10 @@ pub enum ServerEvent {
         item_type: u8,
         shape: i16,
         required_gender: u8,
+        /// #3120 ② 残余：`ItemInfo.bind` 的原始位（`BindMode`）。
+        /// C# 客户端守卫读 `Info.Bind`（`MirItemCell.cs:1793`），本端此前没把它带出来，
+        /// 导致"不可邮寄物品"没有早提示。未知（没拉过该索引）时调用方不得拦截。
+        bind: u16,
     },
     UserInformation {
         name: String,

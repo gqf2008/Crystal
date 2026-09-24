@@ -2247,6 +2247,8 @@ fn shop_server_events(
                 item_type,
                 shape,
                 required_gender,
+                // #3120 ② 残余：商城不关心绑定位（邮件窗的 `MailState.item_bind` 才是消费者）
+                ..
             } => {
                 // P3-3：按需请求的回应——写进表，下一帧格子就会显示真名
                 if remember_item_name(&mut shop.item_names, *index, name) {
