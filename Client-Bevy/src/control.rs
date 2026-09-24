@@ -709,6 +709,17 @@ struct ControlQueries<'w, 's> {
     >,
     /// `ime_probe` 用：共享 CJK 主字体句柄（三处都必须等于它）
     cjk_font: Option<Res<'w, crate::ui::sprite_ui::UiCjkFont>>,
+    /// `mail_probe` 用：邮件列表行的**渲染真值**（#3120 ①：渲染 vs 模型对账）
+    mail_rows: Query<
+        'w,
+        's,
+        (
+            &'static crate::game::dialogs::mail::MailRowSlot,
+            &'static Visibility,
+            &'static Node,
+            Option<&'static Text>,
+        ),
+    >,
     /// dialog_rect RPC：物理→逻辑坐标换算用的窗口 scale_factor
     primary_window: Query<'w, 's, &'static Window, With<PrimaryWindow>>,
     /// dialog_rect 诊断：任意实体的 Visibility 读取（关闭钮祖先链诊断）
@@ -3095,6 +3106,36 @@ fn apply_control_commands(
                 tracing::info!("🎮 control revive_town");
             }
             ControlCommand::MailProbe { reply } => {
+                // #3120 ①：列表行的渲染真值（按 (row, role) 排序保证同状态两次读数一致）
+                fn px(v: &Val) -> f32 {
+                    match v {
+                        Val::Px(p) => *p,
+                        _ => -1.0,
+                    }
+                }
+                let mut row_render: Vec<Value> = q
+                    .mail_rows
+                    .iter()
+                    .map(|(slot, vis, node, text)| {
+                        json!({
+                            "row": slot.row,
+                            "role": format!("{:?}", slot.role),
+                            "visible": matches!(*vis, Visibility::Visible),
+                            "x": px(&node.left),
+                            "y": px(&node.top),
+                            // 图标层实际应用的库/帧（仅 Icon 有意义）——夹具拿它与模型派生值比
+                            "icon_lib": slot.icon_lib,
+                            "icon_index": slot.icon_index,
+                            "text": text.map(|t| t.0.clone()).unwrap_or_default(),
+                        })
+                    })
+                    .collect();
+                row_render.sort_by_key(|v| {
+                    (
+                        v["row"].as_u64().unwrap_or(0),
+                        v["role"].as_str().unwrap_or("").to_string(),
+                    )
+                });
                 let mails: Vec<serde_json::Value> = q
                     .mail
                     .mails
@@ -3148,6 +3189,8 @@ fn apply_control_commands(
                         "ok": true,
                         "count": mails.len(),
                         "mails": mails,
+                        // #3120 ①：行**渲染真值**——夹具按 (row, role) 与上文的 C# 派生字段对账
+                        "row_render": row_render,
                         "detail": detail,
                         "page": q.mail.page,
                         "page_count": crate::game::dialogs::mail::mail_page_count(q.mail.mails.len()),
