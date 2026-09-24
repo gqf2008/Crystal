@@ -909,6 +909,12 @@ pub enum ServerEvent {
     ItemInfoReceived {
         index: i32,
         name: String,
+        /// `ItemInfo.item_type` 数值——商城**试穿预览**要在客户端判断"能不能试穿、用哪个库/帧"，
+        /// 而 C# 的判据正是 `Item.Info.Type/Shape/RequiredGender`
+        /// （`MirGameShopCell.cs:278` 可否试穿、`:505-547` 武器库、`:566` 护甲男女帧）
+        item_type: u8,
+        shape: i16,
+        required_gender: u8,
     },
     UserInformation {
         name: String,

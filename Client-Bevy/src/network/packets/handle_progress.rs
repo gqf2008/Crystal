@@ -1359,6 +1359,9 @@ pub(crate) fn handle_progress(
                 server_events.write(ServerEvent::ItemInfoReceived {
                     index: p.info.index,
                     name: p.info.name.clone(),
+                    item_type: p.info.item_type as u8,
+                    shape: p.info.shape,
+                    required_gender: p.info.required_gender.bits(),
                 });
                 tracing::info!("📦 NewItemInfo: idx={} name={}", p.info.index, p.info.name);
             }
