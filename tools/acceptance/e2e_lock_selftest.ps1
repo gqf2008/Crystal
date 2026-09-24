@@ -236,6 +236,67 @@ Check 'T8.1 三个子进程都进过临界区（3 进 3 出、无超时）' `
 Check 'T8.2 任一时刻最多一个持有者（临界区不重叠）' ($maxDepth -eq 1) ("maxDepth=" + $maxDepth)
 Check 'T8.3 三个子进程都正常退出了' (@($kids | Where-Object { -not $_.HasExited }).Count -eq 0)
 
+# ---------------- T9 接入覆盖面（防"新增夹具忘拿锁"再回来） ----------------
+Write-Host 'T9 接入覆盖面：每个会起客户端的脚本都必须走同一把锁'
+function Get-E2eClientScript {
+    <#
+      判据：正文里出现任一特征即算「会起客户端」——
+        `--e2e-user`（自动化登录账号）/ `client_bevy.exe` / `--real-net` / `--auto-enter`。
+      不只看 `--e2e-user`：`l5r_ranged_projectile`、`l5t_minimize_survives` 这类不传 e2e 账号
+      但照样起客户端的脚本，也必须接入锁（#3129 的覆盖口径就是"会起客户端"）。
+    #>
+    param([string]$Root)
+    $selfNames = @('e2e_lock.ps1', 'e2e_lock_selftest.ps1')
+    $out = @()
+    foreach ($d in @((Join-Path $Root 'tools\acceptance'), (Join-Path $Root 'scripts'))) {
+        if (-not (Test-Path -LiteralPath $d)) { continue }
+        foreach ($f in (Get-ChildItem -LiteralPath $d -File -Filter *.ps1 -EA SilentlyContinue)) {
+            if ($selfNames -contains $f.Name) { continue }
+            $text = Get-Content -LiteralPath $f.FullName -Raw -EA SilentlyContinue
+            if ($null -eq $text) { continue }
+            if ($text -notmatch '--e2e-user|client_bevy\.exe|--real-net|--auto-enter') { continue }
+            $out += [pscustomobject]@{
+                Name  = $f.Name
+                Path  = $f.FullName
+                Armed = (($text -match 'e2e_lock\.ps1') -and ($text -match 'Enter-E2eLock'))
+            }
+        }
+    }
+    $out
+}
+# 本自检没有 -RepoRoot 参数（它只认 -LockScriptPath），这里自己定位仓库根
+$scanRoot = (Resolve-Path "$PSScriptRoot\..\..").Path
+$clientScripts = @(Get-E2eClientScript -Root $scanRoot)
+$notArmed = @($clientScripts | Where-Object { -not $_.Armed })
+Check 'T9.1 判据没写空（真源至少认出 24 个会起客户端的脚本）' `
+    ($clientScripts.Count -ge 24) ("count=" + $clientScripts.Count)
+Check 'T9.2 每个实机入口都 dot-source 了 e2e_lock.ps1 且有 Enter-E2eLock' `
+    ($notArmed.Count -eq 0) ("缺锁：" + (($notArmed | ForEach-Object { $_.Name }) -join ','))
+$fakeRoot = Join-Path $sandbox 'fake_repo'
+New-Item -ItemType Directory -Path (Join-Path $fakeRoot 'tools\acceptance') -Force | Out-Null
+[System.IO.File]::WriteAllText((Join-Path $fakeRoot 'tools\acceptance\fake_no_lock.ps1'),
+    "Start-Process -FilePath client.exe -ArgumentList '--e2e-user','test'`n", (New-Object System.Text.UTF8Encoding($false)))
+$fakeFound = @(Get-E2eClientScript -Root $fakeRoot)
+Check 'T9.3 阳性对照：临时造一个「起客户端但没走锁」的脚本必须被判为不合规' `
+    ($fakeFound.Count -eq 1 -and -not $fakeFound[0].Armed)
+
+# ---------------- T10 语法解析（接入是插入式改动，最容易插出语法错） ----------------
+Write-Host 'T10 语法解析：所有实机入口 + 锁本体 + 本自检都必须能被 PowerShell 解析'
+$parseTargets = @($clientScripts | ForEach-Object { $_.Path }) + @(
+    $LockScriptPath,
+    (Join-Path $PSScriptRoot 'e2e_lock_selftest.ps1')
+)
+$parseBad = @()
+foreach ($p in $parseTargets) {
+    if (-not (Test-Path -LiteralPath $p)) { continue }
+    $errs = $null
+    [void][System.Management.Automation.Language.Parser]::ParseFile($p, [ref]$null, [ref]$errs)
+    if ($errs.Count -gt 0) {
+        $parseBad += ("{0}: {1}" -f (Split-Path -Leaf $p), (($errs | ForEach-Object { $_.Message }) -join '; '))
+    }
+}
+Check 'T10.1 全部文件解析无错' ($parseBad.Count -eq 0) ("解析失败 " + $parseBad.Count + " 个：" + ($parseBad -join ' | '))
+
 Reset-Lock
 Remove-Item -LiteralPath $sandbox -Recurse -Force -EA SilentlyContinue
 
