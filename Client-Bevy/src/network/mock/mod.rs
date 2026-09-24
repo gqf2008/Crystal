@@ -769,11 +769,14 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                                         gold_price: 10,
                                                         credit_price: 0,
                                                         count: 1,
-                                                        class: 0,
+                                                        // 通用商品（原版 Class == "All"）
+                                                        class: "All".to_string(),
                                                         category: "药品".to_string(),
                                                         stock: 99,
                                                         is_bought: false,
                                                         deal: false,
+                                                        top_item: false,
+                                                        date: 0,
                                                         // #2791 单元②：仅金币可购（积分价 0）
                                                         can_buy_credit: false,
                                                         can_buy_gold: true,
@@ -785,11 +788,14 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                                         // #2791 单元②：双币可购（积分价 50）
                                                         credit_price: 50,
                                                         count: 1,
-                                                        class: 0,
+                                                        class: "All".to_string(),
                                                         category: "武器".to_string(),
                                                         stock: 10,
                                                         is_bought: false,
-                                                        deal: false,
+                                                        // 特价 + 置顶：让 mock 也能覆盖三段筛选
+                                                        deal: true,
+                                                        top_item: true,
+                                                        date: 0,
                                                         can_buy_credit: true,
                                                         can_buy_gold: true,
                                                     },

@@ -316,6 +316,12 @@ enum ControlCommand {
     NpcGoodsProbe {
         reply: Sender<String>,
     },
+    /// 只读**游戏商城**探针（owner 队列 `shop-class-tabs`）：当前三段筛选状态
+    /// （C# `ClassFilter`/`TypeFilter`/`SectionFilter`）+ 当前页真实展示的行
+    /// （过滤口径与渲染共用 `filter_shop_items` ⇒ 判据取状态，不猜 UI）。
+    ShopProbe {
+        reply: Sender<String>,
+    },
     /// ③ 购买动作（现成包 `C.BuyItem`）：与商品窗「购买」按钮同一路径。
     /// 服务端仍按原版校验：必须先打开购买页（`[@BUYSELL]/[@BUY]/...`）且商品在该 NPC 销售列表内。
     BuyItem {
@@ -687,6 +693,7 @@ struct ControlQueries<'w, 's> {
     progression: Query<'w, 's, &'static crate::game::player_state::Progression, With<LocalPlayer>>,
     /// `npc_goods_probe` RPC：客户端侧商品行（服务端 GoodsList 写入，判据取状态）
     goods: Res<'w, crate::game::dialogs::npc_goods::NpcGoodsState>,
+    shop: Res<'w, crate::game::dialogs::game_shop::GameShopState>,
     /// `state` RPC：HP/死亡标志（复活闭环判据）
     vitals: Query<'w, 's, &'static crate::game::player_state::Vitals, With<LocalPlayer>>,
     state_flags: Query<'w, 's, &'static crate::game::player_state::StatusFlags, With<LocalPlayer>>,
@@ -1061,6 +1068,21 @@ fn handle_conn(mut stream: std::net::TcpStream, tx: Sender<ControlCommand>) {
                 let (reply_tx, reply_rx) = bounded::<String>(1);
                 if tx
                     .send(ControlCommand::NpcGoodsProbe { reply: reply_tx })
+                    .is_ok()
+                {
+                    let s = reply_rx
+                        .recv_timeout(std::time::Duration::from_secs(2))
+                        .unwrap_or_else(|_| "{}".to_string());
+                    serde_json::from_str::<Value>(&s).unwrap_or_else(|_| json!({}))
+                } else {
+                    json!({"error": "control channel closed"})
+                }
+            }
+            // 商城三段筛选（owner 队列 `shop-class-tabs`）：只读回当前筛选 + 当前页真实行
+            "shop_probe" => {
+                let (reply_tx, reply_rx) = bounded::<String>(1);
+                if tx
+                    .send(ControlCommand::ShopProbe { reply: reply_tx })
                     .is_ok()
                 {
                     let s = reply_rx
@@ -1756,7 +1778,8 @@ fn control_reply(cmd: &ControlCommand) -> Option<&Sender<String>> {
         | ControlCommand::ChatSize { reply, .. }
         | ControlCommand::Click { reply, .. }
         | ControlCommand::DialogRect { reply, .. }
-        | ControlCommand::GetScroll { reply } => Some(reply),
+        | ControlCommand::GetScroll { reply }
+        | ControlCommand::ShopProbe { reply } => Some(reply),
         _ => None,
     }
 }
@@ -2681,6 +2704,51 @@ fn apply_control_commands(
                     "goods": goods,
                 });
                 tracing::info!("🎮 control npc_goods_probe: {} rows", goods.len());
+                let _ = reply.send(payload.to_string());
+            }
+            ControlCommand::ShopProbe { reply } => {
+                use crate::game::dialogs::game_shop::{filter_shop_items, now_unix};
+                let filtered = filter_shop_items(
+                    &q.shop.items,
+                    &q.shop.search,
+                    &q.shop.class_filter,
+                    &q.shop.category,
+                    &q.shop.section_filter,
+                    now_unix(),
+                );
+                const PAGE_SIZE: usize = 8;
+                let pages = filtered.len().div_ceil(PAGE_SIZE).max(1);
+                let page = q.shop.page.min(pages - 1);
+                let rows: Vec<serde_json::Value> = (page * PAGE_SIZE..(page + 1) * PAGE_SIZE)
+                    .filter_map(|i| filtered.get(i).map(|idx| &q.shop.items[*idx]))
+                    .enumerate()
+                    .map(|(row, it)| {
+                        json!({
+                            "row": row, "item_index": it.item_index, "name": it.name,
+                            "class": it.class, "category": it.category,
+                            "deal": it.deal, "top_item": it.top_item, "date": it.date,
+                            "gold": it.gold_price, "credit": it.credit_price,
+                        })
+                    })
+                    .collect();
+                let payload = json!({
+                    "ok": true,
+                    "class_filter": q.shop.class_filter,
+                    "section_filter": q.shop.section_filter,
+                    "category": q.shop.category,
+                    "categories": q.shop.categories,
+                    "page": page,
+                    "pages": pages,
+                    "total_items": q.shop.items.len(),
+                    "filtered": filtered.len(),
+                    "rows": rows,
+                });
+                tracing::info!(
+                    "🎮 control shop_probe: class={} section={} filtered={}",
+                    q.shop.class_filter,
+                    q.shop.section_filter,
+                    filtered.len()
+                );
                 let _ = reply.send(payload.to_string());
             }
             ControlCommand::BuyItem { item_index, count } => {
