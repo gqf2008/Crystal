@@ -176,6 +176,32 @@ impl FxWhen {
     }
 }
 
+/// 种族过滤（原版 `if (ob.Race != ObjectType.X ...) return;`）。
+///
+/// 原版在 switch 里对四个 case 做了提前 return（`GameScene.cs:4768/4779/4804/4816`）：
+/// - `MagicShieldUp` / `MagicShieldDown`：`!= Player && != Hero` → 玩家或英雄；
+/// - `ElementalBarrierUp` / `ElementalBarrierDown`：`!= Player` → 仅玩家。
+///
+/// 本端的对象分类：`Player` 标记覆盖本地玩家与远程玩家（本地玩家同时挂 `LocalPlayer` + `Player`，
+/// 见 `actor/spawn_helpers.rs:44-45`），怪物是 `Monster`，NPC 是 `Npc`；
+/// **本端暂无独立的 `Hero` 标记**（英雄在渲染上依附玩家实体），所以 `PlayerOrHero` 与 `PlayerOnly`
+/// 目前都按「有 `Player` 标记」判定——两者在表里分开保留，等真的出现英雄实体时只需收紧 `PlayerOnly`。
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum FxRace {
+    Any,
+    PlayerOrHero,
+    PlayerOnly,
+}
+
+impl FxRace {
+    pub fn matches(self, is_player: bool) -> bool {
+        match self {
+            FxRace::Any => true,
+            FxRace::PlayerOrHero | FxRace::PlayerOnly => is_player,
+        }
+    }
+}
+
 /// 循环光环分组（原版 `PlayerObject.ShieldEffect` / `PlayerObject.ElementalBarrierEffect`）
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum AuraGroup {
@@ -218,8 +244,11 @@ pub struct ObjectFx {
     pub frames: usize,
     /// 整段动画时长（ms）；0 = 原版写 `Frame.Count * FrameInterval`，按 DEFAULT_FRAME_MS 换算
     pub interval_ms: u32,
-    /// 原版 `{ Blend = false }`：本端 Sprite 仍走 alpha 混合（残留，见 PR）
+    /// 原版 `Effect.Blend`：`true`（默认）→ 加法混合（`Mesh2d` + `ObjectFxBlendMaterial`）；
+    /// `false` → 普通 alpha（`Sprite`）。语义按 C# 源码钉死：`DXManager.cs:378-379` / `Effect.cs:132`。
     pub blend: bool,
+    /// 原版 `if (ob.Race != ObjectType.X) return;` 的种族过滤（默认 `Any` = 不过滤）
+    pub race: FxRace,
     /// 按 `EffectType` 分流的条件（原版 `if (p.EffectType == 0)`）
     pub when: FxWhen,
     pub repeat: FxRepeat,
@@ -243,6 +272,7 @@ impl ObjectFx {
         frames: 1,
         interval_ms: 0,
         blend: true,
+        race: FxRace::Any,
         when: FxWhen::Always,
         repeat: FxRepeat::Once,
         target: FxTarget::Owner,
@@ -483,7 +513,7 @@ pub const OBJECT_FX: &[(&str, &[ObjectFx])] = &[
         ObjectFx { lib: FxLib::Flat(Magic3), start: 46, frames: 8, interval_ms: 800, ..ObjectFx::DEFAULT },
     ]),
     ("MagicShieldUp", &[
-        ObjectFx { lib: FxLib::Flat(Magic), start: 3890, frames: 3, interval_ms: 600, repeat: FxRepeat::UntilDown(AuraGroup::MagicShield), ..ObjectFx::DEFAULT },
+        ObjectFx { lib: FxLib::Flat(Magic), start: 3890, race: FxRace::PlayerOrHero, frames: 3, interval_ms: 600, repeat: FxRepeat::UntilDown(AuraGroup::MagicShield), ..ObjectFx::DEFAULT },
     ]),
     ("MagicShieldDown", &[]),
     ("GreatFoxSpirit", &[
@@ -498,10 +528,10 @@ pub const OBJECT_FX: &[(&str, &[ObjectFx])] = &[
         ObjectFx { lib: FxLib::Flat(Effect), start: 580, frames: 10, interval_ms: 70, ..ObjectFx::DEFAULT },
     ]),
     ("ElementalBarrierUp", &[
-        ObjectFx { lib: FxLib::Flat(Magic3), start: 1890, frames: 10, interval_ms: 2000, repeat: FxRepeat::UntilDown(AuraGroup::ElementalBarrier), ..ObjectFx::DEFAULT },
+        ObjectFx { lib: FxLib::Flat(Magic3), start: 1890, race: FxRace::PlayerOnly, frames: 10, interval_ms: 2000, repeat: FxRepeat::UntilDown(AuraGroup::ElementalBarrier), ..ObjectFx::DEFAULT },
     ]),
     ("ElementalBarrierDown", &[
-        ObjectFx { lib: FxLib::Flat(Magic3), start: 1910, frames: 7, interval_ms: 1400, ..ObjectFx::DEFAULT },
+        ObjectFx { lib: FxLib::Flat(Magic3), start: 1910, race: FxRace::PlayerOnly, frames: 7, interval_ms: 1400, ..ObjectFx::DEFAULT },
     ]),
     // DelayedExplosion：C# 的 `effectid < 0` 支路是同一段动画的 stage=0（本端按 stage 取帧段，effect_type=0 时帧段相同），故只保留 stage 那条
     ("DelayedExplosion", &[

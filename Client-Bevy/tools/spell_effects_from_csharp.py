@@ -314,8 +314,9 @@ def parse_csharp_monster_values(text):
     return out
 
 
-def _build_object_entry(case, stmt, cond, cs_monsters):
+def _build_object_entry(case, stmt, cond, cs_monsters, race=None):
     """一条 `new Effect(...)` / `new DelayedExplosionEffect(...)` → Rust 字段串。"""
+    race_field = [] if race is None else ["race: FxRace::%s" % race]
     call = (
         "DelayedExplosionEffect"
         if "new DelayedExplosionEffect(" in stmt
@@ -341,6 +342,7 @@ def _build_object_entry(case, stmt, cond, cs_monsters):
             raise ValueError("无法解析库: %r" % stmt)
         fields = ["lib: FxLib::Flat(%s)" % ml.group(1)]
     fields += ["%s: %s" % (k, v) for k, v in _object_fx_start(args[1]).items()]
+    fields += race_field
     if not args[2].isdigit():
         raise ValueError("帧数不是字面量: %r" % args[2])
     fields.append("frames: %s" % args[2])
@@ -396,6 +398,7 @@ def parse_object_effects(text, cs_monsters):
     notes = {}
     cur = None
     cond = None
+    race = None
     i = 0
     while i < len(body):
         # 先剥行尾注释：Critical 的 `//ob.Effects.Add(new Effect(...));` 是**被注释掉的**
@@ -405,7 +408,24 @@ def parse_object_effects(text, cs_monsters):
         if m:
             cur = m.group(1)
             cond = None
+            race = None
             cases.append((cur, []))
+            i += 1
+            continue
+        # 种族过滤（原版 `ob.Race != ObjectType.X ... return;`）：
+        #   MagicShieldUp/Down        `!= Player && != Hero` → 玩家或英雄
+        #   ElementalBarrierUp/Down   `!= Player`            → 仅玩家
+        # 机制照抄、不猜：出现**没见过的** `ob.Race` 判据就报错，让它显式补规则。
+        if "ob.Race" in ln:
+            if re.search(
+                r"if \(ob\.Race != ObjectType\.Player && ob\.Race != ObjectType\.Hero\) return;",
+                ln,
+            ):
+                race = "PlayerOrHero"
+            elif re.search(r"if \(ob\.Race != ObjectType\.Player\) return;", ln):
+                race = "PlayerOnly"
+            else:
+                raise ValueError("未识别的 ob.Race 判据（禁止猜语义）: %r" % ln.strip())
             i += 1
             continue
         if re.search(r"if \(p\.EffectType == 0\)", ln):
@@ -443,7 +463,9 @@ def parse_object_effects(text, cs_monsters):
                         "（本端按 stage 取帧段，effect_type=0 时帧段相同），故只保留 stage 那条"
                     )
                 else:
-                    cases[-1][1].append(_build_object_entry(cur, stmt, cond, cs_monsters))
+                    cases[-1][1].append(
+                        _build_object_entry(cur, stmt, cond, cs_monsters, race)
+                    )
             i += 1
             continue
         i += 1
