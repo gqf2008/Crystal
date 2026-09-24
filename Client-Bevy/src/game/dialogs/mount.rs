@@ -17,7 +17,7 @@ use crate::scenes::AppState;
 use crate::ui::sprite_ui::{shared_cjk_font, UiCjkFont, UiFont};
 use crate::ui::theme::{
     load_lib_image, spawn_container, spawn_icon_button, spawn_label_center, spawn_panel,
-    CloseButton,
+    CloseButton, ImageButton,
 };
 
 /// #2892 批B：面板精灵与 C# 原生尺寸/坐标（C# `MountDialog.Index = 167; Location = (10,30)`；
@@ -52,6 +52,88 @@ pub const MOUNT_PORTRAIT_START_5SLOT: usize = 1330;
 pub const MOUNT_PORTRAIT_POS_4SLOT: (f32, f32) = (110.0, 250.0);
 pub const MOUNT_PORTRAIT_POS_5SLOT: (f32, f32) = (0.0, 70.0);
 
+/// #3107：C# `MountDialog.SwitchType`（`MountDialog.cs:163-195`）**整套**两档几何。
+///
+/// 原实现只换面板图与节点尺寸（`Prguse[160]` 272x378 / `Prguse[167]` 324x377），
+/// 关闭/帮助/骑乘三键与标签宽度、格子偏移**写死在 5 孔档**——4 孔坐骑下面板缩到 272 宽，
+/// 关闭钮仍在 x=297..321（面板外），而面板挂 `Overflow::clip()` ⇒ 既不渲染也收不到
+/// picking（实机 `ui_interact_sweep` 的 `mount` 用例「点 X 后窗口仍在」）。
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct MountSlotProfile {
+    /// 面板精灵（C# `Index`：4 孔 160 / 5 孔 167）
+    pub panel_index: usize,
+    /// `MountName` / `MountLoyalty` 的 `Size` 宽（高恒 15）
+    pub label_w: f32,
+    /// 骑乘键三帧（C# `MountButton.Index/HoverIndex/PressedIndex`）
+    pub ride_frames: (usize, usize, usize),
+    pub ride_pos: (f32, f32),
+    pub close_pos: (f32, f32),
+    pub help_pos: (f32, f32),
+    /// 装备格整体偏移（C# `x`/`y`：4 孔 1/1、5 孔 0/0）
+    pub grid_dx: f32,
+    pub grid_dy: f32,
+    /// `Grid[MountSlot.Mask].Visible`（4 孔档隐藏）
+    pub mask_visible: bool,
+    pub portrait_start: usize,
+    pub portrait_pos: (f32, f32),
+}
+
+/// 4 孔档（`Prguse[160]` 272x378）
+pub const MOUNT_PROFILE_4SLOT: MountSlotProfile = MountSlotProfile {
+    panel_index: 160,
+    label_w: 208.0,
+    ride_frames: (164, 165, 166),
+    ride_pos: (210.0, 70.0),
+    close_pos: (245.0, 3.0),
+    help_pos: (221.0, 3.0),
+    grid_dx: 1.0,
+    grid_dy: 1.0,
+    mask_visible: false,
+    portrait_start: MOUNT_PORTRAIT_START_4SLOT,
+    portrait_pos: MOUNT_PORTRAIT_POS_4SLOT,
+};
+
+/// 5 孔档（`Prguse[167]` 324x377；C# 构造函数的初值）
+pub const MOUNT_PROFILE_5SLOT: MountSlotProfile = MountSlotProfile {
+    panel_index: 167,
+    label_w: 260.0,
+    ride_frames: (155, 156, 157),
+    ride_pos: (262.0, 70.0),
+    close_pos: (297.0, 3.0),
+    help_pos: (274.0, 3.0),
+    grid_dx: 0.0,
+    grid_dy: 0.0,
+    mask_visible: true,
+    portrait_start: MOUNT_PORTRAIT_START_5SLOT,
+    portrait_pos: MOUNT_PORTRAIT_POS_5SLOT,
+};
+
+/// 按坐骑孔数选档（C# `switch (MountSlots.Length)`：`case 4` / `case 5`；其余按 5 孔）
+pub fn mount_slot_profile(slot_count: usize) -> &'static MountSlotProfile {
+    if slot_count == 4 {
+        &MOUNT_PROFILE_4SLOT
+    } else {
+        &MOUNT_PROFILE_5SLOT
+    }
+}
+
+/// 装备格在档位下的绝对位置（C# `Grid[...].Location = new Point(base + x, 323 + y)`）
+pub fn mount_gear_cell_pos(profile: &MountSlotProfile, index: usize) -> (f32, f32) {
+    (
+        36.0 + index as f32 * 54.0 + profile.grid_dx,
+        323.0 + profile.grid_dy,
+    )
+}
+
+/// 该档下关闭/帮助/骑乘三键是否**完整落在面板矩形内**（面板 `Overflow::clip()` 会裁掉越界子控件）
+pub fn mount_chrome_inside_panel(profile: &MountSlotProfile, panel_w: f32) -> bool {
+    const BTN_W: f32 = 24.0;
+    const RIDE_W: f32 = 36.0;
+    profile.close_pos.0 + BTN_W <= panel_w
+        && profile.help_pos.0 + BTN_W <= panel_w
+        && profile.ride_pos.0 + RIDE_W <= panel_w
+}
+
 /// 立绘帧号（纯函数，便于门禁）：`mount_shape < 0`（未装坐骑）⇒ `None`（原版不播动画）。
 pub fn mount_portrait_frame(start_index: usize, mount_shape: i16, frame: usize) -> Option<usize> {
     if mount_shape < 0 {
@@ -79,6 +161,19 @@ pub struct MountClose;
 
 #[derive(Component)]
 pub struct MountRide;
+
+/// #3107：随档位重定位/换帧的「窗体三键」（关闭/帮助/骑乘）——C# `SwitchType` 里
+/// `CloseButton.Location` / `HelpButton.Location` / `MountButton`（三帧）逐档不同
+#[derive(Component, Clone, Copy, PartialEq, Eq, Debug)]
+pub enum MountChrome {
+    Close,
+    Help,
+    Ride,
+}
+
+/// 帮助键（C# `HelpButton`，`Index = Prguse2[257/258/259]`）
+#[derive(Component)]
+pub struct MountHelp;
 
 #[derive(Component)]
 pub struct MountPanel;
@@ -180,23 +275,56 @@ fn spawn_mount(
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 156),
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 157),
         ) {
-            spawn_icon_button(p, n, h, pr, 262.0, 70.0, 36.0, 32.0, 10).insert(MountRide);
+            spawn_icon_button(
+                p,
+                n,
+                h,
+                pr,
+                MOUNT_PROFILE_5SLOT.ride_pos.0,
+                MOUNT_PROFILE_5SLOT.ride_pos.1,
+                36.0,
+                32.0,
+                10,
+            )
+            .insert((MountRide, MountChrome::Ride));
         }
-        // 关闭 Prguse2[360/361/362] @(297,3)、帮助 Prguse2[257/258/259] @(274,3)
+        // 关闭 Prguse2[360/361/362]、帮助 Prguse2[257/258/259]：坐标按档位
+        // （`mount_ui_system` 每帧按 `mount_slot_profile` 落位；此处先按 5 孔档建）
         if let (Some(n), Some(h), Some(pr)) = (
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 360),
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 361),
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 362),
         ) {
-            spawn_icon_button(p, n, h, pr, 297.0, 3.0, 24.0, 21.0, 10)
-                .insert((MountClose, CloseButton));
+            spawn_icon_button(
+                p,
+                n,
+                h,
+                pr,
+                MOUNT_PROFILE_5SLOT.close_pos.0,
+                MOUNT_PROFILE_5SLOT.close_pos.1,
+                24.0,
+                21.0,
+                10,
+            )
+            .insert((MountClose, MountChrome::Close, CloseButton));
         }
         if let (Some(n), Some(h), Some(pr)) = (
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 257),
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 258),
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 259),
         ) {
-            spawn_icon_button(p, n, h, pr, 274.0, 3.0, 24.0, 21.0, 10);
+            spawn_icon_button(
+                p,
+                n,
+                h,
+                pr,
+                MOUNT_PROFILE_5SLOT.help_pos.0,
+                MOUNT_PROFILE_5SLOT.help_pos.1,
+                24.0,
+                21.0,
+                10,
+            )
+            .insert((MountHelp, MountChrome::Help));
         }
         // 坐骑装备格 5 个 @(36/90/144/198/252, 323)
         // 坐骑立绘（C# `MountDialog.MountImage`）：位置/帧号在 `mount_ui_system` 里按
@@ -260,10 +388,18 @@ fn mount_ui_system(
     >,
     mut panel: Query<
         (&mut ImageNode, &mut Node, &MountPanel),
-        (Without<MountGearIcon>, Without<MountPortrait>),
+        (
+            Without<MountGearIcon>,
+            Without<MountPortrait>,
+            // #3107：与下面 slot_ui 的三条查询显式互斥（B0001）
+            Without<MountChrome>,
+            Without<MountNameText>,
+            Without<MountLoyaltyText>,
+            Without<MountGearCell>,
+        ),
     >,
     mut names: Query<(&mut Text, Option<&MountNameText>, Option<&MountLoyaltyText>)>,
-    mut gears: Query<(&mut Visibility, &mut ImageNode, &MountGearIcon)>,
+    mut gears: Query<(&mut Visibility, &mut ImageNode, &MountGearIcon), Without<MountGearCell>>,
     // 立绘：写 ImageNode/Node/Visibility——用 MountPortrait 与上面几个查询互斥（B0001 硬要求）
     mut portrait: Query<
         (&mut ImageNode, &mut Node, &mut Visibility, &MountPortrait),
@@ -271,9 +407,46 @@ fn mount_ui_system(
             Without<MountPanel>,
             Without<MountGearIcon>,
             Without<MountGearCell>,
+            Without<MountChrome>,
+            Without<MountNameText>,
+            Without<MountLoyaltyText>,
         ),
     >,
-    time: Res<Time>,
+    // #3107：档位几何（窗体三键 / 两个标签 / 装备格）——打包成一个 SystemParam，
+    // 本系统的参数已到 Bevy 上限（`IntoSystem` 最多 16 个参数，多一个就报
+    // 「the method `chain` exists for tuple but its trait bounds were not satisfied」），
+    // 故把 `Time` 一并放进元组。三条查询用 `With/Without` 显式互斥（B0001）。
+    mut slot_ui: (
+        Res<Time>,
+        Query<
+            (&mut Node, &mut ImageNode, &mut ImageButton, &MountChrome),
+            (Without<MountGearIcon>, Without<MountPortrait>),
+        >,
+        Query<
+            (&mut Node, Option<&MountNameText>, Option<&MountLoyaltyText>),
+            (
+                Or<(With<MountNameText>, With<MountLoyaltyText>)>,
+                Without<MountChrome>,
+                Without<MountGearCell>,
+                Without<MountGearIcon>,
+                Without<MountPanel>,
+                Without<MountPortrait>,
+                Without<crate::ui::outlined_text::OutlineUiShadow>,
+            ),
+        >,
+        Query<
+            (&mut Node, &mut Visibility, &MountGearCell),
+            (
+                With<MountGearCell>,
+                Without<MountChrome>,
+                Without<MountGearIcon>,
+                Without<MountPanel>,
+                Without<MountPortrait>,
+                Without<MountNameText>,
+                Without<MountLoyaltyText>,
+            ),
+        >,
+    ),
     mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
     mut logged: Local<bool>,
     mut logged_portrait: Local<bool>,
@@ -324,8 +497,10 @@ fn mount_ui_system(
 
     // 面板按坐骑孔数换图（4→160, 5→167）
     let slot_count = mount.map(|m| m.slots.len()).unwrap_or(0);
+    // #3107：C# `SwitchType` 的**整套**档位几何（面板图/三键/标签宽/格子偏移/Mask 显隐/立绘）
+    let profile = mount_slot_profile(slot_count);
     if let Ok((mut node, mut layout, _)) = panel.single_mut() {
-        let idx = if slot_count == 4 { 160 } else { 167 };
+        let idx = profile.panel_index;
         // #2892 批B：C# `MirImageControl.Size` 跟随图片——`Prguse[160]`(272x378) 与
         // `Prguse[167]`(324x377) 尺寸不同，换图时必须同步节点尺寸，否则 4 孔坐骑被拉伸到 324 宽
         let (iw, ih) = libs
@@ -346,14 +521,77 @@ fn mount_ui_system(
         }
     }
 
+    // #3107：三键位置（关闭/帮助随档不同；骑乘键既换位置又换三帧）——不落位会出现
+    // 「钮被排到面板外 → 被 `Overflow::clip()` 裁掉 ⇒ 看不见也点不动」（实机 sweep mount 红）
+    for (mut layout, mut image, mut btn, kind) in &mut slot_ui.1 {
+        let pos = match kind {
+            MountChrome::Close => profile.close_pos,
+            MountChrome::Help => profile.help_pos,
+            MountChrome::Ride => profile.ride_pos,
+        };
+        if layout.left != Val::Px(pos.0) {
+            layout.left = Val::Px(pos.0);
+        }
+        if layout.top != Val::Px(pos.1) {
+            layout.top = Val::Px(pos.1);
+        }
+        if *kind == MountChrome::Ride {
+            let (n, hv, pr) = profile.ride_frames;
+            if let (Some(nh), Some(hh), Some(ph)) = (
+                load_lib_image(&mut libs, &mut images, LibraryName::Prguse, n),
+                load_lib_image(&mut libs, &mut images, LibraryName::Prguse, hv),
+                load_lib_image(&mut libs, &mut images, LibraryName::Prguse, pr),
+            ) {
+                if btn.normal != nh {
+                    btn.normal = nh.clone();
+                }
+                if btn.hover != hh {
+                    btn.hover = hh;
+                }
+                if btn.pressed != ph {
+                    btn.pressed = ph;
+                }
+                if image.image != nh {
+                    image.image = nh;
+                }
+            }
+        }
+    }
+    // #3107：标签宽度（C# `MountName/MountLoyalty.Size.Width`：4 孔 208 / 5 孔 260；
+    // 位置恒为 (30,10)/(30,30)，宽度变化使居中文本随之左移）
+    for (mut layout, _, _) in &mut slot_ui.2 {
+        if layout.width != Val::Px(profile.label_w) {
+            layout.width = Val::Px(profile.label_w);
+        }
+        if layout.left != Val::Px(LABEL_LEFT) {
+            layout.left = Val::Px(LABEL_LEFT);
+        }
+    }
+    // #3107：装备格偏移（4 孔 +1/+1）与 `Mask` 格显隐（4 孔隐藏）
+    for (mut layout, mut vis, cell) in &mut slot_ui.3 {
+        let (x, y) = mount_gear_cell_pos(profile, cell.0);
+        if layout.left != Val::Px(x) {
+            layout.left = Val::Px(x);
+        }
+        if layout.top != Val::Px(y) {
+            layout.top = Val::Px(y);
+        }
+        if cell.0 == 4 {
+            let want = if profile.mask_visible {
+                Visibility::Visible
+            } else {
+                Visibility::Hidden
+            };
+            if *vis != want {
+                *vis = want;
+            }
+        }
+    }
+
     // 坐骑立绘（C# `MountDialog.MountImage` + `DrawMountAnimation`）：
     // 帧号 = StartIndex + Shape*20 + 动画帧；绘制点 = Location + 该帧艺术偏移（UseOffSet）。
-    let (start_index, portrait_pos) = if slot_count == 4 {
-        (MOUNT_PORTRAIT_START_4SLOT, MOUNT_PORTRAIT_POS_4SLOT)
-    } else {
-        (MOUNT_PORTRAIT_START_5SLOT, MOUNT_PORTRAIT_POS_5SLOT)
-    };
-    let anim_frame = mount_portrait_anim_frame(time.elapsed_secs() * 1000.0);
+    let (start_index, portrait_pos) = (profile.portrait_start, profile.portrait_pos);
+    let anim_frame = mount_portrait_anim_frame(slot_ui.0.elapsed_secs() * 1000.0);
     let shape = mount.map(|m| m.shape).unwrap_or(-1);
     if let Ok((mut p_node, mut p_layout, mut p_vis, _)) = portrait.single_mut() {
         match mount_portrait_frame(start_index, shape, anim_frame) {
@@ -530,5 +768,63 @@ mod tests {
         assert_eq!(mount_portrait_anim_frame(99.0), 0);
         assert_eq!(mount_portrait_anim_frame(150.0), 1);
         assert_eq!(mount_portrait_anim_frame(1600.0), 0);
+    }
+
+    /// #3107：档位几何逐项对照 C# `MountDialog.SwitchType`（`MountDialog.cs:163-195`）。
+    ///
+    /// 阳性对照（落地时实做）：把 4 孔档的 `close_pos`/`help_pos`/`ride_pos` 改回 5 孔的
+    /// `(297,3)`/`(274,3)`/`(262,70)`（= 修复前的写死值）→ 本测试与
+    /// `mount_chrome_inside_panel` 断言立刻红。
+    #[test]
+    fn slot_profiles_match_csharp_switch_type() {
+        let p4 = mount_slot_profile(4);
+        let p5 = mount_slot_profile(5);
+        // 4 孔（`Prguse[160]` 272x378）
+        assert_eq!(p4.panel_index, 160);
+        assert_eq!(p4.label_w, 208.0);
+        assert_eq!(p4.ride_frames, (164, 165, 166));
+        assert_eq!(p4.ride_pos, (210.0, 70.0));
+        assert_eq!(p4.close_pos, (245.0, 3.0));
+        assert_eq!(p4.help_pos, (221.0, 3.0));
+        assert_eq!((p4.grid_dx, p4.grid_dy), (1.0, 1.0));
+        assert!(!p4.mask_visible, "C# `Grid[Mask].Visible = false`");
+        assert_eq!(
+            (p4.portrait_start, p4.portrait_pos),
+            (MOUNT_PORTRAIT_START_4SLOT, MOUNT_PORTRAIT_POS_4SLOT)
+        );
+        // 5 孔（`Prguse[167]` 324x377；构造函数初值）
+        assert_eq!(p5.panel_index, 167);
+        assert_eq!(p5.label_w, 260.0);
+        assert_eq!(p5.ride_frames, (155, 156, 157));
+        assert_eq!(p5.ride_pos, (262.0, 70.0));
+        assert_eq!(p5.close_pos, (297.0, 3.0));
+        assert_eq!(p5.help_pos, (274.0, 3.0));
+        assert_eq!((p5.grid_dx, p5.grid_dy), (0.0, 0.0));
+        assert!(p5.mask_visible);
+        // 装备格：C# `Grid[i].Location = (base + x, 323 + y)`
+        assert_eq!(mount_gear_cell_pos(p4, 0), (37.0, 324.0));
+        assert_eq!(mount_gear_cell_pos(p4, 4), (253.0, 324.0));
+        assert_eq!(mount_gear_cell_pos(p5, 0), (36.0, 323.0));
+        assert_eq!(mount_gear_cell_pos(p5, 4), (252.0, 323.0));
+        // 其余孔数走 5 孔档（C# 构造函数初值 = 167）
+        assert_eq!(mount_slot_profile(0).panel_index, 167);
+        assert_eq!(mount_slot_profile(3).panel_index, 167);
+    }
+
+    /// #3107：面板有 `Overflow::clip()`（`spawn_panel`），**子控件越出面板即被裁掉**——
+    /// 三键必须落在各自档位的面板宽内。修复前 4 孔档沿用 5 孔坐标 `(297,3)` vs 面板宽 272
+    /// ⇒ 关闭钮被裁（实机 `ui_interact_sweep` 的 `mount` 用例点 X 不关窗）。
+    #[test]
+    fn mount_chrome_stays_inside_panel_each_slot_profile() {
+        // 面板宽取 C# 艺术尺寸（`Prguse[160]` 272 / `Prguse[167]` 324）
+        assert!(mount_chrome_inside_panel(&MOUNT_PROFILE_4SLOT, 272.0));
+        assert!(mount_chrome_inside_panel(&MOUNT_PROFILE_5SLOT, 324.0));
+        // 阳性对照：5 孔坐标 + 4 孔面板 ⇒ 越界（正是修复前的状态）
+        assert!(
+            !mount_chrome_inside_panel(&MOUNT_PROFILE_5SLOT, 272.0),
+            "修复前 4 孔坐骑下关闭钮在面板外（x=297 > 272），门禁必须能报出来"
+        );
+        // 关闭钮（24 宽）在 4 孔档下右缘 = 245+24 = 269 ≤ 272
+        assert_eq!(MOUNT_PROFILE_4SLOT.close_pos.0 + 24.0, 269.0);
     }
 }
