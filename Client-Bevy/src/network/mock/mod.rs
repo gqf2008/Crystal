@@ -1390,6 +1390,7 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                         send(
                                             &to_client,
                                             &MockMailEntry {
+                                                mail_id: 9100,
                                                 sender: "bevy2char".to_string(),
                                                 subject: "测试邮件".to_string(),
                                                 body: "邮件正文 M26 测试".to_string(),
@@ -3538,12 +3539,37 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                         send(
                             &to_client,
                             &MockMailEntry {
+                                mail_id: 9100,
                                 sender: "bevy2char".to_string(),
                                 subject: "测试邮件".to_string(),
                                 body: "邮件正文 M26 测试".to_string(),
                             },
                         );
                         tracing::info!("📧 [MOCK] 推送邮件");
+                    }
+                }
+                // #3120 ③：--mail-many 进游戏 2s 后推 21 封（3 页 × 10 行）——
+                // 用于验证邮件列表的分页键/页号（C# `MailDialogs.cs:99-151/303-306`）。
+                // 与 --mail-read 共用「只推一次」的哨兵，两个开关别同时给。
+                if in_game
+                    && std::env::args().any(|a| a == "--mail-many")
+                    && !mock_mail_pushed
+                {
+                    let since = *mock_mail_since.get_or_insert_with(std::time::Instant::now);
+                    if since.elapsed() >= std::time::Duration::from_secs(2) {
+                        mock_mail_pushed = true;
+                        for i in 1..=21u32 {
+                            send(
+                                &to_client,
+                                &MockMailEntry {
+                                    mail_id: 9200 + i as u64,
+                                    sender: format!("发件人{i:02}"),
+                                    subject: format!("主题{i:02}"),
+                                    body: format!("正文{i:02}"),
+                                },
+                            );
+                        }
+                        tracing::info!("📧 [MOCK] 推送 21 封邮件（分页用例）");
                     }
                 }
                 // #788：--marriage-accept 进游戏 2s 推求婚，婚后 3s 推离婚

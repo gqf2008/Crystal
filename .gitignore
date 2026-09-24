@@ -414,6 +414,9 @@ FodyWeavers.xsd
 !tools/acceptance/e2e_lock_selftest.ps1
 !tools/acceptance/enroll_e2e_lock.ps1
 !tools/acceptance/l5u_ui_batch_2961.ps1
+# #3120 ③：邮件列表分页键/页号夹具——判据取只读 RPC `mail_probe` 的分页状态真值，
+# 点击走真实 picking（`click` 注入），数据用 mock `--mail-many` 预置 21 封（不起服务端、不写 DB）
+!tools/acceptance/l5x_mail_pager.ps1
 # 运营就绪最小集（部署/回滚/压测/可观测性）：与 acceptance 夹具同等级纳入管理，
 # 判据脚本是上线门槛的一部分，不能只躺在某台机器上（ops/out 仍是本地产物，不纳入）
 !tools/ops/

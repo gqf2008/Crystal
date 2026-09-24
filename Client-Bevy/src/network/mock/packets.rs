@@ -695,6 +695,9 @@ impl Packet for MockMarketSuccess {
 
 /// #788：邮件条目（客户端 parse_receive_mail 完整格式）
 pub(crate) struct MockMailEntry {
+    /// 邮件 id：客户端 `ReceiveMail` 按它**去重/替换**（`dialogs/mail.rs:2229`），
+    /// 所以推多封时必须给不同的 id，否则会被合并成一封（#3120 ③ 分页用例踩过）。
+    pub(crate) mail_id: u64,
     pub(crate) sender: String,
     pub(crate) subject: String,
     pub(crate) body: String,
@@ -712,7 +715,7 @@ impl Packet for MockMailEntry {
         writer: &mut W,
     ) -> mir2_shared::data::stats::SharedResult<()> {
         use byteorder::{LittleEndian, WriteBytesExt};
-        writer.write_u64::<LittleEndian>(9100)?; // mail_id
+        writer.write_u64::<LittleEndian>(self.mail_id)?; // mail_id
         mir2_shared::binary::write_dotnet_string(writer, &self.sender)?;
         mir2_shared::binary::write_dotnet_string(writer, &self.subject)?;
         mir2_shared::binary::write_dotnet_string(writer, &self.body)?;
@@ -723,7 +726,7 @@ impl Packet for MockMailEntry {
         writer.write_u8(0)?; // locked（#3103：C# `MailInfo.Locked`）
         writer.write_u32::<LittleEndian>(0)?; // gold
         writer.write_u8(1)?; // item_count
-        writer.write_u64::<LittleEndian>(9101)?; // uid
+        writer.write_u64::<LittleEndian>(self.mail_id * 10 + 1)?; // uid（随邮件唯一）
         writer.write_u32::<LittleEndian>(1)?; // idx
         writer.write_u16::<LittleEndian>(1)?; // image（#3103：Items 库图标索引）
         mir2_shared::binary::write_dotnet_string(writer, "金创药(小)")?;
