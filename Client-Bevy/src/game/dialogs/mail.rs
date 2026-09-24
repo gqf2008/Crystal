@@ -470,6 +470,45 @@ pub fn mail_item_mailable(mail: &MailState, item_index: i32) -> bool {
     }
 }
 
+/// 待寄包裹格被点击时的**决策**（把 C# `MirItemCell` 的两条守卫与本端的移除便利收口成一张表）：
+///
+/// | 情形 | C# | 本端 |
+/// |---|---|---|
+/// | 格子已占用 + 手上有选中物 | `Item != null` → 提示 "You cannot swap items"（:1787-1791） | `RefuseSwap`（保留原物） |
+/// | 格子已占用 + 手上无选中物 | 无对应分支 | `Remove`（本端便利：再点一次取出，注释见下） |
+/// | 空格 + 选中物不可邮寄 | `Bind.DontTrade` → "You cannot mail item"（:1793-1797） | `RefuseUnmailable` |
+/// | 空格 + 选中物可邮寄 | 入包 + `CalculatePostage`（:1799-1807） | `Place` |
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ParcelPlace {
+    /// 取出已占用的附件（本端便利；C# 无此点击路径）
+    Remove,
+    /// 拒绝：目标格已占用（C# "You cannot swap items"）
+    RefuseSwap,
+    /// 拒绝：物品不可邮寄（C# "You cannot mail item"）
+    RefuseUnmailable,
+    /// 正常入包
+    Place,
+}
+
+pub fn parcel_place(occupied: bool, has_selection: bool, mailable: bool) -> ParcelPlace {
+    if occupied {
+        if has_selection {
+            ParcelPlace::RefuseSwap
+        } else {
+            ParcelPlace::Remove
+        }
+    } else if has_selection && !mailable {
+        ParcelPlace::RefuseUnmailable
+    } else {
+        ParcelPlace::Place
+    }
+}
+
+/// 待寄格两条拒绝的提示文案。C# `MirItemCell.cs:1787-1797` 的原文是
+/// `You cannot swap items` / `You cannot mail item`；本端 UI 为中文，按语义翻译并保留出处。
+pub(crate) const PARCEL_REFUSE_SWAP: &str = "不能交换物品";
+pub(crate) const PARCEL_REFUSE_UNMAILABLE: &str = "该物品无法邮寄";
+
 /// 请求写邮件（#2631 跨对话框解耦 Message）。
 /// friend 等外部对话框不再直写 [`MailState`]，改发本 Message；邮件对话框的
 /// [`mail_compose_request_system`] 消费并自行预填收件人 + 打开写邮件界面。
@@ -954,6 +993,7 @@ fn mail_compose_click_system(
     mut click: ResMut<crate::game::dialogs::inventory::InvClickState>,
     inv_q: Query<&Inventory, With<crate::actor::LocalPlayer>>,
     net: Res<NetConnection>,
+    mut chat: ResMut<crate::game::chat::ChatState>,
     mouse: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window>,
     panel: Query<(&MailComposeRoot, &Node)>,
@@ -987,30 +1027,49 @@ fn mail_compose_click_system(
         {
             continue;
         }
-        if mail.attach.get(i).is_some_and(|s| s.is_some()) {
-            mail.attach[i] = None;
-            request_mail_cost(&net, mail.compose_gold, &mail.attach, mail.stamped);
+        let occupied = mail.attach.get(i).is_some_and(|s| s.is_some());
+        // 未贴票时只有第 1 格可装（C# `UpdateParcel`：`Cells[1..].Enabled = false`）；
+        // 但**已装**的格子仍要能取出，故这道闸门放在"空格"分支上。
+        if !occupied && i >= slots {
             return;
         }
-        if i >= slots {
-            return;
+        let picked = click
+            .selected()
+            .and_then(|slot_idx| items.get(slot_idx).and_then(|s| s.as_ref()));
+        let mailable = picked
+            .map(|it| mail_item_mailable(&mail, it.item_index))
+            .unwrap_or(true);
+        match parcel_place(occupied, picked.is_some(), mailable) {
+            ParcelPlace::Remove => {
+                mail.attach[i] = None;
+                request_mail_cost(&net, mail.compose_gold, &mail.attach, mail.stamped);
+            }
+            ParcelPlace::RefuseSwap => {
+                chat.add_line(
+                    PARCEL_REFUSE_SWAP,
+                    crate::game::chat::chat_color(mir2_shared::enums::ChatType::System),
+                    crate::game::chat::ChatChannel::System,
+                );
+            }
+            ParcelPlace::RefuseUnmailable => {
+                chat.add_line(
+                    PARCEL_REFUSE_UNMAILABLE,
+                    crate::game::chat::chat_color(mir2_shared::enums::ChatType::System),
+                    crate::game::chat::ChatChannel::System,
+                );
+            }
+            ParcelPlace::Place => {
+                let Some(uid) = picked.map(|it| it.unique_id) else {
+                    return;
+                };
+                if mail.attach.iter().flatten().any(|u| *u == uid) {
+                    return;
+                }
+                mail.attach[i] = Some(uid);
+                click.clear_selected();
+                request_mail_cost(&net, mail.compose_gold, &mail.attach, mail.stamped);
+            }
         }
-        let Some(slot_idx) = click.selected() else {
-            return;
-        };
-        let Some(uid) = items
-            .get(slot_idx)
-            .and_then(|s| s.as_ref())
-            .map(|it| it.unique_id)
-        else {
-            return;
-        };
-        if mail.attach.iter().flatten().any(|u| *u == uid) {
-            return;
-        }
-        mail.attach[i] = Some(uid);
-        click.clear_selected();
-        request_mail_cost(&net, mail.compose_gold, &mail.attach, mail.stamped);
         return;
     }
 }
@@ -2725,6 +2784,30 @@ mod tests {
             !can_mail_item((BindMode::DONT_TRADE | BindMode::DONT_SELL).bits()),
             "组合位里含 DontTrade 仍不可邮寄"
         );
+    }
+
+    /// 门禁（#3120 ② 残余·交互层）：待寄格点击的四条决策，逐条对齐 C#
+    /// `MirItemCell.cs:1784-1810`（不能交换 / 不能邮寄 / 入包）加一条本端取出便利。
+    /// **阳性对照**：把 `parcel_place` 里任一分支的条件写反 → 对应断言立即红。
+    #[test]
+    fn parcel_place_covers_csharp_guards_and_local_remove() {
+        use ParcelPlace::*;
+        // 已占用 + 手上有选中物 → 拒绝交换（C# `:1787-1791` "You cannot swap items"）
+        assert_eq!(parcel_place(true, true, true), RefuseSwap);
+        assert_eq!(
+            parcel_place(true, true, false),
+            RefuseSwap,
+            "拒绝交换优先于可邮寄性判定（C# 先查 Item != null）"
+        );
+        // 已占用 + 手上无选中物 → 取出（本端便利；C# 无此点击路径）
+        assert_eq!(parcel_place(true, false, true), Remove);
+        assert_eq!(parcel_place(true, false, false), Remove);
+        // 空格 + 选中物不可邮寄 → 拒绝（C# `:1793-1797` "You cannot mail item"）
+        assert_eq!(parcel_place(false, true, false), RefuseUnmailable);
+        // 空格 + 选中物可邮寄 → 入包 + CalculatePostage（C# `:1799-1807`）
+        assert_eq!(parcel_place(false, true, true), Place);
+        // 空格 + 手上没东西 → 不进展（调用方在 Place 分支里因取不到 uid 提前返回）
+        assert_eq!(parcel_place(false, false, true), Place);
     }
 
     /// 门禁（#3120 ② 残余·数据层）：`ItemInfoReceived` 带来的绑定位要能被缓存并驱动守卫，
