@@ -44,6 +44,10 @@ param(
     [int]$HoldSec = 150,
     [string]$AccountPrefix = 'opsload',
     [string]$Password = '123456',
+    # 活动负载：none=只保持连接；walk/run=让每个会话按 --StepMs 走位（真玩家每步都触发
+    # UserLocation + 同图视野广播——这是纯"保持"压不出来的扇出路径，CAPACITY.md §6.1/§6.2 判的就是它）
+    [ValidateSet('none', 'walk', 'run')][string]$Activity = 'none',
+    [int]$StepMs = 600,
     [double]$MaxLagPct = 5.0,
     [int]$MinHeartbeats = 4,
     # 前置：同机 CPU 必须基本空闲，否则测的是"别人抢 CPU"而不是服务端自己的 tick 能力
@@ -126,11 +130,13 @@ foreach ($n in $steps) {
     }
 
     Write-Host ("[{0} 会话] 起压测：{1}s 保持（心跳每 30s 一条）..." -f $n, $HoldSec)
+    if ($Activity -ne 'none') { Write-Host ("   活动负载：{0}，步频 {1}ms" -f $Activity, $StepMs) }
     $acc = (1..$n | ForEach-Object { "$AccountPrefix$_" }) -join ','
     $botJson = Join-Path $outDir ("ticklag_bot_{0}.json" -f $n)
     $bot = Start-Process -FilePath 'python' -PassThru -WindowStyle Hidden -ArgumentList @(
         (Join-Path $ops 'bot.py'), '--host', '127.0.0.1', '--port', "$port", '--accounts', $acc,
-        '--sessions', "$n", '--hold', "$HoldSec", '--password', $Password
+        '--sessions', "$n", '--hold', "$HoldSec", '--password', $Password,
+        '--activity', $Activity, '--step-ms', "$StepMs"
     ) -RedirectStandardOutput $botJson -RedirectStandardError ($botJson + '.err')
     $null = $bot.WaitForExit(($HoldSec + 120) * 1000)
     if (-not $bot.HasExited) { Stop-Process -Id $bot.Id -Force -EA SilentlyContinue }
@@ -140,6 +146,27 @@ foreach ($n in $steps) {
     try { $botRes = (Get-Content $botJson -Raw | ConvertFrom-Json) } catch {}
     $botOk = if ($botRes) { [int]$botRes.summary.ok } else { 0 }
     $botFail = if ($botRes) { [int]$botRes.summary.failed } else { $n }
+    # 扇出量：每个会话在窗口内**收到**的字节/帧（同图玩家走位时的视野广播），以及发出的步数
+    $botBytes = if ($botRes) { [int]$botRes.summary.bytes_recv } else { 0 }
+    $botFrames = if ($botRes) { [int]$botRes.summary.frames_recv } else { 0 }
+    $botSteps = if ($botRes) { [int]$botRes.summary.steps_sent } else { 0 }
+    $perSessionBps = if ($n -gt 0 -and $HoldSec -gt 0) { [Math]::Round($botBytes / $n / $HoldSec, 1) } else { 0 }
+    # 按 opcode 聚合（bot.py 的 drain 已经逐会话记了 opcodes）：扇出的可判据量不是字节数，
+    # 而是**别人走位导致的推送帧数**——ObjectWalk=28 / ObjectRun=29（同图别人移动）、
+    # UserLocation=23（自己的位置纠正）、ObjectPlayer=24（新进视野的玩家）。
+    $op = @{}
+    if ($botRes) {
+        foreach ($s in $botRes.sessions) {
+            if ($null -eq $s.opcodes) { continue }
+            foreach ($p in $s.opcodes.PSObject.Properties) {
+                $k = [string]$p.Name
+                if (-not $op.ContainsKey($k)) { $op[$k] = 0 }
+                $op[$k] = [int]$op[$k] + [int]$p.Value
+            }
+        }
+    }
+    $walkFrames = [int]($op['28']) + [int]($op['29'])
+    $walkPerSessionSec = if ($n -gt 0 -and $HoldSec -gt 0) { [Math]::Round($walkFrames / $n / $HoldSec, 1) } else { 0 }
 
     $text = @(Get-Content $log -EA SilentlyContinue)
     $hb = @($text | Where-Object { $_ -match 'heartbeat: tick=' })
@@ -176,6 +203,15 @@ foreach ($n in $steps) {
         slow_reader_kicks       = @($text | Where-Object { $_ -match 'kicking slow reader' }).Count
         broadcast_deferred      = @($text | Where-Object { $_ -match 'broadcast deferred to outbox' }).Count
         broadcast_outbox_full   = @($text | Where-Object { $_ -match 'broadcast outbox full' }).Count
+        speed_hack_rejected     = @($text | Where-Object { $_ -match 'Speed hack detected' }).Count
+        steps_sent              = $botSteps
+        recv_bytes_total        = $botBytes
+        recv_frames_total       = $botFrames
+        recv_bytes_per_session_sec = $perSessionBps
+        obj_walk_frames        = $walkFrames                    # 同图别人移动推送（28+29）
+        obj_walk_per_session_sec = $walkPerSessionSec
+        user_location_frames   = [int]($op['23'])
+        object_player_frames   = [int]($op['24'])
         j1_load_present         = $j1
         j2_samples_enough       = $j2
         j3_lag_within_limit     = $j3
@@ -198,6 +234,8 @@ $report = [ordered]@{
     port         = $port
     cpu_avg_pct_before = $cpuAvg
     hold_sec     = $HoldSec
+    activity     = $Activity
+    step_ms      = $StepMs
     max_lag_pct  = $MaxLagPct
     min_heartbeats = $MinHeartbeats
     steps        = $rows

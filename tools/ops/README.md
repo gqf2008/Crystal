@@ -265,6 +265,18 @@ pwsh tools/ops/tick_lag_probe.ps1 -DeployDir <deploy> -StepsCsv '10,20,50' -Hold
 `interval_ms` 29974–30032、零丢包零踢线；对照（主机 95.6% CPU）`lag_pct` 0.2%——**判据对主机 CPU 抢占
 不敏感，擅于发现"tick 自己变慢"**（见 CAPACITY.md §5.1 的边界说明）。
 
+**活动负载（同图扇出）**：加 `-Activity walk|run -StepMs <ms>` 会让 `bot.py` 进图后按步频走位
+（默认 600ms = C# `HumanObject` MoveDelay；服务端下限 50ms，低于它判 `Speed hack detected`）。
+真玩家每成功一步都会触发 `UserLocation` + 向同图其它会话广播 `ObjectWalk`，所以这是**纯保持压不出来的
+扇出路径**；探针按 opcode 聚合每会话**收到**的推送帧（28/29 = 别人移动、23 = 自己位置、24 = 新进视野），
+并记 `Speed hack detected` 计数。用法与实测（20/50 人同图走位、零丢包零出箱满）见 CAPACITY.md §3.7。
+（`run` 也实现了但**本轮未测**：它每步 2 格且带体力消耗/掉血，属另一条路径，别把 walk 的结论外推给它。）
+
+```powershell
+pwsh tools/ops/tick_lag_probe.ps1 -DeployDir <deploy> -StepsCsv '50' -HoldSec 150 `
+     -Activity walk -StepMs 600 -OutFile tools/ops/out/fanout_walk50.json
+```
+
 ## 6. 故障注入：`fault_injection.ps1`（+ `latency_proxy.py`）
 
 | 场景 | 做法 | 判据 | 实测 |
