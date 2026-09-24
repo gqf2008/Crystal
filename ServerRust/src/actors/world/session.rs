@@ -1242,6 +1242,16 @@ impl Message<StartGameRequest> for WorldActor {
         // 空配置（测试 harness 无刷怪配置 / 该图真的没有刷怪点）不置「已物化」标记，
         // 否则该图的后续会话会以为生成物已存在而永远不发。
         let materialized = !(new_npcs.is_empty() && new_monsters.is_empty());
+        // CAPACITY.md §4.5 的下一步：把「物化 / 复用」从「只在实机日志里」变成可断言的计数
+        // （口径与日志同源：走了复用分支记一次复用；真的生成了非空生成物记一次物化）。
+        if reused_map_spawns {
+            *self.map_spawn_reuses.entry(spawn_map_index).or_insert(0) += 1;
+        } else if materialized {
+            *self
+                .map_spawn_materializations
+                .entry(spawn_map_index)
+                .or_insert(0) += 1;
+        }
         // #2867：先记录本会话可见的 NPC（db_index → object_id），供任务定义回填 npc_index
         let spawned_npcs: Vec<(i32, u32)> = if reused_map_spawns {
             self.npc_object_ids_on_map(spawn_map_index)
@@ -2146,6 +2156,7 @@ impl Message<WorldMoveRequest> for WorldActor {
                                 &self.npcs,
                                 &self.monsters,
                             );
+                            *self.map_spawn_reuses.entry(dest_map_u16).or_insert(0) += 1;
                             Vec::new()
                         } else {
                             let (npcs, monsters) = spawn_npcs_and_monsters(
@@ -2161,6 +2172,10 @@ impl Message<WorldMoveRequest> for WorldActor {
                             .await;
                             if !(npcs.is_empty() && monsters.is_empty()) {
                                 self.map_spawns_ready.insert(dest_map_u16);
+                                *self
+                                    .map_spawn_materializations
+                                    .entry(dest_map_u16)
+                                    .or_insert(0) += 1;
                             }
                             for npc in npcs {
                                 self.npcs.insert(npc.object_id, npc);
@@ -3017,6 +3032,31 @@ impl Message<TestMonsterCount> for WorldActor {
         _ctx: &mut Context<Self, Self::Reply>,
     ) -> Self::Reply {
         self.monsters.len()
+    }
+}
+
+/// 测试探针：某地图的「生成物**物化** / **复用**」累计次数（只读）。
+/// 与实机日志 `Spawned .. monsters` / `spawns reused` 同源口径，供门禁把
+/// CAPACITY.md §4.5 的计数断言下来（此前只在日志里，静默回归抓不到）。
+pub struct TestMapSpawnStats {
+    pub map_index: u16,
+}
+
+impl Message<TestMapSpawnStats> for WorldActor {
+    type Reply = (u32, u32);
+
+    async fn handle(
+        &mut self,
+        msg: TestMapSpawnStats,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        (
+            *self
+                .map_spawn_materializations
+                .get(&msg.map_index)
+                .unwrap_or(&0),
+            *self.map_spawn_reuses.get(&msg.map_index).unwrap_or(&0),
+        )
     }
 }
 
@@ -8627,7 +8667,9 @@ mod auth_regression_tests {
 
     use crate::actors::account::AccountActor;
     use crate::actors::social::{SocialActor, SocialActorArgs, SocialActorConfig};
-    use crate::actors::world::session::{TestInjectMapSpawnConfig, TestMonsterCount};
+    use crate::actors::world::session::{
+        PlayerLogOut, TestInjectMapSpawnConfig, TestMapSpawnStats, TestMonsterCount,
+    };
     use crate::actors::world::{WorldActor, WorldActorArgs};
     use crate::db;
     use crate::gate::actor::{ClientData, GateActor, SessionCreated, SetAccountRef, SetWorldRef};
@@ -9650,6 +9692,113 @@ mod auth_regression_tests {
             assert_eq!(
                 ids_c, ids_b_sorted,
                 "两个玩家必须看到**同一批**怪（object_id 相同），否则打不到同一只"
+            );
+        });
+    }
+
+    /// 门禁（CAPACITY.md §4.5 的下一步）：把「地图级生成物**物化 / 复用**」从
+    /// 「只在实机日志里」变成可断言的计数，并覆盖**清理后再进图必须重新物化**
+    /// 这条静默回归路径。
+    ///
+    /// 为什么后者要单独钉：`cleanup_map_spawns` 释放整图生成物后必须摘掉
+    /// `map_spawns_ready`；一旦漏摘，该图就变成「标记说已物化、实际一只怪都没有」——
+    /// 后续进场的会话拿到 0 只怪（玩家看到空地图），而既有测试只断言「NPC 计数归零」，
+    /// 对这条**不红**。红检两条（各自独立必红）：
+    /// ① 复用判断强制 false → 物化计数 1→3、`TestMonsterCount` 3→9；
+    /// ② 删掉 `cleanup_map_spawns` 里的 `map_spawns_ready.remove` → 重新进图后
+    ///    计数仍为 1、新会话收到的 ObjectMonster 数变 0。
+    #[test]
+    fn e2e_map_spawns_stats_and_rematerialize_after_cleanup() {
+        let rt = big_stack_runtime();
+        rt.block_on(async {
+            let session_a = 70u64;
+            let (gate_ref, mut rx_a) = setup_gate_and_session(session_a).await;
+            let world_ref = login_and_enter_game(&gate_ref, session_a, &mut rx_a).await;
+            // harness 无 spawn 配置：给 map 0 注入「3 只怪」的合成配置
+            // （A 已在图内且此刻配置尚不存在，故 A 的进图不算物化）
+            let _ = world_ref
+                .ask(TestInjectMapSpawnConfig {
+                    map_index: 0,
+                    monster_count: 3,
+                })
+                .await;
+            // 第二个会话进同一张图 → 本图第一次**物化**
+            let session_b = 71u64;
+            let (tx_b, mut rx_b) = mpsc::channel::<Vec<u8>>(4096);
+            let _ = gate_ref
+                .ask(SessionCreated {
+                    session_id: session_b,
+                    sender: tx_b,
+                    ip: "127.0.0.1".to_string(),
+                })
+                .await;
+            enter_game_as(&gate_ref, session_b, "testuser2", "TestChar2", &mut rx_b).await;
+            let stats = world_ref
+                .ask(TestMapSpawnStats { map_index: 0 })
+                .await
+                .unwrap();
+            assert_eq!(
+                stats,
+                (1, 0),
+                "首个进图会话物化一次、复用零次（与实机日志 Spawned/reused 同源）"
+            );
+            assert_eq!(
+                world_ref.ask(TestMonsterCount).await.unwrap(),
+                3,
+                "物化后世界表里只应有这一份 3 只怪"
+            );
+            assert_eq!(
+                collect_object_monster_ids(&mut rx_b).await.len(),
+                3,
+                "物化那次会话必须收到 3 个 ObjectMonster"
+            );
+            // 所有玩家离开该图 → cleanup_map_spawns 释放整图生成物并摘掉「已物化」标记
+            let _ = world_ref
+                .ask(PlayerLogOut {
+                    session_id: session_a,
+                })
+                .await;
+            let _ = world_ref
+                .ask(PlayerLogOut {
+                    session_id: session_b,
+                })
+                .await;
+            assert_eq!(
+                world_ref.ask(TestMonsterCount).await.unwrap(),
+                0,
+                "最后一个玩家离开后必须释放该图生成物"
+            );
+            // 第三个会话再进同一张图 → 必须是**重新物化**（标记已摘），而不是复用空集合
+            let session_c = 72u64;
+            let (tx_c, mut rx_c) = mpsc::channel::<Vec<u8>>(4096);
+            let _ = gate_ref
+                .ask(SessionCreated {
+                    session_id: session_c,
+                    sender: tx_c,
+                    ip: "127.0.0.1".to_string(),
+                })
+                .await;
+            enter_game_as(&gate_ref, session_c, "testuser3", "TestChar3", &mut rx_c).await;
+            let stats_after = world_ref
+                .ask(TestMapSpawnStats { map_index: 0 })
+                .await
+                .unwrap();
+            assert_eq!(
+                stats_after,
+                (2, 0),
+                "清理后再进图必须重新物化（漏摘 map_spawns_ready 会让这条变 (1,1) 或 (1,0)）"
+            );
+            assert_eq!(
+                world_ref.ask(TestMonsterCount).await.unwrap(),
+                3,
+                "重新物化后世界表里仍是 3 只（不是 0，也不是 6）"
+            );
+            let ids_c = collect_object_monster_ids(&mut rx_c).await;
+            assert_eq!(
+                ids_c.len(),
+                3,
+                "清理后再进图的会话必须收到整图 3 只怪（否则玩家看到空地图），got {:?}",
+                ids_c
             );
         });
     }

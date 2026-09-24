@@ -108,6 +108,7 @@ impl WorldActor {
                 &self.npcs,
                 &self.monsters,
             );
+            *self.map_spawn_reuses.entry(dest_map_index).or_insert(0) += 1;
             Vec::new()
         } else {
             let spawn_ctx = SpawnContext {
@@ -131,6 +132,10 @@ impl WorldActor {
             .await;
             if !(npcs.is_empty() && monsters.is_empty()) {
                 self.map_spawns_ready.insert(dest_map_index);
+                *self
+                    .map_spawn_materializations
+                    .entry(dest_map_index)
+                    .or_insert(0) += 1;
             }
             for npc in npcs {
                 self.npcs.insert(npc.object_id, npc);

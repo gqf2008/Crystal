@@ -1879,6 +1879,13 @@ pub struct WorldActor {
     /// object_id 重新序列化下发，不再各自生成一份（否则 20 会话同图 =
     /// 20 份整图怪物/NPC，既泄漏内存又让两个玩家打不到同一只怪）。
     pub(crate) map_spawns_ready: std::collections::HashSet<u16>,
+    /// 地图级生成物的**物化**次数（按地图累计）：入场路径每次真的生成一份整图
+    /// NPC/怪物就 +1。与实机日志 `Spawned .. monsters` 同源，供门禁断言
+    /// （CAPACITY.md §4.5 的下一步：把计数从"只在日志里"变成可断言）。
+    pub(crate) map_spawn_materializations: HashMap<u16, u32>,
+    /// 地图级生成物的**复用**次数（按地图累计）：该图已物化过、后续会话只重放
+    /// 既有 object_id 时 +1。与实机日志 `spawns reused` 同源。
+    pub(crate) map_spawn_reuses: HashMap<u16, u32>,
     /// 征服旗子 NPC（per-session 生成；object_id → 状态，供易主时广播更新）
     pub(crate) conquest_flags: HashMap<u32, ConquestFlagNpc>,
     /// 装饰物对象（@DECO 生成；object_id → 状态，进图同步）
@@ -2585,6 +2592,8 @@ impl WorldActor {
             last_mail_time: HashMap::new(),
             npcs: HashMap::new(),
             map_spawns_ready: std::collections::HashSet::new(),
+            map_spawn_materializations: HashMap::new(),
+            map_spawn_reuses: HashMap::new(),
             conquest_flags: HashMap::new(),
             deco_objects: HashMap::new(),
             respawn_queue: HashMap::new(),
@@ -9007,6 +9016,8 @@ impl Actor for WorldActor {
             last_mail_time: HashMap::new(),
             npcs: HashMap::new(),
             map_spawns_ready: std::collections::HashSet::new(),
+            map_spawn_materializations: HashMap::new(),
+            map_spawn_reuses: HashMap::new(),
             conquest_flags: HashMap::new(),
             deco_objects: HashMap::new(),
             respawn_queue: HashMap::new(),
