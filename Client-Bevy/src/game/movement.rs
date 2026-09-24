@@ -944,6 +944,8 @@ fn diag_advance_local_move_direction_stability() {
         map_reader: None,
         desired_map: None,
         player_spawn: None,
+        minimap_index: 0,
+        map_title: String::new(),
     });
     app.insert_resource(crate::game::sound::SoundBank::default());
     app.insert_resource(bevy::asset::Assets::<bevy::audio::AudioSource>::default());

@@ -632,6 +632,8 @@ mod tests {
             map_reader: None,
             desired_map: desired.map(|s| s.to_string()),
             player_spawn: None,
+            minimap_index: 0,
+            map_title: String::new(),
         });
         world
     }

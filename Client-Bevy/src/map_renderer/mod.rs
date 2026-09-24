@@ -267,6 +267,13 @@ pub struct GameData {
     pub desired_map: Option<String>,
     /// 玩家出生位置（瓦片坐标 + 朝向），来自 MapChanged
     pub player_spawn: Option<(f32, f32, u8)>,
+    /// 小地图索引（C# `MapInfo.MiniMap`，来自 `S.MapChanged.minimap`）——
+    /// 原版 `MiniMap_BeforeDraw` 用 `Libraries.MiniMap.GetSize(map.MiniMap)` 取缩略图；
+    /// `0` = 该图没有缩略图（原版切小模式且不画）。
+    pub minimap_index: u16,
+    /// 地图标题（C# `MapControl.Title`，来自 `S.NewMapInfo.title`）——小地图左上角显示的名字。
+    /// 注意：**不是**地图文件名（`LoadedMap.name`，如 "0"/"D002"），UI 上不该显示文件名。
+    pub map_title: String,
 }
 
 /// 图像库资源（地图库 + 数组库，供渲染系统使用；懒初始化）

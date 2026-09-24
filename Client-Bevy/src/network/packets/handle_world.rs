@@ -95,6 +95,9 @@ pub(crate) fn handle_world(
                 game_data.desired_map = Some(p.file_name);
                 game_data.player_spawn =
                     Some((p.location_x as f32, p.location_y as f32, p.direction));
+                // 小地图缩略图索引（C# `MiniMap_BeforeDraw` 用 `map.MiniMap` 取 `Libraries.MiniMap`
+                // 的图；本端此前把这个字段整个丢掉 ⇒ 小地图只有一块写死的深绿底）。
+                game_data.minimap_index = p.minimap;
                 server_events.write(ServerEvent::WeatherChanged { code: p.weather });
                 // 游戏内收到时必须用 set_if_neq：Bevy 0.19 的 NextState::set 对同态
                 // 也会真实重跑 OnExit+OnEnter（bevy_state 0.19.1 实测；只有
@@ -131,6 +134,9 @@ pub(crate) fn handle_world(
                     title: p.title.clone(),
                     npcs,
                 });
+                // 小地图左上角显示的是 `MapControl.Title`（人类可读名，如 "BichonProvince"），
+                // 不是地图文件名（"0"/"D002"）——此前 UI 上显示的是文件名，故出现「0」。
+                game_data.map_title = p.title.clone();
             }
         }
         x if x == ServerPacketIds::Roll as i16 => {
