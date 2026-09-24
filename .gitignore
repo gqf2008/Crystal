@@ -406,6 +406,9 @@ FodyWeavers.xsd
 !tools/acceptance/l5t_minimize_survives.ps1
 # 法术特效实机夹具（owner「魔法效果完全不对」的可复验判据：spell_fx_probe 真值断言）
 !tools/acceptance/l5v_spell_fx.ps1
+# 实机资源跨进程锁（客户端 + e2e 账号 + 本地服务端一次只能一组）+ #2961 可复验批次夹具
+!tools/acceptance/e2e_lock.ps1
+!tools/acceptance/l5u_ui_batch_2961.ps1
 # 运营就绪最小集（部署/回滚/压测/可观测性）：与 acceptance 夹具同等级纳入管理，
 # 判据脚本是上线门槛的一部分，不能只躺在某台机器上（ops/out 仍是本地产物，不纳入）
 !tools/ops/
