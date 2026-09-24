@@ -243,6 +243,28 @@ pwsh tools/ops/login_latency_probe.ps1 -DeployDir <deploy> -ExePath <mir2_server
 （读连接永不被写占用）或把簿记写做成真正的异步队列（现在只是"不挡 actor + 快速失败"）。
 另：`LOGIN_TIMING` 分段日志保留在代码里（正常 debug、慢于 500ms 才 warn），下次出现登录抖动可直接看分段。
 
+## 5e. 高负载 tick 滞后长窗口：`tick_lag_probe.ps1`
+
+CAPACITY.md §5 那条「20–50 会话下 tick 滞后待测」的收口工具：`capacity_ramp.ps1` 的 `-HoldSec` 默认
+20s，比心跳间隔（300 tick × 100ms = 30s）还短，短窗口根本采不到样本；本工具把窗口拉到 ≥2 分钟。
+
+判据（缺一不可）：**J-1** 8s 平均 CPU ≤ `MaxIdleCpuPct`（默认 20%，防"测的是别人的编译抢 CPU"；
+忙机要测必须 `-AllowBusy` 并标注 CPU）/ **J0** 起服（`Gate listening`）/ **J1 载荷成立**
+（`bot.ok == N` 且心跳 `online ≥ N`）/ **J2** 心跳条数 ≥ `MinHeartbeats`（默认 4）× **J3** `|lag_pct| ≤ MaxLagPct`（默认 5.0）。
+
+```powershell
+pwsh tools/ops/tick_lag_probe.ps1 -DeployDir <deploy> -StepsCsv '10,20,50' -HoldSec 150 `
+     -OutFile tools/ops/out/tick_lag.json     # 退出码 0 过 / 1 判据红 / 2 前置失败
+```
+
+两处刻意与 `capacity_ramp.ps1` 不同：**绝不按进程名杀 `mir2_server`**（同机可能有别的 agent 的开发服
+7000 与其它 deploy 实例，本工具只停自己启动的 PID）；端口从 `<deploy>\config\server.toml` 的
+`listen_addr` 读（读错端口会让机器人静默连不上，从而得到"零滞后"的假绿）。
+
+实测（2026-09-25，release 构建，同图 1912 只怪）：10/20/50 会话 × 150s → `lag_pct` ≤ 0.1%、
+`interval_ms` 29974–30032、零丢包零踢线；对照（主机 95.6% CPU）`lag_pct` 0.2%——**判据对主机 CPU 抢占
+不敏感，擅于发现"tick 自己变慢"**（见 CAPACITY.md §5.1 的边界说明）。
+
 ## 6. 故障注入：`fault_injection.ps1`（+ `latency_proxy.py`）
 
 | 场景 | 做法 | 判据 | 实测 |
@@ -268,7 +290,10 @@ pwsh tools/ops/login_latency_probe.ps1 -DeployDir <deploy> -ExePath <mir2_server
 
 七项（部署/回滚/压测/可观测性/容量/故障注入/告警）都有可运行脚本与实测证据
 （见 walgit 线程 `crystal-ops-readiness`）。
-**尚未做**：独立压测机与生产拓扑、真实客户端容量、≥24h 长稳、运行中存储故障降级、
-告警通道接入与值班流程、脱敏生产数据迁移演练——清单与理由写在 `CAPACITY.md` §7。
-因此「可交付上线运营」仍**未**达；本目录把它从"完全空白"推进到"最小集可跑、可复现、有判据，
-且已量化单机安全线（世界会话约 10）"。
+**本机已做到**（2026-09-25 更新）：单机安全线**世界会话 ≥120 全绿零丢包**（`CAPACITY.md` §3.6）、
+登录 200 并发真延迟 p95 0.86s（§2.1）、内存 20 会话 3.22MB/会话（§4.5）、高负载 tick 长窗口
+10/20/50 会话 `lag_pct` ≤0.1%（§5.1）、运行中存储写故障降级演练 J1–J5 全过且落库失败对玩家可见（§5c）。
+**仍未做（本机做不了/需外部资源）**：独立压测机与生产拓扑、真实渲染客户端容量、≥24h 长稳（本机最长
+窗口 150s）、告警通道接入与值班流程、脱敏生产数据迁移演练——清单、判据与缺什么写在
+`CAPACITY.md` §7 与 `EXTERNAL_OPS_HANDOFF.md`。
+因此「可交付上线运营」仍**未**达：卡点是上列外部项，本机侧已推进到"最小集可跑、可复现、有判据"。
