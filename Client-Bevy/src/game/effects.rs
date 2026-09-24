@@ -174,6 +174,11 @@ pub(crate) struct ObjectFxAnim {
     /// false = 普通 alpha（`Sprite`）。探针 `spell_fx_probe` 会把它带给实机夹具——
     /// 这样"这条特效到底走了哪条混合通道"是**实机可断言**的，不靠肉眼看截图。
     pub(crate) blend_add: bool,
+    /// 原版 `SoundManager.PlaySound(...)` 的音效 id（表里由 C# 机械生成；`None` = 原版该 case 不播）
+    sound: Option<u32>,
+    /// 音效是否已播（原版 `SoundManager.PlaySound` 在 case 处理时播一次；
+    /// `ef.Played += …` 那几条是**动画真正开始时**播——本端统一在"延迟结束、动画开始"时播一次）
+    sound_played: bool,
 }
 
 pub struct EffectsPlugin;
@@ -587,6 +592,8 @@ fn spawn_pending_effects(
                         },
                         stage: effect_type,
                         blend_add: f.blend,
+                        sound: f.sound,
+                        sound_played: false,
                     };
                     let tf21 = Transform::from_xyz(tf.translation.x, tf.translation.y, 21.0);
                     if f.blend {
@@ -747,6 +754,9 @@ fn advance_object_fx(
     mut images: ResMut<Assets<Image>>,
     mut cache: ResMut<UiImageCache>,
     mut fx_mats: ResMut<Assets<crate::game::object_fx_material::ObjectFxBlendMaterial>>,
+    // 对象特效音效（原版 `SoundManager.PlaySound`）：在"动画真正开始"那一帧播一次
+    mut audio_assets: ResMut<Assets<bevy::audio::AudioSource>>,
+    sound_bank: Res<crate::game::sound::SoundBank>,
     // B0001 回归：下面 q 写 Transform，actors 只读 Transform，`Without<ObjectFxAnim>`
     // 划界证明两个查询不相交（与 advance_spell_fx 同一处置）。
     actors: Query<(&NetObjectId, &Transform), Without<ObjectFxAnim>>,
@@ -771,6 +781,14 @@ fn advance_object_fx(
             continue;
         }
         set_object_fx_alpha(&mut sprite, &mat, &mut fx_mats, 1.0);
+        // 音效：原版在这一段里 `SoundManager.PlaySound(...)`（部分 case 是 `ef.Played += …`，
+        // 即**动画真正开始时**播）。本端统一在"延迟结束、开始播"这一帧播一次，与 `Played` 语义一致。
+        if !fx.sound_played {
+            if let Some(id) = fx.sound {
+                crate::game::sound::play_sound(&mut commands, &mut audio_assets, &sound_bank, id);
+            }
+            fx.sound_played = true;
+        }
         fx.t += dt;
         fx.age += dt;
         if fx.follow_object_id != 0 {
@@ -1069,6 +1087,9 @@ mod tests {
             crate::game::object_fx_material::ObjectFxBlendMaterial,
         >::default());
         world.insert_resource(crate::game::object_fx_material::ObjectFxQuad::default());
+        // 音效（advance_object_fx 会在动画开始时 play_sound）
+        world.insert_resource(bevy::prelude::Assets::<bevy::audio::AudioSource>::default());
+        world.insert_resource(crate::game::sound::SoundBank::default());
         world.insert_resource(bevy::prelude::Time::<()>::default());
         world
             .resource_mut::<crate::map_renderer::GameLibraries>()
@@ -1152,6 +1173,9 @@ mod tests {
             crate::game::object_fx_material::ObjectFxBlendMaterial,
         >::default());
         app.insert_resource(crate::game::object_fx_material::ObjectFxQuad::default());
+        // 对象特效音效（advance_object_fx 会在动画开始时 play_sound）
+        app.insert_resource(bevy::prelude::Assets::<bevy::audio::AudioSource>::default());
+        app.insert_resource(crate::game::sound::SoundBank::default());
         // 与 EffectsPlugin 相同的五条系统、同样的链式注册（.after/run_if 与冲突校验无关，从略）
         app.add_systems(
             Update,
@@ -1195,6 +1219,9 @@ mod tests {
             crate::game::object_fx_material::ObjectFxBlendMaterial,
         >::default());
         world.insert_resource(crate::game::object_fx_material::ObjectFxQuad::default());
+        // 音效（advance_object_fx 会在动画开始时 play_sound）
+        world.insert_resource(bevy::prelude::Assets::<bevy::audio::AudioSource>::default());
+        world.insert_resource(crate::game::sound::SoundBank::default());
         world
             .resource_mut::<crate::map_renderer::GameLibraries>()
             .0
@@ -1299,6 +1326,45 @@ mod tests {
     /// `:4804/4816`：`ElementalBarrierUp/Down` 只对 `Player` 放行。
     /// 本端此前不做任何种族判断 ⇒ 怪物身上也会长护盾光圈。
     /// **阳性对照（实做）**：把 `if !f.race.matches(is_player)` 去掉 → 本测试立即红（怪物身上出现 1 条）。
+    #[test]
+    fn object_fx_with_sound_spawns_audio_player() {
+        use bevy::ecs::system::RunSystemOnce;
+        let Some(mut world) = object_fx_test_world() else {
+            eprintln!("skip object_fx_with_sound_spawns_audio_player: 无 Data 资产");
+            return;
+        };
+        // 真音效库（主检出 `Sound/`）：同时验证 C# 的"表里没有就按公式拼名"这条回退规则
+        let mut bank = crate::game::sound::SoundBank::default();
+        bank.load();
+        if bank.file_for_or_formula(10110).is_none() {
+            eprintln!(
+                "skip object_fx_with_sound_spawns_audio_player: 本机没有 Sound 资产（110.wav）"
+            );
+            return;
+        }
+        world.insert_resource(bank);
+        write_object_effect(&mut world, mir2_shared::enums::SpellEffect::Teleport, 0, 0);
+        world
+            .run_system_once(advance_object_fx)
+            .expect("advance_object_fx 应能运行");
+        let mut q = world.query_filtered::<Entity, With<bevy::audio::AudioPlayer>>();
+        let played = q.iter(&world).count();
+        assert!(
+            played >= 1,
+            "Teleport 有音效（C# `SoundManager.PlaySound(SoundList.Teleport)`）→ 动画开始时应生成 AudioPlayer"
+        );
+        // 再推进一帧不应重复播（C# 一个包只播一次）
+        world
+            .run_system_once(advance_object_fx)
+            .expect("advance_object_fx 应能运行");
+        let mut q2 = world.query_filtered::<Entity, With<bevy::audio::AudioPlayer>>();
+        assert_eq!(
+            q2.iter(&world).count(),
+            played,
+            "音效只应播一次（sound_played 守卫）"
+        );
+    }
+
     #[test]
     fn player_only_aura_is_skipped_on_monster() {
         let Some(mut world) = object_fx_test_world() else {

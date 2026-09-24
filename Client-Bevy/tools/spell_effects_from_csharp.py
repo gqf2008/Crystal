@@ -314,6 +314,94 @@ def parse_csharp_monster_values(text):
     return out
 
 
+def parse_csharp_spell_values(text):
+    """`public enum Spell : ... { ... }` → `{名字: C# 值}`（音效 id 里会用到 `(ushort)Spell.X`）。"""
+    i = text.index("public enum Spell")
+    j = text.index("{", i)
+    depth = 0
+    k = j
+    while k < len(text):
+        if text[k] == "{":
+            depth += 1
+        elif text[k] == "}":
+            depth -= 1
+            if depth == 0:
+                break
+        k += 1
+    body = text[j + 1 : k]
+    out = {}
+    nxt = 0
+    for raw in body.split("\n"):
+        line = raw.split("//", 1)[0].strip().rstrip(",")
+        if not line:
+            continue
+        m = re.match(r"^(\w+)\s*=\s*(\d+)$", line)
+        if m:
+            nxt = int(m.group(2))
+            out[m.group(1)] = nxt
+            continue
+        m = re.match(r"^(\w+)$", line)
+        if m:
+            out[m.group(1)] = nxt
+            nxt += 1
+    if not out:
+        raise ValueError("Shared/Enums.cs 里没解析出 Spell 枚举值")
+    return out
+
+
+def parse_csharp_soundlist_values(text):
+    """`Client/MirSounds/SoundList.cs` 的 `public static int A = 1, B = 2, ...` → `{名字: 值}`。"""
+    out = {}
+    for m in re.finditer(r"(\w+)\s*=\s*(\d+)", text):
+        out.setdefault(m.group(1), int(m.group(2)))
+    if "Teleport" not in out:
+        raise ValueError("SoundList.cs 里没解析到 Teleport（音效常量表变了？）")
+    return out
+
+
+def _object_fx_sound(expr, cs_spells, cs_monsters, cs_soundlist):
+    """C# `SoundManager.PlaySound(<expr>)` 的实参 → 数值 id。**不认识的形式直接报错**。"""
+    e = expr.strip()
+    if e.isdigit():
+        return int(e)
+    m = re.fullmatch(r"SoundList\.(\w+)", e)
+    if m:
+        name = m.group(1)
+        if name not in cs_soundlist:
+            raise ValueError("SoundList.cs 里没有常量 %s（禁止猜音效 id）" % name)
+        return cs_soundlist[name]
+    m = re.fullmatch(r"20000 \+ \(ushort\)Spell\.(\w+) \* 10(?: \+ (\d+))?", e)
+    if m:
+        name = m.group(1)
+        if name not in cs_spells:
+            raise ValueError("Shared/Enums.cs 的 Spell 里没有 %s" % name)
+        return 20000 + cs_spells[name] * 10 + int(m.group(2) or 0)
+    m = re.fullmatch(r"20000 \+ (\d+) \* 10 \+ (\d+)", e)
+    if m:
+        return 20000 + int(m.group(1)) * 10 + int(m.group(2))
+    m = re.fullmatch(r"\(\(ushort\)Monster\.(\w+) \* 10\) \+ (\d+)", e)
+    if m:
+        name = m.group(1)
+        if name not in cs_monsters:
+            raise ValueError("C# `Monster` 枚举里没有 %s（音效 id 无法确定）" % name)
+        return cs_monsters[name] * 10 + int(m.group(2))
+    raise ValueError("未识别的 PlaySound 实参（禁止猜）: %r" % expr)
+    out = {}
+    val = 0
+    for line in body.split("\n"):
+        line = line.split("//")[0].strip().rstrip(",")
+        if not line:
+            continue
+        m = re.match(r"(\w+)\s*=\s*(\d+)", line)
+        if m:
+            out[m.group(1)] = int(m.group(2))
+            val = int(m.group(2)) + 1
+        elif re.match(r"^\w+$", line):
+            out[line] = val
+            val += 1
+    return out
+
+
 def _build_object_entry(case, stmt, cond, cs_monsters, race=None):
     """一条 `new Effect(...)` / `new DelayedExplosionEffect(...)` → Rust 字段串。"""
     race_field = [] if race is None else ["race: FxRace::%s" % race]
@@ -380,7 +468,7 @@ def _build_object_entry(case, stmt, cond, cs_monsters, race=None):
     return ", ".join(fields)
 
 
-def parse_object_effects(text, cs_monsters):
+def parse_object_effects(text, cs_monsters, cs_spells, cs_soundlist):
     """抓 `GameScene.cs` 的 `ObjectEffect(S.ObjectEffect p)` switch。
 
     返回 `([(case 名, [字段串...])...], {case 名: 备注})`。
@@ -396,6 +484,7 @@ def parse_object_effects(text, cs_monsters):
     body = lines[start:end]
     cases = []
     notes = {}
+    case_sounds = {}
     cur = None
     cond = None
     race = None
@@ -426,6 +515,27 @@ def parse_object_effects(text, cs_monsters):
                 race = "PlayerOnly"
             else:
                 raise ValueError("未识别的 ob.Race 判据（禁止猜语义）: %r" % ln.strip())
+            i += 1
+            continue
+        # 音效：原版在这一段里 `SoundManager.PlaySound(<expr>)`（含 `ef.Played += … PlaySound(50002)`）
+        # —— 一个 case 只播一次，故挂在**该 case 的第一条 Effect** 上（播放时机由本端在动画真正开始时触发）。
+        if "SoundManager.PlaySound(" in ln:
+            at = ln.index("SoundManager.PlaySound(") + len("SoundManager.PlaySound(")
+            depth = 1
+            j = at
+            while j < len(ln) and depth > 0:
+                if ln[j] == "(":
+                    depth += 1
+                elif ln[j] == ")":
+                    depth -= 1
+                    if depth == 0:
+                        break
+                j += 1
+            sid = _object_fx_sound(ln[at:j], cs_spells, cs_monsters, cs_soundlist)
+            if cur is not None:
+                if cur in case_sounds and case_sounds[cur] != sid:
+                    raise ValueError("case %s 有多个不同 PlaySound（本端只支持一条）: %r" % (cur, ln.strip()))
+                case_sounds[cur] = sid
             i += 1
             continue
         if re.search(r"if \(p\.EffectType == 0\)", ln):
@@ -469,6 +579,17 @@ def parse_object_effects(text, cs_monsters):
             i += 1
             continue
         i += 1
+    # 把 case 音效挂到该 case 的第一条 Effect 上（C# 一个包播一次）
+    for idx, (name, entries) in enumerate(cases):
+        if name in case_sounds and entries:
+            # 注意插在 `..ObjectFx::DEFAULT` **之前**：struct update 语法必须放最后
+            field = "sound: Some(%d)" % case_sounds[name]
+            if "..ObjectFx::DEFAULT" in entries[0]:
+                entries[0] = entries[0].replace(
+                    "..ObjectFx::DEFAULT", field + ", ..ObjectFx::DEFAULT"
+                )
+            else:
+                entries[0] = entries[0] + ", " + field
     return cases, notes
 
 
@@ -514,7 +635,12 @@ def main():
     range_block = render_range_missiles(ranges)
     gs_text = GS.read_text(encoding="utf-8", errors="replace")
     cs_monsters = parse_csharp_monster_values(ENUMS_CS.read_text(encoding="utf-8", errors="replace"))
-    obj_cases, obj_notes = parse_object_effects(gs_text, cs_monsters)
+    enums_text = ENUMS_CS.read_text(encoding="utf-8", errors="replace")
+    cs_spells = parse_csharp_spell_values(enums_text)
+    cs_soundlist = parse_csharp_soundlist_values(
+        Path("Client/MirSounds/SoundList.cs").read_text(encoding="utf-8", errors="replace")
+    )
+    obj_cases, obj_notes = parse_object_effects(gs_text, cs_monsters, cs_spells, cs_soundlist)
     obj_block = render_object_effects(obj_cases, obj_notes)
     obj_entries = sum(len(v) for _, v in obj_cases)
     print(
