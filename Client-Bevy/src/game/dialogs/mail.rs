@@ -441,6 +441,17 @@ pub fn mail_row_info_text(m: &MailEntry) -> String {
     }
 }
 
+/// #3120 ② 残余：物品能否邮寄（C# `MirItemCell.cs:1793` 守卫 `Info.Bind.HasFlag(BindMode.DontTrade)`；
+/// 服务端同口径见 `ServerRust/src/actors/world/mail.rs:572` —— 那里拦的是 `DontTrade(0x10) | NoMail(0x4000)`）。
+///
+/// 只做判定、不碰状态：客户端**拿到**绑定位时用它做早提示；**拿不到**时调用方不得拦截，
+/// 交回服务端拒绝（保证与当前行为一致，不制造假拒收）。
+pub fn can_mail_item(bind_flags: u16) -> bool {
+    let dont_trade = mir2_shared::enums::BindMode::DONT_TRADE.bits();
+    let no_mail = mir2_shared::enums::BindMode::NO_MAIL.bits();
+    (bind_flags & (dont_trade | no_mail)) == 0
+}
+
 /// 请求写邮件（#2631 跨对话框解耦 Message）。
 /// friend 等外部对话框不再直写 [`MailState`]，改发本 Message；邮件对话框的
 /// [`mail_compose_request_system`] 消费并自行预填收件人 + 打开写邮件界面。
@@ -2665,6 +2676,32 @@ mod tests {
         assert_eq!(mail_row_info_text(&t), "第一行 第二行");
         t.locked = true;
         assert_eq!(mail_row_info_text(&t), "[*] 第一行 第二行");
+    }
+
+    /// 门禁（#3120 ② 残余）：不可邮寄物品的判定必须与服务端同口径
+    /// （`ServerRust/src/actors/world/mail.rs:572` 拦 `DontTrade(0x10) | NoMail(0x4000)`；
+    /// C# 客户端守卫读 `Info.Bind.HasFlag(BindMode.DontTrade)`）。
+    /// **阳性对照**：把任一 flag 从判定里去掉 → 立即红。
+    #[test]
+    fn can_mail_item_matches_dont_trade_and_no_mail() {
+        use mir2_shared::enums::BindMode;
+        assert!(can_mail_item(0), "无绑定 → 可邮寄");
+        assert!(
+            can_mail_item(BindMode::DONT_SELL.bits()),
+            "仅 DontSell 不影响邮寄"
+        );
+        assert!(
+            !can_mail_item(BindMode::DONT_TRADE.bits()),
+            "DontTrade 不可邮寄（C# 守卫 + 服务端 mail.rs:572）"
+        );
+        assert!(
+            !can_mail_item(BindMode::NO_MAIL.bits()),
+            "NoMail 不可邮寄（服务端同口径）"
+        );
+        assert!(
+            !can_mail_item((BindMode::DONT_TRADE | BindMode::DONT_SELL).bits()),
+            "组合位里含 DontTrade 仍不可邮寄"
+        );
     }
 
     /// #2786：点「回复」→ 打开写信窗并把收件人预填为选中邮件的发件人
