@@ -10,7 +10,10 @@
   原版对照（`Client/MirScenes/GameScene.cs` 的 `ObjectEffect` switch，机械生成到
   `Client-Bevy/src/game/spell_effects.rs` 的 `OBJECT_FX`）：
     MagicShieldUp → 帧动画 Magic base 3890 frames 3，且**循环**（原版 `Repeat = true`，
-                    直到收到 MagicShieldDown 才清）← 本夹具的断言项
+                    直到收到 MagicShieldDown 才清）← 断言项（**扁平库**取图路径）
+    Stunned       → 帧动画 Monsters[StoningStatue] base 632 frames 10，
+                    `Repeat = p.Time > 0`（time=6000 → 6 秒窗口）← 断言项（**怪物数组库**
+                    取图路径 `ui_array_image`；这条路径此前从未被实机覆盖）
     Critical      → C# 里是**被注释掉的 case**（表里空切片 = 明确不画）← 本夹具的负控
 
   为什么用 mock：`--battle-vfx-test`（`src/auto/combat.rs`）会自动走到怪旁施法，mock 侧
@@ -94,11 +97,14 @@ if ($null -eq $probe0 -or $null -eq $probe0.count) {
     exit 2
 }
 
-$expect = 'object:MagicShieldUp|Flat(Magic)|3890|3'
+$expects = @(
+    'object:MagicShieldUp|Flat(Magic)|3890|3',
+    'object:Stunned|Monster(StoningStatue)|632|10'
+)
 $forbid = 'object:Critical'
 $observed = @{}
-$expect_polls = 0
-$first_seen_s = $null
+$expect_polls = @{}
+$first_seen_s = @{}
 $violations = @()
 $sw = [Diagnostics.Stopwatch]::StartNew()
 while ($sw.Elapsed.TotalSeconds -lt $TimeoutSec) {
@@ -113,9 +119,12 @@ while ($sw.Elapsed.TotalSeconds -lt $TimeoutSec) {
                 Write-Host ("观察到特效: " + $k)
             } else { $observed[$k]++ }
         }
-        if ($keys -contains $expect) {
-            if ($null -eq $first_seen_s) { $first_seen_s = $sw.Elapsed.TotalSeconds }
-            $expect_polls++
+        foreach ($ex in $expects) {
+            if ($keys -contains $ex) {
+                if (-not $first_seen_s.ContainsKey($ex)) { $first_seen_s[$ex] = $sw.Elapsed.TotalSeconds }
+                if (-not $expect_polls.ContainsKey($ex)) { $expect_polls[$ex] = 0 }
+                $expect_polls[$ex]++
+            }
         }
         foreach ($k in $keys) {
             if ($k -like "$forbid*") {
@@ -123,27 +132,34 @@ while ($sw.Elapsed.TotalSeconds -lt $TimeoutSec) {
                 Write-Host ("负控命中（不该出现）: " + $k)
             }
         }
-        # 已观察到断言项且已跨过 ≥2.0s（证明循环没消失）→ 提前收工
-        if ($expect_polls -ge 2 -and $null -ne $first_seen_s -and
-            ($sw.Elapsed.TotalSeconds - $first_seen_s) -ge 2.0) { break }
+        # 两条断言项都已观察到、且各自跨过 ≥2.0s（证明循环没消失）→ 提前收工
+        $all_ok = $true
+        foreach ($ex in $expects) {
+            if (-not $expect_polls.ContainsKey($ex) -or $expect_polls[$ex] -lt 2 -or
+                ($sw.Elapsed.TotalSeconds - $first_seen_s[$ex]) -lt 2.0) { $all_ok = $false }
+        }
+        if ($all_ok) { break }
     }
     Start-Sleep -Milliseconds 200
 }
 Stop-Client
 
 $object_rows = @($observed.Keys | Where-Object { $_ -like 'object:*' })
-$looping = ($expect_polls -ge 2 -and $null -ne $first_seen_s -and
-    ($sw.Elapsed.TotalSeconds - $first_seen_s) -ge 2.0)
 $fail = @()
-if (-not ($observed.ContainsKey($expect))) { $fail += "缺断言项 $expect" }
-elseif (-not $looping) { $fail += "断言项只观察到一次（循环语义未验证）" }
+$spans = [ordered]@{}
+foreach ($ex in $expects) {
+    if (-not $observed.ContainsKey($ex)) { $fail += "缺断言项 $ex"; continue }
+    $n = $expect_polls[$ex]
+    $span = [math]::Round($sw.Elapsed.TotalSeconds - $first_seen_s[$ex], 2)
+    $spans[$ex] = @{ polls = $n; span_s = $span }
+    if ($n -lt 2 -or $span -lt 2.0) { $fail += "断言项只观察到一次（循环语义未验证）: $ex" }
+}
 if ($violations.Count -gt 0) { $fail += ("负控命中: " + ($violations -join ',')) }
 
 $result = [ordered]@{
     ok              = ($fail.Count -eq 0)
-    expect          = $expect
-    expect_polls    = $expect_polls
-    expect_span_s   = if ($null -ne $first_seen_s) { [math]::Round($sw.Elapsed.TotalSeconds - $first_seen_s, 2) } else { 0 }
+    expects         = $expects
+    expect_stats    = $spans
     forbidden_seen  = $violations
     object_rows     = $object_rows
     observed        = @($observed.Keys)
@@ -151,7 +167,11 @@ $result = [ordered]@{
 }
 $result | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $json -Encoding UTF8
 
-Write-Host ("对象特效条目 = {0}；断言项轮询命中 {1} 次；跨 {2}s" -f $object_rows.Count, $expect_polls, $result.expect_span_s)
+Write-Host ("对象特效条目 = {0}" -f $object_rows.Count)
+foreach ($ex in $expects) {
+    $s = $spans[$ex]
+    if ($null -ne $s) { Write-Host ("  断言项 {0}：命中 {1} 次 / 跨 {2}s" -f $ex, $s.polls, $s.span_s) }
+}
 Write-Host ("结论 JSON: " + $json)
 if ($object_rows.Count -eq 0) {
     Write-Host 'FAIL(3): 整轮没有任何对象特效实体——前置不成立（未施法/未进图/接线断了）'

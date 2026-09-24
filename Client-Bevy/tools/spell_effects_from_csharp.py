@@ -15,6 +15,10 @@ from pathlib import Path
 
 CS = Path("Client/MirObjects/PlayerObject.cs")
 GS = Path("Client/MirScenes/GameScene.cs")
+# 资产索引的真值：`Data/Monster/{:03}.Lib` 是按 **C# `Monster` 枚举值**编号的
+# （本端 `SharedRust/src/enums.rs` 的枚举整体比 C# 大 3：C# `Guard = 0` / 本端 `Guard = 3`，
+# 504 个同名项逐一核对全部 +3）。拿本端枚举值当资产索引会整段错位。
+ENUMS_CS = Path("Shared/Enums.cs")
 BEGIN_MARK = "case Spell.FireBall:"
 END_MARK = "case MirAction.Dead:"
 OUT_MARK_BEGIN = "// ==== SPELL_FX_BEGIN"
@@ -277,7 +281,40 @@ def _object_fx_start(expr):
     raise ValueError("GameScene.ObjectEffect 出现未支持的起始帧表达式: %r" % expr)
 
 
-def _build_object_entry(case, stmt, cond):
+def parse_csharp_monster_values(text):
+    """`public enum Monster : ushort { ... }` → `{名字: C# 值}`（= 资产索引）。"""
+    # 注意别写成 "public enum Monster" —— 那会先匹配到 `public enum MonsterType : byte`
+    i = text.index("public enum Monster :")
+    j = text.index("{", i)
+    depth = 0
+    body = None
+    for k in range(j, len(text)):
+        if text[k] == "{":
+            depth += 1
+        elif text[k] == "}":
+            depth -= 1
+            if depth == 0:
+                body = text[j + 1 : k]
+                break
+    if body is None:
+        raise ValueError("Shared/Enums.cs 里找不到 Monster 枚举的闭合花括号")
+    out = {}
+    val = 0
+    for line in body.split("\n"):
+        line = line.split("//")[0].strip().rstrip(",")
+        if not line:
+            continue
+        m = re.match(r"(\w+)\s*=\s*(\d+)", line)
+        if m:
+            out[m.group(1)] = int(m.group(2))
+            val = int(m.group(2)) + 1
+        elif re.match(r"^\w+$", line):
+            out[line] = val
+            val += 1
+    return out
+
+
+def _build_object_entry(case, stmt, cond, cs_monsters):
     """一条 `new Effect(...)` / `new DelayedExplosionEffect(...)` → Rust 字段串。"""
     call = (
         "DelayedExplosionEffect"
@@ -289,7 +326,15 @@ def _build_object_entry(case, stmt, cond):
         raise ValueError("无法解析 %s 的 %s 实参: %r" % (case, call, stmt))
     m = re.search(r"Libraries\.Monsters\[\(ushort\)Monster\.(\w+)\]", stmt)
     if m:
-        fields = ["lib: FxLib::Monster(Monster::%s)" % m.group(1)]
+        monster = m.group(1)
+        if monster not in cs_monsters:
+            raise ValueError(
+                "C# `Monster` 枚举里没有 %s（无法确定资产索引，禁止猜）" % monster
+            )
+        fields = [
+            "lib: FxLib::Monster { rust: Monster::%s, lib: %d }"
+            % (monster, cs_monsters[monster])
+        ]
     else:
         ml = re.search(r"Libraries\.(\w+)", stmt)
         if not ml:
@@ -333,7 +378,7 @@ def _build_object_entry(case, stmt, cond):
     return ", ".join(fields)
 
 
-def parse_object_effects(text):
+def parse_object_effects(text, cs_monsters):
     """抓 `GameScene.cs` 的 `ObjectEffect(S.ObjectEffect p)` switch。
 
     返回 `([(case 名, [字段串...])...], {case 名: 备注})`。
@@ -398,7 +443,7 @@ def parse_object_effects(text):
                         "（本端按 stage 取帧段，effect_type=0 时帧段相同），故只保留 stage 那条"
                     )
                 else:
-                    cases[-1][1].append(_build_object_entry(cur, stmt, cond))
+                    cases[-1][1].append(_build_object_entry(cur, stmt, cond, cs_monsters))
             i += 1
             continue
         i += 1
@@ -446,7 +491,8 @@ def main():
     ranges = parse_range_missiles(text)
     range_block = render_range_missiles(ranges)
     gs_text = GS.read_text(encoding="utf-8", errors="replace")
-    obj_cases, obj_notes = parse_object_effects(gs_text)
+    cs_monsters = parse_csharp_monster_values(ENUMS_CS.read_text(encoding="utf-8", errors="replace"))
+    obj_cases, obj_notes = parse_object_effects(gs_text, cs_monsters)
     obj_block = render_object_effects(obj_cases, obj_notes)
     obj_entries = sum(len(v) for _, v in obj_cases)
     print(

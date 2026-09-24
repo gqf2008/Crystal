@@ -675,14 +675,10 @@ fn object_fx_handle(
         crate::game::spell_effects::FxLib::Flat(name) => {
             ui_image(libs, images, cache, name.library(), index)
         }
-        crate::game::spell_effects::FxLib::Monster(m) => ui_array_image(
-            libs,
-            images,
-            cache,
-            ArrayLibType::Monsters,
-            m as usize,
-            index,
-        ),
+        // 怪物库要用**资产索引**（C# `Monster` 枚举值），不是本端枚举值——见 `FxLib::Monster` 的说明
+        crate::game::spell_effects::FxLib::Monster { lib, .. } => {
+            ui_array_image(libs, images, cache, ArrayLibType::Monsters, lib, index)
+        }
     }
 }
 
