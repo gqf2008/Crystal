@@ -28,6 +28,16 @@
        （Windows 会复用 PID，缺这条会让死锁看起来"仍被占着"，白白等到 `StaleSec`）；
     3. 锁龄超过 `StaleSec`（默认 1800s）→ 回收（持有者可能卡死或拿到锁后没跑到释放）。
   - 没拿到就每 5s 重试，直到 `TimeoutSec`（默认 1800s）；返回 `$false` 表示超时（调用方应 exit 2）。
+  - **锁文件在、内容却读不全**（空 / 半截 / 被写入句柄独占）→ **不回收**，只等它落地；
+    超过 `GraceSec`（默认 5s）仍不可解析才当残骸回收。2026-09-25 修：原实现把
+    「持有者刚 CreateNew、payload 还没写完」当成垃圾删掉 → 两个客户端可能同时跑，
+    正是这套锁要消除的那种假红。
+  - **继承标记要复核**（2026-09-25 修）：`CRYSTAL_E2E_LOCK_HELD_BY` 只在「标记里的父进程
+    仍活着 **且** 锁文件确实由它持有」时才算数，否则忽略并正常抢锁。原实现凭残留环境变量
+    就能"假持锁"：父脚本退出/提前释放后，同一个 shell 里后续的夹具会跳过排队直接起客户端。
+
+  自证：`pwsh tools/acceptance/e2e_lock_selftest.ps1`（不需要客户端/服务端/账号，秒级；
+  它把 `TEMP` 指向临时目录，**不会碰真实锁**）。
 
   约定：**任何要起客户端或登录 e2e 账号的脚本/agent 都必须先拿这把锁**（含 `*.ps1` 夹具与临时取数脚本）。
 
@@ -54,13 +64,29 @@ function Enter-E2eLock {
         [string]$ScriptName = 'unknown',
         [int]$TimeoutSec = 1800,
         [int]$StaleSec = 1800,
-        [int]$PollSec = 5
+        [int]$PollSec = 5,
+        [int]$GraceSec = 5
     )
-    # 父进程已持有（本进程是它拉起的子脚本）：复用，不重复抢
+    # 父进程已持有（本进程是它拉起的子脚本）：复用，不重复抢。
+    # 但**必须复核**这个标记还成立 —— 只用环境变量当判据时，父脚本退出/提前释放后，
+    # 同一个 shell 里后续的夹具会凭残留标记"假持锁"，两个客户端就同时跑了。
     if ($env:CRYSTAL_E2E_LOCK_HELD_BY) {
-        $script:E2eLockInherited = $true
-        Write-Host ("[e2e-lock] 复用父进程已持有的锁（{0}）：{1}" -f $env:CRYSTAL_E2E_LOCK_HELD_BY, $ScriptName)
-        return $true
+        $inheritParent = $null
+        if ($env:CRYSTAL_E2E_LOCK_HELD_BY -match 'pid=(\d+)') { $inheritParent = [int]$Matches[1] }
+        $inheritOk = $false
+        if ($null -ne $inheritParent -and (Get-Process -Id $inheritParent -EA SilentlyContinue)) {
+            try {
+                $inh = Get-Content -LiteralPath $script:E2eLockPath -Raw -EA Stop | ConvertFrom-Json
+                if ($null -ne $inh -and [int]$inh.pid -eq $inheritParent) { $inheritOk = $true }
+            } catch {}
+        }
+        if ($inheritOk) {
+            $script:E2eLockInherited = $true
+            Write-Host ("[e2e-lock] 复用父进程已持有的锁（{0}）：{1}" -f $env:CRYSTAL_E2E_LOCK_HELD_BY, $ScriptName)
+            return $true
+        }
+        Write-Host ("[e2e-lock] 忽略失效的继承标记（父进程已退出或锁已不在）：{0} → 改为正常抢锁" -f $env:CRYSTAL_E2E_LOCK_HELD_BY) -ForegroundColor Yellow
+        Remove-Item Env:$script:E2eLockEnvVar -ErrorAction SilentlyContinue
     }
     $deadline = (Get-Date).AddSeconds($TimeoutSec)
     $waited = $false
@@ -91,9 +117,39 @@ function Enter-E2eLock {
         } catch {
             # 锁已存在：看持有者是否还活着 / 是否超龄
             $holder = $null
+            if (-not (Test-Path -LiteralPath $script:E2eLockPath)) {
+                # 竞态：持有者恰在这几微秒里释放了 → 不睡觉，立刻重试抢锁
+                continue
+            }
             try {
-                $holder = Get-Content -LiteralPath $script:E2eLockPath -Raw -EA Stop | ConvertFrom-Json
+                $raw = Get-Content -LiteralPath $script:E2eLockPath -Raw -EA Stop
+                if (-not [string]::IsNullOrWhiteSpace($raw)) { $holder = $raw | ConvertFrom-Json }
             } catch {}
+            if ($null -eq $holder) {
+                # 文件在、内容读不全（空 / 半截 / 被写入句柄独占）：极可能是持有者刚
+                # CreateNew、payload 还没写完（写入句柄用 FileShare::None，读者会吃到分享冲突）。
+                # 这里**绝不能当垃圾删** —— 删了就等于两个客户端同时跑。只有超过宽限期
+                # GraceSec 仍不可解析，才认定是残骸并回收。
+                $rawAge = 0
+                try { $rawAge = [int]((Get-Date) - (Get-Item -LiteralPath $script:E2eLockPath -EA Stop).LastWriteTime).TotalSeconds } catch {}
+                if ($rawAge -le $GraceSec) {
+                    if ((Get-Date) -gt $deadline) {
+                        Write-Host ("[e2e-lock] 等锁超时 {0}s（锁文件正在写入中，锁龄 {1}s）" -f $TimeoutSec, $rawAge) -ForegroundColor Yellow
+                        return $false
+                    }
+                    if (-not $waited) {
+                        Write-Host '[e2e-lock] 锁文件刚建立、内容尚未写完 → 等它落地（不回收）...'
+                        $waited = $true
+                        $waitedSeconds = 0
+                    }
+                    Start-Sleep -Seconds 1
+                    $waitedSeconds = ([int]$waitedSeconds) + 1
+                    continue
+                }
+                Write-Host ("[e2e-lock] 回收不可解析的锁文件（锁龄 {0}s > 宽限 {1}s）" -f $rawAge, $GraceSec) -ForegroundColor Yellow
+                try { [System.IO.File]::Delete($script:E2eLockPath) } catch {}
+                continue
+            }
             $ownerAlive = $false
             $ageSec = 0
             $pidReused = $false
