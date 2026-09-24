@@ -309,48 +309,106 @@ pub(crate) fn sync_actor_depth(
     }
 }
 
-/// 穿戴装备后同步本地玩家外观层（SpriteLayer slot ← `Loadout` 组件，#2633 批次4 步6）
-/// 槽位：0=武器(CWeapon) 1=衣服(CArmour) 2=头盔 3=项链 ... 与 ServerRust EquipmentSlot 一致
+/// 穿戴装备后同步本地玩家外观层（SpriteLayer slot ← **物品的 shape**，#2633 批次4 步6）
+///
+/// **2026-09-24 修（owner 报的「CWeapons[793] 贴图缺失」）**：旧写法把装备的 **DB `item_index`** 当槽位
+/// （`equipment.get(0).item_index`），而纸娃娃槽位要的是 **`ItemInfo.shape`**
+/// （C# `Libraries.CWeapons[Weapon]` / `CArmours[Armour]`，`Weapon = info.Shape`）。
+/// 实机证据：装上一把弓/钓竿后客户端去开 `CWeapon/793`（793 正是 `BlueFishingRod` 的 `item_index`，
+/// 不是 shape=49），日志 `✗ CWeapons[793] … 文件不存在`。
+/// 槽位表：0=武器 1=衣服（与 ServerRust `EquipmentSlot` 一致）；武器按
+/// `weapon_layer_plan`（职业武器是 `AWeapon/{i} R`+`L` / `ARWeapon/{i}`，见 resources/libraries.rs）取层，
+/// 层数变化时增删子实体。
 pub(crate) fn sync_player_equipment(
-    loadout_q: Query<&crate::game::player_state::Loadout, With<LocalPlayer>>,
+    mut commands: Commands,
+    loadout_q: Query<
+        (
+            &crate::game::player_state::Loadout,
+            &crate::actor::ActorAppearance,
+        ),
+        With<LocalPlayer>,
+    >,
     players: Query<(Entity, &Children), (With<LocalPlayer>, With<Player>)>,
     mut layers: Query<&mut SpriteLayer>,
 ) {
-    let Ok((_, children)) = players.single() else {
+    let Ok((root, children)) = players.single() else {
         return;
     };
-    let equipment = loadout_q
-        .single()
-        .map(|l| l.slots.as_slice())
-        .unwrap_or(&[]);
-    let armour_slot = equipment
-        .get(1)
-        .and_then(|s| s.as_ref())
-        .map(|i| i.item_index.max(0) as u32)
-        .unwrap_or(0);
-    let weapon_slot = equipment
-        .get(0)
-        .and_then(|s| s.as_ref())
-        .map(|i| i.item_index.max(0) as u32)
-        .unwrap_or(0);
+    let Ok((loadout, appearance)) = loadout_q.single() else {
+        return;
+    };
+    // 外观槽位 = 物品 **shape**（不是 item_index，见上方注释）
+    let shape_of = |slot: usize| -> i16 {
+        loadout
+            .slots
+            .get(slot)
+            .and_then(|s| s.as_ref())
+            .map(|i| i.shape)
+            .unwrap_or(-1)
+    };
+    let armour_slot = shape_of(1).max(0) as u32;
+    let weapon_plan =
+        crate::resources::libraries::weapon_layer_plan(appearance.class, shape_of(0), false);
+
+    let is_weapon_lib = |lib: crate::resources::libraries::ArrayLibType| {
+        use crate::resources::libraries::ArrayLibType as L;
+        matches!(
+            lib,
+            L::CWeapons | L::AWeaponsR | L::AWeaponsL | L::ARWeapons | L::ARWeaponsS
+        )
+    };
+
+    let mut weapon_children: Vec<Entity> = Vec::new();
+    let mut armour_children: Vec<Entity> = Vec::new();
     for child in children.iter() {
-        if let Ok(mut layer) = layers.get_mut(child) {
-            match layer.lib {
-                ArrayLibType::CArmours => {
-                    if layer.slot != armour_slot {
-                        layer.slot = armour_slot;
-                        layer.frame = 0;
-                    }
-                }
-                ArrayLibType::CWeapons => {
-                    if layer.slot != weapon_slot {
-                        layer.slot = weapon_slot;
-                        layer.frame = 0;
-                    }
-                }
-                _ => {}
+        if let Ok(layer) = layers.get(child) {
+            if is_weapon_lib(layer.lib) {
+                weapon_children.push(child);
+            } else if layer.lib == crate::resources::libraries::ArrayLibType::CArmours {
+                armour_children.push(child);
             }
         }
+    }
+    for c in armour_children {
+        if let Ok(mut l) = layers.get_mut(c) {
+            if l.slot != armour_slot {
+                l.slot = armour_slot;
+                l.frame = 0;
+            }
+        }
+    }
+    for (i, (lib, slot)) in weapon_plan.iter().enumerate() {
+        match weapon_children.get(i).copied() {
+            Some(c) => {
+                if let Ok(mut l) = layers.get_mut(c) {
+                    if l.lib != *lib || l.slot != *slot {
+                        l.lib = *lib;
+                        l.slot = *slot;
+                        l.frame = 0;
+                    }
+                }
+            }
+            None => {
+                commands.entity(root).with_children(|p| {
+                    p.spawn((
+                        Sprite::default(),
+                        Transform::default(),
+                        SpriteLayer {
+                            lib: *lib,
+                            slot: *slot,
+                            frame: 0,
+                            is_effect: false,
+                            is_mount: false,
+                            alpha: 1.0,
+                        },
+                    ));
+                });
+            }
+        }
+    }
+    // 计划之外的旧武器层（如从职业武器换回普通武器）要收掉
+    for c in weapon_children.iter().skip(weapon_plan.len()) {
+        commands.entity(*c).despawn();
     }
 }
 
