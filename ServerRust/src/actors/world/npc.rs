@@ -3749,6 +3749,9 @@ pub(crate) fn send_game_shop_catalog(
     session_id: u64,
     gold: u32,
     shop_items: &[db::GameShopItem],
+    // 商品图标：C# `MirGameShopCell.DrawControl` 用 `Libraries.Items[Item.Info.Image]` 画格子图标，
+    // 所以目录里必须带上 `ItemInfo.Image`（#782 之后客户端已能按索引请求名字，但图号只在服务端有）。
+    item_infos: &std::collections::HashMap<i32, db::ItemInfo>,
 ) {
     use mir2_shared::packets::server::special_systems::{GameShopInfo, GameShopItem as ProtoItem};
 
@@ -3758,6 +3761,7 @@ pub(crate) fn send_game_shop_catalog(
             .iter()
             .map(|s| ProtoItem {
                 item_index: s.item_index,
+                image: item_infos.get(&s.item_index).map(|i| i.image).unwrap_or(0),
                 gold_price: s.gold_price,
                 credit_price: s.credit_price,
                 count: s.count,
@@ -3776,6 +3780,7 @@ pub(crate) fn send_game_shop_catalog(
             .iter()
             .map(|s| ProtoItem {
                 item_index: s.item_index,
+                image: item_infos.get(&s.item_index).map(|i| i.image).unwrap_or(0),
                 gold_price: s.gold_price,
                 credit_price: s.credit_price,
                 count: s.count as i32,
@@ -3863,6 +3868,7 @@ impl Message<GameshopBuyRequest> for WorldActor {
                 msg.session_id,
                 state.inventory.gold as u32,
                 &self.game_shop_items,
+                &self.item_infos,
             );
             return;
         }

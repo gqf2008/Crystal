@@ -1021,6 +1021,8 @@ use crate::game::dialogs::npc_goods::GoodsEntry;
 #[derive(Debug, Clone, Default)]
 pub struct ShopCatalogItem {
     pub item_index: i32,
+    /// C# `Item.Info.Image`（格子图标 `Libraries.Items[image]`）
+    pub image: i32,
     pub gold_price: u32,
     pub credit_price: u32,
     pub count: i32,
