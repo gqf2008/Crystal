@@ -368,7 +368,8 @@ fn apply_combat_events(
                         anim.action = mir2_shared::enums::MirAction::Attack1;
                         anim.direction = *direction;
                         anim.frame_index = 0;
-                        commands.entity(e).insert(StruckTimer(0.6));
+                        // #3089（换图崩溃）：命令是延迟落地的——同帧若发生地图重建（换图会把对象实体 despawn+重建）→ 命中失效 Entity 会让 Bevy panic
+                        crate::game::movement::safe_insert(&mut commands, e, StruckTimer(0.6));
                         // #1627：C# MirAction.Struck → PlayFlinchSound（BaseSound+2，MonsterObject.cs:1064）
                         // 注：怪物攻击音由 Attack 事件（#1624）在动作起始播放，此处不播
                         if mon.is_some() {
@@ -397,7 +398,8 @@ fn apply_combat_events(
                     if local_id == Some(id.0) {
                         anim.action = mir2_shared::enums::MirAction::Struck;
                         anim.frame_index = 0;
-                        commands.entity(e).insert(StruckTimer(0.6));
+                        // 同上：本地玩家实体在换图重建里同样会被 despawn
+                        crate::game::movement::safe_insert(&mut commands, e, StruckTimer(0.6));
                         break;
                     }
                 }
