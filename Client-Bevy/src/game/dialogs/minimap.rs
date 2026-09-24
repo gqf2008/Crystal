@@ -33,6 +33,72 @@ const MINIMAP_Y: f32 = 0.0;
 /// 小地图显示区（对齐 C#：drawLocation=(3,22)，viewRect=120x108，仅大模式绘制）
 const MAP_RECT: (f32, f32, f32, f32) = (3.0, 22.0, 120.0, 108.0);
 
+/// 原版 `MiniMap_BeforeDraw` 的**视窗**（`Client/MirScenes/Dialogs/MainDialogs.cs:1907-1933`）：
+///
+/// ```csharp
+/// if (map.MiniMap <= 0 || Index != 2090 || Libraries.MiniMap == null) return;   // 不画
+/// Rectangle viewRect = new Rectangle(0, 0, 120, 108);
+/// Size miniMapSize = Libraries.MiniMap.GetSize(map.MiniMap);
+/// float scaleX = miniMapSize.Width / (float)map.Width;      // 缩略图像素/地图格
+/// viewRect.Location = ((int)(scaleX * User.X) - 120/2, (int)(scaleY * User.Y) - 108/2);
+/// if (viewRect.Right  >= miniMapSize.Width)  viewRect.X = miniMapSize.Width  - 120;   // 贴右
+/// if (viewRect.Bottom >= miniMapSize.Height) viewRect.Y = miniMapSize.Height - 108;   // 贴下
+/// if (viewRect.X < 0) viewRect.X = 0; if (viewRect.Y < 0) viewRect.Y = 0;            // 再钳 0
+/// Libraries.MiniMap.Draw(map.MiniMap, viewRect, drawLocation /*Location+(3,22)*/, White, _fade);
+/// ```
+///
+/// 返回 `None` = 该图没有缩略图（`minimap_index == 0`）或库尺寸未知 ⇒ 原版**不画**。
+/// 纯函数：门禁直接钉它（`minimap_view_rect_*`）。
+/// 小地图左上角显示的名字：C# `MapNameLabel.Text = map.Title`（**标题**）。
+/// 标题缺失时才退回地图文件名（本端旧行为是直接显示文件名，于是 UI 上出现「0」/「D002」）。
+#[must_use]
+pub fn minimap_name(map_title: &str, file_name: &str) -> String {
+    if map_title.is_empty() {
+        file_name.to_string()
+    } else {
+        map_title.to_string()
+    }
+}
+
+#[must_use]
+pub fn minimap_view_rect(
+    player_tile: (i32, i32),
+    map_size: (f32, f32),
+    mmap_size: (f32, f32),
+    minimap_index: u16,
+) -> Option<bevy::math::Rect> {
+    if minimap_index == 0 || map_size.0 <= 0.0 || map_size.1 <= 0.0 {
+        return None;
+    }
+    if mmap_size.0 <= 0.0 || mmap_size.1 <= 0.0 {
+        return None;
+    }
+    let (vw, vh) = (MAP_RECT.2, MAP_RECT.3);
+    let scale_x = mmap_size.0 / map_size.0;
+    let scale_y = mmap_size.1 / map_size.1;
+    let mut x = (scale_x * player_tile.0 as f32) as i32 - (vw / 2.0) as i32;
+    let mut y = (scale_y * player_tile.1 as f32) as i32 - (vh / 2.0) as i32;
+    // 贴边 → 再钳 0（原版顺序：先贴右/下，再钳左/上）
+    if x + vw as i32 >= mmap_size.0 as i32 {
+        x = mmap_size.0 as i32 - vw as i32;
+    }
+    if y + vh as i32 >= mmap_size.1 as i32 {
+        y = mmap_size.1 as i32 - vh as i32;
+    }
+    if x < 0 {
+        x = 0;
+    }
+    if y < 0 {
+        y = 0;
+    }
+    Some(bevy::math::Rect::new(
+        x as f32,
+        y as f32,
+        x as f32 + vw,
+        y as f32 + vh,
+    ))
+}
+
 /// 背景图索引（C# Index：2090 大 / 2091 小）
 const BG_BIG: usize = 2090;
 const BG_SMALL: usize = 2091;
@@ -141,6 +207,9 @@ impl Plugin for MiniMapPlugin {
             (
                 minimap_toggle_system,
                 minimap_ui_system,
+                // 缩略图单独成系统（要同时写 ImageNode/rect/尺寸，塞进 minimap_ui_system 会顶到
+                // 16 参数上限并引发 B0001）；排在 ui_system 之后，独占地图区域的显隐与图像。
+                minimap_map_image_system,
                 minimap_member_events,
                 current_map_index_events,
                 minimap_member_dots_system,
@@ -332,6 +401,102 @@ fn spawn_minimap_button<'a>(
 }
 
 /// 按钮点击：大小切换 / 打开邮件 / 打开大地图（C# Click 处理）
+/// 小地图缩略图（C# `MiniMap_BeforeDraw`，`MainDialogs.cs:1887-1937`）：
+/// 按 `map.MiniMap` 取 `Libraries.MiniMap`（= `Data/MMap`）的图，以玩家为中心取 120×108 视窗
+/// （口径见 [`minimap_view_rect`]），画在面板的 `MAP_RECT(3,22,120,108)` 处。
+///
+/// 本系统**独占**地图区域的 `Visibility/ImageNode/Node/BackgroundColor`（`minimap_ui_system`
+/// 不再碰它）——两处都写会出现「谁最后跑谁说了算」。
+///
+/// owner 2026-09-24 截图里「右上小地图只有一块深绿底 + 光点」就是本系统缺失造成的：
+/// 那块区域此前只是一个写死的深绿 `BackgroundColor` 占位，全仓从未加载过 `MMap` 库。
+fn minimap_map_image_system(
+    mut libs: ResMut<GameLibraries>,
+    mut images: ResMut<Assets<Image>>,
+    mut cache: ResMut<crate::ui::sprite_ui::UiImageCache>,
+    game_data: Res<GameData>,
+    mgr: Res<DialogManager>,
+    mode: Res<MiniMapMode>,
+    players: Query<&Transform, With<LocalPlayer>>,
+    mut areas: Query<
+        (
+            &mut ImageNode,
+            &mut Node,
+            &mut BackgroundColor,
+            &mut Visibility,
+        ),
+        With<MiniMapMapArea>,
+    >,
+) {
+    let open = mgr.is_open(DialogKind::Minimap);
+    let big = mode.big;
+    for (mut img, mut node, mut bg, mut vis) in &mut areas {
+        // 小模式不画地图（原版 `Index != 2090` 直接 return）
+        let mmap_index = game_data.minimap_index as usize;
+        if !open || !big || mmap_index == 0 {
+            *vis = Visibility::Hidden;
+            continue;
+        }
+        let (map_w, map_h) = game_data
+            .map
+            .as_ref()
+            .map(|m| (m.width as f32, m.height as f32))
+            .unwrap_or((1.0, 1.0));
+        let Some(mmap_size) = libs
+            .0
+            .get_image(LibraryName::MiniMap, mmap_index)
+            .map(|i| (i.width.max(0) as f32, i.height.max(0) as f32))
+        else {
+            // 库/该索引缺失（原版 `Libraries.MiniMap == null` 或 GetSize 失败）：不画，但不静默
+            warn!("🗺️ 小地图缺图：MMap[{mmap_index}] 取不到尺寸（Data/MMap 缺失？）");
+            *vis = Visibility::Hidden;
+            continue;
+        };
+        let player_tile = players
+            .single()
+            .ok()
+            .map(|tf| world_to_tile(tf.translation.x, tf.translation.y))
+            .unwrap_or((0, 0));
+        let Some(rect) = minimap_view_rect(
+            player_tile,
+            (map_w, map_h),
+            mmap_size,
+            game_data.minimap_index,
+        ) else {
+            *vis = Visibility::Hidden;
+            continue;
+        };
+        let Some(handle) = crate::ui::sprite_ui::ui_image(
+            &mut libs,
+            &mut images,
+            &mut cache,
+            LibraryName::MiniMap,
+            mmap_index,
+        ) else {
+            *vis = Visibility::Hidden;
+            continue;
+        };
+        if img.image != handle {
+            img.image = handle;
+        }
+        if img.rect != Some(rect) {
+            img.rect = Some(rect);
+        }
+        if node.width != Val::Px(MAP_RECT.2) {
+            node.width = Val::Px(MAP_RECT.2);
+        }
+        if node.height != Val::Px(MAP_RECT.3) {
+            node.height = Val::Px(MAP_RECT.3);
+        }
+        // 有缩略图时不需要占位底色（无图才显示深绿底，见 spawn 处）
+        if bg.0 != Color::NONE {
+            bg.0 = Color::NONE;
+        }
+        *vis = Visibility::Visible;
+    }
+}
+
+/// 按钮点击：大小切换 / 打开邮件 / 打开大地图（C# Click 处理）
 fn minimap_toggle_system(
     mut mode: ResMut<MiniMapMode>,
     mut mgr: ResMut<DialogManager>,
@@ -399,7 +564,8 @@ fn minimap_ui_system(
         ),
     >,
     mut bg: Query<(&mut Node, &mut ImageNode, &MiniMapBg)>,
-    mut map_area: Query<&mut Visibility, (With<MiniMapMapArea>, Without<MiniMapPlayerDot>)>,
+    // 注：地图区域（缩略图）的显隐与图像由 `minimap_map_image_system` 独占（它要同时写
+    // ImageNode/rect/尺寸），本系统不再碰它——两处都写会出现「谁最后跑谁说了算」。
     mut dot: Query<
         (&mut Node, &mut Visibility),
         (
@@ -495,15 +661,6 @@ fn minimap_ui_system(
         None => (1.0, 1.0),
     };
 
-    // 地图区域：仅大模式显示（C# Index != 2090 时不绘制地图）
-    for mut vis in &mut map_area {
-        *vis = if open && big {
-            Visibility::Visible
-        } else {
-            Visibility::Hidden
-        };
-    }
-
     if let Ok((mut dot_node, mut dot_vis)) = dot.single_mut() {
         if !open || !big {
             *dot_vis = Visibility::Hidden;
@@ -566,11 +723,14 @@ fn minimap_ui_system(
     }
 
     if let Ok(mut t) = name_texts.single_mut() {
-        let name = game_data
+        // C# `MiniMapDialog.Process()`：`MapNameLabel.Text = map.Title`（**标题**，不是文件名）。
+        // 本端此前显示 `LoadedMap.name`（="0"/"D002"），owner 截图里那个「0」就是这么来的。
+        let file_name = game_data
             .map
             .as_ref()
-            .map(|m| m.name.clone())
-            .unwrap_or_default();
+            .map(|m| m.name.as_str())
+            .unwrap_or("");
+        let name = minimap_name(&game_data.map_title, file_name);
         if t.0 != name {
             t.0 = name;
         }
@@ -718,6 +878,34 @@ mod tests {
             (3.0, 22.0, 120.0, 108.0),
             "地图区应对齐 C# viewRect+drawLocation"
         );
+        // ---- #3122：缩略图视窗与名字（owner「小地图没有地图 / 只显示 0」）----
+        // 门禁直接钉 `minimap_map_image_system` 用到的两个纯函数。
+        // 阳性对照（实做）：把 `minimap_view_rect` 里的 `- (vw/2)` 去掉 → 第 1 条断言红；
+        // 把 `minimap_name` 改成恒返回 `file_name` → 最后两条断言红。
+        let r = minimap_view_rect((256, 256), (512.0, 512.0), (512.0, 512.0), 3).expect("有缩略图");
+        assert_eq!(
+            (r.min.x, r.min.y, r.max.x, r.max.y),
+            (196.0, 202.0, 316.0, 310.0),
+            "以玩家为中心 120x108（C# viewRect）"
+        );
+        let r = minimap_view_rect((600, 600), (512.0, 512.0), (512.0, 512.0), 3).expect("贴边");
+        assert_eq!((r.min.x, r.min.y), (392.0, 404.0), "右下越界须贴边");
+        let r = minimap_view_rect((0, 0), (512.0, 512.0), (512.0, 512.0), 3).expect("钳 0");
+        assert_eq!((r.min.x, r.min.y), (0.0, 0.0), "左上越界须钳 0");
+        let r = minimap_view_rect((100, 50), (512.0, 256.0), (1024.0, 512.0), 1).expect("比例 2x");
+        assert_eq!((r.min.x, r.min.y), (140.0, 46.0), "scale = mmap/map 逐轴");
+        assert!(
+            minimap_view_rect((10, 10), (512.0, 512.0), (512.0, 512.0), 0).is_none(),
+            "minimap 索引 0 = 该图没有缩略图，原版不画"
+        );
+        assert!(minimap_view_rect((10, 10), (512.0, 512.0), (0.0, 0.0), 3).is_none());
+        assert!(minimap_view_rect((10, 10), (0.0, 0.0), (512.0, 512.0), 3).is_none());
+        assert_eq!(
+            minimap_name("BichonProvince", "0"),
+            "BichonProvince",
+            "有标题时显示标题（C# map.Title）"
+        );
+        assert_eq!(minimap_name("", "D002"), "D002", "标题缺失才退回文件名");
         assert_eq!(BOTTOM_Y_BIG, 131.0, "大模式底部 y = 154-23");
         assert_eq!(BOTTOM_Y_SMALL, 22.0, "小模式底部 y = 45-23");
 
