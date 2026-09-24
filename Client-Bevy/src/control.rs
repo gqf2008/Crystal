@@ -395,6 +395,14 @@ enum ControlCommand {
     Pickup {
         object_id: u32,
     },
+    /// 只读聊天探针（2026-09-24）：返回最近 N 行聊天/系统消息（文本 + 频道）。
+    /// 存在理由：服务端**拒绝类反馈只走 S.Chat 系统消息**（"请到对应 NPC 处接取任务" / "该任务已完成" /
+    /// "等级不足" / "附近没有可采集的猎物"…），日志里没有——没有它就只能靠猜（本轮 ④ 的 `accept_quest`
+    /// 假红查了很久：RPC 回 `ok:true` 但服务端其实拒绝了）。
+    ChatProbe {
+        limit: usize,
+        reply: Sender<String>,
+    },
     /// 采集/剥皮（2026-09-24）：照 `C.Harvest` 发方向；可采集怪（HarvestMonster）的尸体必须走这条路
     /// 才能拿到产出——④ ItemTasks 的 Q 物品在可采集怪身上就靠它交付（详见 combat.rs `roll_harvest_drops`）。
     /// `direction = None` → 用客户端当前朝向。
@@ -884,6 +892,24 @@ fn handle_conn(mut stream: std::net::TcpStream, tx: Sender<ControlCommand>) {
                 let (reply_tx, reply_rx) = bounded::<String>(1);
                 if tx
                     .send(ControlCommand::CombatProbe { reply: reply_tx })
+                    .is_ok()
+                {
+                    let s = reply_rx
+                        .recv_timeout(std::time::Duration::from_secs(2))
+                        .unwrap_or_else(|_| "{}".to_string());
+                    serde_json::from_str::<Value>(&s).unwrap_or_else(|_| json!({}))
+                } else {
+                    json!({"error": "control channel closed"})
+                }
+            }
+            "chat_probe" => {
+                let limit = params.get("limit").and_then(|v| v.as_u64()).unwrap_or(20) as usize;
+                let (reply_tx, reply_rx) = bounded::<String>(1);
+                if tx
+                    .send(ControlCommand::ChatProbe {
+                        limit,
+                        reply: reply_tx,
+                    })
                     .is_ok()
                 {
                     let s = reply_rx
@@ -2417,6 +2443,21 @@ fn apply_control_commands(
                     hp_percent,
                     control_state.combat_log.len()
                 );
+                let _ = reply.send(payload.to_string());
+            }
+            ControlCommand::ChatProbe { limit, reply } => {
+                // 只读：直接读 ChatState 里最近 limit 行（最新在末尾）
+                let n = limit.clamp(1, 200);
+                let lines: Vec<serde_json::Value> = chat
+                    .lines
+                    .iter()
+                    .rev()
+                    .take(n)
+                    .map(|(text, _color, chan, _uid)| {
+                        json!({"text": text, "channel": format!("{chan:?}")})
+                    })
+                    .collect();
+                let payload = json!({"ok": true, "count": lines.len(), "lines": lines});
                 let _ = reply.send(payload.to_string());
             }
             ControlCommand::BagProbe { reply } => {

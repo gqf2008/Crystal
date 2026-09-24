@@ -234,6 +234,8 @@ function KillOne($mon, [int]$timeoutSec = 30) {
         $mty = [int][math]::Round((-[double]$target.y - 32) / 32.0)
         $dx = [math]::Sign([int]$stA.tile_x - $mtx)
         $dy = [math]::Sign([int]$stA.tile_y - $mty)
+        # 目标与自己同格（呼叫/追击都会造成）：必须先走开一格，否则方向差值是 (0,0)、
+        # 服务端按"正前方一格"结算永远打不到（实测 dist=0 的目标能贴 20s 不死）。
         if ($dx -eq 0 -and $dy -eq 0) { $dx = 1 }
         $near = @(($stA.tile_x + $dx), ($stA.tile_y + $dy))
         if (($near[0] -ne [int]$stA.tile_x) -or ($near[1] -ne [int]$stA.tile_y)) {
@@ -280,9 +282,23 @@ function KillOne($mon, [int]$timeoutSec = 30) {
 # 这一步内挥砍必空（见 KillOne 注释第 3 条）。
 function WaitInSync([int]$timeoutSec = 8) {
     $deadline = (Get-Date).AddSeconds($timeoutSec)
+    $nudged = 0
     while ((Get-Date) -lt $deadline) {
         $st = Rpc 'state'
         if ($st.in_sync) { return $true }
+        # **卡在"没同步"多半是没人在动**：服务端只在移动/拒绝时发 UserLocation，
+        # 玩家一静下来就再没有新权威位置可校正。这时主动朝**服务端那一格**走一小步
+        # （产生一次移动 → 一次 UserLocation），客户端随即收敛。实测这一步能把
+        # "8s 内没等到 in_sync" 的僵局打开（此前会一路卡到 B 阶段全废）。
+        if ($nudged -lt 3 -and $null -ne $st.server_tile_x) {
+            $tx = [int]$st.server_tile_x; $ty = [int]$st.server_tile_y
+            if ($tx -ne [int]$st.tile_x -or $ty -ne [int]$st.tile_y) {
+                Rpc 'walk_to' @{ x = [double]($tx * 48 + 24); y = [double](-($ty * 32 + 32)); run = $true } | Out-Null
+                $nudged++
+                Start-Sleep 2
+                continue
+            }
+        }
         Start-Sleep -Milliseconds 400
     }
     return $false
@@ -417,6 +433,15 @@ if ($ResetQuests) {
     Start-Sleep 3
 }
 $taken0 = Taken
+# 前置任务：服务端会以「需要先完成前置任务」拒绝（**只走系统消息**，RPC 仍回 ok:true）。
+# 前置任务本身不是本夹具要验的链路，按验收夹具惯例用 GM `@setquest <id> 1` 把它标成已完成。
+# （踩坑记录：之前用 `@clearquests` 清任务，连带把 completed 标记清掉 → 之后本任务再也接不上。）
+$rqA = QuestReq $QuestId
+if ($rqA -and $rqA.req -gt 0 -and -not $completed.ContainsKey($rqA.req)) {
+    Rpc 'chat' @{ message = "@setquest $($rqA.req) 1" } | Out-Null
+    Start-Sleep 2
+    Write-Host ("[A] 前置任务 {0} 用 GM 标记完成（链路外前提）" -f $rqA.req)
+}
 $rA = Rpc 'accept_quest' @{ npc_index = $accNpc.npc_index; quest_index = $QuestId }
 $taken1 = $taken0
 foreach ($i in 1..15) { Start-Sleep 1; $taken1 = Taken; if ($taken1 -contains $QuestId) { break } }
