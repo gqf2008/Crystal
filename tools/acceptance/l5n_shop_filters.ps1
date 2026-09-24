@@ -29,6 +29,14 @@ param(
     [double]$BtnH = 20.0,
     [switch]$NoRestart
 )
+
+# ---- 实机资源互斥 ----------------------------------------------------------
+# 起客户端 / 登录 e2e 账号前必须先拿锁：客户端 + e2e 账号是「一次只能一组」的资源。
+# 并行时后来者登录会拿到 `result=4 密码错误`（服务端实为 Account already online）——
+# 那是资源互斥假红，不是产品缺陷，靠 for 循环反复重跑撞「干净窗口」修不了它。
+# 拿不到锁就在这里排队；超时未拿到 → 退出码 2（前置失败）。约定见 e2e_lock.ps1 头部。
+. "$PSScriptRoot\e2e_lock.ps1"
+if (-not (Enter-E2eLock -ScriptName 'l5n_shop_filters' -TimeoutSec 1800)) { exit 2 }
 $ErrorActionPreference = 'Continue'
 $env:PATH = 'D:\toolchains\msys64\ucrt64\bin;D:\toolchains\libpinyin-install\bin;' + $env:PATH
 $env:LIBPINYIN_DIR = 'D:/toolchains/libpinyin-install'
