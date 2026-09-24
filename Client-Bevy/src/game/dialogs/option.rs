@@ -185,16 +185,61 @@ pub struct OptionWidget;
 #[derive(Component)]
 pub struct OptionClose;
 
-/// 开/关按钮：持有“设置开/关”两套三态帧，每帧按当前状态切换
+/// 开/关按钮：**每个按钮自带**「设置=ON 时的常态帧 / 设置=OFF 时的常态帧 / 按下帧」。
+///
+/// C# 依据（`MainDialogs.cs`）：`OptionPanel_BeforeDraw` 每帧按 `Settings.X` 给两颗按钮
+/// **各自**赋 `Index`（如 `SkillModeOn.Index = 452/450`、`SkillModeOff.Index = 453/455`，
+/// `:2917-2926`；SkillBar/Effect/DropView/NameView/Observe 同形 `:2928-3002`；
+/// HPView `464/462`+`465/467`；NewMove `853/851`+`848/850`），`PressedIndex` 在构造器里定死
+/// （`:2574/2589/2603/2614/…`）。行标签（"SKILL MODE"/"SKILL BAR"/…）**烘在这几张原版美术里**
+/// ——C# 与 `Client/Localization/*.json` 都没有这些字面量，本端也不画文字（owner 队列
+/// `settings-english-labels` 的核对结论）。
 #[derive(Component)]
 pub struct OptionToggleBtn {
     pub kind: OptionToggleKind,
-    /// true=“开”按钮，false=“关”按钮
+    /// true=该排左边的钮（C# `x=159` 那颗，如 `SkillModeOn`），false=右边那颗（`x=201`）
     pub is_on: bool,
-    /// 设置=ON 时的帧 [normal, hover, pressed]
-    pub frames_on: [Handle<Image>; 3],
-    /// 设置=OFF 时的帧 [normal, hover, pressed]
-    pub frames_off: [Handle<Image>; 3],
+    /// 本钮自己的三帧：`[设置=ON 时的常态帧, 设置=OFF 时的常态帧, 按下帧]`
+    pub own_frames: [Handle<Image>; 3],
+}
+
+/// C# `OptionPanel_BeforeDraw` 的换帧规则（纯函数，便于门禁）：
+/// 返回本钮在当前设置状态下的 `(常态帧, 按下帧)`。
+///
+/// 阳性对照：把两分支写反 → `option_button_frame_matches_csharp` 立即红。
+pub fn toggle_button_frame(own: &[usize; 3], set_on: bool) -> (usize, usize) {
+    (if set_on { own[0] } else { own[1] }, own[2])
+}
+
+/// 点击某档开关时原版发的**本地化提示**（`ChatDialog.ReceiveChat(..., ChatType.Hint)`）。
+///
+/// C# 依据 + 文案（逐字取 `Client/Localization/Chinese.json`）：
+/// - 技能模式：`GameScene.ChangeSkillMode`（`GameScene.cs:890-902`）——ON ⇒ `SkillModeCtrl`
+///   `"[技能模式：Ctrl]"`（`:517`）、OFF ⇒ `SkillModeTilde` `"[技能模式：~]"`（`:516`）
+/// - HP/MP 显示：`MainDialogs.cs:2693-2712`——ON ⇒ `HpMpMode1` `"[HP/MP模式 1]"`（`:528`）、
+///   OFF ⇒ `HpMpMode2` `"[HP/MP模式 2]"`（`:529`）
+/// - 移动方式：`MainDialogs.cs:2765-2784`——ON ⇒ `NewMovementStyle` `"[新移动方式]"`（`:530`）、
+///   OFF ⇒ `OldMovementStyle` `"[旧移动方式]"`（`:531`）
+/// 其余五档（技能栏/特效/掉落显示/名称显示/观察）原版**不发**提示 ⇒ `None`。
+pub fn toggle_hint(kind: OptionToggleKind, set_on: bool) -> Option<&'static str> {
+    match kind {
+        OptionToggleKind::SkillMode => Some(if set_on {
+            "[技能模式：Ctrl]"
+        } else {
+            "[技能模式：~]"
+        }),
+        OptionToggleKind::HpView => Some(if set_on {
+            "[HP/MP模式 1]"
+        } else {
+            "[HP/MP模式 2]"
+        }),
+        OptionToggleKind::NewMove => Some(if set_on {
+            "[新移动方式]"
+        } else {
+            "[旧移动方式]"
+        }),
+        _ => None,
+    }
 }
 
 /// 音量滑条（rect 为面板内相对点击区域 x/y/w/h；命中时加面板原点——面板可拖）
@@ -498,8 +543,7 @@ fn spawn_option(
                 .insert(OptionToggleBtn {
                     kind,
                     is_on: true,
-                    frames_on: on.clone(),
-                    frames_off: off.clone(),
+                    own_frames: on.clone(),
                 });
                 spawn_icon_button(
                     p,
@@ -515,8 +559,7 @@ fn spawn_option(
                 .insert(OptionToggleBtn {
                     kind,
                     is_on: false,
-                    frames_on: on,
-                    frames_off: off,
+                    own_frames: off,
                 });
             }
         }
@@ -638,6 +681,8 @@ fn option_ui_system(
     panel: Query<&Node, With<OptionWidget>>,
     mouse: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window>,
+    // C# 三档开关点击会往聊天区发本地化提示（`ChatType.Hint`）
+    mut chat: ResMut<crate::game::chat::ChatState>,
     mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
 ) {
     fn edge(
@@ -669,7 +714,10 @@ fn option_ui_system(
     for (e, mut ib, inter, tg) in &mut toggles {
         if edge(e, inter, &mut prev_inter) {
             match tg.kind {
-                OptionToggleKind::SkillMode => state.skill_mode_ctrl = !tg.is_on,
+                // 左侧那颗 = "Ctrl"（C# `SkillModeOn.Click → ChangeSkillMode(false)`，
+                // 而 `ChangeSkillMode(false)` 在 SkillMode=false 时把它置 **true**，
+                // `GameScene.cs:890-902`）——旧实现写成 `!tg.is_on` 把方向弄反了。
+                OptionToggleKind::SkillMode => state.skill_mode_ctrl = tg.is_on,
                 OptionToggleKind::SkillBar => state.skill_bar = tg.is_on,
                 OptionToggleKind::Effect => state.effect = tg.is_on,
                 OptionToggleKind::DropView => state.drop_view = tg.is_on,
@@ -683,18 +731,32 @@ fn option_ui_system(
                 tg.kind,
                 state_value(&state, tg.kind)
             );
+            // C# 点击这三档会往聊天区发本地化提示（`ChatType.Hint`）
+            if let Some(hint) = toggle_hint(tg.kind, state_value(&state, tg.kind)) {
+                chat.add_line(
+                    hint,
+                    crate::game::chat::chat_color(mir2_shared::enums::ChatType::Hint),
+                    crate::game::chat::ChatChannel::System,
+                );
+            }
             changed = true;
         }
+        // 本钮自己的两态常态帧 + 按下帧（**不是**"设置=ON 时两钮共用"——那是旧实现的错法：
+        // 同排两颗钮会显示同一张图，实机看到 SKILL BAR 排显示成 [on][on]）
         let sel = state_value(&state, tg.kind);
-        let f = if sel { &tg.frames_on } else { &tg.frames_off };
-        if ib.normal != f[0] {
-            ib.normal = f[0].clone();
+        let base = if sel {
+            &tg.own_frames[0]
+        } else {
+            &tg.own_frames[1]
+        };
+        if ib.normal != *base {
+            ib.normal = base.clone();
         }
-        if ib.hover != f[1] {
-            ib.hover = f[1].clone();
+        if ib.hover != *base {
+            ib.hover = base.clone();
         }
-        if ib.pressed != f[2] {
-            ib.pressed = f[2].clone();
+        if ib.pressed != tg.own_frames[2] {
+            ib.pressed = tg.own_frames[2].clone();
         }
     }
     // #2775：音量滑条 Hint（C# `MainDialogs.cs:2844/2880` `SoundBar.Hint = $"{Settings.Volume}%"`）
@@ -779,6 +841,87 @@ mod tests {
         assert_eq!(volume_hint_text(0.3), "30%");
         assert_eq!(volume_hint_text(0.999), "100%");
         assert_eq!(volume_hint_text(1.0), "100%");
+    }
+
+    /// 门禁（owner 队列 `settings-english-labels`）：换帧必须**按按钮**而不是按状态。
+    ///
+    /// C# `OptionPanel_BeforeDraw`（`MainDialogs.cs:2917-2926`）给同排两颗按钮**各自**赋 `Index`：
+    /// `SkillModeOn.Index = 452(ON)/450(OFF)`、`SkillModeOff.Index = 453(ON)/455(OFF)`，
+    /// `PressedIndex` 固定 451/454（`:2574/2589`）。旧实现把「左钮三帧」当成「设置=ON 时两钮共用」，
+    /// 于是同排显示同一张图（实机 SKILL BAR 排显示成 `[on][on]`）。
+    ///
+    /// 阳性对照：把 [`toggle_button_frame`] 的两个分支写反 → 第 1/2 条断言立即红。
+    #[test]
+    fn option_button_frame_matches_csharp() {
+        // 左钮（SkillModeOn）：C# 452(ON)/450(OFF)，按下 451
+        let left = [452usize, 450, 451];
+        assert_eq!(toggle_button_frame(&left, true), (452, 451));
+        assert_eq!(toggle_button_frame(&left, false), (450, 451));
+        // 右钮（SkillModeOff）：453(ON)/455(OFF)，按下 454 —— 与左钮**不同帧**
+        let right = [453usize, 455, 454];
+        assert_eq!(toggle_button_frame(&right, true), (453, 454));
+        assert_eq!(toggle_button_frame(&right, false), (455, 454));
+        assert_ne!(
+            toggle_button_frame(&left, true).0,
+            toggle_button_frame(&right, true).0,
+            "同一状态下两颗按钮不得显示同一帧（这正是旧实现的 bug）"
+        );
+        // 表里 8 排的取帧与 C# 常量一致（抽 3 排核对：技能栏/HP-MP/移动方式）
+        let row = |kind: OptionToggleKind| {
+            TOGGLE_ROWS
+                .iter()
+                .find(|r| r.0 == kind)
+                .expect("行必须存在")
+        };
+        let bar = row(OptionToggleKind::SkillBar);
+        assert_eq!((bar.3, bar.4), ([458, 456, 457], [459, 461, 460]));
+        let hp = row(OptionToggleKind::HpView);
+        assert_eq!((hp.3, hp.4), ([464, 462, 463], [465, 467, 466]));
+        let mv = row(OptionToggleKind::NewMove);
+        assert_eq!((mv.3, mv.4), ([853, 851, 853], [848, 850, 850]));
+    }
+
+    /// 门禁：三档开关的本地化提示（C# `ChatType.Hint`）——文案逐字取
+    /// `Client/Localization/Chinese.json:516/517/528/529/530/531`；
+    /// 其余五档 C# 不发提示。
+    ///
+    /// 阳性对照：把 SkillMode 的两个文案对调 → 第 1 条断言立即红。
+    #[test]
+    fn option_toggle_hint_matches_csharp() {
+        assert_eq!(
+            toggle_hint(OptionToggleKind::SkillMode, true),
+            Some("[技能模式：Ctrl]")
+        );
+        assert_eq!(
+            toggle_hint(OptionToggleKind::SkillMode, false),
+            Some("[技能模式：~]")
+        );
+        assert_eq!(
+            toggle_hint(OptionToggleKind::HpView, true),
+            Some("[HP/MP模式 1]")
+        );
+        assert_eq!(
+            toggle_hint(OptionToggleKind::HpView, false),
+            Some("[HP/MP模式 2]")
+        );
+        assert_eq!(
+            toggle_hint(OptionToggleKind::NewMove, true),
+            Some("[新移动方式]")
+        );
+        assert_eq!(
+            toggle_hint(OptionToggleKind::NewMove, false),
+            Some("[旧移动方式]")
+        );
+        for kind in [
+            OptionToggleKind::SkillBar,
+            OptionToggleKind::Effect,
+            OptionToggleKind::DropView,
+            OptionToggleKind::NameView,
+            OptionToggleKind::Observe,
+        ] {
+            assert_eq!(toggle_hint(kind, true), None, "{kind:?} 原版不发提示");
+            assert_eq!(toggle_hint(kind, false), None, "{kind:?} 原版不发提示");
+        }
     }
 
     #[test]
