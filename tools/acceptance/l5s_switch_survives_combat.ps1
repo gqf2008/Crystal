@@ -18,9 +18,11 @@ param(
     [string]$User = 'test',
     [string]$Pass = '123456',
     [string]$ClientHome = '',
-    [string]$ToMap = '0',
-    [int]$ToX = 287,
-    [int]$ToY = 615
+    # 目标图必须**与进场图不同**（同图移动不触发地图重建 → 复现不出崩溃 → 夹具会假绿）。
+    # 默认去 SerpentValley(map 文件名 '2')；脚本会自证「换图后 map 变了」，没变直接 exit 3。
+    [string]$ToMap = '2',
+    [int]$ToX = 500,
+    [int]$ToY = 485
 )
 $ErrorActionPreference = 'Continue'
 $env:PATH = 'D:\toolchains\msys64\ucrt64\bin;D:\toolchains\libpinyin-install\bin;' + $env:PATH
@@ -55,6 +57,7 @@ $st = $null
 foreach ($i in 1..60) { Start-Sleep 1; $st = Rpc 'state'; if ($null -ne $st.tile_x) { break } }
 if ($null -eq $st -or $null -eq $st.tile_x) { Write-Host '客户端未进场'; exit 9 }
 Write-Host ("[A] 进场 map={0} tile=({1},{2}) PASS" -f $st.map, $st.tile_x, $st.tile_y)
+$fromMap = $st.map
 
 # B) 制造战斗事件：拉 6 只 Deer 到身边，攻击一次（Struck 事件由服务端回）
 Rpc 'chat' @{ message = '@recallmob Deer 6' } | Out-Null
@@ -73,6 +76,11 @@ Start-Sleep -Seconds 6
 $alive = [bool](Get-CimInstance Win32_Process -Filter "Name='client_bevy.exe'" -EA SilentlyContinue)
 $st2 = Rpc 'state'
 $stateOk = ($null -ne $st2 -and $null -ne $st2.tile_x)
+# 自证：必须真的换了图（否则本夹具证明不了"换图重建"这条路径，属假绿）
+if ($stateOk -and "$fromMap" -eq "$($st2.map)") {
+    Write-Host ("FAIL(J0): 目标图与进场图相同（map={0}）——本夹具必须在**真换图**上跑（用 -ToMap 指定另一张图）" -f $st2.map)
+    exit 3
+}
 Write-Host ("[D] 换图后进程存活={0}；state 可读={1}（map={2} tile=({3},{4})）" -f `
     $alive, $stateOk, $st2.map, $st2.tile_x, $st2.tile_y)
 
