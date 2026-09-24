@@ -10,8 +10,9 @@ use bevy::prelude::*;
 
 use crate::actor::{LocalPlayer, NetObjectId};
 use crate::map_renderer::GameLibraries;
+use crate::resources::libraries::ArrayLibType;
 use crate::scenes::AppState;
-use crate::ui::sprite_ui::{ui_image, UiImageCache};
+use crate::ui::sprite_ui::{ui_array_image, ui_image, UiImageCache};
 
 /// 待生成特效（网络事件 → 渲染，按 target object_id 定位）
 #[derive(Message, Debug, Clone, Copy)]
@@ -42,6 +43,21 @@ pub enum PendingEffect {
         source_id: u32,
         destination_id: u32,
         spell: u8,
+    },
+    /// 对象特效（`S.ObjectEffect`）：原版 `GameScene.cs:4711-4930` 的 `ObjectEffect` switch
+    /// ——护盾光环 / 传送 / 治疗 / 暴击 / 冰柱 / 天罚 / 觉醒 / 月雾…每一类都是真帧动画。
+    /// 此前这些**一律画成染色方块**（本变体就是那处占位表现的替代）。
+    ObjectEffect {
+        /// 包里的 `p.ObjectID`
+        object_id: u32,
+        /// `p.Effect`（`SpellEffect` 枚举值，用来查表）
+        effect: u8,
+        /// `p.EffectType`：多数 case 是帧段步进；MPEater 第二条里它是**另一个对象 ID**
+        effect_type: u32,
+        /// `p.Time`（ms）：`Repeat = p.Time > 0` 类循环的持续时间
+        time: u32,
+        /// `p.DelayTime`（ms）：原版 `StartTime = CMain.Time + p.DelayTime`
+        delay_ms: u32,
     },
 }
 
@@ -107,6 +123,9 @@ pub(crate) fn spell_effect_color(effect: u8) -> [f32; 3] {
 pub struct EffectsState {
     /// 已生成特效计数（E2E 验证）
     pub spawned: u64,
+    /// `SpellEffect.DelayedExplosion` 的 stage 记账：C# 只在 `stage > 已存在.stage` 时替换
+    /// （`GameScene.cs:4867-4878`），重复 stage 的包不再重启动画。
+    pub delayed_stage: std::collections::HashMap<u32, u32>,
 }
 
 #[derive(Component)]
@@ -124,6 +143,35 @@ struct Burst {
     start_scale: f32,
 }
 
+/// 对象特效实体（`S.ObjectEffect` → 原版 `GameScene.ObjectEffect` 的帧动画）。
+///
+/// `pub(crate)`：只读探针 `spell_fx_probe` 要读它，让「实机看到的到底是什么」可取证
+/// （此前这类表现只有单元测试钉表，没有实机判据）。
+#[derive(Component, Debug, Clone, Copy)]
+pub(crate) struct ObjectFxAnim {
+    pub(crate) lib: crate::game::spell_effects::FxLib,
+    /// 当前这次播放的起始帧（已含 effect_type/朝向/随机步进）
+    pub(crate) base: usize,
+    pub(crate) frames: usize,
+    /// 动画自身时间（秒）——用于取帧
+    pub(crate) t: f32,
+    /// 自生成以来的总时间（秒）——用于 `Repeat = p.Time > 0` 的截止
+    pub(crate) age: f32,
+    pub(crate) dur: f32,
+    pub(crate) frame_ms: f32,
+    /// 跟随的目标对象（0 = 不跟随：`FxTarget::OwnerLocation` 挂在地图位置上）
+    pub(crate) follow_object_id: u32,
+    /// 该实体代表的对象特效名（探针/诊断用，`SpellEffect` 枚举名）
+    pub(crate) name: &'static str,
+    pub(crate) repeat: crate::game::spell_effects::FxRepeat,
+    /// `PacketTime`：`p.Time/1000`（>0 才循环，循环到这个时长结束）
+    hold_secs: f32,
+    /// 延迟开播剩余（秒）：原版 `StartTime = CMain.Time + p.DelayTime`，未到就不绘制
+    delay_left: f32,
+    /// 当前 stage（`DelayedExplosion`：`stage != 2` 才循环）
+    stage: u32,
+}
+
 pub struct EffectsPlugin;
 
 impl Plugin for EffectsPlugin {
@@ -138,6 +186,7 @@ impl Plugin for EffectsPlugin {
                 advance_bursts,
                 advance_spell_fx,
                 advance_spell_missiles,
+                advance_object_fx,
             )
                 .chain()
                 .after(crate::network::network_system)
@@ -155,8 +204,11 @@ fn spawn_pending_effects(
     mut images: ResMut<Assets<Image>>,
     mut libs: ResMut<GameLibraries>,
     mut cache: ResMut<UiImageCache>,
+    time: Res<Time>,
     actors: Query<(&NetObjectId, &Transform)>,
     players: Query<&Transform, (With<LocalPlayer>, With<NetObjectId>)>,
+    // 已存活的对象特效实体：光环 Up/Down 要清同组、DelayedExplosion 换 stage 要先移除旧实体
+    object_fx_q: Query<(Entity, &ObjectFxAnim)>,
 ) {
     let pending: Vec<PendingEffect> = effects.read().copied().collect();
     if pending.is_empty() {
@@ -403,6 +455,124 @@ fn spawn_pending_effects(
                     }
                 }
             }
+            PendingEffect::ObjectEffect {
+                object_id,
+                effect,
+                effect_type,
+                time: hold_ms,
+                delay_ms,
+            } => {
+                use crate::game::spell_effects as fx;
+                // 原版同样先 `MapControl.Objects.TryGetValue(p.ObjectID, out var ob)`：
+                // 对象不在就整包丢弃（连光环清理也不用做）。
+                let Some((_, tf)) = actors.iter().find(|(id, _)| id.0 == object_id) else {
+                    continue;
+                };
+                let owner_pos = Vec2::new(tf.translation.x, tf.translation.y);
+                let effect_name = mir2_shared::enums::SpellEffect::try_from(effect)
+                    .map(|e| format!("{e:?}"))
+                    .unwrap_or_default();
+                let entry = fx::object_fx_entry(&effect_name);
+                // 光环 Up/Down 都先清同组（原版两处都 Clear+Remove，否则会叠两层）
+                if let Some(group) = fx::aura_group(&effect_name) {
+                    for (ent, a) in &object_fx_q {
+                        if a.repeat == fx::FxRepeat::UntilDown(group)
+                            && a.follow_object_id == object_id
+                        {
+                            commands.entity(ent).despawn();
+                        }
+                    }
+                }
+                let Some((key, list)) = entry else {
+                    // C# 没有这个 case → 保留旧的占位表现（不静默）
+                    debug!("对象特效表未覆盖 effect={effect_name}（退回占位表现）");
+                    let c = spell_effect_color(effect);
+                    commands.spawn((
+                        Sprite {
+                            image: white.clone(),
+                            color: Color::srgba(c[0], c[1], c[2], 0.9),
+                            custom_size: Some(Vec2::splat(24.0)),
+                            ..default()
+                        },
+                        Transform::from_xyz(owner_pos.x, owner_pos.y, 21.0),
+                        Burst {
+                            t: 0.0,
+                            dur: 0.35,
+                            start_scale: 0.6,
+                        },
+                    ));
+                    continue;
+                };
+                if list.is_empty() {
+                    // C# 明确不画（`Critical` 被注释掉、`MagicShieldDown` 只做清理）
+                    continue;
+                }
+                // DelayedExplosion：C# 只在 `stage > 已存在.stage` 时替换，重复 stage 不重启动画
+                if list.iter().any(|f| f.repeat == fx::FxRepeat::StageNot2) {
+                    if matches!(state.delayed_stage.get(&object_id), Some(p) if effect_type <= *p) {
+                        continue;
+                    }
+                    state.delayed_stage.insert(object_id, effect_type);
+                    for (ent, a) in &object_fx_q {
+                        if a.name == key && a.follow_object_id == object_id {
+                            commands.entity(ent).despawn();
+                        }
+                    }
+                }
+                // 只有 `DeathCrawlerBreath` 用朝向取帧段（`272 + Direction * 4`）；本端 actor
+                // 侧没有可读的朝向组件（残留，见 PR），其余 case 的 dir_step 都是 0。
+                let dir: u8 = 0;
+                let rand = (time.elapsed_secs() * 1000.0) as u32 ^ object_id;
+                for f in list {
+                    if !f.when.matches(effect_type) {
+                        continue;
+                    }
+                    let target_id = match f.target {
+                        fx::FxTarget::Owner | fx::FxTarget::OwnerLocation => object_id,
+                        fx::FxTarget::EffectType => effect_type,
+                    };
+                    let Some((_, tf)) = actors.iter().find(|(id, _)| id.0 == target_id) else {
+                        continue;
+                    };
+                    let base = f.base_frame(effect_type, dir, rand);
+                    let (dur, frame_ms) = f.timing();
+                    let Some(handle) =
+                        object_fx_handle(&mut libs, &mut images, &mut cache, f.lib, base)
+                    else {
+                        continue;
+                    };
+                    commands.spawn((
+                        ObjectFxAnim {
+                            lib: f.lib,
+                            base,
+                            frames: f.frames,
+                            t: 0.0,
+                            age: 0.0,
+                            dur,
+                            frame_ms,
+                            follow_object_id: match f.target {
+                                fx::FxTarget::OwnerLocation => 0,
+                                _ => target_id,
+                            },
+                            name: key,
+                            repeat: f.repeat,
+                            hold_secs: hold_ms as f32 / 1000.0,
+                            delay_left: if f.delay_from_packet {
+                                delay_ms as f32 / 1000.0
+                            } else {
+                                0.0
+                            },
+                            stage: effect_type,
+                        },
+                        Sprite {
+                            image: handle,
+                            ..default()
+                        },
+                        bevy::sprite::Anchor::CENTER,
+                        Transform::from_xyz(tf.translation.x, tf.translation.y, 21.0),
+                    ));
+                }
+            }
             PendingEffect::Burst { target_id, color } => {
                 let Some((_, tf)) = actors.iter().find(|(id, _)| id.0 == target_id) else {
                     continue;
@@ -492,6 +662,97 @@ fn advance_spell_fx(
 /// 施法弹道飞行时长（秒）。原版速度由 Missile 的 interval×count 与距离共同决定，
 /// 本端先用一个固定飞行时长（与旧占位弹道的 0.35s 一致），后续可按原版调优。
 pub const MISSILE_FLIGHT_SECS: f32 = 0.35;
+
+/// 对象特效取一帧图：扁平库走 `ui_image`，怪物库走 `ui_array_image`
+fn object_fx_handle(
+    libs: &mut GameLibraries,
+    images: &mut Assets<Image>,
+    cache: &mut UiImageCache,
+    lib: crate::game::spell_effects::FxLib,
+    index: usize,
+) -> Option<Handle<Image>> {
+    match lib {
+        crate::game::spell_effects::FxLib::Flat(name) => {
+            ui_image(libs, images, cache, name.library(), index)
+        }
+        crate::game::spell_effects::FxLib::Monster(m) => ui_array_image(
+            libs,
+            images,
+            cache,
+            ArrayLibType::Monsters,
+            m as usize,
+            index,
+        ),
+    }
+}
+
+/// 对象特效推进：取帧 + 跟随 + 按 `FxRepeat` 循环或消失。
+///
+/// 原版 `Effect` 的三种循环在这里一一对应：
+/// - `Repeat = true`（护盾 / 元素屏障）→ 循环到收到 Down 包（由 spawn 侧清理）；
+/// - `Repeat = p.Time > 0`（Stunned / FlamingMutantWeb）→ 循环满 `p.Time` 才消失，否则播一遍；
+/// - `DelayedExplosionEffect` 的 `stage != 2` → 循环，stage=2 播完即消失。
+fn advance_object_fx(
+    time: Res<Time>,
+    mut commands: Commands,
+    mut libs: ResMut<GameLibraries>,
+    mut images: ResMut<Assets<Image>>,
+    mut cache: ResMut<UiImageCache>,
+    // B0001 回归：下面 q 写 Transform，actors 只读 Transform，`Without<ObjectFxAnim>`
+    // 划界证明两个查询不相交（与 advance_spell_fx 同一处置）。
+    actors: Query<(&NetObjectId, &Transform), Without<ObjectFxAnim>>,
+    mut q: Query<(Entity, &mut ObjectFxAnim, &mut Sprite, &mut Transform)>,
+) {
+    for (e, mut fx, mut sprite, mut tf) in &mut q {
+        let dt = time.delta_secs();
+        if fx.delay_left > 0.0 {
+            // 原版 `Effect.Draw` 在 `CMain.Time < StartTime` 时直接 return（不绘制）
+            fx.delay_left -= dt;
+            if sprite.color.alpha() != 0.0 {
+                sprite.color.set_alpha(0.0);
+            }
+            continue;
+        }
+        if sprite.color.alpha() == 0.0 {
+            sprite.color.set_alpha(1.0);
+        }
+        fx.t += dt;
+        fx.age += dt;
+        if fx.follow_object_id != 0 {
+            if let Some((_, atf)) = actors.iter().find(|(id, _)| id.0 == fx.follow_object_id) {
+                tf.translation.x = atf.translation.x;
+                tf.translation.y = atf.translation.y;
+            }
+        }
+        use crate::game::spell_effects::FxRepeat;
+        let looping = match fx.repeat {
+            FxRepeat::Once => false,
+            FxRepeat::PacketTime => fx.hold_secs > 0.0,
+            FxRepeat::UntilDown(_) | FxRepeat::StageNot2 => true,
+        };
+        let finished = match fx.repeat {
+            FxRepeat::PacketTime if fx.hold_secs > 0.0 => fx.age >= fx.hold_secs,
+            FxRepeat::StageNot2 => fx.stage >= 2 && fx.t >= fx.dur,
+            FxRepeat::UntilDown(_) => false,
+            _ => fx.t >= fx.dur,
+        };
+        if finished {
+            commands.entity(e).despawn();
+            continue;
+        }
+        let step = (fx.t / fx.frame_ms.max(0.001)).floor() as usize;
+        let frame = if looping {
+            step % fx.frames.max(1)
+        } else {
+            step.min(fx.frames.saturating_sub(1))
+        };
+        if let Some(h) =
+            object_fx_handle(&mut libs, &mut images, &mut cache, fx.lib, fx.base + frame)
+        {
+            sprite.image = h;
+        }
+    }
+}
 
 /// 施法弹道实体：一边飞一边按原版帧表循环播（C# Missile 的帧循环）
 /// （`pub(crate)`：`control.rs` 的只读探针 `spell_fx_probe` 要读它——owner 反馈「魔法效果完全不对」
@@ -627,6 +888,8 @@ mod tests {
             ..Default::default()
         });
         world.insert_resource(EffectsState::default());
+        // `spawn_pending_effects` 现在还要 Res<Time>（对象特效的随机档种子）
+        world.insert_resource(bevy::prelude::Time::<()>::default());
         // 库是惰性初始化的：不先 ensure，ui_image 取不到 Magic[0] → 会走 continue 而不是生成实体
         world
             .resource_mut::<crate::map_renderer::GameLibraries>()
@@ -704,6 +967,7 @@ mod tests {
             ..Default::default()
         });
         world.insert_resource(EffectsState::default());
+        world.insert_resource(bevy::prelude::Time::<()>::default());
         world
             .resource_mut::<crate::map_renderer::GameLibraries>()
             .0
@@ -788,11 +1052,244 @@ mod tests {
                 advance_bursts,
                 advance_spell_fx,
                 advance_spell_missiles,
+                advance_object_fx,
             )
                 .chain(),
         );
         // 首帧即完成调度初始化：有 B0001 冲突时这里直接 panic
         app.update();
         app.update();
+    }
+
+    /// 对象特效接线用的最小 World（与上面两条接线门禁同构）：
+    /// 真实 Data 资产 + 惰性库初始化 + 对象 4242。无资产时返回 None（CI 上跳过）。
+    fn object_fx_test_world() -> Option<bevy::prelude::World> {
+        if !crate::resources::libraries::data_assets_present() {
+            return None;
+        }
+        let mut world = bevy::prelude::World::new();
+        world.insert_resource(crate::map_renderer::GameLibraries(
+            crate::resources::libraries::Libraries::new(
+                crate::resources::libraries::resolve_data_path(),
+            ),
+        ));
+        world.insert_resource(bevy::prelude::Assets::<bevy::prelude::Image>::default());
+        world.insert_resource(crate::ui::sprite_ui::UiImageCache::default());
+        world.insert_resource(crate::game::dialogs::option::OptionState {
+            effect: true,
+            ..Default::default()
+        });
+        world.insert_resource(EffectsState::default());
+        world.insert_resource(bevy::prelude::Time::<()>::default());
+        world
+            .resource_mut::<crate::map_renderer::GameLibraries>()
+            .0
+            .ensure_initialized();
+        world.insert_resource(bevy::prelude::Messages::<PendingEffect>::default());
+        world.spawn((
+            NetObjectId(4242),
+            bevy::prelude::Transform::from_xyz(100.0, 200.0, 0.0),
+        ));
+        Some(world)
+    }
+
+    /// 给上面的 world 写一条 `S.ObjectEffect` 并跑一次生成系统（跑完 Bevy 会 flush 命令）。
+    fn write_object_effect(
+        world: &mut bevy::prelude::World,
+        effect: mir2_shared::enums::SpellEffect,
+        effect_type: u32,
+        time: u32,
+    ) {
+        use bevy::ecs::system::RunSystemOnce;
+        world
+            .resource_mut::<bevy::prelude::Messages<PendingEffect>>()
+            .clear();
+        world
+            .resource_mut::<bevy::prelude::Messages<PendingEffect>>()
+            .write(PendingEffect::ObjectEffect {
+                object_id: 4242,
+                effect: effect as u8,
+                effect_type,
+                time,
+                delay_ms: 0,
+            });
+        world
+            .run_system_once(spawn_pending_effects)
+            .expect("spawn_pending_effects 应能运行");
+    }
+
+    /// 门禁（接线，不只是表）：`S.ObjectEffect` 必须画出**原版真帧动画**，而不是染色方块。
+    ///
+    /// 为什么要有这条：`S.ObjectEffect`（护盾/传送/治疗/冰柱/天罚/觉醒…）此前在
+    /// `handle_social.rs` 里只发一个 `PendingEffect::Burst`，玩家看到的是一个纯色方块 ——
+    /// 表再对，只要这条接线不在，实机就还是方块。
+    ///
+    /// 阳性对照（实做）：把 `spawn_pending_effects` 的 ObjectEffect 分支改回
+    /// `PendingEffect::Burst` 那条路径 → 本测试立即红（`ObjectFxAnim` 数为 0）。
+    #[test]
+    fn object_effect_spawns_original_frame_animation_not_color_block() {
+        let Some(mut world) = object_fx_test_world() else {
+            eprintln!(
+                "skip object_effect_spawns_original_frame_animation_not_color_block: 无 Data 资产"
+            );
+            return;
+        };
+        write_object_effect(&mut world, mir2_shared::enums::SpellEffect::Teleport, 0, 0);
+        let mut q = world.query::<&ObjectFxAnim>();
+        let fx: Vec<&ObjectFxAnim> = q.iter(&world).collect();
+        assert_eq!(
+            fx.len(),
+            1,
+            "Teleport 必须生成一条真帧动画实体（此前是染色方块）"
+        );
+        assert_eq!(fx[0].name, "Teleport");
+        assert_eq!(fx[0].base, 1600, "原版 `Libraries.Magic[1600]`");
+        assert_eq!(fx[0].frames, 10);
+        assert_eq!(fx[0].follow_object_id, 4242, "跟随包里的对象");
+        let mut bq = world.query::<&Burst>();
+        assert_eq!(
+            bq.iter(&world).count(),
+            0,
+            "表里有的对象特效不应再退回占位染色方块"
+        );
+    }
+
+    /// 门禁：护盾光环的 Up 会**先清同组再生成**（原版 `ShieldEffect.Clear(); Remove();`），
+    /// Down 只清理不画（表里是空切片）——否则护盾会叠成两层。
+    #[test]
+    fn magic_shield_aura_up_clears_group_and_down_removes_it() {
+        let Some(mut world) = object_fx_test_world() else {
+            eprintln!("skip magic_shield_aura_up_clears_group_and_down_removes_it: 无 Data 资产");
+            return;
+        };
+        write_object_effect(
+            &mut world,
+            mir2_shared::enums::SpellEffect::MagicShieldUp,
+            0,
+            0,
+        );
+        let count_aura = |world: &mut bevy::prelude::World| {
+            let mut q = world.query::<&ObjectFxAnim>();
+            q.iter(world)
+                .filter(|f| {
+                    f.repeat
+                        == crate::game::spell_effects::FxRepeat::UntilDown(
+                            crate::game::spell_effects::AuraGroup::MagicShield,
+                        )
+                })
+                .count()
+        };
+        assert_eq!(
+            count_aura(&mut world),
+            1,
+            "第一次 MagicShieldUp 生成一条光环"
+        );
+        // 第二次 Up（重复施放）——必须先清掉旧的，不能变两条
+        write_object_effect(
+            &mut world,
+            mir2_shared::enums::SpellEffect::MagicShieldUp,
+            0,
+            0,
+        );
+        assert_eq!(
+            count_aura(&mut world),
+            1,
+            "重复 Up 必须先清同组（原版 Clear+Remove），否则护盾叠两层"
+        );
+        // Down：C# 只做清理，不画（表里是 `Some(&[])`）
+        write_object_effect(
+            &mut world,
+            mir2_shared::enums::SpellEffect::MagicShieldDown,
+            0,
+            0,
+        );
+        assert_eq!(count_aura(&mut world), 0, "MagicShieldDown 必须清掉光环");
+    }
+
+    /// 门禁：MPEater 的两条里，第二条打的是 `p.EffectType` 指的那个**对象**（原版 `ob2`），
+    /// 不是施法者自己 —— 这条最容易在移植时被写成「都挂自己身上」。
+    #[test]
+    fn mpeater_second_effect_targets_effect_type_object() {
+        let Some(mut world) = object_fx_test_world() else {
+            eprintln!("skip mpeater_second_effect_targets_effect_type_object: 无 Data 资产");
+            return;
+        };
+        world.spawn((
+            NetObjectId(7777),
+            bevy::prelude::Transform::from_xyz(500.0, 600.0, 0.0),
+        ));
+        write_object_effect(
+            &mut world,
+            mir2_shared::enums::SpellEffect::MPEater,
+            7777,
+            0,
+        );
+        let mut q = world.query::<&ObjectFxAnim>();
+        let mut follows: Vec<u32> = q.iter(&world).map(|f| f.follow_object_id).collect();
+        follows.sort_unstable();
+        assert_eq!(
+            follows,
+            vec![4242, 7777],
+            "MPEater 两条：一条挂施法者、一条挂 EffectType 指的对象"
+        );
+    }
+
+    /// 门禁：表里**没有**的 case（C# 也没有，如 `KingGuard2`）才允许退回占位表现，
+    /// 且不静默（走 debug）。这条守住「不为了好看把没实现的也画成方块」的边界。
+    #[test]
+    fn uncovered_object_effect_keeps_placeholder_fallback() {
+        let Some(mut world) = object_fx_test_world() else {
+            eprintln!("skip uncovered_object_effect_keeps_placeholder_fallback: 无 Data 资产");
+            return;
+        };
+        write_object_effect(
+            &mut world,
+            mir2_shared::enums::SpellEffect::KingGuard2,
+            0,
+            0,
+        );
+        let mut q = world.query::<&ObjectFxAnim>();
+        assert_eq!(q.iter(&world).count(), 0, "C# 没有 case → 不该画帧动画");
+        let mut bq = world.query::<&Burst>();
+        assert_eq!(bq.iter(&world).count(), 1, "未覆盖的特效保留占位表现");
+    }
+
+    /// 门禁：`DelayedExplosion` 只在 stage **变大**时替换（原版 `stage < p.EffectType` 才 Remove+Add），
+    /// 重复同 stage 的包不能把动画重启。
+    #[test]
+    fn delayed_explosion_replaces_only_on_stage_increase() {
+        let Some(mut world) = object_fx_test_world() else {
+            eprintln!("skip delayed_explosion_replaces_only_on_stage_increase: 无 Data 资产");
+            return;
+        };
+        let count = |world: &mut bevy::prelude::World| {
+            let mut q = world.query::<&ObjectFxAnim>();
+            q.iter(world).count()
+        };
+        write_object_effect(
+            &mut world,
+            mir2_shared::enums::SpellEffect::DelayedExplosion,
+            0,
+            0,
+        );
+        assert_eq!(count(&mut world), 1, "stage 0 生成一条");
+        write_object_effect(
+            &mut world,
+            mir2_shared::enums::SpellEffect::DelayedExplosion,
+            0,
+            0,
+        );
+        assert_eq!(count(&mut world), 1, "同一 stage 重复到达不额外生成");
+        write_object_effect(
+            &mut world,
+            mir2_shared::enums::SpellEffect::DelayedExplosion,
+            1,
+            0,
+        );
+        assert_eq!(
+            count(&mut world),
+            1,
+            "stage 变大 → 替换（旧的移除、新的生成）"
+        );
     }
 }

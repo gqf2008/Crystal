@@ -705,9 +705,15 @@ pub(crate) fn handle_social(
         }
         x if x == ServerPacketIds::ObjectEffect as i16 => {
             if let Ok(p) = magic_combat::ObjectEffect::read_body(&mut cur) {
-                effects.write(PendingEffect::Burst {
-                    target_id: p.object_id,
-                    color: crate::game::effects::spell_effect_color(p.effect as u8),
+                // 原版 `GameScene.ObjectEffect` 的整类真帧动画（护盾/传送/治疗/冰柱/天罚/
+                // 觉醒/月雾…）。此前这里只发一个染色 `Burst`（纯色方块），是 owner 反馈
+                // 「魔法效果完全不对」里「自己/他人身上没有施法表现」的直接原因。
+                effects.write(PendingEffect::ObjectEffect {
+                    object_id: p.object_id,
+                    effect: p.effect as u8,
+                    effect_type: p.effect_type,
+                    time: p.time,
+                    delay_ms: p.delay_time,
                 });
                 tracing::info!(
                     "✨ 对象特效: id={} effect={:?} type={} delay={} time={}",

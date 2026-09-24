@@ -17,10 +17,10 @@
 use bevy::prelude::*;
 
 use crate::resources::libraries::LibraryName;
-use mir2_shared::enums::Spell;
+use mir2_shared::enums::{Monster, Spell};
 // 生成表里写的是 `library: Magic` 这样的短名（对齐 C# 的 Libraries.Magic），故把变体引进作用域
 #[allow(unused_imports)]
-use SpellFxLibrary::{Magic, Magic2, Magic3};
+use SpellFxLibrary::{Effect, Magic, Magic2, Magic3};
 
 /// 原版写 `Frame.Count * FrameInterval` 时的兜底每帧时长（ms）
 pub const DEFAULT_FRAME_MS: u32 = 100;
@@ -31,6 +31,8 @@ pub enum SpellFxLibrary {
     Magic,
     Magic2,
     Magic3,
+    /// 原版 `Libraries.Effect`（`SpellEffect.Reflect` 的 580 帧段）
+    Effect,
 }
 
 impl SpellFxLibrary {
@@ -39,6 +41,7 @@ impl SpellFxLibrary {
             SpellFxLibrary::Magic => LibraryName::Magic,
             SpellFxLibrary::Magic2 => LibraryName::Magic2,
             SpellFxLibrary::Magic3 => LibraryName::Magic3,
+            SpellFxLibrary::Effect => LibraryName::Effect,
         }
     }
 }
@@ -89,6 +92,161 @@ pub struct MissileFx {
     pub skip: usize,
 }
 
+// ============================================================================
+// 对象特效（`S.ObjectEffect`）：原版 `Client/MirScenes/GameScene.cs:4711-4930` 的
+// `ObjectEffect(S.ObjectEffect p)` 大 switch——护盾光环 / 传送 / 治疗 / 暴击 / 冰柱 /
+// 天罚 / 觉醒 / 月雾…每一类都是**一条或多条真帧动画**（MPEater、Hemorrhage 还是多条）。
+//
+// 本端此前把这些全画成一个纯色方块（`PendingEffect::Burst` + `spell_effect_color`），
+// 与「魔法效果完全不对」的反馈直接相关。表同样由 C# 机械生成（脚本的
+// `parse_object_effects()`），生成块在下方 OBJECT_FX_BEGIN/END 之间，勿手改。
+// ============================================================================
+
+/// 对象特效用的库：扁平库或怪物数组库
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum FxLib {
+    Flat(SpellFxLibrary),
+    Monster(Monster),
+}
+
+impl FxLib {
+    /// 扁平库名（`Monster` 走数组库，返回 None）
+    pub fn flat(self) -> Option<LibraryName> {
+        match self {
+            FxLib::Flat(l) => Some(l.library()),
+            FxLib::Monster(_) => None,
+        }
+    }
+
+    /// 怪物库索引（`Flat` 返回 None）
+    pub fn monster(self) -> Option<Monster> {
+        match self {
+            FxLib::Monster(m) => Some(m),
+            FxLib::Flat(_) => None,
+        }
+    }
+}
+
+/// 原版 `if (p.EffectType == 0)` 这类按 `EffectType` 分流的条件（KingGuard 的 753/763）
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum FxWhen {
+    Always,
+    EffectTypeZero,
+    EffectTypeNonZero,
+}
+
+impl FxWhen {
+    pub fn matches(self, effect_type: u32) -> bool {
+        match self {
+            FxWhen::Always => true,
+            FxWhen::EffectTypeZero => effect_type == 0,
+            FxWhen::EffectTypeNonZero => effect_type != 0,
+        }
+    }
+}
+
+/// 循环光环分组（原版 `PlayerObject.ShieldEffect` / `PlayerObject.ElementalBarrierEffect`）
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum AuraGroup {
+    MagicShield,
+    ElementalBarrier,
+}
+
+/// 循环语义（原版 `Effect.Repeat` / `DelayedExplosionEffect` 的 stage）
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum FxRepeat {
+    /// 播完 `frames` 即消失（原版默认）
+    Once,
+    /// 一直循环，直到收到同组的 Down 包（原版 `Repeat = true`，由 Down 清理）
+    UntilDown(AuraGroup),
+    /// 原版 `Repeat = p.Time > 0`：`time > 0` 时循环 `time` 毫秒，否则播完即消失
+    /// （Stunned / FlamingMutantWeb）
+    PacketTime,
+    /// 原版 `DelayedExplosionEffect`：`stage != 2` 时循环；同对象新 stage 到达即替换
+    StageNot2,
+}
+
+/// 特效锚定的对象
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum FxTarget {
+    /// 包里的 `ob`（`p.ObjectID`）
+    Owner,
+    /// `p.EffectType` 指向的那个对象（原版 MPEater 的 `ob2`；该字段在此当**对象 ID** 用）
+    EffectType,
+    /// `ob.CurrentLocation`（Behemoth：挂地图位置、不跟随对象）
+    OwnerLocation,
+}
+
+/// 一条对象特效（原版一条 `new Effect(...)` 或 `new DelayedExplosionEffect(...)`）
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ObjectFx {
+    pub lib: FxLib,
+    /// 库内起始帧
+    pub start: usize,
+    /// 帧数
+    pub frames: usize,
+    /// 整段动画时长（ms）；0 = 原版写 `Frame.Count * FrameInterval`，按 DEFAULT_FRAME_MS 换算
+    pub interval_ms: u32,
+    /// 原版 `{ Blend = false }`：本端 Sprite 仍走 alpha 混合（残留，见 PR）
+    pub blend: bool,
+    /// 按 `EffectType` 分流的条件（原版 `if (p.EffectType == 0)`）
+    pub when: FxWhen,
+    pub repeat: FxRepeat,
+    pub target: FxTarget,
+    /// 原版 `1590 + (int)p.EffectType * 10` 这类按 `EffectType` 取帧段
+    pub step_effect_type: usize,
+    /// 原版 `375 + CMain.Random.Next(3) * 20` 这类随机取帧段
+    pub rand_step: usize,
+    pub rand_count: usize,
+    /// 原版 `272 + (int)ob.Direction * 4` 这类按朝向取帧段
+    pub dir_step: usize,
+    /// 原版把生成时刻写成 `CMain.Time + p.DelayTime`（觉醒系列）→ 延迟后再开播
+    pub delay_from_packet: bool,
+}
+
+impl ObjectFx {
+    /// 生成块里只写与默认值不同的字段（`..ObjectFx::DEFAULT`），便于 diff 与幂等
+    pub const DEFAULT: ObjectFx = ObjectFx {
+        lib: FxLib::Flat(SpellFxLibrary::Magic),
+        start: 0,
+        frames: 1,
+        interval_ms: 0,
+        blend: true,
+        when: FxWhen::Always,
+        repeat: FxRepeat::Once,
+        target: FxTarget::Owner,
+        step_effect_type: 0,
+        rand_step: 0,
+        rand_count: 0,
+        dir_step: 0,
+        delay_from_packet: false,
+    };
+
+    /// 实际起始帧：`start + effect_type * step_effect_type + dir * dir_step`，
+    /// 再按 `rand_count` 随机挑一档（`rand` 由调用方给，保持纯函数可测）。
+    pub fn base_frame(&self, effect_type: u32, dir: u8, rand: u32) -> usize {
+        let mut base = self.start + self.step_effect_type * effect_type as usize;
+        if self.dir_step > 0 {
+            base += self.dir_step * dir as usize;
+        }
+        if self.rand_count > 1 && self.rand_step > 0 {
+            base += self.rand_step * (rand % self.rand_count as u32) as usize;
+        }
+        base
+    }
+
+    /// 整段时长（秒）与每帧时长（秒）；原版 `interval` 是整段时长而非每帧
+    pub fn timing(&self) -> (f32, f32) {
+        let frames = self.frames.max(1) as f32;
+        let total_ms = if self.interval_ms > 0 {
+            self.interval_ms as f32
+        } else {
+            frames * DEFAULT_FRAME_MS as f32
+        };
+        (total_ms / 1000.0, total_ms / frames / 1000.0)
+    }
+}
+
 /// 查表：该法术的弹道（原版 MirAction.Spell 分支里 `CreateProjectile` 的那些法术）
 pub fn spell_missile(spell: Spell) -> Option<MissileFx> {
     let name = format!("{spell:?}");
@@ -115,6 +273,36 @@ pub fn range_missile(spell: u8) -> Option<MissileFx> {
         .iter()
         .find(|(n, _)| *n == name)
         .map(|(_, fx)| *fx)
+}
+
+/// 查表：这个对象特效 C# 会画什么。
+///
+/// - `None` = C# 的 switch 里**没有**这个 case（本端才允许退回占位表现，且不静默）；
+/// - `Some(&[])` = C# **明确不画**（`Critical` 被注释掉、`MagicShieldDown` 只做清理）。
+pub fn object_fx(name: &str) -> Option<&'static [ObjectFx]> {
+    OBJECT_FX.iter().find(|(n, _)| *n == name).map(|(_, v)| *v)
+}
+
+/// 同上，但**同时返回表里的名字**（`&'static str`）——渲染实体要长期持有它做诊断/探针，
+/// 不能拿调用方那次 `format!` 出来的临时 `String`。
+pub fn object_fx_entry(name: &str) -> Option<(&'static str, &'static [ObjectFx])> {
+    OBJECT_FX
+        .iter()
+        .find(|(n, _)| *n == name)
+        .map(|(n, v)| (*n, *v))
+}
+
+/// 该特效名属于哪个循环光环的 Up/Down。
+///
+/// 原版在 MagicShield/ElementalBarrier 的 Up 与 Down 里都先
+/// `ShieldEffect.Clear(); ShieldEffect.Remove();`（`GameScene.cs:4773-4797`、`:4816-4843`），
+/// 所以收到任一包都要先清同组实体，否则护盾会叠成两层。
+pub fn aura_group(name: &str) -> Option<AuraGroup> {
+    match name {
+        "MagicShieldUp" | "MagicShieldDown" => Some(AuraGroup::MagicShield),
+        "ElementalBarrierUp" | "ElementalBarrierDown" => Some(AuraGroup::ElementalBarrier),
+        _ => None,
+    }
 }
 
 // ==== SPELL_FX_BEGIN（由 Client-Bevy/tools/spell_effects_from_csharp.py 生成，勿手改）====
@@ -224,6 +412,114 @@ pub const RANGE_MISSILE: &[(&str, MissileFx)] = &[
     ("NapalmShot", MissileFx { library: Magic3, base: 2530, frames: 6, frame_ms: 50, skip: 4 }),
 ];
 // ==== RANGE_MISSILE_END ====
+
+// ==== OBJECT_FX_BEGIN（由 Client-Bevy/tools/spell_effects_from_csharp.py 生成，勿手改）====
+/// 原版对象特效表（`Client/MirScenes/GameScene.cs` 的 `ObjectEffect` switch 机械生成）
+/// 空切片 = C# 明确不画；表里没有的名字 = C# 没有这个 case（调用方才退回占位表现）
+#[rustfmt::skip]  // 生成块：保持每条一行，便于 diff 与 --write 幂等
+pub const OBJECT_FX: &[(&str, &[ObjectFx])] = &[
+    ("FurbolgWarriorCritical", &[
+        ObjectFx { lib: FxLib::Monster(Monster::FurbolgWarrior), start: 400, frames: 6, interval_ms: 600, ..ObjectFx::DEFAULT },
+    ]),
+    ("FatalSword", &[
+        ObjectFx { lib: FxLib::Flat(Magic2), start: 1940, frames: 4, interval_ms: 400, ..ObjectFx::DEFAULT },
+    ]),
+    ("StormEscape", &[
+        ObjectFx { lib: FxLib::Flat(Magic3), start: 610, frames: 10, interval_ms: 600, ..ObjectFx::DEFAULT },
+    ]),
+    ("Teleport", &[
+        ObjectFx { lib: FxLib::Flat(Magic), start: 1600, frames: 10, interval_ms: 600, ..ObjectFx::DEFAULT },
+    ]),
+    ("Healing", &[
+        ObjectFx { lib: FxLib::Flat(Magic), start: 370, frames: 10, interval_ms: 800, ..ObjectFx::DEFAULT },
+    ]),
+    ("RedMoonEvil", &[
+        ObjectFx { lib: FxLib::Monster(Monster::RedMoonEvil), start: 32, frames: 6, interval_ms: 400, blend: false, ..ObjectFx::DEFAULT },
+    ]),
+    ("TwinDrakeBlade", &[
+        ObjectFx { lib: FxLib::Flat(Magic2), start: 380, frames: 6, interval_ms: 800, ..ObjectFx::DEFAULT },
+    ]),
+    ("MPEater", &[
+        ObjectFx { lib: FxLib::Flat(Magic2), start: 2411, frames: 19, interval_ms: 1900, target: FxTarget::EffectType, ..ObjectFx::DEFAULT },
+        ObjectFx { lib: FxLib::Flat(Magic2), start: 2400, frames: 9, interval_ms: 900, ..ObjectFx::DEFAULT },
+    ]),
+    ("Bleeding", &[
+        ObjectFx { lib: FxLib::Flat(Magic3), start: 60, frames: 3, interval_ms: 400, ..ObjectFx::DEFAULT },
+    ]),
+    ("Hemorrhage", &[
+        ObjectFx { lib: FxLib::Flat(Magic3), start: 0, frames: 4, interval_ms: 400, ..ObjectFx::DEFAULT },
+        ObjectFx { lib: FxLib::Flat(Magic3), start: 28, frames: 6, interval_ms: 600, ..ObjectFx::DEFAULT },
+        ObjectFx { lib: FxLib::Flat(Magic3), start: 46, frames: 8, interval_ms: 800, ..ObjectFx::DEFAULT },
+    ]),
+    ("MagicShieldUp", &[
+        ObjectFx { lib: FxLib::Flat(Magic), start: 3890, frames: 3, interval_ms: 600, repeat: FxRepeat::UntilDown(AuraGroup::MagicShield), ..ObjectFx::DEFAULT },
+    ]),
+    ("MagicShieldDown", &[]),
+    ("GreatFoxSpirit", &[
+        ObjectFx { lib: FxLib::Monster(Monster::GreatFoxSpirit), start: 375, rand_step: 20, rand_count: 3, frames: 20, interval_ms: 1400, ..ObjectFx::DEFAULT },
+    ]),
+    ("Entrapment", &[
+        ObjectFx { lib: FxLib::Flat(Magic2), start: 1010, frames: 10, interval_ms: 1500, ..ObjectFx::DEFAULT },
+        ObjectFx { lib: FxLib::Flat(Magic2), start: 1020, frames: 8, interval_ms: 1200, ..ObjectFx::DEFAULT },
+    ]),
+    ("Critical", &[]),
+    ("Reflect", &[
+        ObjectFx { lib: FxLib::Flat(Effect), start: 580, frames: 10, interval_ms: 70, ..ObjectFx::DEFAULT },
+    ]),
+    ("ElementalBarrierUp", &[
+        ObjectFx { lib: FxLib::Flat(Magic3), start: 1890, frames: 10, interval_ms: 2000, repeat: FxRepeat::UntilDown(AuraGroup::ElementalBarrier), ..ObjectFx::DEFAULT },
+    ]),
+    ("ElementalBarrierDown", &[
+        ObjectFx { lib: FxLib::Flat(Magic3), start: 1910, frames: 7, interval_ms: 1400, ..ObjectFx::DEFAULT },
+    ]),
+    // DelayedExplosion：C# 的 `effectid < 0` 支路是同一段动画的 stage=0（本端按 stage 取帧段，effect_type=0 时帧段相同），故只保留 stage 那条
+    ("DelayedExplosion", &[
+        ObjectFx { lib: FxLib::Flat(Magic3), start: 1590, step_effect_type: 10, frames: 8, interval_ms: 1200, repeat: FxRepeat::StageNot2, ..ObjectFx::DEFAULT },
+    ]),
+    ("AwakeningSuccess", &[
+        ObjectFx { lib: FxLib::Flat(Magic3), start: 900, frames: 16, interval_ms: 1600, delay_from_packet: true, ..ObjectFx::DEFAULT },
+        ObjectFx { lib: FxLib::Flat(Magic3), start: 840, frames: 16, interval_ms: 1600, blend: false, delay_from_packet: true, ..ObjectFx::DEFAULT },
+    ]),
+    ("AwakeningFail", &[
+        ObjectFx { lib: FxLib::Flat(Magic3), start: 920, frames: 9, interval_ms: 900, delay_from_packet: true, ..ObjectFx::DEFAULT },
+        ObjectFx { lib: FxLib::Flat(Magic3), start: 860, frames: 9, interval_ms: 900, blend: false, delay_from_packet: true, ..ObjectFx::DEFAULT },
+    ]),
+    ("AwakeningHit", &[
+        ObjectFx { lib: FxLib::Flat(Magic3), start: 880, frames: 5, interval_ms: 500, delay_from_packet: true, ..ObjectFx::DEFAULT },
+        ObjectFx { lib: FxLib::Flat(Magic3), start: 820, frames: 5, interval_ms: 500, blend: false, delay_from_packet: true, ..ObjectFx::DEFAULT },
+    ]),
+    ("AwakeningMiss", &[
+        ObjectFx { lib: FxLib::Flat(Magic3), start: 890, frames: 5, interval_ms: 500, delay_from_packet: true, ..ObjectFx::DEFAULT },
+        ObjectFx { lib: FxLib::Flat(Magic3), start: 830, frames: 5, interval_ms: 500, blend: false, delay_from_packet: true, ..ObjectFx::DEFAULT },
+    ]),
+    ("TurtleKing", &[
+        ObjectFx { lib: FxLib::Monster(Monster::TurtleKing), start: 922, rand_step: 12, rand_count: 2, frames: 12, interval_ms: 1200, ..ObjectFx::DEFAULT },
+    ]),
+    ("Behemoth", &[
+        ObjectFx { lib: FxLib::Monster(Monster::Behemoth), start: 788, frames: 10, interval_ms: 1500, target: FxTarget::OwnerLocation, ..ObjectFx::DEFAULT },
+        ObjectFx { lib: FxLib::Monster(Monster::Behemoth), start: 778, frames: 10, interval_ms: 1500, blend: false, target: FxTarget::OwnerLocation, ..ObjectFx::DEFAULT },
+    ]),
+    ("Stunned", &[
+        ObjectFx { lib: FxLib::Monster(Monster::StoningStatue), start: 632, frames: 10, interval_ms: 1000, repeat: FxRepeat::PacketTime, ..ObjectFx::DEFAULT },
+    ]),
+    ("IcePillar", &[
+        ObjectFx { lib: FxLib::Monster(Monster::IcePillar), start: 18, frames: 8, interval_ms: 800, ..ObjectFx::DEFAULT },
+    ]),
+    ("KingGuard", &[
+        ObjectFx { lib: FxLib::Monster(Monster::KingGuard), start: 753, frames: 10, interval_ms: 1000, blend: false, when: FxWhen::EffectTypeZero, ..ObjectFx::DEFAULT },
+        ObjectFx { lib: FxLib::Monster(Monster::KingGuard), start: 763, frames: 10, interval_ms: 1000, blend: false, when: FxWhen::EffectTypeNonZero, ..ObjectFx::DEFAULT },
+    ]),
+    ("FlamingMutantWeb", &[
+        ObjectFx { lib: FxLib::Monster(Monster::FlamingMutant), start: 330, frames: 10, interval_ms: 1000, repeat: FxRepeat::PacketTime, ..ObjectFx::DEFAULT },
+    ]),
+    ("DeathCrawlerBreath", &[
+        ObjectFx { lib: FxLib::Monster(Monster::DeathCrawler), start: 272, dir_step: 4, frames: 4, interval_ms: 400, ..ObjectFx::DEFAULT },
+    ]),
+    ("MoonMist", &[
+        ObjectFx { lib: FxLib::Flat(Magic3), start: 705, frames: 10, interval_ms: 800, ..ObjectFx::DEFAULT },
+    ]),
+];
+// ==== OBJECT_FX_END ====
 
 /// 查表：按法术 + 朝向取该次施法要播的特效（原版每个 Spell 至少一条）
 pub fn spell_fx(spell: Spell, dir: u8) -> Option<SpellFx> {
@@ -512,5 +808,148 @@ mod tests {
         let (total0, per0) = fx0.timing();
         assert!((total0 - 1.0).abs() < 1e-6);
         assert!((per0 - (DEFAULT_FRAME_MS as f32 / 1000.0)).abs() < 1e-6);
+    }
+
+    /// 门禁：对象特效表逐条对原版 `Client/MirScenes/GameScene.cs` 的 `ObjectEffect` switch
+    /// （`:4711-4930`）。抽到的每一条都必须与 C# 字面量一致。
+    ///
+    /// 阳性对照（落地时实做）：把 Teleport 的 `start` 改成 1 → 本测试立即红。
+    #[test]
+    fn object_fx_table_matches_csharp_game_scene() {
+        use crate::game::spell_effects::{AuraGroup, FxRepeat, FxTarget, FxWhen};
+        let one = |name: &str| -> ObjectFx {
+            let v = object_fx(name).unwrap_or_else(|| panic!("表里没有 {name}"));
+            assert_eq!(v.len(), 1, "{name} 应只有一条 Effect");
+            v[0]
+        };
+        // Teleport: `new Effect(Libraries.Magic, 1600, 10, 600, ob)`
+        let t = one("Teleport");
+        assert_eq!(t.lib, FxLib::Flat(SpellFxLibrary::Magic));
+        assert_eq!((t.start, t.frames, t.interval_ms), (1600, 10, 600));
+        // Healing: `Libraries.Magic, 370, 10, 800`
+        let h = one("Healing");
+        assert_eq!((h.start, h.frames, h.interval_ms), (370, 10, 800));
+        // Reflect: `Libraries.Effect, 580, 10, 70`（唯一用 Effect 库的一条）
+        let r = one("Reflect");
+        assert_eq!(r.lib, FxLib::Flat(SpellFxLibrary::Effect));
+        assert_eq!((r.start, r.frames, r.interval_ms), (580, 10, 70));
+        // MagicShieldUp: `Libraries.Magic, 3890, 3, 600` + `Repeat = true`（循环到 Down）
+        let s = one("MagicShieldUp");
+        assert_eq!((s.start, s.frames, s.interval_ms), (3890, 3, 600));
+        assert_eq!(s.repeat, FxRepeat::UntilDown(AuraGroup::MagicShield));
+        // ElementalBarrierUp/Down
+        let eu = one("ElementalBarrierUp");
+        assert_eq!((eu.start, eu.frames, eu.interval_ms), (1890, 10, 2000));
+        assert_eq!(eu.repeat, FxRepeat::UntilDown(AuraGroup::ElementalBarrier));
+        let ed = one("ElementalBarrierDown");
+        assert_eq!((ed.start, ed.frames, ed.interval_ms), (1910, 7, 1400));
+        // Stunned: 632,10,1000 且 `Repeat = p.Time > 0`
+        let st = one("Stunned");
+        assert_eq!(st.repeat, FxRepeat::PacketTime);
+        assert_eq!((st.start, st.frames, st.interval_ms), (632, 10, 1000));
+        // DelayedExplosion: `1590 + (int)p.EffectType * 10` 且 stage != 2 才循环
+        let de = one("DelayedExplosion");
+        assert_eq!((de.start, de.step_effect_type), (1590, 10));
+        assert_eq!(de.repeat, FxRepeat::StageNot2);
+        // DeathCrawlerBreath: `272 + (int)ob.Direction * 4`，Blend = true
+        let dc = one("DeathCrawlerBreath");
+        assert_eq!((dc.start, dc.dir_step), (272, 4));
+        // TurtleKing / GreatFoxSpirit 的随机档
+        let tk = one("TurtleKing");
+        assert_eq!((tk.start, tk.rand_step, tk.rand_count), (922, 12, 2));
+        let gf = one("GreatFoxSpirit");
+        assert_eq!((gf.start, gf.rand_step, gf.rand_count), (375, 20, 3));
+        // 随机档的取帧（纯函数）：rand=0 → start；rand=1 → start+step
+        assert_eq!(tk.base_frame(0, 0, 0), 922);
+        assert_eq!(tk.base_frame(0, 0, 1), 934);
+        assert_eq!(gf.base_frame(0, 0, 2), 415);
+        // Hemorrhage 三条同播
+        let hm = object_fx("Hemorrhage").expect("Hemorrhage 在表里");
+        assert_eq!(hm.len(), 3);
+        let vals: Vec<(usize, usize, u32)> = hm
+            .iter()
+            .map(|f| (f.start, f.frames, f.interval_ms))
+            .collect();
+        assert_eq!(vals, vec![(0, 4, 400), (28, 6, 600), (46, 8, 800)]);
+        // MPEater 两条，第二条 target = EffectType（原版 `ob2`）
+        let mp = object_fx("MPEater").expect("MPEater 在表里");
+        assert_eq!(mp.len(), 2);
+        assert_eq!(
+            (mp[0].start, mp[0].frames, mp[0].interval_ms),
+            (2411, 19, 1900)
+        );
+        assert_eq!(mp[0].target, FxTarget::EffectType);
+        assert_eq!(
+            (mp[1].start, mp[1].frames, mp[1].interval_ms),
+            (2400, 9, 900)
+        );
+        assert_eq!(mp[1].target, FxTarget::Owner);
+        // KingGuard: `if (p.EffectType == 0)` → 753 else 763（两条，按 EffectType 分流）
+        let kg = object_fx("KingGuard").expect("KingGuard 在表里");
+        assert_eq!(kg.len(), 2);
+        assert_eq!((kg[0].start, kg[0].when), (753, FxWhen::EffectTypeZero));
+        assert_eq!((kg[1].start, kg[1].when), (763, FxWhen::EffectTypeNonZero));
+        // Behemoth：两条挂 `ob.CurrentLocation`（地图位置，不跟随）
+        let bh = object_fx("Behemoth").expect("Behemoth 在表里");
+        assert_eq!(bh.len(), 2);
+        assert!(bh.iter().all(|f| f.target == FxTarget::OwnerLocation));
+        // 觉醒四条各两条，且带 `CMain.Time + p.DelayTime`
+        for name in [
+            "AwakeningSuccess",
+            "AwakeningFail",
+            "AwakeningHit",
+            "AwakeningMiss",
+        ] {
+            let v = object_fx(name).unwrap_or_else(|| panic!("{name} 应在表里"));
+            assert_eq!(v.len(), 2, "{name} 是两层（主层 + Blend=false 底图）");
+            assert!(v.iter().all(|f| f.delay_from_packet));
+            assert!(v.iter().any(|f| !f.blend));
+        }
+        // `Critical` 被 C# 注释掉、`MagicShieldDown` 只做清理 → 表里是空切片（明确不画）
+        assert_eq!(object_fx("Critical"), Some(&[][..]));
+        assert_eq!(object_fx("MagicShieldDown"), Some(&[][..]));
+        // C# 没有的 case → None（才允许退回占位表现）
+        assert_eq!(object_fx("KingGuard2"), None);
+    }
+
+    /// 门禁：`SpellEffect` 枚举里**除 C# 真的没有 case 的四个**以外，其余都必须有表项。
+    ///
+    /// 这条守的是「枚举加了/改了名字，生成器没跟上」：表是按 `SpellEffect` 的 Debug 名查的，
+    /// 名字漂了就静默查不到 → 实机退回方块（正是本次要修的那类现象）。
+    #[test]
+    fn object_fx_covers_every_spell_effect_case() {
+        use mir2_shared::enums::SpellEffect;
+        // C# `GameScene.ObjectEffect` 的 switch 里确实没有这四个：
+        // `None`(3) 只是缺省值、`Mine`(15)/`Tester`(36) 走 `S.MapEffect`、`KingGuard2`(32) 无 case。
+        let no_case = [
+            SpellEffect::None,
+            SpellEffect::Mine,
+            SpellEffect::Tester,
+            SpellEffect::KingGuard2,
+        ];
+        let mut missing: Vec<String> = Vec::new();
+        let mut total = 0usize;
+        for v in 0u8..=255 {
+            let Ok(e) = SpellEffect::try_from(v) else {
+                continue;
+            };
+            if no_case.contains(&e) {
+                continue;
+            }
+            total += 1;
+            let name = format!("{e:?}");
+            if object_fx(&name).is_none() {
+                missing.push(name);
+            }
+        }
+        assert!(
+            missing.is_empty(),
+            "这些 SpellEffect 在表里缺失: {missing:?}"
+        );
+        assert_eq!(
+            total,
+            OBJECT_FX.len(),
+            "表项数必须等于「SpellEffect 变体数 - C# 无 case 的 4 个」"
+        );
     }
 }
