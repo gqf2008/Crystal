@@ -197,7 +197,8 @@ pub(crate) fn spawn_light_chunk(
                 continue;
             }
             let li = ((l as usize % 10) * 3).min(9);
-            let (lw, lh) = LIGHT_SIZES[li];
+            // 绘制尺寸 = C# `DXManager.Lights[li]` = `LightSizes[li + 1]`（**不是** `LightSizes[li]`）
+            let (lw, lh) = crate::map_renderer::light_tex_size(li);
             // C#：front 动画格叠加库偏移
             let mut off_x = 0.0f32;
             let mut off_y = 0.0f32;
@@ -209,9 +210,9 @@ pub(crate) fn spawn_light_chunk(
                     }
                 }
             }
-            // 中心一律走 `light_center`（与 C# GameScene.cs Map Lights 段同源，含 OffSetX=10）；
-            // 详见该函数文档——此前这里硬编码 `-14.0 + 10`，比原版多算了 10px（#灯）
-            let (cx_w, cy_w) = crate::map_renderer::light_center(x, y, off_x, off_y);
+            // 中心一律走 `light_center`（与 C# GameScene.cs Map Lights 段同源，含 OffSetX=10 与
+            // `Lights[li]=LightSizes[li+1]` 的 (40, 30.5) 半径差）；详见该函数文档
+            let (cx_w, cy_w) = crate::map_renderer::light_center(x, y, off_x, off_y, li);
             // C# 灯光颜色按 Light/10：1=白 2=蓝 3=橙 4=绿，默认白；强度 0.4 避免过曝
             let (cr, cg, cb) = match l / 10 {
                 2 => (120.0, 180.0, 255.0),

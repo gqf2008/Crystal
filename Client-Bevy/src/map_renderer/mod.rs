@@ -102,10 +102,16 @@ pub struct MapLightTexture(pub Handle<Image>);
 /// 光斑 x 必须补上 OffSetX 才能与路灯（blend 2723..=2732）精确对齐（#88）。
 pub const LIGHT_SCREEN_OFFSET_X: f32 = 10.0;
 
-/// C# DXManager.Lights[i] = LightSizes[i+1]（径向渐变光斑尺寸，索引 0..9）
-/// 原版 `DXManager.LightSizes`（`Client/MirGraphics/DXManager.cs:43-56`）**逐项照抄**——
-/// 注意它有 **11** 项、index 0 = (125,95)：本端此前漏了第 0 项，导致每个灯光都用大一号的
-/// 光斑（`light = (cell.Light % 10) * 3` 的下标整体错位一格），表现为「部分地图灯光错位」。
+/// 原版 `DXManager.LightSizes`（`Client/MirGraphics/DXManager.cs:43-56`）**逐项照抄**：
+/// **11** 项、index 0 = (125,95)。
+///
+/// **警告：它不是「绘制尺寸表」。** 原版 `DXManager.CreateLights()` 的循环是
+/// `for (int i = 1; i < LightSizes.Length; i++) Lights.Add(...)`（`DXManager.cs:160-215`）
+/// ⇒ `Lights[j]` 的**纹理尺寸 = LightSizes[j + 1]**（`Lights.Count == 10`）；
+/// 而 Map Lights 的**偏移**用的是 `LightSizes[li]`（`GameScene.cs:11257`）。
+/// 两者差一格 ⇒ 光斑中心比「按同一张表抵消」多出 `(S[li+1] − S[li]) / 2 = (40, 30.5)`；
+/// 同时绘制尺寸必须取 `S[li+1]`，否则每档小一格（li=9：845×642 vs 原版 925×703）。
+/// 取绘制尺寸一律走 [`light_tex_size`]，**不要**直接索引本表。
 pub const LIGHT_SIZES: [(f32, f32); 11] = [
     (125.0, 95.0),
     (205.0, 156.0),
@@ -120,25 +126,53 @@ pub const LIGHT_SIZES: [(f32, f32); 11] = [
     (925.0, 703.0),
 ];
 
+/// C# `DXManager.Lights[li]` 的**纹理尺寸** = `LightSizes[li + 1]`
+/// （`CreateLights` 的循环起点 `i = 1`，`Client/MirGraphics/DXManager.cs:160-215`）。
+#[must_use]
+pub fn light_tex_size(li: usize) -> (f32, f32) {
+    LIGHT_SIZES[li.saturating_add(1).min(LIGHT_SIZES.len() - 1)]
+}
+
+/// 原版排版下「纹理半宽 − 偏移里的半宽」= `(S[li+1] − S[li]) / 2`（**逐档不同**：
+/// x 侧恒 40，y 侧在 30.0/30.5 之间交替——`LightSizes` 的 y 步进是 61/60 交替）。
+#[must_use]
+pub fn light_center_radius_diff(li: usize) -> (f32, f32) {
+    let i = li.min(LIGHT_SIZES.len() - 2);
+    (
+        (LIGHT_SIZES[i + 1].0 - LIGHT_SIZES[i].0) / 2.0,
+        (LIGHT_SIZES[i + 1].1 - LIGHT_SIZES[i].1) / 2.0,
+    )
+}
+
 /// 地图灯光的中心（世界坐标，Bevy 约定；原版 `GameScene.cs:11245-11257` 的 Map Lights 段）：
 ///
 /// ```text
 /// p = (x * CellWidth, (y + 1) * CellHeight)          // 格左缘 / 格底缘（+32）
 /// if (FrontAnimationFrame > 0) p += (off_x, off_y)   // front 动画格叠加库偏移
-/// p.Offset(-(lightW / 2) - (CellWidth / 2) + 10,
-///          -(lightH / 2) - (CellHeight / 2) - 5)
-/// Draw(light, ..., p)                                 // 纹理左上角落在 p ⇒ 中心 = p + (w/2, h/2)
-/// ⇒ 中心（屏幕） = (x*CellWidth + off_x - CellWidth/2 + 10,
-///                  (y+1)*CellHeight + off_y - CellHeight/2 - 5)
+/// p.Offset(-(LightSizes[li].W / 2) - (CellWidth / 2) + 10,
+///          -(LightSizes[li].H / 2) - (CellHeight / 2) - 5)
+/// Draw(DXManager.Lights[li], ..., p)   // 纹理左上角落在 p ⇒ 中心 = p + (纹理尺寸 / 2)
 /// ```
 ///
-/// 因为光斑总是以**中心**对齐，公式里 w/h 全部抵消 —— 中心与光斑大小无关（大小只决定缩放）。
-/// 本端早期版本把 `-CellWidth/2` 写成了 `-14`（那是 28×42 的老光斑半宽），又额外加了 +10，
-/// 相当于**多算了 10px**（原版的 +10 已经在上面这条公式里），于是光斑整体右偏 → 「灯光错位」。
-pub fn light_center(cell_x: usize, cell_y: usize, off_x: f32, off_y: f32) -> (f32, f32) {
-    let x =
-        cell_x as f32 * TILE_WIDTH as f32 + off_x - TILE_WIDTH as f32 / 2.0 + LIGHT_SCREEN_OFFSET_X;
-    let y = -((cell_y + 1) as f32 * TILE_HEIGHT as f32 + off_y - TILE_HEIGHT as f32 / 2.0 - 5.0);
+/// **偏移的表与绘制的纹理不是同一格**：偏移用 `LightSizes[li]`，纹理用 `Lights[li] = LightSizes[li+1]`
+/// （见 [`light_tex_size`]）⇒ 中心 = `p + (−S[li]/2 − 格/2 + (10, −5)) + S[li+1]/2`，
+/// 即比「按同一张表抵消」多出 [`light_center_radius_diff`]（x 恒 +40；y 在 +30.0/+30.5 之间交替——表的 y 步进是 61/60 交替）：
+///
+/// ```text
+/// 中心（屏幕，y 向下） = (x*CellWidth + off_x − S[li].W/2 − 24 + 10 + S[li+1].W/2,
+///                       (y+1)*CellHeight + off_y − S[li].H/2 − 16 − 5 + S[li+1].H/2)
+/// ```
+///
+/// 历史坑（两次都出在同一处）：① 早期把 `-CellWidth/2` 写成 `-14` 又额外加 +10（多算 10px）；
+/// ② #3053 把表补成原版 11 项却**只改了表**，消费端仍写 `LIGHT_SIZES[li]`
+/// ⇒ 绘制尺寸比原版小一格、中心少 (40, 30/30.5)。两处都由本函数与 [`light_tex_size`] 收口。
+pub fn light_center(cell_x: usize, cell_y: usize, off_x: f32, off_y: f32, li: usize) -> (f32, f32) {
+    let (shift_x, shift_y) = light_center_radius_diff(li);
+    let x = cell_x as f32 * TILE_WIDTH as f32 + off_x - TILE_WIDTH as f32 / 2.0
+        + LIGHT_SCREEN_OFFSET_X
+        + shift_x;
+    let y = -((cell_y + 1) as f32 * TILE_HEIGHT as f32 + off_y - TILE_HEIGHT as f32 / 2.0 - 5.0
+        + shift_y);
     (x, y)
 }
 
@@ -370,34 +404,36 @@ mod light_alignment_tests {
 
     /// 门禁（owner 反馈「部分地图灯光错位」）：灯光中心必须与原版 C#「Map Lights」段同源。
     ///
-    /// 原版 `Client/MirScenes/GameScene.cs:11245-11257`：
+    /// 原版 `Client/MirScenes/GameScene.cs:11245-11258`：
     ///   p = (x*CellWidth, (y+1)*CellHeight)（+front 动画偏移）
-    ///   p.Offset(-w/2 - CellWidth/2 + 10, -h/2 - CellHeight/2 - 5)
-    ///   Draw(..., p)   // 纹理左上角落 p ⇒ 中心 = p + (w/2, h/2)，w/h 抵消
-    /// ⇒ 中心 = (x*48 + off_x - 24 + 10, -((y+1)*32 + off_y - 16 - 5))
+    ///   p.Offset(-LightSizes[li].W/2 - CellWidth/2 + 10, -LightSizes[li].H/2 - CellHeight/2 - 5)
+    ///   Draw(DXManager.Lights[li], ..., p)   // 左上角落 p ⇒ 中心 = p + 纹理尺寸/2，
+    ///                                        // 而 Lights[li] = LightSizes[li+1]（差一格）
+    /// ⇒ 中心 = (x*48 + off_x - 24 + 10 + 40, -((y+1)*32 + off_y - 16 - 5 + 30.5))
     ///
-    /// 阳性对照（落地时实做）：把 `light_center` 里的 `TILE_WIDTH / 2.0` 改回旧的 `14.0`
-    /// → 本测试立即红（x 会大 10px，正是「灯光错位」的成因）。
+    /// 阳性对照（三条，落地时实做，见测试体末尾注释）。**期望值在这里是手写常量**，
+    /// 不复用被测函数里的表达式，避免「用被测常量断言被测常量」的自证门禁。
     #[test]
     fn light_center_matches_csharp_map_lights() {
-        for (x, y, ox, oy) in [
-            (10usize, 20usize, 0.0f32, 0.0f32),
-            (0, 0, 10.0, -6.0),
-            (288, 616, -5.0, 3.0),
-        ] {
-            let (cx, cy) = light_center(x, y, ox, oy);
-            let expect_x =
-                x as f32 * TILE_WIDTH as f32 + ox - TILE_WIDTH as f32 / 2.0 + LIGHT_SCREEN_OFFSET_X;
-            let expect_y =
-                -((y + 1) as f32 * TILE_HEIGHT as f32 + oy - TILE_HEIGHT as f32 / 2.0 - 5.0);
-            assert_eq!(
-                (cx, cy),
-                (expect_x, expect_y),
-                "格 ({x},{y}) 偏移 ({ox},{oy})"
-            );
-        }
-        // 数值锚点：格 (10,20)、无偏移 → x = 480 - 24 + 10 = 466；y = -(21*32 - 21) = -651
-        assert_eq!(light_center(10, 20, 0.0, 0.0), (466.0, -651.0));
+        // li=0：半径差 (40, 30.5)
+        //   格 (10,20) 无偏移 → x = 480 − 24 + 10 + 40 = 506；y = −(21*32 − 16 − 5 + 30.5) = −681.5
+        assert_eq!(light_center(10, 20, 0.0, 0.0, 0), (506.0, -681.5));
+        assert_eq!(light_center(0, 0, 10.0, -6.0, 0), (36.0, -35.5));
+        assert_eq!(light_center(288, 616, -5.0, 3.0, 0), (13845.0, -19756.5));
+        // li=2：x 步进仍 80（+40），y 步进是 60（217→277）⇒ 半径差 (40, 30.0)
+        assert_eq!(light_center(10, 20, 0.0, 0.0, 2), (506.0, -681.0));
+        // 中心相对格锚点（原版口径，li=0）：x = −24 + 10 + 40 = +26；y(屏幕向下) = −16 − 5 + 30.5 = +9.5
+        let (ax, ay) = light_center(0, 0, 0.0, 0.0, 0);
+        assert_eq!(ax, 26.0, "光斑中心须比格左缘右移 26px（= −24 + 10 + 40）");
+        // 原版口径（屏幕 y 向下）：中心 = 格底缘 + 9.5 = 32 + 9.5 = 41.5；Bevy 里 y 取负。
+        assert_eq!(
+            -ay,
+            TILE_HEIGHT as f32 + 9.5,
+            "光斑中心须比格底缘下移 9.5px（= −16 − 5 + 30.5）"
+        );
+        // 阳性对照①（实做）：把 light_center 里的 `shift_x/shift_y` 去掉（= 回到 #3053 那版「w/h 抵消」）
+        //   → 上面两条锚点断言立即红（x 少 40、y 少 30/30.5）。
+        // 阳性对照②（实做）：把 `− TILE_WIDTH / 2.0` 改回旧的 `−14.0` → x 锚点变 486 而红（多算 10px 的老坑）。
     }
 
     /// 门禁：**有 light 但无 Front 图的格子不画灯**（C# Map Lights 的
@@ -429,7 +465,6 @@ mod light_alignment_tests {
 
     /// 门禁：光斑尺寸表必须与原版 `DXManager.LightSizes` 逐项一致（**11** 项、index 0 = 125×95）。
     ///
-    /// 本端此前漏了第 0 项 → 每个灯光都用大一号的光斑，这也是「灯光错位」的一部分。
     /// 阳性对照（实做）：把第 0 项删掉（恢复旧 10 项表）→ 本测试立即红。
     #[test]
     fn light_sizes_match_dxmanager_table() {
@@ -460,5 +495,100 @@ mod light_alignment_tests {
         }
         // `li = (cell.Light % 10) * 3` 最大到 9，必须能索引到（原版 11 项保证）
         assert!(LIGHT_SIZES.len() > 9, "li 最大 9 必须可索引");
+    }
+
+    /// 门禁（「光斑小一号」的根因）：**绘制尺寸**必须取 `DXManager.Lights[li] = LightSizes[li + 1]`，
+    /// 而不是 `LightSizes[li]`（#3053 只改了表、没改消费端，导致每档光斑小一格）。
+    ///
+    /// 期望值手写自原版 `CreateLights` 的循环语义（`i` 从 1 起 ⇒ `Lights[j] = LightSizes[j+1]`）。
+    /// 阳性对照（实做）：把 `light_tex_size` 改回 `LIGHT_SIZES[li]` → 本测试立即红（每项小一格）。
+    #[test]
+    fn light_tex_size_matches_csharp_lights_table() {
+        let csharp_lights = [
+            (205.0, 156.0),
+            (285.0, 217.0),
+            (365.0, 277.0),
+            (445.0, 338.0),
+            (525.0, 399.0),
+            (605.0, 460.0),
+            (685.0, 521.0),
+            (765.0, 581.0),
+            (845.0, 642.0),
+            (925.0, 703.0),
+        ];
+        assert_eq!(
+            csharp_lights.len(),
+            10,
+            "原版 Lights.Count = LightSizes.Length - 1 = 10"
+        );
+        for (li, (w, h)) in csharp_lights.iter().enumerate() {
+            assert_eq!(
+                light_tex_size(li),
+                (*w, *h),
+                "li={li} 的绘制尺寸必须是原版 Lights[li] = LightSizes[li+1]"
+            );
+            assert_ne!(
+                light_tex_size(li),
+                LIGHT_SIZES[li],
+                "li={li}：画到 LightSizes[li] 就是「小一格」——这正是 #3053 遗留的缺陷"
+            );
+        }
+        // li 上限 9（`(Light % 10) * 3` 再 min(9)）→ 必须安全取到 10（原版 11 项表的最后一项）
+        assert_eq!(light_tex_size(9), (925.0, 703.0));
+        assert_eq!(
+            light_tex_size(usize::MAX),
+            (925.0, 703.0),
+            "越界必须钳到最后一项"
+        );
+    }
+
+    /// 门禁：`light_center_radius_diff(li)` 必须逐档 = 原版 `(S[li+1] − S[li]) / 2`
+    /// （x 恒 40；y 在 30.0/30.5 交替 —— `LightSizes` 的 y 步进是 61/60 交替，
+    /// 所以**中心补偿不是常数**，写死 30.5 会在 li=2/7 上偏 0.5px）。
+    ///
+    /// 阳性对照（实做）：把该函数改成返回常量 (40, 30.5) → li=2 的断言立即红。
+    #[test]
+    fn light_center_radius_diff_follows_light_sizes_table() {
+        let csharp = [
+            (125.0f32, 95.0f32),
+            (205.0, 156.0),
+            (285.0, 217.0),
+            (365.0, 277.0),
+            (445.0, 338.0),
+            (525.0, 399.0),
+            (605.0, 460.0),
+            (685.0, 521.0),
+            (765.0, 581.0),
+            (845.0, 642.0),
+            (925.0, 703.0),
+        ];
+        let mut y_variants = std::collections::BTreeSet::new();
+        for li in 0..LIGHT_SIZES.len() - 1 {
+            let expect = (
+                (csharp[li + 1].0 - csharp[li].0) / 2.0,
+                (csharp[li + 1].1 - csharp[li].1) / 2.0,
+            );
+            assert_eq!(
+                light_center_radius_diff(li),
+                expect,
+                "li={li} 的半径差必须 = (LightSizes[li+1] − LightSizes[li]) / 2"
+            );
+            assert_eq!(expect.0, 40.0, "x 半径差恒 40");
+            y_variants.insert((expect.1 * 2.0) as i32);
+        }
+        assert_eq!(
+            y_variants,
+            [60, 61].into_iter().collect(),
+            "y 半径差必须出现 30.0 与 30.5 两种（表步进 61/60 交替）——写死常数会偏 0.5px"
+        );
+        // 越界钳位：li 上限 9，且 `li+1` 不能越出 11 项表
+        assert_eq!(
+            light_center_radius_diff(9),
+            ((925.0 - 845.0) / 2.0, (703.0 - 642.0) / 2.0)
+        );
+        assert_eq!(
+            light_center_radius_diff(usize::MAX),
+            light_center_radius_diff(9)
+        );
     }
 }
