@@ -436,6 +436,7 @@ FodyWeavers.xsd
 !tools/ops/fault_injection.ps1
 !tools/ops/alert_probe.ps1
 !tools/ops/latency_proxy.py
+!tools/ops/memory_cycle.ps1
 
 # 客户端运行时本地设置（游戏自写自读，不入库；两个客户端都按进程 CWD 相对路径写，
 # 故用不带前导斜杠的模式覆盖任意启动目录）
