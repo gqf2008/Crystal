@@ -122,6 +122,10 @@ pub fn register(app: &mut App) {
     if std::env::args().any(|a| a == "--mail-compose-test") {
         app.add_systems(Update, auto_mail_compose_test);
     }
+    // --mail-parcel-test: #3103 待寄包裹窗取证（开窗留 8 秒供 control `screenshot` 取证）
+    if std::env::args().any(|a| a == "--mail-parcel-test") {
+        app.add_systems(Update, auto_mail_compose_test);
+    }
     // --guild-test: 创建行会链路（GuildNameReturn → GuildStatus 信息）
     if std::env::args().any(|a| a == "--guild-test") {
         app.add_systems(Update, auto_guild_test);
