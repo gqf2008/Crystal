@@ -8,7 +8,7 @@
 
 use bevy::prelude::*;
 
-use crate::actor::{LocalPlayer, NetObjectId};
+use crate::actor::{ActorAnim, LocalPlayer, NetObjectId, Player};
 use crate::map_renderer::GameLibraries;
 use crate::resources::libraries::ArrayLibType;
 use crate::scenes::AppState;
@@ -215,7 +215,12 @@ fn spawn_pending_effects(
     mut fx_mats: ResMut<Assets<crate::game::object_fx_material::ObjectFxBlendMaterial>>,
     mut fx_quad: ResMut<crate::game::object_fx_material::ObjectFxQuad>,
     mut meshes: ResMut<Assets<Mesh>>,
-    actors: Query<(&NetObjectId, &Transform)>,
+    // 朝向从 `ActorAnim.direction` 取（原版 `ob.Direction`）——`DeathCrawlerBreath` 的
+    // `272 + Direction * 4` 用它取帧段；`Option` 兼容测试/演示里没有动画组件的对象。
+    actors: Query<(&NetObjectId, &Transform, Option<&ActorAnim>)>,
+    // 种族过滤用：原版 `if (ob.Race != ObjectType.Player/Hero) return;`。
+    // 本端 `Player` 标记覆盖本地玩家与远程玩家（本地玩家同时挂 `LocalPlayer` + `Player`）。
+    player_ids: Query<&NetObjectId, With<Player>>,
     players: Query<&Transform, (With<LocalPlayer>, With<NetObjectId>)>,
     // 已存活的对象特效实体：光环 Up/Down 要清同组、DelayedExplosion 换 stage 要先移除旧实体
     object_fx_q: Query<(Entity, &ObjectFxAnim)>,
@@ -245,7 +250,7 @@ fn spawn_pending_effects(
                 color,
                 fx,
             } => {
-                let Some((_, tf)) = actors.iter().find(|(id, _)| id.0 == target_id) else {
+                let Some((_, tf, _)) = actors.iter().find(|(id, _, _)| id.0 == target_id) else {
                     continue;
                 };
                 let to = Vec2::new(tf.translation.x, tf.translation.y);
@@ -288,7 +293,7 @@ fn spawn_pending_effects(
             } => {
                 let mut from = None;
                 let mut to = None;
-                for (id, tf) in &actors {
+                for (id, tf, _) in &actors {
                     if id.0 == source_id {
                         from = Some(Vec2::new(tf.translation.x, tf.translation.y));
                     }
@@ -353,7 +358,7 @@ fn spawn_pending_effects(
             } => {
                 let mut from = None;
                 let mut to = None;
-                for (id, tf) in &actors {
+                for (id, tf, _) in &actors {
                     if id.0 == source_id {
                         from = Some(Vec2::new(tf.translation.x, tf.translation.y));
                     }
@@ -408,7 +413,7 @@ fn spawn_pending_effects(
             } => {
                 // 原版：施法动作播一条（或多条）Magic/Magic2/Magic3 帧动画，跟随施法者。
                 // 表里没有的法术才退回旧的占位表现，并且只在 debug 里说一声（不静默）。
-                let Some((_, tf)) = actors.iter().find(|(id, _)| id.0 == object_id) else {
+                let Some((_, tf, _)) = actors.iter().find(|(id, _, _)| id.0 == object_id) else {
                     continue;
                 };
                 let pos = Vec2::new(tf.translation.x, tf.translation.y);
@@ -475,7 +480,7 @@ fn spawn_pending_effects(
                 use crate::game::spell_effects as fx;
                 // 原版同样先 `MapControl.Objects.TryGetValue(p.ObjectID, out var ob)`：
                 // 对象不在就整包丢弃（连光环清理也不用做）。
-                let Some((_, tf)) = actors.iter().find(|(id, _)| id.0 == object_id) else {
+                let Some((_, tf, _)) = actors.iter().find(|(id, _, _)| id.0 == object_id) else {
                     continue;
                 };
                 let owner_pos = Vec2::new(tf.translation.x, tf.translation.y);
@@ -529,9 +534,6 @@ fn spawn_pending_effects(
                         }
                     }
                 }
-                // 只有 `DeathCrawlerBreath` 用朝向取帧段（`272 + Direction * 4`）；本端 actor
-                // 侧没有可读的朝向组件（残留，见 PR），其余 case 的 dir_step 都是 0。
-                let dir: u8 = 0;
                 let rand = (time.elapsed_secs() * 1000.0) as u32 ^ object_id;
                 for f in list {
                     if !f.when.matches(effect_type) {
@@ -541,9 +543,21 @@ fn spawn_pending_effects(
                         fx::FxTarget::Owner | fx::FxTarget::OwnerLocation => object_id,
                         fx::FxTarget::EffectType => effect_type,
                     };
-                    let Some((_, tf)) = actors.iter().find(|(id, _)| id.0 == target_id) else {
+                    // 朝向：原版每条 `new Effect(..., ob)` 用的是**被挂对象**的 `ob.Direction`
+                    // （只有 `DeathCrawlerBreath` 的 `272 + (int)ob.Direction * 4` 会用到它，
+                    // 其余 case 的 `dir_step` 都是 0）。本端朝向在 `ActorAnim.direction`——
+                    // 此前这里硬编码 0，导致吐息永远播第 1 个朝向的帧段。
+                    let Some((_, tf, anim)) = actors.iter().find(|(id, _, _)| id.0 == target_id)
+                    else {
                         continue;
                     };
+                    // 种族过滤（原版 `if (ob.Race != Player/Hero) return;` 的四个 case）：
+                    // 怪物/NPC 身上不该出现护盾、元素屏障这类玩家专属光环。
+                    let is_player = player_ids.iter().any(|id| id.0 == target_id);
+                    if !f.race.matches(is_player) {
+                        continue;
+                    }
+                    let dir: u8 = anim.map(|a| a.direction).unwrap_or(0);
                     let base = f.base_frame(effect_type, dir, rand);
                     let (dur, frame_ms) = f.timing();
                     let Some(handle) =
@@ -612,7 +626,7 @@ fn spawn_pending_effects(
                 }
             }
             PendingEffect::Burst { target_id, color } => {
-                let Some((_, tf)) = actors.iter().find(|(id, _)| id.0 == target_id) else {
+                let Some((_, tf, _)) = actors.iter().find(|(id, _, _)| id.0 == target_id) else {
                     continue;
                 };
                 commands.spawn((
@@ -978,6 +992,9 @@ mod tests {
         // 一个「施法者」对象，位置随便
         world.spawn((
             NetObjectId(4242),
+            // 种族：原版 `ob.Race`。测试对象 4242 当**玩家**（MagicShieldUp 等四个 case 有
+            // `ob.Race != Player/Hero → return` 的过滤，不给玩家标记就会被正确地跳过）。
+            Player,
             bevy::prelude::Transform::from_xyz(100.0, 200.0, 0.0),
         ));
         // 一次 run 里同时排「施法帧动画 + 弹道」两条（同一个 MessageReader 会把缓冲里的
@@ -1185,6 +1202,9 @@ mod tests {
         world.insert_resource(bevy::prelude::Messages::<PendingEffect>::default());
         world.spawn((
             NetObjectId(4242),
+            // 种族：原版 `ob.Race`。4242 当**玩家**——MagicShieldUp/Down 与 ElementalBarrierUp/Down
+            // 四个 case 在原版有 `ob.Race != Player/Hero(或 Player) → return`，不给标记会被正确跳过。
+            Player,
             bevy::prelude::Transform::from_xyz(100.0, 200.0, 0.0),
         ));
         Some(world)
@@ -1197,6 +1217,25 @@ mod tests {
         effect_type: u32,
         time: u32,
     ) {
+        write_object_effect_for_full(world, 4242, effect, effect_type, time);
+    }
+
+    /// 同上，但指定**被挂对象**（种族过滤/朝向的用例要分别挂在玩家与怪物上）。
+    fn write_object_effect_for(
+        world: &mut bevy::prelude::World,
+        object_id: u32,
+        effect: mir2_shared::enums::SpellEffect,
+    ) {
+        write_object_effect_for_full(world, object_id, effect, 0, 0);
+    }
+
+    fn write_object_effect_for_full(
+        world: &mut bevy::prelude::World,
+        object_id: u32,
+        effect: mir2_shared::enums::SpellEffect,
+        effect_type: u32,
+        time: u32,
+    ) {
         use bevy::ecs::system::RunSystemOnce;
         world
             .resource_mut::<bevy::prelude::Messages<PendingEffect>>()
@@ -1204,7 +1243,7 @@ mod tests {
         world
             .resource_mut::<bevy::prelude::Messages<PendingEffect>>()
             .write(PendingEffect::ObjectEffect {
-                object_id: 4242,
+                object_id,
                 effect: effect as u8,
                 effect_type,
                 time,
@@ -1252,6 +1291,92 @@ mod tests {
     }
 
     /// 门禁：护盾光环的 Up 会**先清同组再生成**（原版 `ShieldEffect.Clear(); Remove();`），
+    /// 门禁：对象特效的**混合通道**必须按原版 `Effect.Blend` 分流（2026-09-25 按 C# 源码钉死）：
+    /// 门禁：`DeathCrawlerBreath` 必须按**被挂对象的朝向**取帧段。
+    /// 门禁：种族过滤（原版 `if (ob.Race != ObjectType.Player/Hero) return;`）。
+    ///
+    /// `GameScene.cs:4768/4779`：`MagicShieldUp/Down` 在 `ob.Race != Player && != Hero` 时**直接 return**；
+    /// `:4804/4816`：`ElementalBarrierUp/Down` 只对 `Player` 放行。
+    /// 本端此前不做任何种族判断 ⇒ 怪物身上也会长护盾光圈。
+    /// **阳性对照（实做）**：把 `if !f.race.matches(is_player)` 去掉 → 本测试立即红（怪物身上出现 1 条）。
+    #[test]
+    fn player_only_aura_is_skipped_on_monster() {
+        let Some(mut world) = object_fx_test_world() else {
+            eprintln!("skip player_only_aura_is_skipped_on_monster: 无 Data 资产");
+            return;
+        };
+        // 再来一只**怪物**（有 NetObjectId 但没有 `Player` 标记）
+        world.spawn((
+            NetObjectId(5001),
+            crate::actor::Monster,
+            bevy::prelude::Transform::from_xyz(300.0, 400.0, 0.0),
+        ));
+        write_object_effect_for(
+            &mut world,
+            5001,
+            mir2_shared::enums::SpellEffect::MagicShieldUp,
+        );
+        let mut q = world.query::<&ObjectFxAnim>();
+        let on_monster: Vec<String> = q.iter(&world).map(|f| f.name.to_string()).collect();
+        assert!(
+            on_monster.is_empty(),
+            "怪物身上不该有 MagicShieldUp（原版 `ob.Race != Player/Hero → return`），实测 {on_monster:?}"
+        );
+        // 同一份表在**玩家**身上必须照常生成（否则就是"过滤过头"）
+        write_object_effect_for(
+            &mut world,
+            4242,
+            mir2_shared::enums::SpellEffect::MagicShieldUp,
+        );
+        let mut q2 = world.query::<&ObjectFxAnim>();
+        let on_player: Vec<String> = q2.iter(&world).map(|f| f.name.to_string()).collect();
+        assert!(
+            on_player.iter().any(|n| n == "MagicShieldUp"),
+            "玩家身上必须有 MagicShieldUp（实测 {on_player:?}）"
+        );
+    }
+
+    /// 门禁：`DeathCrawlerBreath` 必须按**被挂对象的朝向**取帧段。
+    ///
+    /// 原版 `GameScene.cs:4918`：`new Effect(Libraries.Monsters[Monster.DeathCrawler], 272 + ((int)ob.Direction * 4), 4, 400, ob)`
+    /// —— `ob.Direction` 是被挂对象的朝向，不是一个常量。本端此前在 spawn 侧把 `dir` 硬编码成 0
+    /// （注释写"actor 侧没有可读的朝向组件"，其实 `ActorAnim.direction` 就是），导致吐息永远播第 1 段。
+    /// **阳性对照（实做）**：把 `dir` 改回 `0` → 本测试立即红（base 会是 272 而不是 280）。
+    #[test]
+    fn death_crawler_breath_uses_owner_direction() {
+        let Some(mut world) = object_fx_test_world() else {
+            eprintln!("skip death_crawler_breath_uses_owner_direction: 无 Data 资产");
+            return;
+        };
+        // 给对象 4242 挂上朝向（原版 `ob.Direction`）——2 = Right（MirDirection 枚举序）
+        let owner = {
+            let mut q = world.query::<(Entity, &NetObjectId)>();
+            q.iter(&world)
+                .find(|(_, id)| id.0 == 4242)
+                .map(|(e, _)| e)
+                .expect("测试 world 里应有对象 4242")
+        };
+        world.entity_mut(owner).insert(ActorAnim {
+            direction: 2,
+            ..default()
+        });
+        write_object_effect(
+            &mut world,
+            mir2_shared::enums::SpellEffect::DeathCrawlerBreath,
+            0,
+            0,
+        );
+        let mut q = world.query::<&ObjectFxAnim>();
+        let fx: Vec<&ObjectFxAnim> = q.iter(&world).collect();
+        assert_eq!(fx.len(), 1, "DeathCrawlerBreath 应生成 1 条");
+        assert_eq!(
+            fx[0].base,
+            272 + 2 * 4,
+            "原版 `272 + (int)ob.Direction * 4`，direction=2 → 280（此前硬编码 dir=0 → 272）"
+        );
+        assert_eq!(fx[0].frames, 4, "原版一条 4 帧");
+    }
+
     /// 门禁：对象特效的**混合通道**必须按原版 `Effect.Blend` 分流（2026-09-25 按 C# 源码钉死）：
     /// - `Blend = true`（`Effect.cs:23` 默认值；`GameScene.ObjectEffect` 39 条里 31 条）
     ///   → `Library.DrawBlend` → `DXManager.SetBlend(true)`（`DXManager.cs:378-379`）= **加法混合**
