@@ -211,3 +211,53 @@ function Exit-E2eLock {
     Remove-Item Env:$script:E2eLockEnvVar -ErrorAction SilentlyContinue
     Write-Host '[e2e-lock] 已释放'
 }
+
+function Get-E2eClientScripts {
+    <#
+      「会起客户端并登录 e2e 账号的脚本」的**单一判据**（接入器与门禁共用，避免两边漂移）。
+
+      判据：正文里出现任一特征即算「会起客户端」——
+        `--e2e-user`（自动化登录账号）/ `client_bevy.exe` / `--real-net` / `--auto-enter`。
+      不只看 `--e2e-user`：`l5r_ranged_projectile`、`l5t_minimize_survives` 这类不传 e2e 账号
+      但照样起客户端的脚本，也必须接入锁（#3129 的覆盖口径就是「会起客户端」）。
+      扫描面：<RepoRoot>\tools\acceptance\*.ps1 与 <RepoRoot>\scripts\*.ps1。
+      临时取数脚本不在此列——那种脚本归「谁写谁拿锁」，见本文件头部的约定。
+    #>
+    param([string]$RepoRoot = (Resolve-Path "$PSScriptRoot\..\..").Path)
+    $selfNames = @('e2e_lock.ps1', 'e2e_lock_selftest.ps1', 'enroll_e2e_lock.ps1')
+    $dirs = @((Join-Path $RepoRoot 'tools\acceptance'), (Join-Path $RepoRoot 'scripts'))
+    $out = @()
+    foreach ($d in $dirs) {
+        if (-not (Test-Path -LiteralPath $d)) { continue }
+        foreach ($f in (Get-ChildItem -LiteralPath $d -File -Filter *.ps1 -EA SilentlyContinue)) {
+            if ($selfNames -contains $f.Name) { continue }
+            $text = Get-Content -LiteralPath $f.FullName -Raw -EA SilentlyContinue
+            if ($null -eq $text) { continue }
+            if ($text -notmatch '--e2e-user|client_bevy\.exe|--real-net|--auto-enter') { continue }
+            $out += [pscustomobject]@{
+                Name       = $f.Name
+                Path       = $f.FullName
+                Dir        = $f.DirectoryName
+                EnterCount = ([regex]::Matches($text, 'Enter-E2eLock')).Count
+                ExitCount  = ([regex]::Matches($text, 'Exit-E2eLock')).Count
+            }
+        }
+    }
+    $out
+}
+
+function Test-E2eLockEnrollment {
+    <#
+      单个实机入口的接入是否完整：① dot-source 了 e2e_lock.ps1；② 有 `Enter-E2eLock`；
+      ③ 至少有 `Exit-E2eLock`（没持锁时它是 no-op，所以宁多勿少——缺它，早退路径会把锁
+      留到下一个调用者才发现要回收）。
+      返回 @{ ok = $bool; reasons = @() }。
+    #>
+    param([Parameter(Mandatory)][string]$Path)
+    $text = Get-Content -LiteralPath $Path -Raw -EA Stop
+    $reasons = @()
+    if ($text -notmatch 'e2e_lock\.ps1') { $reasons += '未 dot-source e2e_lock.ps1' }
+    if ($text -notmatch 'Enter-E2eLock') { $reasons += '未调用 Enter-E2eLock' }
+    if ($text -notmatch 'Exit-E2eLock') { $reasons += '未调用 Exit-E2eLock（早退路径会把锁留到下一次进入才发现）' }
+    [pscustomobject]@{ ok = ($reasons.Count -eq 0); reasons = $reasons }
+}

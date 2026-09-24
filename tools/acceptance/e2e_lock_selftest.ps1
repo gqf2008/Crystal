@@ -246,7 +246,9 @@ function Get-E2eClientScript {
       但照样起客户端的脚本，也必须接入锁（#3129 的覆盖口径就是"会起客户端"）。
     #>
     param([string]$Root)
-    $selfNames = @('e2e_lock.ps1', 'e2e_lock_selftest.ps1')
+    # 这三个是"锁自己的脚本"，不算实机入口（接入器正文里就写着 `--e2e-user` 之类的示例，
+    # 不排除它就会被自己的判据扫进来）——与 e2e_lock.ps1 里的 Get-E2eClientScripts 保持同一份名单。
+    $selfNames = @('e2e_lock.ps1', 'e2e_lock_selftest.ps1', 'enroll_e2e_lock.ps1')
     $out = @()
     foreach ($d in @((Join-Path $Root 'tools\acceptance'), (Join-Path $Root 'scripts'))) {
         if (-not (Test-Path -LiteralPath $d)) { continue }
@@ -256,9 +258,12 @@ function Get-E2eClientScript {
             if ($null -eq $text) { continue }
             if ($text -notmatch '--e2e-user|client_bevy\.exe|--real-net|--auto-enter') { continue }
             $out += [pscustomobject]@{
-                Name  = $f.Name
-                Path  = $f.FullName
-                Armed = (($text -match 'e2e_lock\.ps1') -and ($text -match 'Enter-E2eLock'))
+                Name    = $f.Name
+                Path    = $f.FullName
+                Armed   = (($text -match 'e2e_lock\.ps1') -and ($text -match 'Enter-E2eLock'))
+                # 有 Enter 还不够：早退路径（if (...) { exit 5 }）会把锁留到下一个调用者才发现要回收，
+                # 所以接入必须**成对**——有 Enter 就要有 Exit（缺它即红，见 T9.2）。
+                HasExit = ($text -match 'Exit-E2eLock')
             }
         }
     }
@@ -272,6 +277,9 @@ Check 'T9.1 判据没写空（真源至少认出 24 个会起客户端的脚本�
     ($clientScripts.Count -ge 24) ("count=" + $clientScripts.Count)
 Check 'T9.2 每个实机入口都 dot-source 了 e2e_lock.ps1 且有 Enter-E2eLock' `
     ($notArmed.Count -eq 0) ("缺锁：" + (($notArmed | ForEach-Object { $_.Name }) -join ','))
+$noExit = @($clientScripts | Where-Object { -not $_.HasExit })
+Check 'T9.2b 每个实机入口都有 Exit-E2eLock（早退路径也要释放，不能只靠「持有者已死」兜底）' `
+    ($noExit.Count -eq 0) ("缺 Exit：" + (($noExit | ForEach-Object { $_.Name }) -join ','))
 $fakeRoot = Join-Path $sandbox 'fake_repo'
 New-Item -ItemType Directory -Path (Join-Path $fakeRoot 'tools\acceptance') -Force | Out-Null
 [System.IO.File]::WriteAllText((Join-Path $fakeRoot 'tools\acceptance\fake_no_lock.ps1'),
@@ -279,6 +287,28 @@ New-Item -ItemType Directory -Path (Join-Path $fakeRoot 'tools\acceptance') -For
 $fakeFound = @(Get-E2eClientScript -Root $fakeRoot)
 Check 'T9.3 阳性对照：临时造一个「起客户端但没走锁」的脚本必须被判为不合规' `
     ($fakeFound.Count -eq 1 -and -not $fakeFound[0].Armed)
+
+# T9.4/T9.5：两处判据不许漂移 + 接入器与门禁必须同口径
+# （本自检里的 Get-E2eClientScript 是为了 A/B 对照旧版锁脚本才自带的副本；锁脚本里另有一份
+#  Get-E2eClientScripts 供批量接入器使用——两份口径一旦漂移，就会出现「接入器说都接了、门禁说没接」。）
+if (Get-Command Get-E2eClientScripts -EA SilentlyContinue) {
+    $shared = @(Get-E2eClientScripts -RepoRoot $scanRoot | ForEach-Object { $_.Name } | Sort-Object)
+    $local = @($clientScripts | ForEach-Object { $_.Name } | Sort-Object)
+    $diff = @(Compare-Object -ReferenceObject $local -DifferenceObject $shared)
+    Check 'T9.4 自检自带判据与 e2e_lock.ps1 的共享判据识别同一批脚本（防两处漂移）' `
+        ($diff.Count -eq 0) ("仅自检认得：" + (($diff | Where-Object SideIndicator -eq '<=' | ForEach-Object InputObject) -join ',') +
+                             "；仅共享判据认得：" + (($diff | Where-Object SideIndicator -eq '=>' | ForEach-Object InputObject) -join ','))
+} else {
+    Write-Host '  [SKIP] T9.4 —— 被测锁脚本没提供 Get-E2eClientScripts（A/B 对照旧版时的正常情况）' -ForegroundColor DarkGray
+}
+$enroller = Join-Path $PSScriptRoot 'enroll_e2e_lock.ps1'
+if (Test-Path -LiteralPath $enroller) {
+    $enrollOut = (& (Get-Process -Id $PID).Path -NoProfile -NoLogo -File $enroller 2>&1) -join "`n"
+    Check 'T9.5 批量接入器与门禁同口径（dry-run 应为「需改 0 个」）' `
+        ($enrollOut -match '需改\s*0\s*个') ("接入器输出末段：" + (($enrollOut -split "`n" | Select-Object -Last 2) -join ' / '))
+} else {
+    Write-Host "  [SKIP] T9.5 —— 没有 $enroller（新增夹具时可以没有接入器，但要手工照抄已接入夹具的写法）" -ForegroundColor DarkGray
+}
 
 # ---------------- T10 语法解析（接入是插入式改动，最容易插出语法错） ----------------
 Write-Host 'T10 语法解析：所有实机入口 + 锁本体 + 本自检都必须能被 PowerShell 解析'
