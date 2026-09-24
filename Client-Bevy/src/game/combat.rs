@@ -72,6 +72,12 @@ pub enum CombatEvent {
 #[derive(Resource, Default)]
 pub struct RealHitProbe {
     pub hits: u32,
+    /// 已把写入排上队（即真正走过 apply 路径）的战斗事件计数——给实机夹具当**非空转判据**：
+    /// `l5s_switch_survives_combat.ps1` 用它断言「Struck 事件真的到达并被处理」，
+    /// 否则「事件没来」与「修复有效」在报告里无法区分。
+    pub struck_applied: u32,
+    pub player_struck_applied: u32,
+    pub died_applied: u32,
 }
 
 /// 伤害飘字
@@ -370,6 +376,8 @@ fn apply_combat_events(
                         anim.frame_index = 0;
                         // #3089（换图崩溃）：命令是延迟落地的——同帧若发生地图重建（换图会把对象实体 despawn+重建）→ 命中失效 Entity 会让 Bevy panic
                         crate::game::movement::safe_insert(&mut commands, e, StruckTimer(0.6));
+                        // 非空转判据：写过一次 = 这条事件真的被 apply 处理过（见 RealHitProbe 注释）
+                        probe.struck_applied = probe.struck_applied.saturating_add(1);
                         // #1627：C# MirAction.Struck → PlayFlinchSound（BaseSound+2，MonsterObject.cs:1064）
                         // 注：怪物攻击音由 Attack 事件（#1624）在动作起始播放，此处不播
                         if mon.is_some() {
@@ -400,6 +408,7 @@ fn apply_combat_events(
                         anim.frame_index = 0;
                         // 同上：本地玩家实体在换图重建里同样会被 despawn
                         crate::game::movement::safe_insert(&mut commands, e, StruckTimer(0.6));
+                        probe.player_struck_applied = probe.player_struck_applied.saturating_add(1);
                         break;
                     }
                 }
@@ -412,10 +421,14 @@ fn apply_combat_events(
                 // C# S.ObjectHealth：挂载血量（血条系统渲染/过期）
                 for (e, id, _, _, _) in &mut actors {
                     if id.0 == *object_id {
-                        commands.entity(e).insert(ActorHp {
-                            percent: *percent,
-                            expire: *expire as f32,
-                        });
+                        crate::game::movement::safe_insert(
+                            &mut commands,
+                            e,
+                            ActorHp {
+                                percent: *percent,
+                                expire: *expire as f32,
+                            },
+                        );
                         break;
                     }
                 }
@@ -434,7 +447,7 @@ fn apply_combat_events(
                         };
                         anim.direction = *direction;
                         anim.frame_index = 0;
-                        commands.entity(e).insert(StruckTimer(0.6));
+                        crate::game::movement::safe_insert(&mut commands, e, StruckTimer(0.6));
                         break;
                     }
                 }
@@ -443,10 +456,14 @@ fn apply_combat_events(
                 // #238：更新/插入对象蓝条（刷新式 15s 生命周期）
                 for (e, id, _, _, _) in &mut actors {
                     if id.0 == *object_id {
-                        commands.entity(e).insert(ActorMp {
-                            percent: *percent,
-                            expire: 15.0,
-                        });
+                        crate::game::movement::safe_insert(
+                            &mut commands,
+                            e,
+                            ActorMp {
+                                percent: *percent,
+                                expire: 15.0,
+                            },
+                        );
                         break;
                     }
                 }
@@ -468,14 +485,16 @@ fn apply_combat_events(
                     if id.0 == *object_id {
                         // #1790：C# ObjectDied.Type 1/2——特效+立即移除，不播尸体动画
                         if *death_type != 0 && local_id != Some(*object_id) {
-                            commands.entity(e).despawn();
+                            crate::game::movement::safe_despawn(&mut commands, e);
+                            probe.died_applied = probe.died_applied.saturating_add(1);
                             break;
                         }
                         anim.action = mir2_shared::enums::MirAction::Dead;
                         anim.frame_index = 0;
                         // 本地玩家死亡由 Death 包管理（复活时恢复），不自动 despawn
                         if local_id != Some(*object_id) {
-                            commands.entity(e).insert(DeathTimer(3.0));
+                            crate::game::movement::safe_insert(&mut commands, e, DeathTimer(3.0));
+                            probe.died_applied = probe.died_applied.saturating_add(1);
                             // #1570：怪物死亡音（C# PlayDieSound → BaseSound+3；本地玩家走性别死亡音）
                             if mon.is_some() {
                                 if let Some(appr) = appr {
@@ -503,7 +522,7 @@ fn apply_combat_events(
                             mir2_shared::enums::MirAction::Spell
                         };
                         anim.frame_index = 0;
-                        commands.entity(e).insert(StruckTimer(0.6));
+                        crate::game::movement::safe_insert(&mut commands, e, StruckTimer(0.6));
                         break;
                     }
                 }
@@ -537,7 +556,7 @@ fn apply_combat_events(
                         };
                         anim.direction = *direction;
                         anim.frame_index = 0;
-                        commands.entity(e).insert(StruckTimer(0.6));
+                        crate::game::movement::safe_insert(&mut commands, e, StruckTimer(0.6));
                         // #1624：怪物攻击动作起始音（C# SetAction → Play*AttackSound）
                         if mon.is_some() {
                             if let Some(appr) = appr {
@@ -599,7 +618,7 @@ fn apply_combat_events(
                             None => mir2_shared::enums::MirAction::AttackRange1,
                         };
                         anim.frame_index = 0;
-                        commands.entity(e).insert(StruckTimer(0.6));
+                        crate::game::movement::safe_insert(&mut commands, e, StruckTimer(0.6));
                         // #1629：怪物远程攻击动作起始音（C# PlayRangeSound，AttackRange1）
                         if mon.is_some() {
                             if let Some(appr) = appr {
@@ -625,7 +644,7 @@ fn apply_combat_events(
                     if id.0 == *object_id {
                         anim.action = mir2_shared::enums::MirAction::Standing;
                         anim.frame_index = 0;
-                        commands.entity(e).remove::<DeathTimer>();
+                        crate::game::movement::safe_remove::<DeathTimer>(&mut commands, e);
                         // #1634：怪物复活音（C# PlayReviveSound，MonsterObject.cs:4128；僵尸 705）
                         if mon.is_some() {
                             if let Some(appr) = appr {
@@ -739,7 +758,7 @@ fn advance_combat_timers(
         if t.0 <= 0.0 {
             anim.action = mir2_shared::enums::MirAction::Standing;
             anim.frame_index = 0;
-            commands.entity(e).remove::<StruckTimer>();
+            crate::game::movement::safe_remove::<StruckTimer>(&mut commands, e);
         }
     }
     for (e, mut t, appr) in &mut deaths {
@@ -756,7 +775,7 @@ fn advance_combat_timers(
                     );
                 }
             }
-            commands.entity(e).despawn();
+            crate::game::movement::safe_despawn(&mut commands, e);
         }
     }
 }
@@ -771,7 +790,7 @@ fn advance_damage_texts(
         dt.life -= time.delta_secs();
         tf.translation.y += dt.vy * time.delta_secs();
         if dt.life <= 0.0 {
-            commands.entity(e).despawn();
+            crate::game::movement::safe_despawn(&mut commands, e);
         }
     }
 }
@@ -798,16 +817,16 @@ fn actor_hp_bar_system(
                 .map(|(e2, _, _, _)| e2)
                 .collect();
             for c in children {
-                commands.entity(c).despawn();
+                crate::game::movement::safe_despawn(&mut commands, c);
             }
-            commands
-                .entity(e)
-                .remove::<ActorHp>()
-                .remove::<ActorHpBar>();
+            crate::game::movement::safe_remove::<ActorHp>(&mut commands, e);
+            crate::game::movement::safe_remove::<ActorHpBar>(&mut commands, e);
             continue;
         }
         if bar.is_none() {
-            commands.entity(e).insert(ActorHpBar);
+            crate::game::movement::safe_insert(&mut commands, e, ActorHpBar);
+            // NOTE(#3089)：下面的 with_children 仍是裸写法——它的闭包借用局部句柄（需要 'static 化
+            // 才能像 safe_insert 那样延后执行），本批未改造，已记入 PR/walgit 的残留清单。
             commands.entity(e).with_children(|p| {
                 p.spawn((
                     HpBarBg,
@@ -864,16 +883,16 @@ fn actor_mp_bar_system(
                 .map(|(e2, _, _, _)| e2)
                 .collect();
             for c in children {
-                commands.entity(c).despawn();
+                crate::game::movement::safe_despawn(&mut commands, c);
             }
-            commands
-                .entity(e)
-                .remove::<ActorMp>()
-                .remove::<ActorMpBar>();
+            crate::game::movement::safe_remove::<ActorMp>(&mut commands, e);
+            crate::game::movement::safe_remove::<ActorMpBar>(&mut commands, e);
             continue;
         }
         if bar.is_none() {
-            commands.entity(e).insert(ActorMpBar);
+            crate::game::movement::safe_insert(&mut commands, e, ActorMpBar);
+            // NOTE(#3089)：下面的 with_children 仍是裸写法——它的闭包借用局部句柄（需要 'static 化
+            // 才能像 safe_insert 那样延后执行），本批未改造，已记入 PR/walgit 的残留清单。
             commands.entity(e).with_children(|p| {
                 p.spawn((
                     MpBarBg,

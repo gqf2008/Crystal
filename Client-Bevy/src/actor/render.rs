@@ -138,7 +138,7 @@ pub fn actor_name_label_system(
         } else {
             continue;
         };
-        commands.entity(e).insert(ActorNamed);
+        crate::game::movement::safe_insert(&mut commands, e, ActorNamed);
         let guild = g.filter(|g| !g.0.is_empty()).map(|g| g.0.clone());
         let mut spawned: Vec<Entity> = Vec::new();
         commands.entity(e).with_children(|p| {
@@ -281,7 +281,7 @@ pub fn actor_guild_label_system(
                 }
             }
             (None, Some(le)) => {
-                commands.entity(le).despawn();
+                crate::game::movement::safe_despawn(&mut commands, le);
             }
             (None, None) => {}
         }
@@ -332,7 +332,7 @@ pub fn object_colour_server_events(
             };
             for (e, id) in &actors {
                 if id.0 == *object_id {
-                    commands.entity(e).insert(ActorNameColour(color));
+                    crate::game::movement::safe_insert(&mut commands, e, ActorNameColour(color));
                     break;
                 }
             }

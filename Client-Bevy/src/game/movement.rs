@@ -371,6 +371,17 @@ pub(crate) fn safe_remove<C: bevy::prelude::Component>(
     });
 }
 
+/// 见 [`safe_insert`]。**删除**同样是延迟命令：实体可能已被换图重建/其它系统在本帧删掉，
+/// 直接 `commands.entity(e).despawn()` 会打到失效 Entity（`despawn` 在 Bevy 里是
+/// `queue_handled(.., warn)`，但为一致性与可读性，本仓统一走这一个出口）。
+pub(crate) fn safe_despawn(commands: &mut bevy::prelude::Commands, entity: bevy::prelude::Entity) {
+    commands.queue(move |world: &mut bevy::prelude::World| {
+        if let Ok(ec) = world.get_entity_mut(entity) {
+            ec.despawn();
+        }
+    });
+}
+
 /// 消耗 NetMotions：给对象实体挂 MoveTween / 转向
 fn apply_net_motions(
     mut commands: Commands,
