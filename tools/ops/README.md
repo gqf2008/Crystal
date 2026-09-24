@@ -195,6 +195,27 @@ INFO  world: PERSIST_REPLAY tick ok=1 dropped=0 queued=0 (was 1)                
 3. 登录读路径在长写锁下的延迟本身要单独定位（master 也出现过 9.5s 的登录回复；
    候选：连接获取排队、`list_character_summaries` 读、WAL checkpoint）。
 
+## 5c-2. 连登连退的平台门禁：`leak_plateau.ps1`
+
+把「登出后不归还」（CAPACITY.md §4.1 → §4.1b 已更正为**预热台阶 + 平台**）做成可复跑门禁：
+预热若干轮后，再测量若干轮，断言**平台**而不是"没涨"。
+
+```powershell
+# 前置：deploy 库里要有 -AccountPrefix 前缀的账号+角色
+python tools/ops/seed_load_accounts.py <deploy>/data/crystal.db 20 --prefix opsload --char-prefix OpsLoad
+pwsh tools/ops/leak_plateau.ps1 -DeployDir <deploy> -ExePath <mir2_server.exe> `
+     -Sessions 20 -WarmCycles 3 -MeasureCycles 5 -OutFile tools/ops/out/leak_plateau.json
+```
+
+判据（缺一不可）：**J1** 每个 idle 采样 `online_players == 0`（玩家记录真回收）；
+**J2** `tasks.running` 回到基线（后台任务不泄漏）；**J3** 测量轮 idle 的**线程数±2 / 句柄数±8** 稳定；
+**J4** 测量轮 idle RSS 斜率 ≤ `-MaxRssSlopePerCycleMb`（默认 0.5 MB/轮，20 会话/轮）。
+基线会话失败（`failed>0`）直接 exit 3，不产出空转报告。
+
+**2026-09-24 release 实测**：`ok=true`，测量段 RSS 43.0/43.2/43.3/43.9/43.4 MB（斜率 **0.1 MB/轮**），
+线程 span 0、句柄 span 0、`online_players` 每轮回 0、`tasks.running` 每轮回基线 3。
+注意 admin 端口 = gate 端口 **+1**（脚本按 `-Port + 1` 取；硬编码 7001 会拿到 -1）。
+
 ## 5d. 写锁下的登录时延：`login_latency_probe.ps1`（带阈值夹具）
 
 判据（缺一不可）：L1 写锁**真注入**（等注入器输出 `LOCK_HELD`，拿不到直接退出码 3、不产出结论）；
