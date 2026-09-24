@@ -175,10 +175,16 @@ pub fn parcel_origin(inventory_w: f32) -> (f32, f32) {
 }
 
 /// 写邮件输入框槽位（`TextInputState.texts`；两窗正文各自独立，与 C# 两张窗各持
-/// 一个 `MirTextBox` 一致）
+/// 一个 `MirTextBox` 一致）。
+///
+/// **槽位必须是本模块私有的**：`TextInputState.texts` 是全客户端共用的一维数组，
+/// 槽位即身份。旧覆盖层用 0..3 时，正文槽 2 与行会公告槽 2 撞车——`guild.rs` 的公告
+/// 同步系统在 `input.active != Some(2)` 时**每帧**用服务端公告回写该槽（无公告即空串），
+/// 于是写邮件正文在未聚焦时被反复清空（实机取证：`ui_nodes_at` 里正文文本节点高度 0）。
+/// 5/6 当前无其它模块使用（已用：0-4、7、10、12、13、31-33、40）。
 pub const INPUT_RECIPIENT: usize = 0;
-pub const INPUT_LETTER_BODY: usize = 2;
-pub const INPUT_PARCEL_BODY: usize = 4;
+pub const INPUT_LETTER_BODY: usize = 5;
+pub const INPUT_PARCEL_BODY: usize = 6;
 
 fn mail_panel_origin(screen_w: f32) -> (f32, f32) {
     (screen_w - MAIL_W - 150.0, 5.0)
