@@ -404,6 +404,8 @@ FodyWeavers.xsd
 !tools/acceptance/l5j_revive.ps1
 # 窗口生命周期夹具：最小化窗口不得退进程（离线 ~25s；自带阳性对照 `-NoHandler` 必红）
 !tools/acceptance/l5t_minimize_survives.ps1
+# 法术特效实机夹具（owner「魔法效果完全不对」的可复验判据：spell_fx_probe 真值断言）
+!tools/acceptance/l5v_spell_fx.ps1
 # 运营就绪最小集（部署/回滚/压测/可观测性）：与 acceptance 夹具同等级纳入管理，
 # 判据脚本是上线门槛的一部分，不能只躺在某台机器上（ops/out 仍是本地产物，不纳入）
 !tools/ops/

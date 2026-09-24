@@ -494,12 +494,14 @@ fn advance_spell_fx(
 pub const MISSILE_FLIGHT_SECS: f32 = 0.35;
 
 /// 施法弹道实体：一边飞一边按原版帧表循环播（C# Missile 的帧循环）
+/// （`pub(crate)`：`control.rs` 的只读探针 `spell_fx_probe` 要读它——owner 反馈「魔法效果完全不对」
+/// 的修复此前只有单元测试钉表，没有实机判据）
 #[derive(Component, Debug, Clone, Copy)]
-struct SpellMissileAnim {
-    library: crate::game::spell_effects::SpellFxLibrary,
-    base: usize,
-    frames: usize,
-    frame_ms: f32,
+pub(crate) struct SpellMissileAnim {
+    pub(crate) library: crate::game::spell_effects::SpellFxLibrary,
+    pub(crate) base: usize,
+    pub(crate) frames: usize,
+    pub(crate) frame_ms: f32,
     from: Vec2,
     to: Vec2,
     t: f32,
