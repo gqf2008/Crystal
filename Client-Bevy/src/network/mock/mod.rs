@@ -765,6 +765,7 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                                 items: vec![
                                                     server::special_systems::GameShopItem {
                                                         item_index: 1,
+                                                        image: 0,
                                                         gold_price: 10,
                                                         credit_price: 0,
                                                         count: 1,
@@ -779,6 +780,7 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                                     },
                                                     server::special_systems::GameShopItem {
                                                         item_index: 221,
+                                                        image: 0,
                                                         gold_price: 100,
                                                         // #2791 单元②：双币可购（积分价 50）
                                                         credit_price: 50,

@@ -279,6 +279,8 @@ pub struct GameShopInfo {
 #[derive(Debug, Clone)]
 pub struct GameShopItem {
     pub item_index: i32,            // 物品索引
+    /// C# `Item.Info.Image`（`MirGameShopCell.DrawControl` 用 `Libraries.Items[Image]` 画格子图标）
+    pub image: i32,
     pub gold_price: u32,            // 金币价格
     pub credit_price: u32,          // 点券价格
     pub count: i32,                 // 数量
@@ -307,6 +309,7 @@ impl Packet for GameShopInfo {
         
         for item in &self.items {
             writer.write_i32::<LittleEndian>(item.item_index)?;
+            writer.write_i32::<LittleEndian>(item.image)?;
             writer.write_u32::<LittleEndian>(item.gold_price)?;
             writer.write_u32::<LittleEndian>(item.credit_price)?;
             writer.write_i32::<LittleEndian>(item.count)?;
@@ -331,6 +334,7 @@ impl Packet for GameShopInfo {
         
         for _ in 0..count {
             let item_index = reader.read_i32::<LittleEndian>()?;
+            let image = reader.read_i32::<LittleEndian>()?;
             let gold_price = reader.read_u32::<LittleEndian>()?;
             let credit_price = reader.read_u32::<LittleEndian>()?;
             let item_count = reader.read_i32::<LittleEndian>()?;
@@ -349,6 +353,7 @@ impl Packet for GameShopInfo {
             
             items.push(GameShopItem {
                 item_index,
+                image,
                 gold_price,
                 credit_price,
                 count: item_count,

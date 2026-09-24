@@ -45,6 +45,8 @@ pub use crate::game::item_names::{remember_item_name, resolve_item_name as resol
 #[derive(Debug, Clone, Default)]
 pub struct ShopItem {
     pub item_index: i32,
+    /// C# `Item.Info.Image`：格子图标用 `Libraries.Items[image]`（`MirGameShopCell.DrawControl`）
+    pub image: i32,
     pub name: String,
     pub gold_price: u32,
     pub credit_price: u32,
@@ -240,6 +242,10 @@ pub struct GameShopCreditLabel;
 #[derive(Component)]
 pub struct GameShopConfirm;
 
+/// 商品格物品图标（C# `MirGameShopCell.DrawControl`：`Libraries.Items[Item.Info.Image]`）
+#[derive(Component)]
+pub struct GameShopCellIcon(pub usize);
+
 #[derive(Component)]
 pub struct GameShopConfirmText;
 
@@ -273,6 +279,43 @@ fn filter_shop_items(items: &[ShopItem], search: &str, category: &str) -> Vec<us
 }
 
 /// 第 i 格当前展示的商品（C# `UpdateShop`：`filteredShop[i + Page*8]`；空格 None）
+/// 格子图标索引（纯函数，门禁可测）：C# 用 `Libraries.Items[Item.Info.Image]`；
+/// `image <= 0` 视为无图（空槽/未下发图号）。
+pub(crate) fn shop_cell_icon_index(image: i32) -> Option<usize> {
+    if image > 0 {
+        Some(image as usize)
+    } else {
+        None
+    }
+}
+
+/// 商品格图标刷新：按当前分类/搜索/页取该格的商品，拿 `image` 去 `Libraries.Items` 取图。
+/// 单独成一个系统（现有渲染系统已经吃满 ParamSet 槽位），分类切换/翻页时同一份
+/// `filter_shop_items` 口径 ⇒ 图标与文字同步换页。
+fn shop_cell_icons_system(
+    shop: Res<GameShopState>,
+    mut libs: ResMut<GameLibraries>,
+    mut images: ResMut<Assets<Image>>,
+    mut q: Query<(&GameShopCellIcon, &mut ImageNode, &mut Visibility)>,
+) {
+    let filtered = filter_shop_items(&shop.items, &shop.search, &shop.category);
+    for (icon, mut node, mut vis) in q.iter_mut() {
+        let image = cell_item(&shop, &filtered, icon.0)
+            .map(|it| it.image)
+            .unwrap_or(0);
+        match shop_cell_icon_index(image) {
+            Some(idx) => match load_lib_image(&mut libs, &mut images, LibraryName::Items, idx) {
+                Some(h) => {
+                    node.image = h;
+                    *vis = Visibility::Visible;
+                }
+                None => *vis = Visibility::Hidden,
+            },
+            None => *vis = Visibility::Hidden,
+        }
+    }
+}
+
 fn cell_item<'a>(shop: &'a GameShopState, filtered: &'a [usize], i: usize) -> Option<&'a ShopItem> {
     filtered
         .get(shop.page * 8 + i)
@@ -286,6 +329,10 @@ impl Plugin for GameShopPlugin {
         app.init_resource::<GameShopState>();
         app.init_resource::<GameShopPayFrames>();
         app.add_systems(Update, shop_server_events.run_if(in_state(AppState::Game)));
+        app.add_systems(
+            Update,
+            shop_cell_icons_system.run_if(in_state(AppState::Game)),
+        );
         app.add_systems(OnEnter(AppState::Game), spawn_game_shop);
         app.add_systems(OnExit(AppState::Game), cleanup_game_shop);
         app.add_systems(
@@ -423,6 +470,28 @@ fn spawn_game_shop(
                 if let Some(bg) = cell_bg.clone() {
                     spawn_image(cp, bg, 0.0, 0.0, 125.0, 146.0, 0);
                 }
+                // 物品图标：C# `DrawControl` 把 `Libraries.Items[Image]` 居中画在 32×32 盒里，
+                // 盒左上 = 格子本地 (12,40)（`offSet + DisplayLocation + (12,40)`）
+                cp.spawn((
+                    Node {
+                        position_type: PositionType::Absolute,
+                        left: Val::Px(12.0),
+                        top: Val::Px(40.0),
+                        width: Val::Px(32.0),
+                        height: Val::Px(32.0),
+                        justify_content: JustifyContent::Center,
+                        align_items: AlignItems::Center,
+                        ..default()
+                    },
+                    ZIndex(1),
+                ))
+                .with_children(|ib| {
+                    ib.spawn((
+                        ImageNode::default(),
+                        GameShopCellIcon(i),
+                        Visibility::Hidden,
+                    ));
+                });
                 // 商品名（C# `nameLabel` 125x15 居中 @(0,13)；>17 字截断）
                 spawn_label_center(cp, &cjk, "", 62.5, 13.0, 125.0, 12.0, Color::WHITE, 1)
                     .insert(GameShopCellName(i));
@@ -1221,6 +1290,7 @@ fn shop_server_events(
                     .iter()
                     .map(|it| ShopItem {
                         item_index: it.item_index,
+                        image: it.image,
                         name: shop
                             .item_names
                             .get(&it.item_index)
@@ -1280,6 +1350,7 @@ mod tests {
 
     fn item(name: &str) -> ShopItem {
         ShopItem {
+            image: 0,
             item_index: 0,
             name: name.to_string(),
             gold_price: 1,
@@ -1294,6 +1365,7 @@ mod tests {
 
     fn item_cat(name: &str, category: &str) -> ShopItem {
         ShopItem {
+            image: 0,
             category: category.to_string(),
             ..item(name)
         }
@@ -1443,6 +1515,18 @@ mod tests {
     }
 
     /// 商品格坐标逐一对齐 C# `UpdateShop`：`i < 4 ? (152 + i*132, 115) : (152 + (i-4)*132, 275)`
+    /// 门禁（2026-09-24，owner 队列「商城缺物品图标」）：格子图标的取图口径必须与 C# 一致——
+    /// `Libraries.Items[Item.Info.Image]`，`image<=0` 视为无图（隐藏）。
+    ///
+    /// 阳性对照：把 `shop_cell_icon_index` 改成恒 `Some(image as usize)`（不排除 0/负数）→ 断言立即红。
+    #[test]
+    fn shop_cell_icon_index_matches_csharp_items_library() {
+        assert_eq!(shop_cell_icon_index(2259), Some(2259)); // HoaSword 的 Image
+        assert_eq!(shop_cell_icon_index(1), Some(1));
+        assert_eq!(shop_cell_icon_index(0), None, "无图号（0）必须视为无图");
+        assert_eq!(shop_cell_icon_index(-1), None, "负数同样无图");
+    }
+
     #[test]
     fn shop_cell_positions_match_csharp() {
         let expect = [

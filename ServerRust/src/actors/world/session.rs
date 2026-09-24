@@ -1164,6 +1164,7 @@ impl Message<StartGameRequest> for WorldActor {
             msg.session_id,
             loaded_state.inventory.gold as u32,
             &self.game_shop_items,
+            &self.item_infos,
         );
 
         // C# PlayerObject 构造（~1219）：登录下发 S.SwitchGroup 同步客户端“允许组队”开关

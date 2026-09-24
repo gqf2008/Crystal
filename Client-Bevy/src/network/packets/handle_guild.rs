@@ -14,6 +14,8 @@ use crate::network::server_event::ShopCatalogItem;
 pub(crate) fn parse_shop_catalog_item(cur: &mut std::io::Cursor<&[u8]>) -> Option<ShopCatalogItem> {
     use byteorder::{LittleEndian, ReadBytesExt};
     let item_index = cur.read_i32::<LittleEndian>().ok()?;
+    // 与 `special_systems::GameShopItem::write_body` 同序：item_index 之后是 image
+    let image = cur.read_i32::<LittleEndian>().ok()?;
     let gold_price = cur.read_u32::<LittleEndian>().ok()?;
     let credit_price = cur.read_u32::<LittleEndian>().ok()?;
     let count = cur.read_i32::<LittleEndian>().ok()?;
@@ -26,6 +28,7 @@ pub(crate) fn parse_shop_catalog_item(cur: &mut std::io::Cursor<&[u8]>) -> Optio
     let can_buy_gold = cur.read_u8().ok()? != 0;
     Some(ShopCatalogItem {
         item_index,
+        image,
         gold_price,
         credit_price,
         count,
@@ -504,13 +507,15 @@ mod shop_catalog_tests {
     use super::parse_shop_catalog_item;
 
     /// #2791 单元②：`S.GameShopInfo` 商品项字节序（与 SharedRust `GameShopInfo::write_body`
-    /// 同序）：`[item_index i32][gold u32][credit u32][count i32][class u8][category 7-bit]
+    /// 同序）：`[item_index i32][image i32][gold u32][credit u32][count i32][class u8][category 7-bit]
     /// [stock i32][is_bought u8][deal u8][can_buy_credit u8][can_buy_gold u8]`
+    /// （`image` 为 2026-09-24 商城格子图标新增，`MirGameShopCell.DrawControl` 用 `Libraries.Items[Image]`）
     #[test]
     fn parses_can_buy_flags_from_item_tail() {
         use byteorder::{LittleEndian, WriteBytesExt};
         let mut body: Vec<u8> = Vec::new();
         body.write_i32::<LittleEndian>(221).unwrap();
+        body.write_i32::<LittleEndian>(2259).unwrap(); // image（HoaSword 的 Image）
         body.write_u32::<LittleEndian>(100).unwrap();
         body.write_u32::<LittleEndian>(50).unwrap();
         body.write_i32::<LittleEndian>(2).unwrap();
@@ -527,6 +532,7 @@ mod shop_catalog_tests {
         let mut cur = std::io::Cursor::new(body.as_slice());
         let item = parse_shop_catalog_item(&mut cur).expect("应解析成功");
         assert_eq!(item.item_index, 221);
+        assert_eq!(item.image, 2259, "格子图标取 Item.Info.Image");
         assert_eq!(item.gold_price, 100);
         assert_eq!(item.credit_price, 50);
         assert_eq!(item.count, 2);
