@@ -924,6 +924,36 @@ fn new_char_anim_system(
 mod tests {
     use super::*;
 
+    /// 门禁（owner 队列 `offset-sweep-rest`）：新建角色预览的坐标必须叠**艺术偏移**。
+    ///
+    /// C# `NewCharacterDialog.CharacterDisplay` 是 `MirAnimatedControl { UseOffSet = true,
+    /// Location = (120,250) }`（`Client/MirScenes/Dialogs/NewCharacterDialog.cs:100-105`），
+    /// 而 `MirImageControl.DisplayLocation => UseOffSet ? Location + Library.GetOffSet(Index) : Location`
+    /// （`MirImageControl.cs:7`）。本端在 `preview_pos` 里叠加（与选人界面 `select.rs::preview_pos` 同形，
+    /// 且与宠物立绘 `69bf6e58`、坐骑立绘同一套修法）。
+    ///
+    /// 阳性对照：把 `preview_pos` 里的 `+ ox / + oy` 去掉 → 本测试立即红。
+    #[test]
+    fn new_char_preview_adds_art_offset_like_csharp() {
+        let mut state = NewCharState::default();
+        state.preview_offsets = vec![(-86.0, -106.0), (0.0, 0.0)];
+        assert_eq!(
+            preview_pos(&state, 0),
+            (DLG_X + PREVIEW_X - 86.0, DLG_Y + PREVIEW_Y - 106.0),
+            "帧 0 必须叠该帧艺术偏移（C# UseOffSet）"
+        );
+        assert_eq!(
+            preview_pos(&state, 1),
+            (DLG_X + PREVIEW_X, DLG_Y + PREVIEW_Y),
+            "偏移为 0 的帧不加不减"
+        );
+        assert_eq!(
+            preview_pos(&state, 9),
+            (DLG_X + PREVIEW_X, DLG_Y + PREVIEW_Y),
+            "越界帧回落 (0,0) 偏移，不 panic"
+        );
+    }
+
     /// #2970 同类隐患防线：`new_char_ui_system` 是全仓**剩下唯一**的「同函数双 ParamSet」
     /// （`preview` + `texts`）。Bevy 的 B0001 豁免只在**单个** ParamSet 内部生效，两个
     /// ParamSet 的并集一旦在某个组件上都持写访问，就会在**系统参数初始化期** panic——

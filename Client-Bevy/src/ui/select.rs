@@ -776,3 +776,36 @@ fn select_anim_system(
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 门禁（owner 队列 `offset-sweep-rest`）：选人界面角色预览必须叠**艺术偏移**。
+    ///
+    /// C# `SelectScene.CharacterDisplay` 是 `MirAnimatedControl { UseOffSet = true,
+    /// Location = (260,420) }`（`Client/MirScenes/SelectScene.cs:128-135`），
+    /// `DisplayLocation => UseOffSet ? Location + Library.GetOffSet(Index) : Location`
+    /// （`MirImageControl.cs:7`）。本端 `preview_pos` 已按此叠加——本门禁把它钉住，
+    /// 免得日后有人"顺手"把偏移删掉（宠物立绘 69bf6e58 就是漏叠这一项）。
+    ///
+    /// 阳性对照：把 `preview_pos` 里的 `* PREVIEW_SCALE` 与 `+ ox/+ oy` 去掉 → 本测试立即红。
+    #[test]
+    fn select_preview_adds_art_offset_like_csharp() {
+        let mut anim = SelectAnim::default();
+        anim.preview_offsets = vec![(-86.0, -106.0)];
+        assert_eq!(
+            preview_pos(&anim, 0),
+            (
+                PREVIEW_X + -86.0 * PREVIEW_SCALE,
+                PREVIEW_Y + -106.0 * PREVIEW_SCALE
+            ),
+            "帧 0 必须叠该帧艺术偏移（C# UseOffSet）"
+        );
+        assert_eq!(
+            preview_pos(&anim, 7),
+            (PREVIEW_X, PREVIEW_Y),
+            "越界帧回落 (0,0) 偏移，不 panic"
+        );
+    }
+}
