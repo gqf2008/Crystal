@@ -13,6 +13,7 @@ pub mod hud;
 pub mod input_gate;
 pub mod item_names;
 pub mod movement;
+pub mod object_fx_material;
 pub mod object_state;
 pub mod output_lines;
 pub mod pathfinding;

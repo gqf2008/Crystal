@@ -118,6 +118,10 @@ $observed = @{}
 $expect_polls = @{}
 $first_seen_s = @{}
 $violations = @()
+# 混合通道（探针 2026-09-25 起返回）：add = 原版 `Effect.Blend = true`（加法发光，走 Mesh2d+加法材质）；
+# alpha = 原版 `Blend = false`（普通 Sprite）。实机判据：至少要有对象特效走 add 通道，
+# 否则说明「发光类特效」还是被画成了普通贴图（旧实现就是这样）。
+$blend_by_key = @{}
 $sw = [Diagnostics.Stopwatch]::StartNew()
 while ($sw.Elapsed.TotalSeconds -lt $TimeoutSec) {
     $p = Rpc 'spell_fx_probe'
@@ -130,6 +134,7 @@ while ($sw.Elapsed.TotalSeconds -lt $TimeoutSec) {
                 $observed[$k] = 1
                 Write-Host ("观察到特效: " + $k)
             } else { $observed[$k]++ }
+            if ($null -ne $a.blend) { $blend_by_key[$k] = [string]$a.blend }
         }
         foreach ($ex in $expects) {
             if ($keys -contains $ex) {
@@ -167,6 +172,17 @@ foreach ($ex in $expects) {
     if ($n -lt 2 -or $span -lt 2.0) { $fail += "断言项只观察到一次（循环语义未验证）: $ex" }
 }
 if ($violations.Count -gt 0) { $fail += ("负控命中: " + ($violations -join ',')) }
+$add_rows = @($observed.Keys | Where-Object { $blend_by_key[$_] -eq 'add' })
+if ($add_rows.Count -eq 0) {
+    $fail += '没有任何对象特效走 add（加法混合）通道——原版 Blend=true 的发光类特效应走它'
+} else {
+    Write-Host ("走 add 通道的对象特效 = {0} 条：{1}" -f $add_rows.Count, ($add_rows -join '; '))
+}
+foreach ($ex in $expects) {
+    if ($blend_by_key.ContainsKey($ex)) {
+        Write-Host ("  断言项混合通道 {0} → {1}" -f $ex, $blend_by_key[$ex])
+    }
+}
 
 $result = [ordered]@{
     ok              = ($fail.Count -eq 0)
@@ -174,6 +190,8 @@ $result = [ordered]@{
     expect_stats    = $spans
     forbidden_seen  = $violations
     object_rows     = $object_rows
+    blend_by_key    = $blend_by_key
+    add_rows        = $add_rows
     observed        = @($observed.Keys)
     missing         = $fail
 }
