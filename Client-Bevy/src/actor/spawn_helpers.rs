@@ -93,18 +93,23 @@ pub(crate) fn spawn_player_with(
                 alpha: 1.0,
             },
         ));
-        p.spawn((
-            Sprite::default(),
-            Transform::default(),
-            SpriteLayer {
-                lib: ArrayLibType::CWeapons,
-                slot: weapon.max(0) as u32,
-                frame: 0,
-                is_effect: false,
-                is_mount: false,
-                alpha: 1.0,
-            },
-        ));
+        // 武器层：照 C# 职业武器规则（`weapon_layer_plan`）——刺客 `AWeapon/{i} R`+`L`、弓箭手 `ARWeapon/{i}`，
+        // 默认武器仍 `CWeapon/{shape}`。此前这里**只挂 CWeapons**，于是库里 63 个 `shape 100..199` 的职业武器
+        // 会去开不存在的 `CWeapon/100..152`（目录只有 `00..78`）⇒ 武器贴图直接缺失（owner 报的那一类）。
+        for (lib, slot) in crate::resources::libraries::weapon_layer_plan(class, weapon, false) {
+            p.spawn((
+                Sprite::default(),
+                Transform::default(),
+                SpriteLayer {
+                    lib,
+                    slot,
+                    frame: 0,
+                    is_effect: false,
+                    is_mount: false,
+                    alpha: 1.0,
+                },
+            ));
+        }
         // M62：武器特效（C# DrawWeapon：WeaponEffectLibrary1.DrawBlend(DrawFrame, 0.4F)）
         if weapon_effect > 0 {
             tracing::debug!("⚔️ 武器特效层: type={}", weapon_effect);
@@ -199,6 +204,7 @@ pub(crate) fn spawn_local_player_with(
     attach_player_layers(
         commands,
         root,
+        class,
         armour,
         hair,
         weapon,
@@ -251,6 +257,7 @@ pub(crate) fn spawn_remote_player_with(
     attach_player_layers(
         commands,
         root,
+        class,
         armour,
         hair,
         weapon,
@@ -322,6 +329,7 @@ pub(crate) fn detach_mount_layers(
 pub(crate) fn attach_player_layers(
     commands: &mut Commands,
     root: Entity,
+    class: MirClass,
     armour: i16,
     hair: u8,
     weapon: i16,
@@ -353,18 +361,23 @@ pub(crate) fn attach_player_layers(
                 alpha: 1.0,
             },
         ));
-        p.spawn((
-            Sprite::default(),
-            Transform::default(),
-            SpriteLayer {
-                lib: ArrayLibType::CWeapons,
-                slot: weapon.max(0) as u32,
-                frame: 0,
-                is_effect: false,
-                is_mount: false,
-                alpha: 1.0,
-            },
-        ));
+        // 武器层：照 C# 职业武器规则（`weapon_layer_plan`）——刺客 `AWeapon/{i} R`+`L`、弓箭手 `ARWeapon/{i}`，
+        // 默认武器仍 `CWeapon/{shape}`。此前这里**只挂 CWeapons**，于是库里 63 个 `shape 100..199` 的职业武器
+        // 会去开不存在的 `CWeapon/100..152`（目录只有 `00..78`）⇒ 武器贴图直接缺失（owner 报的那一类）。
+        for (lib, slot) in crate::resources::libraries::weapon_layer_plan(class, weapon, false) {
+            p.spawn((
+                Sprite::default(),
+                Transform::default(),
+                SpriteLayer {
+                    lib,
+                    slot,
+                    frame: 0,
+                    is_effect: false,
+                    is_mount: false,
+                    alpha: 1.0,
+                },
+            ));
+        }
         // M62：武器特效（C# DrawWeapon：WeaponEffectLibrary1.DrawBlend(DrawFrame, 0.4F)）
         if weapon_effect > 0 {
             tracing::debug!("⚔️ 武器特效层: type={}", weapon_effect);
