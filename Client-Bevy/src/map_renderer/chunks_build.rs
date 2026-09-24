@@ -141,7 +141,8 @@ pub(crate) fn setup_world(
                 continue;
             }
             let li = ((l as usize % 10) * 3).min(9);
-            let (lw, lh) = LIGHT_SIZES[li];
+            // 绘制尺寸 = C# `DXManager.Lights[li]` = `LightSizes[li + 1]`（**不是** `LightSizes[li]`）
+            let (lw, lh) = crate::map_renderer::light_tex_size(li);
             // C#：若该格有 front 动画，叠加库偏移
             let mut off_x = 0.0f32;
             let mut off_y = 0.0f32;
@@ -154,10 +155,9 @@ pub(crate) fn setup_world(
                 }
             }
             // 中心一律走 `light_center`（与 C# GameScene.cs Map Lights 段同源）：
-            //   p = 格左缘 / 格底缘(+CellHeight)，front 动画格叠加库偏移，
-            //   p.Offset(-w/2 - CellWidth/2 + 10, -h/2 - CellHeight/2 - 5) ⇒ 中心 = (格左-24+10, 格底-21)
-            // 详见 map_renderer::light_center 的文档（此前这里有 10px 多算 + 尺寸表错位一格）
-            let (cx, cy) = crate::map_renderer::light_center(x, y, off_x, off_y);
+            //   偏移用 LightSizes[li]、纹理用 Lights[li]=LightSizes[li+1] ⇒ 中心 = 格锚点 + (26, 9.5)
+            // 详见 map_renderer::light_center 的文档（此前这里有 10px 多算 + 尺寸少一格/中心少 40,30.5）
+            let (cx, cy) = crate::map_renderer::light_center(x, y, off_x, off_y, li);
             // C# 灯光颜色按 Light/10：1=白 2=蓝 3=橙 4=绿，默认白
             let (cr, cg, cb) = match l / 10 {
                 2 => (120.0, 180.0, 255.0),
