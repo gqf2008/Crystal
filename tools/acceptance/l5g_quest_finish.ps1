@@ -39,6 +39,18 @@ param(
     # 客户端构建根（其 Client-Bevy\target\debug\client_bevy.exe）；默认 wt-p3 保持原约定。
     [string]$ClientHome = ''
 )
+
+# --- 实机资源串行：客户端 + e2e 账号 + 本地服务端一次只能跑一组（跨进程锁）---
+# 不拿锁就会撞上「别的 agent 已登录同一账号」→ 日志里的 result=4 密码错误
+# （服务端实为 Account already online），那是资源互斥假红、不是产品缺陷，重试再多也修不了它；
+# 详见 tools\acceptance\e2e_lock.ps1 与 e2e_lock_selftest.ps1（门禁会查漏接入）。
+. "$PSScriptRoot\e2e_lock.ps1"
+if (-not (Enter-E2eLock -ScriptName 'l5g_quest_finish' -TimeoutSec 1800)) { Write-Host 'FAIL(2): 等 e2e 锁超时'; exit 2 }
+
+# 整段包 try/finally：任何 exit/return/异常路径都会释放锁
+# （PowerShell 的 finally 在 exit 下也会执行——实测 -File 与会话内 & script.ps1 两种调用都成立），
+# 所以早退分支（例如中段的 if (...) { exit 5 }）不会把锁漏给别人：漏了要等 StaleSec=1800s 才回收。
+try {
 $ErrorActionPreference = 'Continue'
 $env:PATH = 'D:\toolchains\msys64\ucrt64\bin;D:\toolchains\libpinyin-install\bin;' + $env:PATH
 $env:LIBPINYIN_DIR = 'D:/toolchains/libpinyin-install'
@@ -178,3 +190,7 @@ $okD = ($okA -and ($goldDelta -ge $MinGold) -and ($expDelta -ge $MinExp))
 Write-Host ("VERDICT accept={0} state_flip={1} reward_gold={2}" -f `
     $(if ($okA) { 'PASS' } else { 'FAIL' }), $(if ($okC) { 'PASS' } else { 'FAIL' }), $(if ($okD) { 'PASS' } else { 'FAIL' }))
 if (-not ($okA -and $okC -and $okD)) { exit 5 }
+
+} finally {
+    Exit-E2eLock   # 幂等：没持锁时直接返回
+}
