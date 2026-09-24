@@ -58,13 +58,17 @@ param(
     [int]$HarvestTimeoutSec = 900
 )
 
-# ---- 实机资源互斥 ----------------------------------------------------------
-# 起客户端 / 登录 e2e 账号前必须先拿锁：客户端 + e2e 账号是「一次只能一组」的资源。
-# 并行时后来者登录会拿到 `result=4 密码错误`（服务端实为 Account already online）——
-# 那是资源互斥假红，不是产品缺陷，靠 for 循环反复重跑撞「干净窗口」修不了它。
-# 拿不到锁就在这里排队；超时未拿到 → 退出码 2（前置失败）。约定见 e2e_lock.ps1 头部。
+# --- 实机资源串行：客户端 + e2e 账号 + 本地服务端一次只能跑一组（跨进程锁）---
+# 不拿锁就会撞上「别的 agent 已登录同一账号」→ 日志里的 result=4 密码错误
+# （服务端实为 Account already online），那是资源互斥假红、不是产品缺陷，重试再多也修不了它；
+# 详见 tools\acceptance\e2e_lock.ps1 与 e2e_lock_selftest.ps1（门禁会查漏接入）。
 . "$PSScriptRoot\e2e_lock.ps1"
-if (-not (Enter-E2eLock -ScriptName 'l5g3_quest_item_tasks' -TimeoutSec 1800)) { exit 2 }
+if (-not (Enter-E2eLock -ScriptName 'l5g3_quest_item_tasks' -TimeoutSec 1800)) { Write-Host 'FAIL(2): 等 e2e 锁超时'; exit 2 }
+
+# 整段包 try/finally：任何 exit/return/异常路径都会释放锁
+# （PowerShell 的 finally 在 exit 下也会执行——实测 -File 与会话内 & script.ps1 两种调用都成立），
+# 所以早退分支（例如中段的 if (...) { exit 5 }）不会把锁漏给别人：漏了要等 StaleSec=1800s 才回收。
+try {
 $ErrorActionPreference = 'Continue'
 $env:PATH = 'D:\toolchains\msys64\ucrt64\bin;D:\toolchains\libpinyin-install\bin;' + $env:PATH
 $env:LIBPINYIN_DIR = 'D:/toolchains/libpinyin-install'
@@ -523,3 +527,7 @@ Write-Host ("VERDICT accept={0} quest_items_in_quest_bag={1} finish={2} reward={
     $(if ($okA) { 'PASS' } else { 'FAIL' }), $(if ($okB) { 'PASS' } else { 'FAIL' }), `
     $(if ($okC) { 'PASS' } else { 'FAIL' }), $(if ($okD) { 'PASS' } else { 'FAIL' }))
 if (-not ($okA -and $okB -and $okC -and $okD)) { exit 5 }
+
+} finally {
+    Exit-E2eLock   # 幂等：没持锁时直接返回
+}

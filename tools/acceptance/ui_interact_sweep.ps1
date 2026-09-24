@@ -18,6 +18,10 @@
   恢复交互级回归的用法：UI 改动合并前跑一次，退出码非 0 就不合。
   结果 JSON（默认 tools/acceptance/ui_interact_results.json）里 gate.exit_code 与退出码一致。
 
+  实机资源串行：客户端 + e2e 账号 + 本地服务端是单例，本脚本通过 e2e_lock.ps1 拿跨进程锁
+  （等锁超时 = exit 2）。日志里的 `result=4 密码错误` 通常不是产品缺陷，而是账号被没走锁的
+  会话占着（服务端实为 `Account already online`）——那属于资源互斥，重跑夹具修不了它。
+
 .PARAMETER RepoRoot
   代码所在检出，默认 = 本脚本所在仓库根（$PSScriptRoot\..\..）。
   产物与 Data 都按它解析——**在 worktree 里跑要传 worktree 路径**：以前这里硬编码主检出
@@ -70,13 +74,17 @@ param(
     [switch]$FailOnSkip
 )
 
-# ---- 实机资源互斥 ----------------------------------------------------------
-# 起客户端 / 登录 e2e 账号前必须先拿锁：客户端 + e2e 账号是「一次只能一组」的资源。
-# 并行时后来者登录会拿到 `result=4 密码错误`（服务端实为 Account already online）——
-# 那是资源互斥假红，不是产品缺陷，靠 for 循环反复重跑撞「干净窗口」修不了它。
-# 拿不到锁就在这里排队；超时未拿到 → 退出码 2（前置失败）。约定见 e2e_lock.ps1 头部。
+# --- 实机资源串行：客户端 + e2e 账号 + 本地服务端一次只能跑一组（跨进程锁）---
+# 不拿锁就会撞上「别的 agent 已登录同一账号」→ 日志里的 result=4 密码错误
+# （服务端实为 Account already online），那是资源互斥假红、不是产品缺陷，重试再多也修不了它；
+# 详见 tools\acceptance\e2e_lock.ps1 与 e2e_lock_selftest.ps1（门禁会查漏接入）。
 . "$PSScriptRoot\e2e_lock.ps1"
-if (-not (Enter-E2eLock -ScriptName 'ui_interact_sweep' -TimeoutSec 1800)) { exit 2 }
+if (-not (Enter-E2eLock -ScriptName 'ui_interact_sweep' -TimeoutSec 1800)) { Write-Host 'FAIL(2): 等 e2e 锁超时'; exit 2 }
+
+# 整段包 try/finally：任何 exit/return/异常路径都会释放锁
+# （PowerShell 的 finally 在 exit 下也会执行——实测 -File 与会话内 & script.ps1 两种调用都成立），
+# 所以早退分支（例如中段的 if (...) { exit 5 }）不会把锁漏给别人：漏了要等 StaleSec=1800s 才回收。
+try {
 $ErrorActionPreference = 'Stop'
 # PS7.3+：原生命令非零退出码默认会被当成异常（下面要读 git 的退出码）——显式关掉
 if (Get-Variable PSNativeCommandUseErrorActionPreference -ErrorAction SilentlyContinue) {
@@ -252,10 +260,16 @@ try {
     }
 
     # ---------------- 起客户端 ----------------
-    # 只清理带 --e2e-user 标记的自动化实例：共享桌面/多 agent 环境下不误杀人工会话
-    Get-CimInstance Win32_Process -Filter "Name='client_bevy.exe'" -EA SilentlyContinue |
-        Where-Object { $_.CommandLine -match '--e2e-user' } |
-        ForEach-Object { Stop-Process -Id $_.ProcessId -Force -EA SilentlyContinue }
+    # 只清理**本脚本自己这一路**（同 control-port + e2e 标记）的残留自动化实例。
+    # 本脚本已持 e2e 跨进程锁（见文件头），所以同端口上不该有别的活会话；按端口精确匹配，
+    # 既不误杀人工会话，也不会去打断「别的 agent 正在跑的验收」——历史写法是按进程名 + --e2e-user 全杀，
+    # 那会把别人的实机任务一起带走（对方随后报 result=4 密码错误，看起来像产品缺陷，其实是资源互斥）。
+    $stale = @(Get-CimInstance Win32_Process -Filter "Name='client_bevy.exe'" -EA SilentlyContinue |
+        Where-Object { $_.CommandLine -match '--e2e-user' -and $_.CommandLine -match "--control-port\s+$ControlPort\b" })
+    if ($stale.Count -gt 0) {
+        Write-Host ("清理同端口残留自动化客户端 PID={0}" -f (($stale | ForEach-Object { $_.ProcessId }) -join ','))
+        $stale | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -EA SilentlyContinue }
+    }
     Start-Sleep -Milliseconds 800
     $clientArgs = @('--real-net', '--auto-enter', '--control-port', "$ControlPort", '--e2e-user', $TestUser, '--e2e-pass', $TestPass)
     $clientProc = Start-Process -FilePath $ClientExe -ArgumentList $clientArgs -WorkingDirectory $ClientWorkDir `
@@ -271,7 +285,13 @@ try {
         $tail = ''
         $errLog = Join-Path $AccDir 'interact_client.err.log'
         if (Test-Path $errLog) { $tail = (Get-Content $errLog -Tail 8 -EA SilentlyContinue) -join "`n    " }
-        Stop-Gate "未进入游戏（客户端提前退出？PATH/libpinyin 缺 DLL 会 0xC0000135 静默退）`n    日志尾：`n    $tail"
+        $holdHint = ''
+        if ($tail -match 'result=4|密码错误|已在线|already online') {
+            $holdHint = "`n    提示：本脚本已持 e2e 锁，出现 result=4/已在线 ⇒ 账号被**没走锁**的旧会话占着" +
+                "（崩溃残留的客户端，或别的 agent 直接起客户端）。先确认 127.0.0.1:$ControlPort 没人应答，" +
+                "必要时重启 127.0.0.1:7000 服务端清在线态；重跑本脚本不会解决它（那是资源互斥，不是产品缺陷）。"
+        }
+        Stop-Gate "未进入游戏（客户端提前退出？PATH/libpinyin 缺 DLL 会 0xC0000135 静默退）`n    日志尾：`n    $tail$holdHint"
     }
     $enteredGame = $true
     Write-Host ("进图 tile=({0},{1})" -f $st.tile_x, $st.tile_y)
@@ -440,3 +460,7 @@ if ($failures.Count -gt 0) { $failures | ForEach-Object { Write-Host ("  FAIL  "
 if ($skips.Count -gt 0) { $skips | ForEach-Object { Write-Host ("  SKIP  " + $_) -ForegroundColor Yellow } }
 Write-Host ("结论 JSON: {0}" -f $JsonOut)
 exit $exitCode
+
+} finally {
+    Exit-E2eLock   # 幂等：没持锁时直接返回
+}
