@@ -274,7 +274,7 @@ pub struct GameShopInfo {
 
 #[derive(Debug, Clone)]
 pub struct GameShopItem {
-    pub item_index: i32,   // 物品索引
+    pub item_index: i32, // 物品索引
     /// C# `Item.Info.Image`（`MirGameShopCell.DrawControl` 用 `Libraries.Items[Image]` 画格子图标）
     pub image: i32,
     pub gold_price: u32,   // 金币价格
