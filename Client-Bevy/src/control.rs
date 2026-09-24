@@ -2943,7 +2943,18 @@ fn apply_control_commands(
                     })
                 });
                 let payload =
-                    json!({ "ok": true, "count": mails.len(), "mails": mails, "detail": detail });
+                    // #3120 ③：列表分页状态（只读）——夹具用**状态真值**断言翻页键/页号，
+                    // 不解析像素（与 C# `MailDialogs.cs` 的 CurrentPage/StartIndex/PageCount 同源）。
+                    json!({
+                        "ok": true,
+                        "count": mails.len(),
+                        "mails": mails,
+                        "detail": detail,
+                        "page": q.mail.page,
+                        "page_count": crate::game::dialogs::mail::mail_page_count(q.mail.mails.len()),
+                        "page_start": crate::game::dialogs::mail::mail_page_start(q.mail.page),
+                        "selected": q.mail.selected,
+                    });
                 tracing::info!("🎮 control mail_probe: {} mails", mails.len());
                 let _ = reply.send(payload.to_string());
             }

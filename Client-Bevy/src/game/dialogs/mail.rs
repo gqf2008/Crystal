@@ -91,6 +91,9 @@ pub struct MailState {
     pub parcel_cost: u32,
     /// #3103：赠金数量框是否由邮件窗发起（区分背包拆分/丢弃的数量框结果）
     pub gold_ask_pending: bool,
+    /// #3120 ③：列表当前页（1 起；C# `MailDialogs.cs:26` `CurrentPage`）。
+    /// 行区间 = `mail_page_start(page) .. +10`，与 C# `StartIndex` 等价。
+    pub page: usize,
 }
 
 impl Default for MailState {
@@ -106,6 +109,7 @@ impl Default for MailState {
             stamped: false,
             parcel_cost: 0,
             gold_ask_pending: false,
+            page: 1,
         }
     }
 }
@@ -142,6 +146,54 @@ const MAIL_SCREEN_W: f32 = 1024.0;
 const MAIL_VISIBLE_ROWS: usize = 10;
 const MAIL_ROW_H: f32 = 33.0;
 const MAIL_BUTTON_Y: f32 = 414.0;
+
+// ---- 列表分页（#3120 ③）----------------------------------------------------
+// C# `MailDialogs.cs:25-26`：`StartIndex`（首行下标）与 `CurrentPage/PageCount` 成对维护；
+// `:99-151` 建上一页/下一页按钮与页号标签，`:303-306` 每次 `UpdateInterface` 重算
+// `PageCount = ceil(Mail.Count/10)`（至少 1）并写 `PageLabel.Text = "{CurrentPage} / {PageCount}"`。
+const MAIL_PAGE_ROWS: usize = MAIL_VISIBLE_ROWS;
+/// 上一页 `Prguse2[240..242]` @ (102, H-55)（H=444 → y=389）
+pub const PAGE_PREV_POS: (f32, f32) = (102.0, MAIL_H - 55.0);
+/// 页号 `PageLabel` @ (120, H-55)，67x15，垂直+水平居中（`MailDialogs.cs:122-129`）
+pub const PAGE_LABEL_POS: (f32, f32) = (120.0, MAIL_H - 55.0);
+/// 下一页 `Prguse2[243..245]` @ (192, H-55)（`MailDialogs.cs:131-140`）
+pub const PAGE_NEXT_POS: (f32, f32) = (192.0, MAIL_H - 55.0);
+pub const PAGE_LABEL_SIZE: (f32, f32) = (67.0, 15.0);
+pub const PAGE_PREV_FRAMES: (usize, usize, usize) = (240, 241, 242);
+pub const PAGE_NEXT_FRAMES: (usize, usize, usize) = (243, 244, 245);
+
+/// C# `MailDialogs.cs:303-304`：`PageCount = ceil(Count/10)`，且 `PageCount < 1 → 1`
+pub fn mail_page_count(total: usize) -> usize {
+    total.div_ceil(MAIL_PAGE_ROWS).max(1)
+}
+
+/// C# `MailDialogs.cs:25/117/148`：`StartIndex = (CurrentPage - 1) * 10`
+pub fn mail_page_start(page: usize) -> usize {
+    page.saturating_sub(1) * MAIL_PAGE_ROWS
+}
+
+/// C# `MailDialogs.cs:306`：`PageLabel.Text = string.Format("{0} / {1}", CurrentPage, PageCount)`
+pub fn mail_page_label(page: usize, total: usize) -> String {
+    format!("{} / {}", page.max(1), mail_page_count(total))
+}
+
+/// 点「上一页」的新页码：`None` = 按 C# `MailDialogs.cs:111` `if (CurrentPage <= 1) return;` 原地不动
+pub fn mail_page_after_prev(page: usize) -> Option<usize> {
+    if page <= 1 {
+        None
+    } else {
+        Some(page - 1)
+    }
+}
+
+/// 点「下一页」的新页码：`None` = 按 C# `MailDialogs.cs:143` `if (CurrentPage >= PageCount) return;` 原地不动
+pub fn mail_page_after_next(page: usize, total: usize) -> Option<usize> {
+    if page >= mail_page_count(total) {
+        None
+    } else {
+        Some(page + 1)
+    }
+}
 
 // ============================================================================
 // #3103 写邮件两窗（C# `Client/MirScenes/Dialogs/MailDialogs.cs` 逐项抄录）
@@ -365,6 +417,18 @@ pub struct MailAttachSlot(pub usize);
 
 #[derive(Component)]
 pub struct MailLine(usize);
+
+/// #3120 ③：上一页键（C# `MailDialogs.cs:99` `PreviousButton`，`Prguse2[240..242]`）
+#[derive(Component)]
+pub struct MailPagePrev;
+
+/// #3120 ③：下一页键（C# `MailDialogs.cs:131` `NextButton`，`Prguse2[243..245]`）
+#[derive(Component)]
+pub struct MailPageNext;
+
+/// #3120 ③：页号标签（C# `MailDialogs.cs:122` `PageLabel`，"当前页 / 总页数"）
+#[derive(Component)]
+pub struct MailPageLabel;
 
 // 写邮件界面
 #[derive(Component)]
@@ -1596,6 +1660,41 @@ fn spawn_mail(
             )
             .insert(MailLine(i));
         }
+        // #3120 ③：分页键 + 页号（C# `MailDialogs.cs:99-151`；H=444 → y=389）
+        for (pos, frames, is_next) in [
+            (PAGE_PREV_POS, PAGE_PREV_FRAMES, false),
+            (PAGE_NEXT_POS, PAGE_NEXT_FRAMES, true),
+        ] {
+            if let (Some(n), Some(h), Some(pr)) = (
+                load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, frames.0),
+                load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, frames.1),
+                load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, frames.2),
+            ) {
+                // MirButton 用帧的原生尺寸（不显式给 Size）
+                let (bw, bh) = libs
+                    .0
+                    .get_image(LibraryName::Prguse2, frames.0)
+                    .map(|i| (i.width as f32, i.height as f32))
+                    .unwrap_or((15.0, 15.0));
+                let mut btn = spawn_icon_button(p, n, h, pr, pos.0, pos.1, bw, bh, 10);
+                if is_next {
+                    btn.insert(MailPageNext);
+                } else {
+                    btn.insert(MailPagePrev);
+                }
+            }
+        }
+        spawn_label(
+            p,
+            &cjk,
+            "",
+            PAGE_LABEL_POS.0,
+            PAGE_LABEL_POS.1,
+            12.0,
+            Color::WHITE,
+            9,
+        )
+        .insert(MailPageLabel);
         // C# 列表操作按钮 y=414：写邮件 @75 / 回复 @102 / 阅读 @129 / 删除 @156
         let actions = [
             (75.0, 563usize, 564usize, 565usize, MailAction::Write),
@@ -1678,8 +1777,14 @@ fn mail_ui_system(
     // #3103 读侧：阅读态不再画在列表窗内（内容改由独立读邮件窗渲染），
     // 故本系统只剩「根面板显隐 + 行文本 + 滚动」三块。
     mut widgets: Query<&mut Visibility, (With<MailWidget>, Without<MailLine>)>,
-    mut lines: Query<(&mut Text, &mut TextColor, &mut Visibility, &MailLine)>,
+    mut lines: Query<
+        (&mut Text, &mut TextColor, &mut Visibility, &MailLine),
+        Without<MailPageLabel>,
+    >,
     mut scroll: Query<&mut UiScrollList, With<MailWidget>>,
+    page_prev: Query<(Entity, &Interaction), With<MailPagePrev>>,
+    page_next: Query<(Entity, &Interaction), With<MailPageNext>>,
+    mut page_labels: Query<&mut Text, (With<MailPageLabel>, Without<MailLine>)>,
     mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
     panel_origin: Query<&Node, With<MailWidget>>,
 ) {
@@ -1711,14 +1816,67 @@ fn mail_ui_system(
             mgr.close(DialogKind::Mail);
         }
     }
-    // 列表（#89 支持滚轮滚动）
+    // #3120 ③：分页键（C# `MailDialogs.cs:109-120` / `:141-151`）——
+    // 到边界直接 return（不夹住、不清选中），翻页时 `SelectedMail = null`。
+    // 放在行渲染之前，这样点完当帧就能看到新一页。
+    let pc_now = mail_page_count(mail.mails.len());
+    // 本帧是否由**分页键**换了页：换页后必须把滚轮 offset 拉回页首（见下面的对账），
+    // 否则下一帧会把这个「offset 与页首不一致」误判成滚轮动作，把页码又推回去。
+    let mut page_changed = false;
+    for (e, inter) in &page_prev {
+        if edge(e, inter, &mut prev_inter) {
+            if let Some(p) = mail_page_after_prev(mail.page) {
+                mail.selected = None;
+                mail.page = p;
+                page_changed = true;
+                tracing::info!("📧 邮件列表上一页 → {}/{}", mail.page, pc_now);
+            }
+        }
+    }
+    for (e, inter) in &page_next {
+        if edge(e, inter, &mut prev_inter) {
+            if let Some(p) = mail_page_after_next(mail.page, mail.mails.len()) {
+                mail.selected = None;
+                mail.page = p;
+                page_changed = true;
+                tracing::info!("📧 邮件列表下一页 → {}/{}", mail.page, pc_now);
+            }
+        }
+    }
+    // 列表（#89 支持滚轮滚动；#3120 ③ 起滚轮按「一格 = 一页」走，与分页键同一份状态）
     let mut sl = scroll.single_mut();
     if let Ok(sl) = sl.as_mut() {
-        sl.set_total(mail.mails.len());
-        let off = sl.offset;
+        let pc = mail_page_count(mail.mails.len());
+        // 让滚轮偏移量**就表示「页码-1」**：UiScrollList 的 `max_offset = total - visible`，
+        // 所以把 total 设成 `page_count + visible - 1` → `max_offset = page_count - 1`；
+        // 步长 1 ⇒ 一格滚轮翻一页。这样 offset 永远落在合法区间内，
+        // 不会被 max_offset 夹到（旧写法把 total 设成邮件数，21 封时 max_offset=11，
+        // 第 3 页要的 offset=20 被夹成 11 → 下一帧又被当成「滚轮上滚」，页码来回跳）。
+        sl.set_total(pc + MAIL_VISIBLE_ROWS - 1);
+        sl.step = 1;
+        if mail.page > pc {
+            // 邮件被删/读走后页数变少：夹住当前页（C# 每次 UpdateInterface 重算 PageCount）
+            mail.page = pc;
+        }
+        let want_off = mail.page - 1;
+        if sl.offset != want_off {
+            if page_changed {
+                // 分页键换了页：只是把 offset 对齐到新页（不是滚轮输入）
+                sl.offset = want_off;
+            } else {
+                // 滚轮把 offset 推动了：它本身就是目标页码-1
+                let p = (sl.offset + 1).clamp(1, pc);
+                if p != mail.page {
+                    mail.selected = None;
+                    mail.page = p;
+                }
+                sl.offset = mail.page - 1;
+            }
+        }
+        let start = mail_page_start(mail.page);
         for (mut text, mut color, mut vis, line) in &mut lines {
             *vis = Visibility::Visible;
-            let idx = off + line.0;
+            let idx = start + line.0;
             text.0 = match mail.mails.get(idx) {
                 Some(m) => {
                     let mark = if m.unread { "（未读）" } else { "" };
@@ -1734,6 +1892,13 @@ fn mail_ui_system(
             if color.0 != c {
                 color.0 = c;
             }
+        }
+    }
+    // 页号（C# `MailDialogs.cs:306`：`"{CurrentPage} / {PageCount}"`）
+    if let Ok(mut t) = page_labels.single_mut() {
+        let want = mail_page_label(mail.page, mail.mails.len());
+        if t.0 != want {
+            t.0 = want;
         }
     }
     // 阅读按钮（C# `MailDialogs.cs:209-221`）：有选中行就开对应的读邮件窗
@@ -1758,7 +1923,8 @@ fn mail_ui_system(
         let Some(cursor) = window.cursor_position() else {
             return;
         };
-        let off = scroll.single().map(|s| s.offset).unwrap_or(0);
+        // #3120 ③：行号 = 页首 + 可视槽位（与渲染同一份分页状态；不再读滚轮 offset）
+        let off = mail_page_start(mail.page);
         let (ox, oy) = panel_origin
             .single()
             .map(|n| crate::ui::theme::node_origin(n, mail_panel_origin(MAIL_SCREEN_W)))
@@ -2161,6 +2327,70 @@ mod tests {
         assert_eq!(mail_row_y(MAIL_VISIBLE_ROWS - 1), 352.0);
         assert!(mail_row_y(MAIL_VISIBLE_ROWS - 1) + MAIL_ROW_H < MAIL_BUTTON_Y);
         assert!(MAIL_BUTTON_Y + 24.0 <= MAIL_H);
+    }
+
+    /// #3120 ③：分页键/页号按 C# `MailDialogs.cs:99-151` 的锚点与帧号（H=444 → y=389）。
+    #[test]
+    fn mail_pager_layout_matches_csharp_anchor() {
+        assert_eq!(MAIL_H - 55.0, 389.0);
+        assert_eq!(
+            PAGE_PREV_POS,
+            (102.0, 389.0),
+            "C# PreviousButton @(102,H-55)"
+        );
+        assert_eq!(PAGE_LABEL_POS, (120.0, 389.0), "C# PageLabel @(120,H-55)");
+        assert_eq!(PAGE_NEXT_POS, (192.0, 389.0), "C# NextButton @(192,H-55)");
+        assert_eq!(PAGE_LABEL_SIZE, (67.0, 15.0), "C# PageLabel.Size = 67x15");
+        assert_eq!(PAGE_PREV_FRAMES, (240, 241, 242), "C# Prguse2[240..242]");
+        assert_eq!(PAGE_NEXT_FRAMES, (243, 244, 245), "C# Prguse2[243..245]");
+        // 分页键不与 10 行列表、底部操作按钮（y=414..438）相撞
+        assert!(mail_row_y(MAIL_VISIBLE_ROWS - 1) + MAIL_ROW_H < PAGE_PREV_POS.1);
+        assert!(PAGE_PREV_POS.1 + 15.0 <= MAIL_BUTTON_Y);
+    }
+
+    /// #3120 ③：页数/页首/页号文本＝C# `MailDialogs.cs:25/117/148/303-306`
+    #[test]
+    fn mail_pager_math_matches_csharp() {
+        // PageCount = ceil(Count/10)，且至少 1（C# `:303-304`）
+        assert_eq!(mail_page_count(0), 1);
+        assert_eq!(mail_page_count(1), 1);
+        assert_eq!(mail_page_count(10), 1);
+        assert_eq!(mail_page_count(11), 2);
+        assert_eq!(mail_page_count(20), 2);
+        assert_eq!(mail_page_count(21), 3);
+        assert_eq!(mail_page_count(200), 20);
+        // StartIndex = (CurrentPage-1)*10（C# `:25/117/148`）
+        assert_eq!(mail_page_start(0), 0, "页码夹到 1 → 页首 0");
+        assert_eq!(mail_page_start(1), 0);
+        assert_eq!(mail_page_start(2), 10);
+        assert_eq!(mail_page_start(3), 20);
+        // PageLabel.Text = "{CurrentPage} / {PageCount}"（C# `:306`）
+        assert_eq!(mail_page_label(1, 0), "1 / 1");
+        assert_eq!(mail_page_label(1, 10), "1 / 1");
+        assert_eq!(mail_page_label(2, 11), "2 / 2");
+        assert_eq!(mail_page_label(3, 21), "3 / 3");
+    }
+
+    /// #3120 ③：翻页边界＝C# 的「到边界直接 return」（不夹住、不清选中由调用方负责）
+    #[test]
+    fn mail_pager_buttons_stop_at_bounds() {
+        assert_eq!(
+            mail_page_after_prev(1),
+            None,
+            "C# `:111` CurrentPage<=1 → return"
+        );
+        assert_eq!(mail_page_after_prev(2), Some(1));
+        assert_eq!(mail_page_after_prev(3), Some(2));
+        // 0 封邮件时只有 1 页：下一页也不动
+        assert_eq!(mail_page_after_next(1, 0), None);
+        assert_eq!(
+            mail_page_after_next(1, 10),
+            None,
+            "C# `:143` CurrentPage>=PageCount → return"
+        );
+        assert_eq!(mail_page_after_next(1, 11), Some(2));
+        assert_eq!(mail_page_after_next(2, 21), Some(3));
+        assert_eq!(mail_page_after_next(3, 21), None, "末页再点不动");
     }
 
     #[test]
