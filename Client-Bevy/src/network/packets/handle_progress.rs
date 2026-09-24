@@ -1362,6 +1362,8 @@ pub(crate) fn handle_progress(
                     item_type: p.info.item_type as u8,
                     shape: p.info.shape,
                     required_gender: p.info.required_gender.bits(),
+                    // #3120 ② 残余：把绑定位一起带出来（C# 客户端守卫读 `Info.Bind`）
+                    bind: p.info.bind.bits(),
                 });
                 tracing::info!("📦 NewItemInfo: idx={} name={}", p.info.index, p.info.name);
             }

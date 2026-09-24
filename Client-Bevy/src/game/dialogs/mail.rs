@@ -97,6 +97,11 @@ pub struct MailState {
     /// #3120 ③：列表当前页（1 起；C# `MailDialogs.cs:26` `CurrentPage`）。
     /// 行区间 = `mail_page_start(page) .. +10`，与 C# `StartIndex` 等价。
     pub page: usize,
+    /// #3120 ② 残余：**按物品索引缓存绑定位**（`ItemInfo.bind`，来自 `S.NewItemInfo`）。
+    /// C# 客户端守卫读 `Info.Bind`（`MirItemCell.cs:1793` 的 `DontTrade`），但本端此前的
+    /// `ItemInfoReceived` 投影没带 `bind`、本地也没有表 ⇒ 没法早提示。
+    /// 约定：**表里没有该索引 = 未知**，此时不拦（交回服务端拒绝，与既有行为一致）。
+    pub item_bind: std::collections::HashMap<i32, u16>,
 }
 
 impl Default for MailState {
@@ -113,6 +118,7 @@ impl Default for MailState {
             parcel_cost: 0,
             gold_ask_pending: false,
             page: 1,
+            item_bind: std::collections::HashMap::new(),
         }
     }
 }
@@ -450,6 +456,18 @@ pub fn can_mail_item(bind_flags: u16) -> bool {
     let dont_trade = mir2_shared::enums::BindMode::DONT_TRADE.bits();
     let no_mail = mir2_shared::enums::BindMode::NO_MAIL.bits();
     (bind_flags & (dont_trade | no_mail)) == 0
+}
+
+/// 待寄包裹窗能否收下该物品：**已知**绑定位时按 [`can_mail_item`] 判定；
+/// **未知**（该索引还没被 `S.NewItemInfo` 补全）时返回 `true`（不拦，交回服务端拒绝）。
+///
+/// 这条"未知不拦"的取舍是刻意的：客户端拦截只是 UX 提前量，**权威闸门在服务端**
+/// （`ServerRust/src/actors/world/mail.rs:572`）；未知时拦会造成"没拉过信息的物品一律寄不出"的假拒收。
+pub fn mail_item_mailable(mail: &MailState, item_index: i32) -> bool {
+    match mail.item_bind.get(&item_index) {
+        Some(bits) => can_mail_item(*bits),
+        None => true,
+    }
 }
 
 /// 请求写邮件（#2631 跨对话框解耦 Message）。
@@ -2550,6 +2568,11 @@ fn mail_server_events(
             mail.parcel_cost = *cost;
             tracing::debug!("✉️ 邮资更新: {}", cost);
         }
+        // #3120 ② 残余：把按需回来的物品绑定位缓存起来（守卫 `can_mail_item` 的数据源）
+        if let ServerEvent::ItemInfoReceived { index, bind, .. } = ev {
+            mail.item_bind.insert(*index, *bind);
+            tracing::debug!("✉️ 物品 {} 绑定位 = 0x{:X}", index, bind);
+        }
         if let ServerEvent::ParcelCollected { result } = ev {
             match *result {
                 1 => {
@@ -2702,6 +2725,21 @@ mod tests {
             !can_mail_item((BindMode::DONT_TRADE | BindMode::DONT_SELL).bits()),
             "组合位里含 DontTrade 仍不可邮寄"
         );
+    }
+
+    /// 门禁（#3120 ② 残余·数据层）：`ItemInfoReceived` 带来的绑定位要能被缓存并驱动守卫，
+    /// 且**未知索引不得拦截**（否则没拉过信息的物品会被假拒收）。
+    #[test]
+    fn mail_item_bind_cache_feeds_cannot_mail_guard() {
+        use mir2_shared::enums::BindMode;
+        let mut m = MailState::default();
+        assert!(mail_item_mailable(&m, 782), "未知索引 → 不拦（交回服务端）");
+        m.item_bind.insert(782, BindMode::DONT_TRADE.bits());
+        assert!(!mail_item_mailable(&m, 782), "DontTrade → 拦");
+        m.item_bind.insert(783, BindMode::NO_MAIL.bits());
+        assert!(!mail_item_mailable(&m, 783), "NoMail → 拦");
+        m.item_bind.insert(784, BindMode::DONT_SELL.bits());
+        assert!(mail_item_mailable(&m, 784), "仅 DontSell → 不拦");
     }
 
     /// #2786：点「回复」→ 打开写信窗并把收件人预填为选中邮件的发件人
