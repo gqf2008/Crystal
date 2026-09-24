@@ -1671,6 +1671,9 @@ fn has_rpc_mapping(kind: DialogKind) -> bool {
         // #3103：两张写邮件窗与 `Mail` 成对显隐（由 `MailState.compose` / `compose_parcel` 驱动），
         // 无独立 RPC 开关——`visible_win`/`close` 这类 RPC 仍作用于 `Mail`（列表窗）
         D::MailCompose => false,
+        // #3103 读侧：两张读邮件窗由 `MailState.detail` 驱动（读邮件 / 双击已选行才开），
+        // 同样无独立 RPC 开关；`mail_read` RPC 仍走 `MailState.detail` 的同一条路径。
+        D::MailRead => false,
     }
 }
 
@@ -2816,7 +2819,11 @@ fn apply_control_commands(
                 let detail = q.mail.detail.as_ref().map(|d| {
                     json!({
                         "mail_id": d.mail_id, "sender": d.sender, "subject": d.subject,
-                        "body": d.body, "gold": d.gold, "items": d.items, "collected": d.collected,
+                        "body": d.body, "gold": d.gold, "collected": d.collected,
+                        // #3103 读侧：附件条目改为 `MailAttachment`（多带图标/数量/耐久），
+                        // 探针沿用旧口径只回名字列表（`l5f` 夹具按名字断言）
+                        "items": d.items.iter().map(|a| a.name.clone()).collect::<Vec<_>>(),
+                        "send_date": d.send_date, "locked": d.locked,
                     })
                 });
                 let payload =

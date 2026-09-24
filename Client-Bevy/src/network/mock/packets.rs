@@ -716,13 +716,16 @@ impl Packet for MockMailEntry {
         mir2_shared::binary::write_dotnet_string(writer, &self.sender)?;
         mir2_shared::binary::write_dotnet_string(writer, &self.subject)?;
         mir2_shared::binary::write_dotnet_string(writer, &self.body)?;
-        writer.write_i64::<LittleEndian>(0)?; // timestamp
+        // #3103 读侧：时间戳给真值，读信窗的日期标签才有内容（`0` 会被当"无时间"显示空串）
+        writer.write_i64::<LittleEndian>(1_700_000_000)?; // timestamp
         writer.write_u8(0)?; // read
         writer.write_u8(0)?; // collected
+        writer.write_u8(0)?; // locked（#3103：C# `MailInfo.Locked`）
         writer.write_u32::<LittleEndian>(0)?; // gold
         writer.write_u8(1)?; // item_count
         writer.write_u64::<LittleEndian>(9101)?; // uid
         writer.write_u32::<LittleEndian>(1)?; // idx
+        writer.write_u16::<LittleEndian>(1)?; // image（#3103：Items 库图标索引）
         mir2_shared::binary::write_dotnet_string(writer, "金创药(小)")?;
         writer.write_u16::<LittleEndian>(1)?; // count
         writer.write_u16::<LittleEndian>(1)?; // cd

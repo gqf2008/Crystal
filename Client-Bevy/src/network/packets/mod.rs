@@ -207,9 +207,14 @@ pub(crate) fn to_inv_item(item: &mir2_shared::data::item::UserItem) -> InvItem {
 }
 
 /// 解析服务端 ReceiveMail（同 opcode 双格式）：
-/// - 条目包：mail_id, sender, subject, timestamp, read, collected, gold, item_count
-/// - 全文包：mail_id, sender, subject, body, timestamp, read, collected, gold, item_count, items...
-/// 先尝试全文格式，失败再按条目格式（条目包按全文解析时 timestamp 首字节必然导致 7-bit 长度越界）
+/// - 条目包：mail_id, sender, subject, timestamp, read, collected, **locked**, gold, item_count
+/// - 全文包：mail_id, sender, subject, body, timestamp, read, collected, **locked**, gold,
+///   item_count, items...（每项：uid, idx, **image**, name, count, current_dura, max_dura）
+/// 先尝试全文格式，失败再按条目格式（条目包按全文解析时 timestamp 首字节必然导致 7-bit 长度越界）。
+///
+/// #3103 读侧补的两个字段（两端同一 PR 改，Rust 客户端 ↔ Rust 服务端自洽）：
+/// `locked` 让读信窗「删除」与列表删除按 C# `MailInfo.Locked` 守卫（`MailDialogs.cs:236/1049`）；
+/// `image` 是 `Items` 库图标索引（C# `UserItem.Info.Image`），读包裹窗 5 个附件格靠它出图。
 fn parse_receive_mail(payload: &[u8]) -> Option<(MailEntry, Option<MailDetail>)> {
     use byteorder::{LittleEndian, ReadBytesExt};
     use mir2_shared::binary::read_dotnet_string;
@@ -220,20 +225,32 @@ fn parse_receive_mail(payload: &[u8]) -> Option<(MailEntry, Option<MailDetail>)>
         let sender = read_dotnet_string(&mut cur).ok()?;
         let subject = read_dotnet_string(&mut cur).ok()?;
         let body = read_dotnet_string(&mut cur).ok()?;
-        let _timestamp = cur.read_i64::<LittleEndian>().ok()?;
+        let send_date = cur.read_i64::<LittleEndian>().ok()?;
         let read_flag = cur.read_u8().ok()? != 0;
         let collected = cur.read_u8().ok()? != 0;
+        let locked = cur.read_u8().ok()? != 0;
         let gold = cur.read_u32::<LittleEndian>().ok()?;
         let item_count = cur.read_u8().ok()? as usize;
         let mut items = Vec::new();
         for _ in 0..item_count {
             let _uid = cur.read_u64::<LittleEndian>().ok()?;
             let _idx = cur.read_u32::<LittleEndian>().ok()?;
+            let image = cur.read_u16::<LittleEndian>().ok()?;
             let name = read_dotnet_string(&mut cur).ok()?;
-            let _count = cur.read_u16::<LittleEndian>().ok()?;
-            let _cd = cur.read_u16::<LittleEndian>().ok()?;
-            let _md = cur.read_u16::<LittleEndian>().ok()?;
-            items.push(name);
+            let count = cur.read_u16::<LittleEndian>().ok()?;
+            let cd = cur.read_u16::<LittleEndian>().ok()?;
+            let md = cur.read_u16::<LittleEndian>().ok()?;
+            items.push(crate::game::dialogs::mail::MailAttachment {
+                name,
+                image,
+                count,
+                // C# `MirItemCell.DrawDurability` 只在 MaxDura > 0 时画耐久条
+                dura_ratio: if md > 0 {
+                    Some(cd as f32 / md as f32)
+                } else {
+                    None
+                },
+            });
         }
         if payload.len() as u64 != cur.position() {
             return None;
@@ -246,6 +263,7 @@ fn parse_receive_mail(payload: &[u8]) -> Option<(MailEntry, Option<MailDetail>)>
                 unread: !read_flag,
                 gold,
                 collected,
+                locked,
             },
             Some(MailDetail {
                 mail_id,
@@ -255,6 +273,8 @@ fn parse_receive_mail(payload: &[u8]) -> Option<(MailEntry, Option<MailDetail>)>
                 gold,
                 items,
                 collected,
+                send_date,
+                locked,
             }),
         ))
     }
@@ -264,9 +284,10 @@ fn parse_receive_mail(payload: &[u8]) -> Option<(MailEntry, Option<MailDetail>)>
         let mail_id = cur.read_u64::<LittleEndian>().ok()?;
         let sender = read_dotnet_string(&mut cur).ok()?;
         let subject = read_dotnet_string(&mut cur).ok()?;
-        let _timestamp = cur.read_i64::<LittleEndian>().ok()?;
+        let send_date = cur.read_i64::<LittleEndian>().ok()?;
         let read_flag = cur.read_u8().ok()? != 0;
         let collected = cur.read_u8().ok()? != 0;
+        let locked = cur.read_u8().ok()? != 0;
         let gold = cur.read_u32::<LittleEndian>().ok()?;
         let _item_count = cur.read_u8().ok()?;
         if payload.len() as u64 != cur.position() {
@@ -280,6 +301,7 @@ fn parse_receive_mail(payload: &[u8]) -> Option<(MailEntry, Option<MailDetail>)>
                 unread: !read_flag,
                 gold,
                 collected,
+                locked,
             },
             None,
         ))

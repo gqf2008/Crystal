@@ -75,8 +75,13 @@ use crate::game::dialogs::text_input::TextInputRect;
 use crate::scenes::AppState;
 use crate::ui::theme::UiDropDown;
 
-/// 对话框类型
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
+/// 对话框类型。
+///
+/// **新增变体时**：本枚举带 `Reflect` 派生，`tests/ui_alignment.rs` 的
+/// `dialog_kind_registry_covers_all_variants` 会拿 `EnumInfo::variant_names()` 与登记表
+/// `ALL_DIALOG_KINDS` 对账——只加变体不登记会红。`control.rs::has_rpc_mapping` 与
+/// `ui_alignment::kind_alignment_tests` 是无通配 `match`，漏分类会编译失败。
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Hash, Reflect)]
 pub enum DialogKind {
     Inventory,
     Character,
@@ -150,6 +155,11 @@ pub enum DialogKind {
     /// （`MailListDialog` `Title[670]`）各自拖动——共用 `Mail` 会让拖邮件列表时把写邮件窗一起拖走
     /// （owner 2026-09-24 截图里那块"飘在世界中间的写邮件面板"就是这么来的）。
     MailCompose,
+    /// #3103 读侧：C# 两张**读**邮件窗（`MailReadLetterDialog` `Title[672]` 236x300 @(100,100)、
+    /// `MailReadParcelDialog` `Title[675]` @(100,100)，均 `Movable = true` / `Sort = true`，
+    /// `MailDialogs.cs:979-1272`）。独立 kind 的理由同 `MailCompose`：C# 里读信窗与邮件列表窗
+    /// 各自 `Movable`，共用 kind 会让拖一个把另一个也拖走。
+    MailRead,
 }
 
 /// 对话框管理（打开栈，栈顶在最前）
