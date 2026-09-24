@@ -496,6 +496,82 @@ pub struct MailAttachSlot(pub usize);
 #[derive(Component)]
 pub struct MailLine(usize);
 
+/// #3120 ①：行内视觉层的角色（C# `MailItemRow` 的五个 `MirImageControl` + 两个 `MirLabel`）
+#[derive(Component, Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum MailRowRole {
+    /// `SelectedImage` `Prguse[545] @(-5,-3)`（:477-483）
+    Selected,
+    /// `IconImage`（`IconArea 34x32` 居中；库/帧由模型三分支决定，:517-533）
+    Icon,
+    /// `UnreadImage` `Prguse[550]`（:449）
+    Unread,
+    /// `LockedImage` `Prguse[551]`（:458）
+    Locked,
+    /// `ParcelImage` `Prguse[552]`（:467）
+    Parcel,
+    /// `SenderLabel @(35,0)`（:487）
+    Sender,
+    /// `MessageLabel @(170,0)`（:496）
+    Info,
+}
+
+/// #3120 ①：行内一个视觉层实体（探针据此把"渲染真值"与模型派生的 C# 规则对账）
+#[derive(Component)]
+pub(crate) struct MailRowSlot {
+    pub(crate) row: usize,
+    pub(crate) role: MailRowRole,
+    /// 图标层**实际应用的**库与帧（仅 `Icon` 有含义）——夹具拿它与 `mail_probe.mails[i].icon` 比
+    pub(crate) icon_lib: &'static str,
+    pub(crate) icon_index: u16,
+}
+
+/// 行在列表里的左原点（与行点击命中矩形同一口径：`x ∈ [ROW_X, ROW_X + 290]`）
+pub(crate) const MAIL_ROW_X: f32 = 10.0;
+
+/// 铺一个行内图片层（`Node`/`ImageNode` 空间，与邮件窗其它元素一致），默认 `Hidden`。
+#[allow(clippy::too_many_arguments)]
+fn spawn_row_image(
+    p: &mut ChildSpawnerCommands,
+    libs: &mut GameLibraries,
+    images: &mut Assets<Image>,
+    lib: LibraryName,
+    index: u16,
+    x: f32,
+    y: f32,
+    z: i32,
+    row: usize,
+    role: MailRowRole,
+) {
+    let Some(handle) = load_lib_image(libs, images, lib, index as usize) else {
+        return;
+    };
+    let (w, h) = libs
+        .0
+        .get_image(lib, index as usize)
+        .map(|i| (i.width as f32, i.height as f32))
+        .unwrap_or((1.0, 1.0));
+    // 图标层先按 IconArea 居中摆（帧尺寸由 C# `((34-w)/2,(32-h)/2)` 决定）
+    let (x, y) = if role == MailRowRole::Icon {
+        let (ox, oy) = mail_row_icon_offset(w, h);
+        (x + ox, y + oy)
+    } else {
+        (x, y)
+    };
+    crate::ui::theme::spawn_image(p, handle, x, y, w, h, z).insert((
+        MailRowSlot {
+            row,
+            role,
+            icon_lib: if lib == LibraryName::Items {
+                "Items"
+            } else {
+                "Prguse"
+            },
+            icon_index: index,
+        },
+        Visibility::Hidden,
+    ));
+}
+
 /// #3120 ③：上一页键（C# `MailDialogs.cs:99` `PreviousButton`，`Prguse2[240..242]`）
 #[derive(Component)]
 pub struct MailPagePrev;
@@ -1725,18 +1801,88 @@ fn spawn_mail(
             btn.insert(MailClose);
         }
         // C# 10 行 @ 55 + 33*i；行点击由 mail_ui_system 按同一常量命中。
+        // #3120 ①：每行按 C# `MailItemRow` 铺 7 个 UI 层（选中底图 / 图标 / 未读·锁定·包裹 /
+        // 发件人 / 信息）；可见性与位置由 `mail_ui_system` 每帧按模型 + `mail_row_*` 口径写。
         for i in 0..MAIL_VISIBLE_ROWS {
-            spawn_label(
+            let ry = mail_row_y(i);
+            // ① 选中底图 Prguse[545] @(-5,-3)
+            spawn_row_image(
+                p,
+                &mut libs,
+                &mut images,
+                LibraryName::Prguse,
+                MAIL_ROW_SELECTED_BG,
+                MAIL_ROW_X + MAIL_ROW_SELECTED_OFFSET.0,
+                ry + MAIL_ROW_SELECTED_OFFSET.1,
+                7,
+                i,
+                MailRowRole::Selected,
+            );
+            // ② 图标（先按"空图标"占位；每帧按模型三分支换帧 + 居中）
+            spawn_row_image(
+                p,
+                &mut libs,
+                &mut images,
+                LibraryName::Prguse,
+                MAIL_ROW_ICON_EMPTY,
+                MAIL_ROW_X,
+                ry,
+                8,
+                i,
+                MailRowRole::Icon,
+            );
+            // ③④⑤ 未读/锁定/包裹角标（默认 @(5,17)；未读在"未取回或锁定"时让位 (20,17)）
+            for (index, role) in [
+                (MAIL_ROW_BADGE_UNREAD, MailRowRole::Unread),
+                (MAIL_ROW_BADGE_LOCKED, MailRowRole::Locked),
+                (MAIL_ROW_BADGE_PARCEL, MailRowRole::Parcel),
+            ] {
+                spawn_row_image(
+                    p,
+                    &mut libs,
+                    &mut images,
+                    LibraryName::Prguse,
+                    index,
+                    MAIL_ROW_X + MAIL_ROW_BADGE_POS.0,
+                    ry + MAIL_ROW_BADGE_POS.1,
+                    9,
+                    i,
+                    role,
+                );
+            }
+            // ⑥⑦ 发件人 @(35,0) / 信息 @(170,0)（C# 都是 31 高的 VerticalCenter → 12px 字取 +9）
+            let mut sender = spawn_label(
                 p,
                 &cjk,
                 "",
-                10.0,
-                mail_row_y(i) + 9.0,
+                MAIL_ROW_X + MAIL_ROW_SENDER_RECT.0,
+                ry + 9.0,
                 12.0,
                 Color::WHITE,
                 9,
-            )
-            .insert(MailLine(i));
+            );
+            sender.insert(MailRowSlot {
+                row: i,
+                role: MailRowRole::Sender,
+                icon_lib: "",
+                icon_index: 0,
+            });
+            let mut info = spawn_label(
+                p,
+                &cjk,
+                "",
+                MAIL_ROW_X + MAIL_ROW_INFO_RECT.0,
+                ry + 9.0,
+                12.0,
+                Color::WHITE,
+                9,
+            );
+            info.insert(MailRowSlot {
+                row: i,
+                role: MailRowRole::Info,
+                icon_lib: "",
+                icon_index: 0,
+            });
         }
         // #3120 ③：分页键 + 页号（C# `MailDialogs.cs:99-151`；H=444 → y=389）
         for (pos, frames, is_next) in [
@@ -1843,6 +1989,30 @@ fn spawn_mail(
     spawn_read_windows(&mut commands, &mut libs, &mut images, &cjk);
 }
 
+/// #3120 ①：行相关的三个查询打包成一个 SystemParam——
+/// `mail_ui_system` 的参数已接近 Bevy 的 16 个上限，直接加两个会编译不过。
+#[derive(bevy::ecs::system::SystemParam)]
+pub(crate) struct MailRowQueries<'w, 's> {
+    pub(crate) widgets:
+        Query<'w, 's, &'static mut Visibility, (With<MailWidget>, Without<MailRowSlot>)>,
+    pub(crate) row_slots: Query<
+        'w,
+        's,
+        (
+            &'static mut MailRowSlot,
+            &'static mut Visibility,
+            &'static mut Node,
+            Option<&'static mut ImageNode>,
+            Option<&'static mut Text>,
+        ),
+        // B0001：`panel_origin: Query<&Node, With<MailWidget>>` 与本查询都要 `Node`，
+        // 用 `Without<MailWidget>` 证明两者不相交（行层不是面板本身）。
+        Without<MailWidget>,
+    >,
+    pub(crate) page_labels:
+        Query<'w, 's, &'static mut Text, (With<MailPageLabel>, Without<MailRowSlot>)>,
+}
+
 fn mail_ui_system(
     mut mgr: ResMut<DialogManager>,
     mut mail: ResMut<MailState>,
@@ -1852,17 +2022,15 @@ fn mail_ui_system(
     close: Query<(Entity, &Interaction), With<MailClose>>,
     delete_btn: Query<(Entity, &Interaction), With<MailDelete>>,
     read_btn: Query<(Entity, &Interaction), With<MailReadBtn>>,
-    // #3103 读侧：阅读态不再画在列表窗内（内容改由独立读邮件窗渲染），
-    // 故本系统只剩「根面板显隐 + 行文本 + 滚动」三块。
-    mut widgets: Query<&mut Visibility, (With<MailWidget>, Without<MailLine>)>,
-    mut lines: Query<
-        (&mut Text, &mut TextColor, &mut Visibility, &MailLine),
-        Without<MailPageLabel>,
-    >,
+    // #3103 读侧：阅读态不再画在列表窗内（内容改由独立读邮件窗渲染）。
+    // #3120 ①：列表行不再是"一行文本"，而是每行 7 个 `MailRowSlot` 层——
+    // 本系统按模型 + `mail_row_*` 口径每帧写它们的可见性/位置/帧/文本。
+    mut libs: ResMut<GameLibraries>,
+    mut images: ResMut<Assets<Image>>,
+    mut rows: MailRowQueries,
     mut scroll: Query<&mut UiScrollList, With<MailWidget>>,
     page_prev: Query<(Entity, &Interaction), With<MailPagePrev>>,
     page_next: Query<(Entity, &Interaction), With<MailPageNext>>,
-    mut page_labels: Query<&mut Text, (With<MailPageLabel>, Without<MailLine>)>,
     mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
     panel_origin: Query<&Node, With<MailWidget>>,
 ) {
@@ -1875,7 +2043,7 @@ fn mail_ui_system(
         *inter == Interaction::Pressed && was != Some(Interaction::Pressed)
     }
     let open = mgr.is_open(DialogKind::Mail);
-    for mut vis in &mut widgets {
+    for mut vis in &mut rows.widgets {
         *vis = if open {
             Visibility::Visible
         } else {
@@ -1952,28 +2120,111 @@ fn mail_ui_system(
             }
         }
         let start = mail_page_start(mail.page);
-        for (mut text, mut color, mut vis, line) in &mut lines {
-            *vis = Visibility::Visible;
-            let idx = start + line.0;
-            text.0 = match mail.mails.get(idx) {
-                Some(m) => {
-                    let mark = if m.unread { "（未读）" } else { "" };
-                    format!("{} - {}{}", m.sender, m.subject, mark)
+        for (mut slot, mut vis, mut node, img, text) in &mut rows.row_slots {
+            let row = slot.row;
+            let idx = start + row;
+            let m = mail.mails.get(idx);
+            let ry = mail_row_y(row);
+            let (mut x, mut y) = (MAIL_ROW_X, ry);
+            let mut want = Visibility::Hidden;
+            match slot.role {
+                MailRowRole::Selected => {
+                    if m.is_some() && mail.selected == Some(idx) {
+                        want = Visibility::Visible;
+                    }
+                    x = MAIL_ROW_X + MAIL_ROW_SELECTED_OFFSET.0;
+                    y = ry + MAIL_ROW_SELECTED_OFFSET.1;
                 }
-                None => String::new(),
-            };
-            let c = if mail.selected == Some(idx) {
-                Color::srgb(1.0, 0.9, 0.3)
-            } else {
-                Color::WHITE
-            };
-            if color.0 != c {
-                color.0 = c;
+                MailRowRole::Icon => {
+                    if let Some(m) = m {
+                        // C# 三分支（:517-531）：有附件 → `Items[Items[0].Info.Image]`；有金币 → 541；否则 540
+                        let (lib, index) = match mail_row_icon(m) {
+                            MailRowIcon::Item(image) => (LibraryName::Items, image),
+                            MailRowIcon::Gold => (LibraryName::Prguse, MAIL_ROW_ICON_GOLD),
+                            MailRowIcon::Empty => (LibraryName::Prguse, MAIL_ROW_ICON_EMPTY),
+                        };
+                        slot.icon_lib = if lib == LibraryName::Items {
+                            "Items"
+                        } else {
+                            "Prguse"
+                        };
+                        slot.icon_index = index;
+                        if let (Some(mut img), Some(handle)) = (
+                            img,
+                            load_lib_image(&mut libs, &mut images, lib, index as usize),
+                        ) {
+                            img.image = handle;
+                        }
+                        // 图标在 `IconArea 34x32` 内居中（:533）：尺寸取该帧真实像素
+                        let (w, h) = libs
+                            .0
+                            .get_image(lib, index as usize)
+                            .map(|i| (i.width as f32, i.height as f32))
+                            .unwrap_or((1.0, 1.0));
+                        let (ox, oy) = mail_row_icon_offset(w, h);
+                        x = MAIL_ROW_X + ox;
+                        y = ry + oy;
+                        want = Visibility::Visible;
+                    }
+                }
+                MailRowRole::Unread => {
+                    if let Some(m) = m {
+                        if m.unread {
+                            want = Visibility::Visible;
+                        }
+                        // C# 让位规则（:546-562）：未取回包裹 或 已锁定 → 第二位 (20,17)
+                        x = MAIL_ROW_X + mail_row_unread_x(m);
+                    }
+                    y = ry + MAIL_ROW_BADGE_POS.1;
+                }
+                MailRowRole::Locked => {
+                    if m.map(|m| m.locked).unwrap_or(false) {
+                        want = Visibility::Visible;
+                    }
+                    x = MAIL_ROW_X + MAIL_ROW_BADGE_POS.0;
+                    y = ry + MAIL_ROW_BADGE_POS.1;
+                }
+                MailRowRole::Parcel => {
+                    if m.map(|m| !m.collected).unwrap_or(false) {
+                        want = Visibility::Visible;
+                    }
+                    x = MAIL_ROW_X + MAIL_ROW_BADGE_POS.0;
+                    y = ry + MAIL_ROW_BADGE_POS.1;
+                }
+                MailRowRole::Sender => {
+                    if let Some(mut t) = text {
+                        let want_text = m.map(|m| m.sender.clone()).unwrap_or_default();
+                        if t.0 != want_text {
+                            t.0 = want_text;
+                        }
+                    }
+                    x = MAIL_ROW_X + MAIL_ROW_SENDER_RECT.0;
+                    y = ry + 9.0;
+                }
+                MailRowRole::Info => {
+                    if let Some(mut t) = text {
+                        let want_text = m.map(mail_row_info_text).unwrap_or_default();
+                        if t.0 != want_text {
+                            t.0 = want_text;
+                        }
+                    }
+                    x = MAIL_ROW_X + MAIL_ROW_INFO_RECT.0;
+                    y = ry + 9.0;
+                }
+            }
+            if *vis != want {
+                *vis = want;
+            }
+            if node.left != Val::Px(x) {
+                node.left = Val::Px(x);
+            }
+            if node.top != Val::Px(y) {
+                node.top = Val::Px(y);
             }
         }
     }
     // 页号（C# `MailDialogs.cs:306`：`"{CurrentPage} / {PageCount}"`）
-    if let Ok(mut t) = page_labels.single_mut() {
+    if let Ok(mut t) = rows.page_labels.single_mut() {
         let want = mail_page_label(mail.page, mail.mails.len());
         if t.0 != want {
             t.0 = want;
