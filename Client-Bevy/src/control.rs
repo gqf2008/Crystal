@@ -263,6 +263,15 @@ enum ControlCommand {
     StorageProbe {
         reply: Sender<String>,
     },
+    /// 只读法术特效探针（2026-09-25）：当前存活的**渲染侧**特效实体读数
+    /// （施法帧动画 `SpellFxAnim` + 施法/远程弹道 `SpellMissileAnim`）。
+    ///
+    /// 存在理由：owner 反馈「魔法效果完全不对」的修复（把染色白方块换成原版
+    /// `Magic/Magic2/Magic3` 帧表）此前**只有单元测试钉表**，没有实机判据——
+    /// 本探针把「渲染侧真正 spawn 的库/起始帧/帧数」暴露成可断言状态（不是日志文本）。
+    SpellFxProbe {
+        reply: Sender<String>,
+    },
     /// 只读 NPC 窗探针（2026-09-23）：每行文本 + 每条**行内链接的精确命中矩形**。
     /// 存在理由：NPC 窗是自绘文本、行内链接形如 `<Access/@Storage> Storage`，
     /// 链接段只覆盖行首那几个字——夹具按"行中心/行右半"点会静默无反应（⑤ 开仓库栽在这里）。
@@ -649,6 +658,10 @@ struct ControlQueries<'w, 's> {
         Without<crate::ui::theme::UiScrollThumb>,
     >,
     ui_nodes: Query<'w, 's, &'static Node, Without<crate::ui::theme::UiScrollThumb>>,
+    /// `spell_fx_probe` 用：渲染侧存活的施法帧动画（库/起始帧/帧数/跟随对象）
+    spell_fx: Query<'w, 's, &'static crate::game::spell_effects::SpellFxAnim>,
+    /// `spell_fx_probe` 用：渲染侧存活的施法/远程弹道（库/起始帧/帧数）
+    spell_missiles: Query<'w, 's, &'static crate::game::effects::SpellMissileAnim>,
     /// dialog_rect RPC：物理→逻辑坐标换算用的窗口 scale_factor
     primary_window: Query<'w, 's, &'static Window, With<PrimaryWindow>>,
     /// dialog_rect 诊断：任意实体的 Visibility 读取（关闭钮祖先链诊断）
@@ -943,6 +956,20 @@ fn handle_conn(mut stream: std::net::TcpStream, tx: Sender<ControlCommand>) {
                 let (reply_tx, reply_rx) = bounded::<String>(1);
                 if tx
                     .send(ControlCommand::BagProbe { reply: reply_tx })
+                    .is_ok()
+                {
+                    let s = reply_rx
+                        .recv_timeout(std::time::Duration::from_secs(2))
+                        .unwrap_or_else(|_| "{}".to_string());
+                    serde_json::from_str::<Value>(&s).unwrap_or_else(|_| json!({}))
+                } else {
+                    json!({"error": "control channel closed"})
+                }
+            }
+            "spell_fx_probe" => {
+                let (reply_tx, reply_rx) = bounded::<String>(1);
+                if tx
+                    .send(ControlCommand::SpellFxProbe { reply: reply_tx })
                     .is_ok()
                 {
                     let s = reply_rx
@@ -2562,6 +2589,50 @@ fn apply_control_commands(
                     Err(_) => json!({"ok": false, "error": "no local player inventory"}),
                 };
                 tracing::info!("🎮 control bag_probe: {payload}");
+                let _ = reply.send(payload.to_string());
+            }
+            ControlCommand::SpellFxProbe { reply } => {
+                // 只读：渲染侧真正 spawn 的特效实体（不是日志文本）。
+                // 输出按 (kind, library, base, follow) 排序——Query 迭代序不稳定，
+                // 夹具要靠「连读两次一致」做仪器自检，所以必须确定性（见
+                // LESSON_HashMap派生JSON输出必须先排序保证确定性）。
+                let mut rows: Vec<(String, String, u64, u64, usize, usize)> = Vec::new();
+                for fx in q.spell_fx.iter() {
+                    rows.push((
+                        "cast".to_string(),
+                        format!("{:?}", fx.library),
+                        fx.base as u64,
+                        fx.follow_object_id as u64,
+                        fx.frames,
+                        (fx.dur * 1000.0) as usize,
+                    ));
+                }
+                for m in q.spell_missiles.iter() {
+                    rows.push((
+                        "missile".to_string(),
+                        format!("{:?}", m.library),
+                        m.base as u64,
+                        0,
+                        m.frames,
+                        (m.frame_ms * 1000.0) as usize,
+                    ));
+                }
+                rows.sort();
+                let active: Vec<Value> = rows
+                    .into_iter()
+                    .map(|(kind, library, base, follow, frames, ms)| {
+                        json!({
+                            "kind": kind,
+                            "library": library,
+                            "base": base,
+                            "frames": frames,
+                            "follow_object_id": follow,
+                            "ms": ms,
+                        })
+                    })
+                    .collect();
+                let payload = json!({ "ok": true, "count": active.len(), "active": active });
+                tracing::info!("🎮 control spell_fx_probe: count={}", payload["count"]);
                 let _ = reply.send(payload.to_string());
             }
             ControlCommand::UiNodesAt { x, y, reply } => {
