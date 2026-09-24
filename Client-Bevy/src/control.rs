@@ -550,6 +550,14 @@ struct ControlQueries<'w, 's> {
     session: Res<'w, crate::network::SessionState>,
     /// `quest_probe` 用：客户端侧任务日记状态（已接/已完成标记）
     quest_log: Res<'w, crate::game::dialogs::quest_log::QuestLogState>,
+    /// `chat_probe` 用：聊天过滤设置——`transparent`（C# Settings.TransparentChat）决定面板底色
+    /// 是否半透明；owner 缺陷②的实机判据要读它，而 `apply_control_commands` 的参数表已到
+    /// 16 个 SystemParam 上限（再多会因 `ObserverSystem` 实现上限编译失败），故挂在 `ControlQueries`。
+    chat_filter: Res<'w, crate::game::chat::ChatFilter>,
+    /// `chat_probe` 用：主窗口（逻辑尺寸 + `scale_factor`）。
+    /// 截图落盘的是**物理像素**（窗口逻辑尺寸 × scale_factor），而 UI 命中/绘制用的是逻辑坐标——
+    /// 像素判据（l5t 的"面板展开后是否不透明"）必须按这个比例换算，否则采样区根本不是面板。
+    window: Query<'w, 's, &'static bevy::window::Window, With<bevy::window::PrimaryWindow>>,
     /// ⑤ 探针用：本地玩家背包组件（占用/总格数、重量）
     bag: Query<'w, 's, &'static crate::game::player_state::Inventory, With<LocalPlayer>>,
     /// `combat_probe` 用：本地玩家状态标志——`auto_attack_system` 的 run_if 是
@@ -2495,7 +2503,30 @@ fn apply_control_commands(
                         json!({"text": text, "channel": format!("{chan:?}")})
                     })
                     .collect();
-                let payload = json!({"ok": true, "count": lines.len(), "lines": lines});
+                // owner 四缺陷（①滚动 / ②透明 / ③对齐 / ④尺寸还原）的实机判据要读**滚动状态与几何**，
+                // 不能只看最近几行文本：`tools/acceptance/l5t_chat_dialog4.ps1` 就是靠这些字段断言的。
+                // 全部只读，取自 `ChatState` 与 `game::chat` 的纯函数（与绘制/命中同源，避免两套口径漂移）。
+                let (px, py, pw, ph) = crate::game::chat::chat_panel_rect(chat.size);
+                let payload = json!({
+                    "ok": true,
+                    "count": lines.len(),
+                    "lines": lines,
+                    "size": chat.size,
+                    "visible_lines": chat.visible_lines,
+                    "scroll_up": chat.scroll_up,
+                    "total_lines": chat.lines.len(),
+                    "max_scroll": chat.lines.len().saturating_sub(chat.visible_lines),
+                    "transparent": q.chat_filter.transparent,
+                    "panel": {"x": px, "y": py, "w": pw, "h": ph},
+                    "panel_top": py,
+                    "bar_top": crate::game::chat::chat_bar_top(chat.size),
+                    // 物理像素 = 逻辑坐标 × scale（截图判据用；见 `ControlQueries::window` 注释）
+                    "window": q.window.single().ok().map(|w| json!({
+                        "w": w.width(),
+                        "h": w.height(),
+                        "scale": w.scale_factor(),
+                    })),
+                });
                 let _ = reply.send(payload.to_string());
             }
             ControlCommand::BagProbe { reply } => {

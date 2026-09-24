@@ -1636,9 +1636,16 @@ fn chat_wheel_system(
     mut wheels: MessageReader<MouseWheel>,
     mut chat: ResMut<ChatState>,
     windows: Query<&Window>,
+    probe: Res<crate::control::CursorProbe>,
 ) {
-    let Ok(window) = windows.single() else { return };
-    let Some(cursor) = window.cursor_position() else {
+    // 命中位置必须走统一口径 `resolve_cursor`（CursorProbe 优先）——与 #2767 之后
+    // tooltip / npc / theme 等悬停系统一致。此前这里直接读 `window.cursor_position()`：
+    // 注入式验收（`tools/acceptance/l5t_chat_dialog4.ps1`）把光标放在面板中心也点不动聊天窗，
+    // 且窗口不存在（无头测试）时直接 return，连测都测不了。
+    let Some(cursor) = crate::control::resolve_cursor(
+        probe.pos,
+        windows.single().ok().and_then(|w| w.cursor_position()),
+    ) else {
         return;
     };
     // 命中区取**当前档位**的面板矩形（此前硬编码只在 0 档成立 → 展开后滚轮失效）
@@ -1673,12 +1680,16 @@ fn chat_key_scroll_system(
     keys: Res<ButtonInput<KeyCode>>,
     mut chat: ResMut<ChatState>,
     windows: Query<&Window>,
+    probe: Res<crate::control::CursorProbe>,
 ) {
     if chat.input_active {
         return;
     }
-    let Ok(window) = windows.single() else { return };
-    let Some(cursor) = window.cursor_position() else {
+    // 同 `chat_wheel_system`：统一走 `resolve_cursor`（CursorProbe 优先）。
+    let Some(cursor) = crate::control::resolve_cursor(
+        probe.pos,
+        windows.single().ok().and_then(|w| w.cursor_position()),
+    ) else {
         return;
     };
     // 同上：命中区取当前档位矩形
@@ -1757,14 +1768,18 @@ fn chat_scroll_drag_system(
     windows: Query<&Window>,
     buttons: Res<ButtonInput<MouseButton>>,
     track: Query<(&Transform, &Sprite), With<ChatScrollTrack>>,
+    probe: Res<crate::control::CursorProbe>,
     mut dragging: Local<bool>,
 ) {
     if chat.input_active {
         *dragging = false;
         return;
     }
-    let Ok(window) = windows.single() else { return };
-    let Some(cursor) = window.cursor_position() else {
+    // 同 `chat_wheel_system`：统一走 `resolve_cursor`（CursorProbe 优先）。
+    let Some(cursor) = crate::control::resolve_cursor(
+        probe.pos,
+        windows.single().ok().and_then(|w| w.cursor_position()),
+    ) else {
         return;
     };
     let Ok((_, sprite)) = track.single() else {
@@ -2035,6 +2050,73 @@ fn chat_server_events(
 
 #[cfg(test)]
 mod tests {
+
+    /// 门禁（owner 缺陷①）：聊天窗滚轮的命中位置必须走统一口径 `resolve_cursor`
+    /// —— `CursorProbe`（注入式验收/自动化）优先，其次才是真实窗口光标。
+    ///
+    /// 此前三个系统（滚轮/键盘/拖动）直接读 `window.cursor_position()`：
+    /// 无头测试里连 `Window` 都没有 → 系统直接 return；实机注入把光标放在面板中心也点不动
+    /// ——`tools/acceptance/l5t_chat_dialog4.ps1` 首跑就是全红（scroll_up 恒 0）。
+    ///
+    /// 阳性对照写在同一条测试里：探针不在面板内时**必须不动** scroll_up
+    /// （把 `resolve_cursor` 换回 `window.cursor_position()` 会让第一段直接红）。
+    #[test]
+    fn chat_wheel_hits_via_cursor_probe() {
+        use bevy::ecs::message::Messages;
+        use bevy::ecs::system::RunSystemOnce;
+
+        let build = |probe: Option<Vec2>, win_cursor: Option<Vec2>| {
+            let mut world = World::new();
+            world.init_resource::<Messages<MouseWheel>>();
+            world.insert_resource(crate::control::CursorProbe { pos: probe });
+            let mut chat = ChatState::default();
+            chat.size = 0;
+            chat.visible_lines = chat_size_lines(0);
+            for i in 0..30 {
+                chat.add_line(format!("line-{i}"), Color::WHITE, ChatChannel::All);
+            }
+            world.insert_resource(chat);
+            // `win_cursor = None`：模拟无头/无焦点（真实光标不可用）——旧实现直接 return
+            let mut window = Window::default();
+            window.set_cursor_position(win_cursor);
+            let win = world.spawn(window).id();
+            world.write_message(MouseWheel {
+                unit: MouseScrollUnit::Line,
+                x: 0.0,
+                y: 3.0,
+                window: win,
+                phase: bevy::input::touch::TouchPhase::Moved,
+            });
+            world
+                .run_system_once(chat_wheel_system)
+                .expect("滚轮系统应成功");
+            world.resource::<ChatState>().scroll_up
+        };
+
+        let (px, py, pw, ph) = chat_panel_rect(0);
+        let inside = Vec2::new(px + pw / 2.0, py + ph / 2.0);
+        let outside = Vec2::new(px - 50.0, py / 2.0);
+        assert!(
+            build(Some(inside), None) > 0,
+            "CursorProbe 落在面板内时滚轮必须改变 scroll_up（否则聊天窗在注入式验收里点不动）"
+        );
+        // 阳性对照（内建负控）：探针为 None 且窗口无光标 → 不得滚动
+        assert_eq!(
+            build(None, None),
+            0,
+            "无任何光标来源时不得滚动（证明开关是探针，不是把命中判定整个放宽）"
+        );
+        // 优先级必须钉住：探针优先于真实光标（窗口光标故意放在面板外）
+        assert!(
+            build(Some(inside), Some(outside)) > 0,
+            "探针优先于真实光标：窗口光标在面板外时也必须按探针命中"
+        );
+        assert_eq!(
+            build(None, Some(outside)),
+            0,
+            "探针不在面板内且真实光标也在面板外时不得滚动"
+        );
+    }
 
     /// 门禁（owner 缺陷③）：轨道高度必须随档位对齐内容区，且绝不再退化成 1px
     /// 阳性对照（实做）：把兜底改成恒 1.0 → 第 2 条断言立即红。
