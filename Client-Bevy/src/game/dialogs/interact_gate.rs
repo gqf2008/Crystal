@@ -125,10 +125,54 @@ fn synth_data_dir() -> std::path::PathBuf {
     .clone()
 }
 
+/// 邮件窗结构门禁的专用合成资产目录：除 `Title` 的上列帧外全是 1x1。
+///
+/// 声明值 = **真实资产实测**（`Data/Title.Lib`，2026-09-25 用帧头读得）：
+/// `[670]=312x444`（邮件列表）、`[671]=236x300`（写信）、`[672]=236x300`（读书信）、
+/// `[674]=236x384`（待寄）、`[675]=236x384`（读包裹）、`[676]=144x36`（ItemCover）。
+/// 其中 `Title[675]` 的 384 正是「C# `MailReadParcelDialog.Size` 声明 236x300 与其控件
+/// y 到 350 自相矛盾」时按美术落地的依据。
+fn synth_mail_lib_dir() -> std::path::PathBuf {
+    static DIR: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
+    DIR.get_or_init(|| {
+        let dir = std::env::temp_dir().join("crystal_ui_mail_struct_libs");
+        std::fs::create_dir_all(&dir).expect("建邮件结构门禁合成资产目录");
+        for name in SYNTH_LIBS {
+            let sized = name == &LibraryName::Title;
+            write_synth_lib_sized(
+                &dir.join(format!("{}.Lib", name.default_path())),
+                SYNTH_FRAMES,
+                |i| match (sized, i) {
+                    (true, 670) => (312, 444),
+                    (true, 671) | (true, 672) => (236, 300),
+                    (true, 674) | (true, 675) => (236, 384),
+                    (true, 676) => (144, 36),
+                    _ => (1, 1),
+                },
+            );
+        }
+        dir
+    })
+    .clone()
+}
+
 /// 写一个最小合法 `.Lib`（version 2）：文件头 + 索引表 + 每帧
 /// 「17 字节 `ImageInfo` 头 + gzip(BGRA)」（见 `resources/mlibrary.rs` 的解析）。
 /// 所有帧共用同一份 1x1 压缩数据——门禁只关心「精灵存在 ⇒ 控件被创建」，图案无意义。
 fn write_synth_lib(path: &std::path::Path, frames: usize) {
+    write_synth_lib_sized(path, frames, |_| (1, 1));
+}
+
+/// 每个索引可自定义宽高的合成 `.Lib`。
+///
+/// 像素数据仍是一份 1x1 gzip（加载器会按声明的 `width*height*4` 补零，
+/// 见 `mlibrary.rs::decompress_image`），**但 `ImageInfo` 里声明的尺寸是真的**——
+/// 于是 Bevy 侧的 `Assets<Image>` 会带正确像素尺寸，可用于「根面板底图是不是那一帧」的判据。
+fn write_synth_lib_sized(
+    path: &std::path::Path,
+    frames: usize,
+    size_of: impl Fn(usize) -> (i16, i16),
+) {
     use std::io::Write;
     let mut enc = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::fast());
     enc.write_all(&[0x40, 0x80, 0xC0, 0xFF]).expect("gzip 写入");
@@ -142,9 +186,10 @@ fn write_synth_lib(path: &std::path::Path, frames: usize) {
     for i in 0..frames {
         out.extend_from_slice(&((header_len + i * frame_len) as i32).to_le_bytes());
     }
-    for _ in 0..frames {
-        out.extend_from_slice(&1i16.to_le_bytes()); // width
-        out.extend_from_slice(&1i16.to_le_bytes()); // height
+    for i in 0..frames {
+        let (w, h) = size_of(i);
+        out.extend_from_slice(&w.to_le_bytes()); // width
+        out.extend_from_slice(&h.to_le_bytes()); // height
         for _ in 0..4 {
             // offset_x / offset_y / shadow_x / shadow_y
             out.extend_from_slice(&0i16.to_le_bytes());
@@ -159,7 +204,13 @@ fn write_synth_lib(path: &std::path::Path, frames: usize) {
 /// 最小可跑的 headless App：与生产同构地进 `AppState::Game`（各窗在 `OnEnter` 里
 /// 建自己的 UI），但不含窗口/渲染/网络。
 fn sweep_app() -> App {
-    let mut libs = Libraries::new(synth_data_dir());
+    sweep_app_with(synth_data_dir())
+}
+
+/// 同 [`sweep_app`]，但换成指定的合成资产目录（供「要按帧尺寸做判据」的用例使用，
+/// 见 [`mail_panels_have_native_background_sprites`]）。
+fn sweep_app_with(data_dir: std::path::PathBuf) -> App {
+    let mut libs = Libraries::new(data_dir);
     libs.init_single_libraries();
     // 合成库已装载：置 initialized 阻止各窗 spawn 里的 `ensure_initialized()` 把
     // data_path 改回 `resolve_data_path()`（CI 无 `Data/` → 每窗 return，门禁空转）
@@ -474,4 +525,112 @@ fn sweep_kind_list_matches_live_manifest() {
             .collect::<Vec<_>>(),
         "「设计无 X」名单与清单 no_close_by_design 不一致"
     );
+}
+
+/// #3103：写/读邮件**四张窗**的「真底图」结构门禁。
+///
+/// 上一批（#3106）留下的债：`compose_windows_match_csharp_geometry` 只断言「常量 == 字面量」，
+/// 把实现改回半透明黑底它照样绿（独立复核指出）。本用例补**实现级**判据：
+/// spawn 出来的四张窗根面板必须
+/// ① 带 `ImageNode`（= 真底图，而不是 `BackgroundColor` 自造底）；
+/// ② 底图纹理尺寸 == 该窗面板的 C#/美术尺寸（本用例用按真实尺寸声明的合成 `Title` 库，
+///    故这条能钉住"用的是哪一帧"）；
+/// ③ 根上不得出现自造的 60% 黑底（owner 2026-09-24 截图里的病象）。
+///
+/// 阳性对照（实做）：把任一面板改回 `BackgroundColor(srgba(0,0,0,0.6))` → ① 直接红
+/// （没有 `ImageNode`）；把面板图换成另一帧**同尺寸**的 `Title[672]`（236x300）→ ② 不红，
+/// 如实记录（同尺寸不同帧在这种判据下不可分辨，靠 `ui_alignment` 的资产尺寸表兜住）。
+#[test]
+fn mail_panels_have_native_background_sprites() {
+    use super::mail::{ComposeWin, MailComposeRoot, MailReadRoot, ReadWin};
+
+    let mut app = sweep_app_with(synth_mail_lib_dir());
+    app.update(); // 让 OnEnter(Game) 的 spawn 命令落到世界
+
+    let mut checked: Vec<(String, (u32, u32))> = Vec::new();
+    // 先把四张窗的「标记 + 图柄 + Node + 底色」拷出来（查询要 `&mut World`，
+    // 不能在同一个借用里再读 `Assets<Image>`）
+    let found: Vec<(String, Handle<Image>, Node, Option<BackgroundColor>)> = {
+        let world = app.world_mut();
+        let mut compose_q = world.query::<(
+            &MailComposeRoot,
+            &ImageNode,
+            &Node,
+            Option<&BackgroundColor>,
+        )>();
+        let compose: Vec<_> = compose_q
+            .iter(world)
+            .map(|(root, img, node, bg)| {
+                (
+                    format!("{:?}", root.0),
+                    img.image.clone(),
+                    node.clone(),
+                    bg.copied(),
+                )
+            })
+            .collect();
+        let mut read_q =
+            world.query::<(&MailReadRoot, &ImageNode, &Node, Option<&BackgroundColor>)>();
+        let read: Vec<_> = read_q
+            .iter(world)
+            .map(|(root, img, node, bg)| {
+                (
+                    format!("{:?}", root.0),
+                    img.image.clone(),
+                    node.clone(),
+                    bg.copied(),
+                )
+            })
+            .collect();
+        compose.into_iter().chain(read).collect()
+    };
+    {
+        let images = app.world().resource::<Assets<Image>>();
+        for (tag, handle, node, bg) in found {
+            let expect = match tag.as_str() {
+                "Letter" => (236.0_f32, 300.0_f32),
+                "Parcel" => (236.0, 384.0),
+                other => panic!("未知邮件窗 {other}"),
+            };
+            let img = images.get(&handle).unwrap_or_else(|| {
+                panic!("{tag}: 根面板底图句柄不在 Assets<Image> 里（自造底？）")
+            });
+            assert_eq!(
+                (img.width() as f32, img.height() as f32),
+                expect,
+                "[底图] {tag}: 根面板纹理应来自该窗的 Title 帧（{}x{}）",
+                expect.0,
+                expect.1
+            );
+            assert_eq!(
+                (node.width, node.height),
+                (Val::Px(expect.0), Val::Px(expect.1)),
+                "[几何] {tag}: 根面板 Node 尺寸应等于 C# 面板尺寸"
+            );
+            if let Some(bg) = bg {
+                let c = bg.0.to_srgba();
+                let is_selfmade_overlay = c.alpha > 0.0
+                    && c.alpha < 1.0
+                    && c.red == 0.0
+                    && c.green == 0.0
+                    && c.blue == 0.0;
+                assert!(
+                    !is_selfmade_overlay,
+                    "[底图] {tag}: 根面板不得用自造半透明黑底（owner 截图病象）"
+                );
+            }
+            checked.push((tag, (img.width(), img.height())));
+        }
+    }
+
+    // 四张窗（写信/待寄/读书信/读包裹）都必须被查到——少一张说明它压根没建
+    let tags: Vec<&str> = checked.iter().map(|(t, _)| t.as_str()).collect();
+    for want in ["Letter", "Parcel"] {
+        assert_eq!(
+            tags.iter().filter(|t| **t == want).count(),
+            2,
+            "写侧/读侧各应有一张 {want} 窗（实查：{tags:?}）"
+        );
+    }
+    eprintln!("ui 邮件窗结构门禁：{checked:?}");
 }

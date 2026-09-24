@@ -4407,8 +4407,10 @@ fn hero_equipment_dialog_aligned() {
 // ---------------------------------------------------------------------------
 
 /// 枚举变体总数（`DialogKind` 无字段、判别值默认 0..N-1 连续）。
-/// 新增变体会让 [`kind_alignment_tests`] 的非穷尽 match **编译失败**，强制回到本文件登记。
-const DIALOG_KIND_COUNT: usize = 48;
+/// 新增变体会让 [`kind_alignment_tests`] 的非穷尽 match **编译失败**，强制回到本文件登记；
+/// 「登记表本身漏了尾部变体」（编译期查不出）由
+/// [`dialog_kind_registry_covers_all_variants`] 用 `Reflect` 的 `EnumInfo` 对账。
+const DIALOG_KIND_COUNT: usize = 50;
 
 /// 全窗口列表（判别值顺序；守卫断言 `ALL[i] as usize == i`）。
 const ALL_DIALOG_KINDS: [client_bevy::game::dialogs::DialogKind; DIALOG_KIND_COUNT] = [
@@ -4460,6 +4462,8 @@ const ALL_DIALOG_KINDS: [client_bevy::game::dialogs::DialogKind; DIALOG_KIND_COU
     client_bevy::game::dialogs::DialogKind::InputBox,
     client_bevy::game::dialogs::DialogKind::Memo,
     client_bevy::game::dialogs::DialogKind::FishingStatus,
+    client_bevy::game::dialogs::DialogKind::MailCompose,
+    client_bevy::game::dialogs::DialogKind::MailRead,
 ];
 
 /// 每个窗口登记覆盖它的对齐测试名。
@@ -4494,11 +4498,19 @@ fn kind_alignment_tests(kind: client_bevy::game::dialogs::DialogKind) -> &'stati
         K::Mail => &[
             "panel_sprites_batch_b1_match_csharp",
             "trust_merchant_price_filter_and_mail_aligned",
+            "mail_window_panels_native_aligned",
         ],
         // #3103：两张写邮件窗与邮件列表同源（`MailDialogs.cs`），由邮件批次的对齐测试覆盖
         K::MailCompose => &[
             "panel_sprites_batch_b1_match_csharp",
             "trust_merchant_price_filter_and_mail_aligned",
+            "mail_window_panels_native_aligned",
+        ],
+        // #3103 读侧：两张读邮件窗同源（`MailDialogs.cs:979-1272`），同上
+        K::MailRead => &[
+            "panel_sprites_batch_b1_match_csharp",
+            "trust_merchant_price_filter_and_mail_aligned",
+            "mail_window_panels_native_aligned",
         ],
         K::Guild => &["panel_sprites_batch_b7_match_csharp"],
         K::Ranking => &["ranking_dialog_aligned", "ranking_children_aligned"],
@@ -4562,7 +4574,90 @@ fn every_dialog_kind_has_alignment_coverage() {
             );
         }
     }
-    println!("  ✓ 48 个 DialogKind 全部有对齐断言登记（且登记名在源码中真实存在）");
+    println!(
+        "  ✓ {DIALOG_KIND_COUNT} 个 DialogKind 全部有对齐断言登记（且登记名在源码中真实存在）"
+    );
+}
+
+/// #3103：邮件五张窗的面板帧**实测资产**对账。
+///
+/// 离线常量断言（`mail.rs` 的 `read_windows_match_csharp_geometry`）只证明「我们抄的数是这些」；
+/// 这条证明「那些帧在真资产里确实是这个尺寸」——即写/读四张窗的底图帧选对了。
+/// 实测（2026-09-25，`Data/Title.Lib` 帧头）：`[670]=312x444`、`[671]=236x300`、`[672]=236x300`、
+/// `[674]=236x384`、`[675]=236x384`。
+///
+/// 注意 `MailReadParcelDialog`：C# 声明 `Size = 236x300` 但控件排到 y=350、附件格 y=311，
+/// 与该窗美术 `Title[675]=236x384` 一致——本端按美术落地（压成 300 会把收取/取消裁出面板）。
+#[test]
+fn mail_window_panels_native_aligned() {
+    use client_bevy::game::dialogs::mail as m;
+
+    require_assets!("mail_window_panels_native_aligned");
+    let mut libs = Libs::new();
+
+    // 帧索引：底图取自哪一帧（对齐 C# `Index = 670/671/672/674/675`）
+    assert_eq!(m::LETTER_PANEL, (LibraryName::Title, 671));
+    assert_eq!(m::READ_LETTER_PANEL, (LibraryName::Title, 672));
+    assert_eq!(m::PARCEL_PANEL, (LibraryName::Title, 674));
+    assert_eq!(m::READ_PARCEL_PANEL, (LibraryName::Title, 675));
+    assert_eq!(m::PANEL, (LibraryName::Title, 670));
+
+    // 尺寸：实现常量 == 真资产尺寸（帧选错/尺寸抄错都红）
+    assert_eq!(libs.size(LibraryName::Title, 670), m::PANEL_SIZE);
+    assert_eq!(libs.size(LibraryName::Title, 671), m::LETTER_SIZE);
+    assert_eq!(libs.size(LibraryName::Title, 672), m::READ_SIZE);
+    assert_eq!(libs.size(LibraryName::Title, 674), m::PARCEL_SIZE);
+    assert_eq!(libs.size(LibraryName::Title, 675), m::READ_PARCEL_SIZE);
+}
+
+/// #3103 读侧：登记表「尾部漏登记」的兜底门禁。
+///
+/// 背景：`every_dialog_kind_has_alignment_coverage` 只校验「`ALL_DIALOG_KINDS` 自身连续无缺口」，
+/// 抓不到**新变体追加在枚举末尾、却没进登记表**——#3103 加的 `MailCompose` 就是这样漏了一轮
+/// （枚举已 49 个，登记表仍是 48 个，测试全绿）。
+///
+/// 这里用 `#[derive(Reflect)]` 生成的 `EnumInfo`（`Type::type_info()`，无需注册）取**枚举真值**：
+/// 变体名逐个与登记表比对——只加变体不登记 → 条数/名字对不上 → 红。
+///
+/// 阳性对照（实做）：把 `ALL_DIALOG_KINDS` 末项删掉 → 本测试 FAILED（条数不符）。
+#[test]
+fn dialog_kind_registry_covers_all_variants() {
+    // `Typed` 是 bevy_reflect 里提供 `type_info()` 的 trait（`Type` 在该版本是结构体，
+    // 不是 trait——写错会以 "expected trait, found struct" 编译失败）
+    use bevy::reflect::{TypeInfo, Typed};
+
+    let info = <client_bevy::game::dialogs::DialogKind as Typed>::type_info();
+    let enum_info = match info {
+        TypeInfo::Enum(e) => e,
+        other => panic!("DialogKind 应派生 Reflect 为枚举，实际 {other:?}"),
+    };
+    let names: &[&str] = enum_info.variant_names();
+    assert_eq!(
+        names.len(),
+        DIALOG_KIND_COUNT,
+        "[对账] DialogKind 有 {} 个变体，DIALOG_KIND_COUNT 写的是 {}",
+        names.len(),
+        DIALOG_KIND_COUNT
+    );
+    assert_eq!(
+        ALL_DIALOG_KINDS.len(),
+        names.len(),
+        "[对账] ALL_DIALOG_KINDS 少登记了尾部变体（枚举 {} 个 vs 登记 {} 个）：{:?}",
+        names.len(),
+        ALL_DIALOG_KINDS.len(),
+        &names[ALL_DIALOG_KINDS.len()..]
+    );
+    for (i, kind) in ALL_DIALOG_KINDS.iter().enumerate() {
+        assert_eq!(
+            *kind as usize, i,
+            "[对账] 登记表第 {i} 项判别值不是 {i}（顺序/增删未同步）"
+        );
+        assert_eq!(
+            format!("{kind:?}"),
+            names[i],
+            "[对账] 登记表第 {i} 项与枚举变体名不符（变体被改名/位移）"
+        );
+    }
 }
 
 /// 批57 扫尾：16 窗关闭钮统一对齐 C# `Prguse2[360..362]`——无 `Size` → 原生 24x21，

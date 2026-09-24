@@ -22,7 +22,7 @@ use crate::ui::gray::UiGray;
 use crate::ui::sprite_ui::{shared_cjk_font, UiCjkFont, UiFont};
 use crate::ui::theme::{
     load_lib_image, spawn_close_button, spawn_container, spawn_icon_button, spawn_image,
-    spawn_item_cell_ui, spawn_label, spawn_panel, spawn_scroll_bar_ui, UiItemCellData,
+    spawn_item_cell_ui, spawn_label, spawn_panel, spawn_scroll_bar_ui, ImageButton, UiItemCellData,
     UiScrollList,
 };
 
@@ -35,6 +35,20 @@ pub struct MailEntry {
     pub unread: bool,
     pub gold: u32,
     pub collected: bool,
+    /// #3103 读侧：`MailInfo.Locked`——C# `MailListDialog.DeleteButton.Click` 的守卫
+    /// （`MailDialogs.cs:236` `if (SelectedMail == null || SelectedMail.Locked) return;`）
+    pub locked: bool,
+}
+
+/// 邮件附件条目（C# `MailInfo.Items[i]`；读信窗的 5 个 `MirItemCell` 用它渲染）
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct MailAttachment {
+    pub name: String,
+    /// `Items` 库图标索引（C# `MailItemRow.IconImage.Index = Mail.Items[0].Info.Image`）
+    pub image: u16,
+    pub count: u16,
+    /// 耐久比例 0.0-1.0（`max_dura == 0` 时 `None` → 不画耐久条，同 `MirItemCell`）
+    pub dura_ratio: Option<f32>,
 }
 
 /// 邮件详情（ReadMail 响应全文）
@@ -46,8 +60,13 @@ pub struct MailDetail {
     pub body: String,
     pub gold: u32,
     /// 附件名列表
-    pub items: Vec<String>,
+    pub items: Vec<MailAttachment>,
     pub collected: bool,
+    /// C# `MailInfo.SendDate`（Unix 秒）→ 读信窗 `DateSentLabel`
+    /// （`MailDialogs.cs:1102` `Mail.DateSent.ToString("dd/MM/yy H:mm:ss")`）
+    pub send_date: i64,
+    /// C# `MailInfo.Locked`：锁定后读信窗「删除」拒发（`:1049`）
+    pub locked: bool,
 }
 
 /// 邮件状态（网络 ReceiveMail 写入）
@@ -116,6 +135,9 @@ pub const CLOSE_POS: (f32, f32) = (MAIL_W - 24.0, 3.0);
 /// `MailComposeLetterDialog` / `MailComposeParcelDialog` 与 `MailListDialog` 是互不相关的独立窗
 /// （各自 `Movable = true`），故这里给独立 kind。
 pub const COMPOSE_DRAG_KIND: DialogKind = DialogKind::MailCompose;
+/// #3103 读侧：两张**读邮件**窗自己的拖动/置顶分组（理由同 [`COMPOSE_DRAG_KIND`]——
+/// C# 里 `MailReadLetterDialog` / `MailReadParcelDialog` 与邮件列表窗各自 `Movable`）。
+pub const READ_DRAG_KIND: DialogKind = DialogKind::MailRead;
 const MAIL_SCREEN_W: f32 = 1024.0;
 const MAIL_VISIBLE_ROWS: usize = 10;
 const MAIL_ROW_H: f32 = 33.0;
@@ -174,6 +196,101 @@ pub fn parcel_origin(inventory_w: f32) -> (f32, f32) {
     (inventory_w + PARCEL_X_GAP, 0.0)
 }
 
+// ============================================================================
+// #3103 读侧：读邮件两窗（C# `Client/MirScenes/Dialogs/MailDialogs.cs` 逐项抄录）
+//   `MailReadLetterDialog`（`:979-1107`）：Title[672] 236x300 @ (100,100)
+//   `MailReadParcelDialog`（`:1108-1272`）：Title[675] 236x300 @ (100,100)
+//
+// **原版自身的不一致（如实处理）**：`MailReadParcelDialog.Size = (236,300)`，但其控件 y 一直排到
+// 350、附件格 y=311——按美术实际高度落地（`Title[675]` 与 `Title[674]` 同族，内建边框到 384），
+// 与写侧 `MailComposeParcelDialog`（C# 显式 `Size = 236x384`）口径一致。若压成 300 高，
+// 面板 `Overflow::clip()` 会把收取/取消两键裁掉（既看不见也点不到，同 #3107 的坐骑窗）。
+// ============================================================================
+pub const READ_LETTER_PANEL: (LibraryName, usize) = (LibraryName::Title, 672);
+pub const READ_PARCEL_PANEL: (LibraryName, usize) = (LibraryName::Title, 675);
+pub const READ_SIZE: (f32, f32) = (236.0, 300.0);
+pub const READ_PARCEL_SIZE: (f32, f32) = (236.0, 384.0);
+pub const READ_POS: (f32, f32) = (100.0, 100.0);
+/// 两窗共用：发件人 @ (70,35)、发信时间 @ (70,56)，均 150x15 白字
+pub const READ_SENDER_POS: (f32, f32) = (70.0, 35.0);
+pub const READ_DATE_POS: (f32, f32) = (70.0, 56.0);
+pub const READ_LABEL_SIZE: (f32, f32) = (150.0, 15.0);
+/// 正文：书信 `MessageLabel @ (15,92) 202x165`；包裹 `@ (15,98) 202x165`
+pub const READ_LETTER_BODY_POS: (f32, f32) = (15.0, 92.0);
+pub const READ_PARCEL_BODY_POS: (f32, f32) = (15.0, 98.0);
+pub const READ_BODY_SIZE: (f32, f32) = (202.0, 165.0);
+/// 书信三键（C# `MirButton` 均不设 `Size` → 取精灵原生尺寸）
+pub const READ_DELETE_POS: (f32, f32) = (12.0, 265.0);
+pub const READ_LOCK_POS: (f32, f32) = (81.0, 265.0);
+pub const READ_LETTER_CANCEL_POS: (f32, f32) = (154.0, 265.0);
+pub const READ_DELETE_FRAMES: (usize, usize, usize) = (540, 541, 542);
+pub const READ_LOCK_FRAMES: (usize, usize, usize) = (686, 687, 688);
+/// 包裹窗赠金标签 `GoldSendLabel @ (63,290) 143x15`
+pub const READ_GOLD_POS: (f32, f32) = (63.0, 290.0);
+pub const READ_VALUE_SIZE: (f32, f32) = (143.0, 15.0);
+/// 包裹窗 5 个附件格 35x31 @ (27+36i, 311)（与 `MailComposeParcelDialog.Cells` 同格位）
+pub const READ_CELL_X0: f32 = 27.0;
+pub const READ_CELL_STEP: f32 = 36.0;
+pub const READ_CELL_Y: f32 = 311.0;
+pub const READ_CELL_SIZE: (f32, f32) = (35.0, 31.0);
+pub const READ_COLLECT_POS: (f32, f32) = (30.0, 350.0);
+pub const READ_PARCEL_CANCEL_POS: (f32, f32) = (135.0, 350.0);
+/// 收取钮：**已领取**`Title[680/681/682]`、**未领取（禁用）**`Title[683/684/685]`
+/// （`MailDialogs.cs:1243-1256` `if (!Mail.Collected) {Index=683..685; Enabled=false;}`）
+pub const READ_COLLECT_OK_FRAMES: (usize, usize, usize) = (680, 681, 682);
+pub const READ_COLLECT_DISABLED_FRAMES: (usize, usize, usize) = (683, 684, 685);
+
+/// C# `MailReadLetterDialog.ReadMail` / `MailReadParcelDialog.ReadMail` 的**选窗规则**
+/// （`MailDialogs.cs:213-220` 与 `:334-341` 两处同式）：
+/// `if (SelectedMail.Gold > 0 || SelectedMail.Items.Count > 0) → 包裹窗 else 书信窗`。
+pub fn read_window_for(detail: &MailDetail) -> ReadWin {
+    if detail.gold > 0 || !detail.items.is_empty() {
+        ReadWin::Parcel
+    } else {
+        ReadWin::Letter
+    }
+}
+
+/// 收取钮三帧（C# `UpdateParcel`/`ReadMail` 的 Index/Hover/Pressed 整套替换）
+pub fn collect_frames(collected: bool) -> (usize, usize, usize) {
+    if collected {
+        READ_COLLECT_OK_FRAMES
+    } else {
+        READ_COLLECT_DISABLED_FRAMES
+    }
+}
+
+/// C# `Mail.DateSent.ToString("dd/MM/yy H:mm:ss")`（本地墙钟；`H` 不补零）。
+/// `send_date <= 0`（时间戳缺失）→ 空串，不显示假日期。
+pub fn format_send_date(send_date: i64) -> String {
+    if send_date <= 0 {
+        return String::new();
+    }
+    chrono::DateTime::from_timestamp(send_date, 0)
+        .map(|t| {
+            t.with_timezone(&chrono::Local)
+                .format("%d/%m/%y %-H:%M:%S")
+                .to_string()
+        })
+        .unwrap_or_default()
+}
+
+/// C# `Gold.ToString("###,###,##0")`（读包裹窗 `MailDialogs.cs:1221`、待寄窗 `UpdateParcel`）：
+/// 千分位分隔，**0 照样输出 `"0"`**（末位占位符是 `0` 不是 `#`）。
+/// 实测口径（.NET `string.Format("{0:###,###,##0}", v)`）：`0→"0"`、`7→"7"`、`1234→"1,234"`、
+/// `1234567→"1,234,567"`——本函数逐项对齐，读/写两侧共用（避免两处各写一份漂移）。
+pub fn format_gold(gold: u32) -> String {
+    let digits = gold.to_string();
+    let mut out = String::with_capacity(digits.len() + digits.len() / 3);
+    for (i, c) in digits.chars().enumerate() {
+        if i > 0 && (digits.len() - i) % 3 == 0 {
+            out.push(',');
+        }
+        out.push(c);
+    }
+    out
+}
+
 /// 写邮件输入框槽位（`TextInputState.texts`；两窗正文各自独立，与 C# 两张窗各持
 /// 一个 `MirTextBox` 一致）。
 ///
@@ -229,10 +346,6 @@ pub struct MailDelete;
 #[derive(Component)]
 pub struct MailReadBtn;
 
-/// 收取附件按钮（C# MailReadParcelDialog.CollectButton → C.CollectParcel）
-#[derive(Component)]
-pub struct MailCollect;
-
 /// #2786：回复按钮（C# `MailDialogs.cs:180-196` `ReplyButton` `Prguse[569..571]` @(102,414)）
 #[derive(Component)]
 pub struct MailReplyBtn;
@@ -252,9 +365,6 @@ pub struct MailAttachSlot(pub usize);
 
 #[derive(Component)]
 pub struct MailLine(usize);
-
-#[derive(Component)]
-pub struct MailDetailText;
 
 // 写邮件界面
 #[derive(Component)]
@@ -311,6 +421,65 @@ pub struct MailStampOn;
 #[derive(Component)]
 pub struct MailCostLabel;
 
+// ---- #3103 读侧：读邮件两窗 ----
+
+/// 读邮件窗种类（C# `MailReadLetterDialog` / `MailReadParcelDialog` 两张窗）
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum ReadWin {
+    /// `Title[672]` 236x300 @ (100,100)
+    Letter,
+    /// `Title[675]` @ (100,100)，美术 236x384
+    Parcel,
+}
+
+/// 读邮件窗根面板（`AlwaysVisible` + 按 `MailState.detail` 驱动显隐，同 [`MailComposeRoot`]）
+#[derive(Component)]
+pub struct MailReadRoot(pub ReadWin);
+
+/// 读邮件窗按钮种类（C# `DeleteButton` / `LockButton` / `CancelButton` / `CloseButton` / `CollectButton`）
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum ReadBtn {
+    Delete,
+    Lock,
+    Cancel,
+    Close,
+    Collect,
+}
+
+/// 读邮件窗按钮（窗种类 + 按钮种类）
+#[derive(Component)]
+pub struct MailReadButton(pub ReadWin, pub ReadBtn);
+
+/// 读邮件窗的文本标签种类（C# 两窗 `SenderNameLabel`/`DateSentLabel`/`MessageLabel`
+/// 与包裹窗 `GoldSendLabel`；用一个查询统一刷新，避免同系统内多条 `&mut Text` 查询冲突）
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum ReadLabel {
+    /// `@ (70,35) 150x15`
+    Sender,
+    /// `@ (70,56) 150x15`
+    Date,
+    /// 书信 `@ (15,92)`、包裹 `@ (15,98)`，均 202x165
+    Body(ReadWin),
+    /// 包裹窗 `@ (63,290) 143x15`
+    Gold,
+}
+
+/// 读邮件窗文本标签
+#[derive(Component)]
+pub struct MailReadLabel(pub ReadLabel);
+
+/// 包裹窗附件格（C# `MailReadParcelDialog.Cells[5]`，只读展示）
+#[derive(Component)]
+pub struct MailReadCell(pub usize);
+
+/// 收取钮的两套三帧（C# `Index/HoverIndex/PressedIndex` 按 `Mail.Collected` 整组替换，
+/// `MailDialogs.cs:1243-1256`）——两套都在 spawn 时备好，状态翻转只换句柄，不重载资产。
+#[derive(Component)]
+pub struct MailCollectFrames {
+    pub ok: [Handle<Image>; 3],
+    pub disabled: [Handle<Image>; 3],
+}
+
 pub struct MailPlugin;
 
 impl Plugin for MailPlugin {
@@ -336,6 +505,8 @@ impl Plugin for MailPlugin {
                 mail_compose_follow_system,
                 mail_stamp_system,
                 mail_gold_system,
+                // #3103 读侧：读邮件两窗（显隐/字段/按钮），排在写侧之后以免同帧抢状态
+                mail_read_ui_system,
             )
                 .chain()
                 .run_if(in_state(AppState::Game)),
@@ -493,7 +664,9 @@ fn mail_compose_ui_system(
             t.0 = recipient.clone();
         }
     }
-    let gold_text = mail.compose_gold.to_string();
+    // C# 待寄窗 `UpdateParcel`：`GoldSendLabel.Text = GiftGoldAmount.ToString("###,###,##0")`
+    // ——与读包裹窗同一条格式串（`format_gold` 单一来源）
+    let gold_text = format_gold(mail.compose_gold);
     for mut t in &mut golds {
         if t.0 != gold_text {
             t.0 = gold_text.clone();
@@ -1034,6 +1207,256 @@ fn spawn_compose_body_input(
     });
 }
 
+/// 读邮件两窗（C# `MailReadLetterDialog` / `MailReadParcelDialog`）。
+///
+/// 与写侧同构：两窗都是**独立可拖窗**（`DialogRoot(READ_DRAG_KIND)` + [`AlwaysVisible`]，
+/// 显隐由 [`mail_read_ui_system`] 按 `MailState.detail` 驱动）。
+fn spawn_read_windows(
+    commands: &mut Commands,
+    libs: &mut GameLibraries,
+    images: &mut Assets<Image>,
+    cjk: &Handle<Font>,
+) {
+    fn native_size(libs: &mut GameLibraries, index: usize) -> (f32, f32) {
+        libs.0
+            .get_image(LibraryName::Title, index)
+            .map(|i| (i.width as f32, i.height as f32))
+            .unwrap_or((76.0, 25.0))
+    }
+
+    // ---- 读书信窗：C# `MailReadLetterDialog`（`:979-1107`） ----
+    if let Some(bg) = load_lib_image(libs, images, READ_LETTER_PANEL.0, READ_LETTER_PANEL.1) {
+        let letter = spawn_panel(
+            commands,
+            bg,
+            READ_POS.0,
+            READ_POS.1,
+            READ_SIZE.0,
+            READ_SIZE.1,
+            40,
+        );
+        commands.entity(letter).insert((
+            DialogRoot(READ_DRAG_KIND),
+            MailReadRoot(ReadWin::Letter),
+            AlwaysVisible,
+        ));
+        commands.entity(letter).with_children(|p| {
+            spawn_label(
+                p,
+                cjk,
+                "",
+                READ_SENDER_POS.0,
+                READ_SENDER_POS.1,
+                12.0,
+                Color::WHITE,
+                10,
+            )
+            .insert(MailReadLabel(ReadLabel::Sender));
+            spawn_label(
+                p,
+                cjk,
+                "",
+                READ_DATE_POS.0,
+                READ_DATE_POS.1,
+                12.0,
+                Color::WHITE,
+                10,
+            )
+            .insert(MailReadLabel(ReadLabel::Date));
+            spawn_label(
+                p,
+                cjk,
+                "",
+                READ_LETTER_BODY_POS.0,
+                READ_LETTER_BODY_POS.1,
+                12.0,
+                Color::WHITE,
+                10,
+            )
+            .insert(MailReadLabel(ReadLabel::Body(ReadWin::Letter)));
+            // C# 三键：删除 `Title[540..542]` @(12,265)、锁定 `Title[686..688]` @(81,265)、
+            // 取消 `Title[193..195]` @(154,265)——均不设 Size → 原生尺寸
+            for (frames, pos, tag) in [
+                (READ_DELETE_FRAMES, READ_DELETE_POS, ReadBtn::Delete),
+                (READ_LOCK_FRAMES, READ_LOCK_POS, ReadBtn::Lock),
+                (
+                    COMPOSE_CANCEL_FRAMES,
+                    READ_LETTER_CANCEL_POS,
+                    ReadBtn::Cancel,
+                ),
+            ] {
+                if let (Some(n), Some(h), Some(pr)) = (
+                    load_lib_image(libs, images, LibraryName::Title, frames.0),
+                    load_lib_image(libs, images, LibraryName::Title, frames.1),
+                    load_lib_image(libs, images, LibraryName::Title, frames.2),
+                ) {
+                    let (w, hh) = native_size(libs, frames.0);
+                    spawn_icon_button(p, n, h, pr, pos.0, pos.1, w, hh, 11)
+                        .insert(MailReadButton(ReadWin::Letter, tag));
+                }
+            }
+            if let Some(mut btn) = spawn_close_button(
+                p,
+                libs,
+                images,
+                READ_SIZE.0 - COMPOSE_CLOSE_DX,
+                COMPOSE_CLOSE_Y,
+                12,
+            ) {
+                btn.insert(MailReadButton(ReadWin::Letter, ReadBtn::Close));
+            }
+        });
+    }
+
+    // ---- 读包裹窗：C# `MailReadParcelDialog`（`:1108-1272`） ----
+    if let Some(bg) = load_lib_image(libs, images, READ_PARCEL_PANEL.0, READ_PARCEL_PANEL.1) {
+        let parcel = spawn_panel(
+            commands,
+            bg,
+            READ_POS.0,
+            READ_POS.1,
+            READ_PARCEL_SIZE.0,
+            READ_PARCEL_SIZE.1,
+            40,
+        );
+        commands.entity(parcel).insert((
+            DialogRoot(READ_DRAG_KIND),
+            MailReadRoot(ReadWin::Parcel),
+            AlwaysVisible,
+        ));
+        commands.entity(parcel).with_children(|p| {
+            spawn_label(
+                p,
+                cjk,
+                "",
+                READ_SENDER_POS.0,
+                READ_SENDER_POS.1,
+                12.0,
+                Color::WHITE,
+                10,
+            )
+            .insert(MailReadLabel(ReadLabel::Sender));
+            spawn_label(
+                p,
+                cjk,
+                "",
+                READ_DATE_POS.0,
+                READ_DATE_POS.1,
+                12.0,
+                Color::WHITE,
+                10,
+            )
+            .insert(MailReadLabel(ReadLabel::Date));
+            spawn_label(
+                p,
+                cjk,
+                "",
+                READ_PARCEL_BODY_POS.0,
+                READ_PARCEL_BODY_POS.1,
+                12.0,
+                Color::WHITE,
+                10,
+            )
+            .insert(MailReadLabel(ReadLabel::Body(ReadWin::Parcel)));
+            spawn_label(
+                p,
+                cjk,
+                "",
+                READ_GOLD_POS.0,
+                READ_GOLD_POS.1,
+                12.0,
+                Color::WHITE,
+                10,
+            )
+            .insert(MailReadLabel(ReadLabel::Gold));
+            // 5 个附件格 35x31 @ (27+36i, 311)（只读展示；C# 是 `MirItemCell` GridType=Mail）
+            for i in 0..5usize {
+                spawn_item_cell_ui(
+                    p,
+                    images,
+                    cjk,
+                    READ_CELL_X0 + i as f32 * READ_CELL_STEP,
+                    READ_CELL_Y,
+                    READ_CELL_SIZE.0,
+                    READ_CELL_SIZE.1,
+                    11,
+                    i,
+                )
+                .insert(MailReadCell(i));
+            }
+            // 收取钮：已领取 `Title[680..682]` / 未领取（禁用）`Title[683..685]` @(30,350)
+            let frames = [READ_COLLECT_OK_FRAMES, READ_COLLECT_DISABLED_FRAMES].map(|f| {
+                (
+                    load_lib_image(libs, images, LibraryName::Title, f.0),
+                    load_lib_image(libs, images, LibraryName::Title, f.1),
+                    load_lib_image(libs, images, LibraryName::Title, f.2),
+                )
+            });
+            if let (Some(a), Some(b)) = (triple(&frames[0]), triple(&frames[1])) {
+                let (w, hh) = native_size(libs, READ_COLLECT_OK_FRAMES.0);
+                spawn_icon_button(
+                    p,
+                    a.0.clone(),
+                    a.1.clone(),
+                    a.2.clone(),
+                    READ_COLLECT_POS.0,
+                    READ_COLLECT_POS.1,
+                    w,
+                    hh,
+                    11,
+                )
+                .insert((
+                    MailReadButton(ReadWin::Parcel, ReadBtn::Collect),
+                    MailCollectFrames {
+                        ok: [a.0, a.1, a.2],
+                        disabled: [b.0, b.1, b.2],
+                    },
+                ));
+            }
+            if let Some(mut btn) = spawn_close_button(
+                p,
+                libs,
+                images,
+                READ_PARCEL_SIZE.0 - COMPOSE_CLOSE_DX,
+                COMPOSE_CLOSE_Y,
+                12,
+            ) {
+                btn.insert(MailReadButton(ReadWin::Parcel, ReadBtn::Close));
+            }
+            if let (Some(n), Some(h), Some(pr)) = (
+                load_lib_image(libs, images, LibraryName::Title, COMPOSE_CANCEL_FRAMES.0),
+                load_lib_image(libs, images, LibraryName::Title, COMPOSE_CANCEL_FRAMES.1),
+                load_lib_image(libs, images, LibraryName::Title, COMPOSE_CANCEL_FRAMES.2),
+            ) {
+                let (w, hh) = native_size(libs, COMPOSE_CANCEL_FRAMES.0);
+                spawn_icon_button(
+                    p,
+                    n,
+                    h,
+                    pr,
+                    READ_PARCEL_CANCEL_POS.0,
+                    READ_PARCEL_CANCEL_POS.1,
+                    w,
+                    hh,
+                    11,
+                )
+                .insert(MailReadButton(ReadWin::Parcel, ReadBtn::Cancel));
+            }
+        });
+    }
+}
+
+/// 三帧句柄元组（缺任一帧 → `None`，对应控件不建）
+fn triple(
+    f: &(
+        Option<Handle<Image>>,
+        Option<Handle<Image>>,
+        Option<Handle<Image>>,
+    ),
+) -> Option<(Handle<Image>, Handle<Image>, Handle<Image>)> {
+    Some((f.0.clone()?, f.1.clone()?, f.2.clone()?))
+}
+
 /// 写邮件窗「发送 / 取消」（C# 两窗同为 `Title[607/608/609]` 与 `Title[193/194/195]`，
 /// 均不设 `Size` → 取精灵原生尺寸）。
 fn spawn_compose_send_cancel(
@@ -1173,19 +1596,6 @@ fn spawn_mail(
             )
             .insert(MailLine(i));
         }
-        // 阅读内容复用同一面板；有 detail 时隐藏行并显示正文。
-        spawn_label(
-            p,
-            &cjk,
-            "",
-            10.0,
-            58.0,
-            12.0,
-            Color::srgb(0.95, 0.95, 0.8),
-            12,
-        )
-        .insert((MailDetailText, Visibility::Hidden));
-
         // C# 列表操作按钮 y=414：写邮件 @75 / 回复 @102 / 阅读 @129 / 删除 @156
         let actions = [
             (75.0, 563usize, 564usize, 565usize, MailAction::Write),
@@ -1240,14 +1650,6 @@ fn spawn_mail(
                 }
             }
         }
-        // 附件领取按钮只在阅读详情且附件可领取时显示（C# MailReadParcelDialog）。
-        if let (Some(n), Some(h), Some(pr)) = (
-            load_lib_image(&mut libs, &mut images, LibraryName::Title, 680),
-            load_lib_image(&mut libs, &mut images, LibraryName::Title, 681),
-            load_lib_image(&mut libs, &mut images, LibraryName::Title, 682),
-        ) {
-            spawn_icon_button(p, n, h, pr, 100.0, 390.0, 32.0, 24.0, 10).insert(MailCollect);
-        }
         // C# `MailDialogs.cs:257-283`：`BlockListButton`/`BugReportButton` 是构造即
         // `GrayScale = true, Enabled = false` 的禁用占位键（`Prguse[520]` @(183,414)、
         // `Prguse[523]` @(210,414)，均 28x25）；两键无 Click 处理，且 `MirControl` 的
@@ -1261,6 +1663,7 @@ fn spawn_mail(
     });
 
     spawn_compose_windows(&mut commands, &mut libs, &mut images, &cjk);
+    spawn_read_windows(&mut commands, &mut libs, &mut images, &cjk);
 }
 
 fn mail_ui_system(
@@ -1272,31 +1675,10 @@ fn mail_ui_system(
     close: Query<(Entity, &Interaction), With<MailClose>>,
     delete_btn: Query<(Entity, &Interaction), With<MailDelete>>,
     read_btn: Query<(Entity, &Interaction), With<MailReadBtn>>,
-    mut collect_btn: Query<
-        (Entity, &Interaction, &mut Visibility),
-        (
-            With<MailCollect>,
-            Without<MailLine>,
-            Without<MailDetailText>,
-        ),
-    >,
-    mut widgets: Query<
-        (&mut Visibility, Option<&MailLine>, Option<&MailDetailText>),
-        (
-            With<MailWidget>,
-            Without<MailCollect>,
-            Without<MailLine>,
-            Without<MailDetailText>,
-        ),
-    >,
-    mut lines: Query<
-        (&mut Text, &mut TextColor, &mut Visibility, &MailLine),
-        (Without<MailDetailText>, Without<MailCollect>),
-    >,
-    mut detail_texts: Query<
-        (&mut Text, &mut Visibility, &MailDetailText),
-        (Without<MailLine>, Without<MailCollect>),
-    >,
+    // #3103 读侧：阅读态不再画在列表窗内（内容改由独立读邮件窗渲染），
+    // 故本系统只剩「根面板显隐 + 行文本 + 滚动」三块。
+    mut widgets: Query<&mut Visibility, (With<MailWidget>, Without<MailLine>)>,
+    mut lines: Query<(&mut Text, &mut TextColor, &mut Visibility, &MailLine)>,
     mut scroll: Query<&mut UiScrollList, With<MailWidget>>,
     mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
     panel_origin: Query<&Node, With<MailWidget>>,
@@ -1310,10 +1692,7 @@ fn mail_ui_system(
         *inter == Interaction::Pressed && was != Some(Interaction::Pressed)
     }
     let open = mgr.is_open(DialogKind::Mail);
-    for (mut vis, line, _det) in &mut widgets {
-        if line.is_some() || _det.is_some() {
-            continue;
-        }
+    for mut vis in &mut widgets {
         *vis = if open {
             Visibility::Visible
         } else {
@@ -1321,35 +1700,24 @@ fn mail_ui_system(
         };
     }
     if !open {
-        // 收取附件按钮（MailCollect）不在 widgets 查询里，关闭时必须隐藏
-        for (_, _, mut vis) in &mut collect_btn {
-            *vis = Visibility::Hidden;
-        }
         return;
     }
     for (e, inter) in &close {
         if edge(e, inter, &mut prev_inter) {
-            if mail.detail.is_some() {
-                // 阅读态先返回列表，第二次关闭才关闭整个邮件窗。
-                mail.detail = None;
-                mail.selected = None;
-            } else {
-                mgr.close(DialogKind::Mail);
-            }
+            // C# `MailDialogs.cs:85` `CloseButton.Click += Hide()`——只关列表窗本身。
+            // 读邮件窗是**独立窗**（`:701-703`），不随列表关闭；只有 ESC 的 Closeall
+            // 会把它们一起隐藏（见 `mail_compose_follow_system`）。
+            mail.selected = None;
+            mgr.close(DialogKind::Mail);
         }
     }
-    let showing_detail = mail.detail.is_some();
     // 列表（#89 支持滚轮滚动）
     let mut sl = scroll.single_mut();
     if let Ok(sl) = sl.as_mut() {
         sl.set_total(mail.mails.len());
         let off = sl.offset;
         for (mut text, mut color, mut vis, line) in &mut lines {
-            *vis = if showing_detail {
-                Visibility::Hidden
-            } else {
-                Visibility::Visible
-            };
+            *vis = Visibility::Visible;
             let idx = off + line.0;
             text.0 = match mail.mails.get(idx) {
                 Some(m) => {
@@ -1368,59 +1736,10 @@ fn mail_ui_system(
             }
         }
     }
-    // 内容区
-    for (mut text, mut vis, _) in &mut detail_texts {
-        *vis = if showing_detail {
-            Visibility::Visible
-        } else {
-            Visibility::Hidden
-        };
-        text.0 = match mail.detail.as_ref() {
-            Some(d) => {
-                let mut s = format!("发件人: {}\n主题: {}\n\n{}", d.sender, d.subject, d.body);
-                if d.gold > 0 {
-                    s.push_str(&format!("\n金币: {}", d.gold));
-                }
-                if !d.items.is_empty() || d.gold > 0 {
-                    if d.collected {
-                        s.push_str("\n（附件待领取）");
-                    } else {
-                        s.push_str("\n（附件需到邮局取回）");
-                    }
-                }
-                if !d.items.is_empty() {
-                    s.push_str(&format!("\n附件: {}", d.items.join(", ")));
-                }
-                s
-            }
-            None => "点击上方邮件查看内容".to_string(),
-        };
-    }
-    // 收取附件（#166 C# MailReadParcelDialog.CollectButton → C.CollectParcel）
-    let can_collect = mail
-        .detail
-        .as_ref()
-        .map(|d| d.collected && (!d.items.is_empty() || d.gold > 0))
-        .unwrap_or(false);
-    for (e, inter, mut vis) in &mut collect_btn {
-        *vis = if open && showing_detail && can_collect {
-            Visibility::Visible
-        } else {
-            Visibility::Hidden
-        };
-        if edge(e, inter, &mut prev_inter) && can_collect {
-            if let Some(d) = mail.detail.as_ref() {
-                net.send_packet(&mir2_shared::packets::client::mail::CollectParcel {
-                    mail_id: d.mail_id,
-                });
-                tracing::info!("📦 收取附件: mail_id={}", d.mail_id);
-            }
-        }
-    }
-
-    // 阅读按钮与行点击共用同一 C.ReadMail 路径。
+    // 阅读按钮（C# `MailDialogs.cs:209-221`）：有选中行就开对应的读邮件窗
+    // （窗的显隐由 `MailState.detail` 驱动，见 `mail_read_ui_system`）。
     for (e, inter) in &read_btn {
-        if edge(e, inter, &mut prev_inter) && !showing_detail {
+        if edge(e, inter, &mut prev_inter) {
             if let Some(idx) = mail.selected {
                 if let Some(m) = mail.mails.get(idx) {
                     net.send_packet(&mir2_shared::packets::client::mail::ReadMail {
@@ -1432,8 +1751,9 @@ fn mail_ui_system(
         }
     }
 
-    // 点击列表项 → ReadMail（#89：行号 = 滚动偏移 + 可视槽位）
-    if mouse.just_pressed(MouseButton::Left) && !showing_detail {
+    // 行点击（C# `MailDialogs.cs:322-343`；行号 = 滚动偏移 + 可视槽位）：
+    // 点**未选中**行 = 只选中（不发包）；点**已选中**行 = 打开读邮件窗（C.ReadMail）。
+    if mouse.just_pressed(MouseButton::Left) {
         let Ok(window) = windows.single() else { return };
         let Some(cursor) = window.cursor_position() else {
             return;
@@ -1453,18 +1773,26 @@ fn mail_ui_system(
                 if let Some(m) = mail.mails.get(off + i) {
                     let mail_id = m.mail_id;
                     let subject = m.subject.clone();
-                    mail.selected = Some(off + i);
-                    net.send_packet(&mir2_shared::packets::client::mail::ReadMail { mail_id });
-                    tracing::info!("📧 读取邮件: {} ({})", subject, mail_id);
+                    if mail.selected == Some(off + i) {
+                        net.send_packet(&mir2_shared::packets::client::mail::ReadMail { mail_id });
+                        tracing::info!("📧 读取邮件: {} ({})", subject, mail_id);
+                    } else {
+                        mail.selected = Some(off + i);
+                        tracing::info!("📧 选中邮件: {} ({})", subject, mail_id);
+                    }
                 }
                 break;
             }
         }
     }
-    // 删除邮件（#132）
+    // 删除邮件（#132；C# `MailDialogs.cs:234-236`：`SelectedMail.Locked` 时拒发）
     for (e, inter) in &delete_btn {
         if edge(e, inter, &mut prev_inter) {
             if let Some(idx) = mail.selected {
+                if mail.mails.get(idx).map(|m| m.locked).unwrap_or(false) {
+                    tracing::info!("📧 邮件已锁定，拒绝删除");
+                    continue;
+                }
                 if let Some(m) = mail.mails.get(idx) {
                     net.send_packet(&mir2_shared::packets::client::mail::DeleteMail {
                         mail_id: m.mail_id,
@@ -1473,6 +1801,146 @@ fn mail_ui_system(
                     mail.mails.remove(idx);
                     mail.selected = None;
                     mail.detail = None;
+                }
+            }
+        }
+    }
+}
+
+/// #3103 读侧：两张读邮件窗的显隐、内容与按钮。
+///
+/// 逐条对齐 C#：
+/// - **选窗**：`MailDialogs.cs:213-220`（阅读钮）与 `:322-343`（行点击）同式——
+///   `Gold > 0 || Items.Count > 0` → `MailReadParcelDialog`，否则 `MailReadLetterDialog`
+///   （见 [`read_window_for`]）；
+/// - **两窗互斥**：C# 未显式隐藏另一张（两张底图同位置，真同开会互相压住）；
+///   本端「只显示当前这封该开的那张」，等价于后读覆盖先读且不留叠影（PR 已说明）；
+/// - **字段**：发件人 `@(70,35)`、发信时间 `@(70,56)`（`dd/MM/yy H:mm:ss`）、正文
+///   `@(15,92|98) 202x165`、赠金 `@(63,290)`；附件格 5 个 `35x31 @(27+36i,311)`；
+/// - **关闭**：X / 取消 = `MailDialogs.cs:1006/1087/1137/1202` 的 `Hide()`（本端清 `detail`）；
+/// - **删除**：`:1047-1056`，`Mail.Locked` 时直接 return（不发 `C.DeleteMail`）；
+/// - **锁定**：`:1068-1075`，`Mail.Locked = !Mail.Locked` + `C.LockMail{lock}`；
+/// - **收取**：`:1177-1190`，`C.CollectParcel`；未领取（`!Collected`）时按钮换成
+///   `Title[683/684/685]` 且禁用（`:1243-1256`）。
+#[allow(clippy::too_many_arguments)]
+fn mail_read_ui_system(
+    mut mail: ResMut<MailState>,
+    net: Res<NetConnection>,
+    mut roots: Query<(&MailReadRoot, &mut Visibility)>,
+    mut labels: Query<(&MailReadLabel, &mut Text)>,
+    mut buttons: Query<(
+        Entity,
+        &Interaction,
+        &MailReadButton,
+        Option<&mut ImageButton>,
+        Option<&mut ImageNode>,
+        Option<&MailCollectFrames>,
+    )>,
+    mut cells: Query<(&MailReadCell, &mut UiItemCellData)>,
+    mut libs: ResMut<GameLibraries>,
+    mut images: ResMut<Assets<Image>>,
+    mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
+    mut rendered: Local<Option<(u64, bool, usize)>>,
+) {
+    let want = mail.detail.as_ref().map(read_window_for);
+    for (root, mut vis) in &mut roots {
+        *vis = if want == Some(root.0) {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
+    }
+    let Some(d) = mail.detail.clone() else {
+        return;
+    };
+
+    for (label, mut text) in &mut labels {
+        let s = match label.0 {
+            ReadLabel::Sender => d.sender.clone(),
+            ReadLabel::Date => format_send_date(d.send_date),
+            ReadLabel::Body(_) => d.body.clone(),
+            ReadLabel::Gold => format_gold(d.gold),
+        };
+        if text.0 != s {
+            text.0 = s;
+        }
+    }
+
+    // 附件格：只在「读了另一封 / 领取状态变了 / 附件个数变了」时重建图标，
+    // 否则每帧 `load_lib_image` 会往 `Assets<Image>` 里塞新图（资产泄漏）。
+    let key = (d.mail_id, d.collected, d.items.len());
+    if *rendered != Some(key) {
+        *rendered = Some(key);
+        for (cell, mut data) in &mut cells {
+            let att = d.items.get(cell.0);
+            let icon = att.and_then(|a| {
+                load_lib_image(&mut libs, &mut images, LibraryName::Items, a.image as usize)
+            });
+            *data = UiItemCellData {
+                icon,
+                count: att.map(|a| a.count as u32),
+                dura_ratio: att.and_then(|a| a.dura_ratio),
+            };
+        }
+    }
+
+    // C# `UpdateInterface` 口径：`Collected` 才有可领取内容（`:1243-1256`）
+    let can_collect = d.collected && (d.gold > 0 || !d.items.is_empty());
+    for (e, inter, btn, mut image_btn, mut node, collect_frames) in &mut buttons {
+        if let Some(cf) = collect_frames {
+            let want_frames = if can_collect { &cf.ok } else { &cf.disabled };
+            if let (Some(ib), Some(n)) = (image_btn.as_deref_mut(), node.as_deref_mut()) {
+                if ib.normal != want_frames[0] {
+                    ib.normal = want_frames[0].clone();
+                    ib.hover = want_frames[1].clone();
+                    ib.pressed = want_frames[2].clone();
+                    n.image = want_frames[0].clone();
+                }
+            }
+        }
+        let was = prev_inter.insert(e, *inter);
+        if !(*inter == Interaction::Pressed && was != Some(Interaction::Pressed)) {
+            continue;
+        }
+        match btn.1 {
+            ReadBtn::Delete => {
+                // C# `:1049` `if (Mail.Locked) return;`
+                if d.locked {
+                    tracing::info!("📧 邮件已锁定，拒绝删除（读信窗）");
+                    continue;
+                }
+                net.send_packet(&mir2_shared::packets::client::mail::DeleteMail {
+                    mail_id: d.mail_id,
+                });
+                tracing::info!("📧 删除邮件（读信窗）: {}", d.mail_id);
+                mail.mails.retain(|m| m.mail_id != d.mail_id);
+                mail.selected = None;
+                mail.detail = None;
+            }
+            ReadBtn::Lock => {
+                // C# `:1070-1074`：本地翻转 + `C.LockMail`
+                let lock = !d.locked;
+                net.send_packet(&mir2_shared::packets::client::mail::LockMail {
+                    mail_id: d.mail_id,
+                    lock,
+                });
+                if let Some(dd) = mail.detail.as_mut() {
+                    dd.locked = lock;
+                }
+                if let Some(m) = mail.mails.iter_mut().find(|m| m.mail_id == d.mail_id) {
+                    m.locked = lock;
+                }
+                tracing::info!("🔒 邮件锁定: {} → {}", d.mail_id, lock);
+            }
+            ReadBtn::Cancel | ReadBtn::Close => {
+                mail.detail = None;
+            }
+            ReadBtn::Collect => {
+                if can_collect {
+                    net.send_packet(&mir2_shared::packets::client::mail::CollectParcel {
+                        mail_id: d.mail_id,
+                    });
+                    tracing::info!("📦 收取附件（读信窗）: mail_id={}", d.mail_id);
                 }
             }
         }
@@ -1533,13 +2001,18 @@ fn mail_reply_system(
 ///
 /// - 写信窗跟随邮件列表窗：C# `GameScene.cs:699-700` 关邮件窗时
 ///   `MailComposeLetterDialog.Hide()`；待寄包裹窗独立（C# 由 X/取消关，不随邮件列表窗）；
-/// - ESC：C# 同一处「关全部窗」也会 `Hide()` 两个写邮件窗。
+/// - ESC：C# `GameScene.cs:699-703` 的 `Closeall` 会 `Hide()` 两个写邮件窗**和两张读邮件窗**
+///   （`:702-703`），故这里一并清 `MailState.detail`（读邮件窗的显隐由它驱动）。
 fn mail_compose_follow_system(
     mgr: Res<DialogManager>,
     keys: Res<ButtonInput<KeyCode>>,
     mut mail: ResMut<MailState>,
     mut input: ResMut<crate::game::dialogs::text_input::TextInputState>,
 ) {
+    if keys.just_pressed(KeyCode::Escape) {
+        // 读邮件窗：C# `GameScene.cs:702-703`（Closeall 一并 Hide）
+        mail.detail = None;
+    }
     if !mail.compose {
         return;
     }
@@ -1574,12 +2047,9 @@ fn mail_server_events(
         if let ServerEvent::ParcelCollected { result } = ev {
             match *result {
                 1 => {
-                    // C# Result=1：邮箱领取成功 → 本地标记已领取并清空附件显示
-                    if let Some(d) = mail.detail.as_mut() {
-                        d.collected = true;
-                        d.gold = 0;
-                        d.items.clear();
-                    }
+                    // C# Result=1：邮箱领取成功 → `MailReadParcelDialog.Hide()`（`GameScene.cs:6528`）
+                    // + 列表行标记已领取（`MailItemRow.UpdateInterface` 的包裹角标随之消失）
+                    mail.detail = None;
                     if let Some(idx) = mail.selected {
                         if let Some(m) = mail.mails.get_mut(idx) {
                             m.collected = true;
@@ -1642,6 +2112,7 @@ mod tests {
                 unread: true,
                 gold: 0,
                 collected: false,
+                locked: false,
             },
             MailEntry {
                 mail_id: 12,
@@ -1650,6 +2121,7 @@ mod tests {
                 unread: false,
                 gold: 0,
                 collected: false,
+                locked: false,
             },
         ];
         st.selected = Some(1);
@@ -1916,6 +2388,119 @@ mod tests {
             !world.resource::<MailState>().compose,
             "问名字阶段不得先开写信窗"
         );
+    }
+
+    // ---------------------------------------------------------------------
+    // #3103 读侧：读邮件两窗
+    // ---------------------------------------------------------------------
+
+    /// 读信窗几何/面板帧逐项对 C#（`MailDialogs.cs:979-1272`）。
+    ///
+    /// 这是「常量对字面量」的基础断言；**实现级**结构判据在
+    /// `interact_gate::mail_panels_have_native_background_sprites`（真底图 + 纹理尺寸）。
+    #[test]
+    fn read_windows_match_csharp_geometry() {
+        assert_eq!(READ_LETTER_PANEL, (LibraryName::Title, 672));
+        assert_eq!(READ_PARCEL_PANEL, (LibraryName::Title, 675));
+        // C# `MailReadLetterDialog.Size = (236,300)`；`MailReadParcelDialog` 声明同为 236x300
+        // 但控件排到 y=350 → 按美术 236x384（资产实测 `Title[675] = 236x384`）
+        assert_eq!(READ_SIZE, (236.0, 300.0));
+        assert_eq!(READ_PARCEL_SIZE, (236.0, 384.0));
+        assert_eq!(READ_POS, (100.0, 100.0));
+        assert_eq!(READ_SENDER_POS, (70.0, 35.0));
+        assert_eq!(READ_DATE_POS, (70.0, 56.0));
+        assert_eq!(READ_LABEL_SIZE, (150.0, 15.0));
+        assert_eq!(READ_LETTER_BODY_POS, (15.0, 92.0));
+        assert_eq!(READ_PARCEL_BODY_POS, (15.0, 98.0));
+        assert_eq!(READ_BODY_SIZE, (202.0, 165.0));
+        assert_eq!(READ_DELETE_POS, (12.0, 265.0));
+        assert_eq!(READ_LOCK_POS, (81.0, 265.0));
+        assert_eq!(READ_LETTER_CANCEL_POS, (154.0, 265.0));
+        assert_eq!(READ_GOLD_POS, (63.0, 290.0));
+        assert_eq!(READ_CELL_X0 + 4.0 * READ_CELL_STEP, 171.0);
+        assert_eq!(READ_CELL_SIZE, (35.0, 31.0));
+        assert_eq!(READ_COLLECT_POS, (30.0, 350.0));
+        assert_eq!(READ_PARCEL_CANCEL_POS, (135.0, 350.0));
+        assert_eq!(READ_DELETE_FRAMES, (540, 541, 542));
+        assert_eq!(READ_LOCK_FRAMES, (686, 687, 688));
+        assert_eq!(READ_COLLECT_OK_FRAMES, (680, 681, 682));
+        assert_eq!(READ_COLLECT_DISABLED_FRAMES, (683, 684, 685));
+    }
+
+    /// 选窗规则 = C# `Gold > 0 || Items.Count > 0` → 包裹窗，否则书信窗
+    /// （`MailDialogs.cs:213-220` 阅读钮 与 `:334-341` 行点击，两处同式）。
+    ///
+    /// 阳性对照：把判据改成只看 `gold > 0` → 第二条断言红。
+    #[test]
+    fn read_window_choice_matches_csharp() {
+        let plain = MailDetail::default();
+        assert_eq!(read_window_for(&plain), ReadWin::Letter);
+
+        let with_item = MailDetail {
+            items: vec![MailAttachment {
+                name: "金创药(小)".into(),
+                image: 1,
+                count: 1,
+                dura_ratio: None,
+            }],
+            ..Default::default()
+        };
+        assert_eq!(read_window_for(&with_item), ReadWin::Parcel);
+
+        let with_gold = MailDetail {
+            gold: 100,
+            ..Default::default()
+        };
+        assert_eq!(read_window_for(&with_gold), ReadWin::Parcel);
+    }
+
+    /// 收取钮两套帧：`Collected` 才有 680/681/682，否则 683/684/685 且禁用
+    /// （`MailDialogs.cs:1243-1256`）。
+    #[test]
+    fn collect_button_frames_follow_collected_flag() {
+        assert_eq!(collect_frames(true), READ_COLLECT_OK_FRAMES);
+        assert_eq!(collect_frames(false), READ_COLLECT_DISABLED_FRAMES);
+        assert_ne!(READ_COLLECT_OK_FRAMES, READ_COLLECT_DISABLED_FRAMES);
+    }
+
+    /// 发信时间文本 = C# `Mail.DateSent.ToString("dd/MM/yy H:mm:ss")`。
+    ///
+    /// 期望串由**日期分量**拼出（不复用 `format` 串），故「日/月写反」「小时补零」
+    /// 这类格式回归会红；`send_date <= 0`（时间戳缺失）必须回空串，不编假日期。
+    #[test]
+    fn send_date_matches_csharp_format() {
+        use chrono::{Datelike, Timelike};
+
+        let ts = 1_709_600_000; // UTC 2024-03-05 12:53:20
+        let dt = chrono::DateTime::from_timestamp(ts, 0)
+            .unwrap()
+            .with_timezone(&chrono::Local);
+        let expect = format!(
+            "{:02}/{:02}/{:02} {}:{:02}:{:02}",
+            dt.day(),
+            dt.month(),
+            dt.year() % 100,
+            dt.hour(),
+            dt.minute(),
+            dt.second()
+        );
+        assert_eq!(format_send_date(ts), expect);
+        assert_eq!(format_send_date(0), "");
+        assert_eq!(format_send_date(-1), "");
+        // 日/月不同（2024-03-05 的 3 与 5）——写反会被上面抓；这里再钉一次顺序特征
+        assert!(format_send_date(ts).starts_with("05/03/24 "));
+    }
+
+    /// 赠金文本 = C# `Gold.ToString("###,###,##0")`：千分位，**0 输出 "0"**
+    /// （.NET 实测 `Format("{0:###,###,##0}", 0) == "0"`；末位占位符是 `0` 不是 `#`）。
+    #[test]
+    fn gold_label_matches_csharp_thousands() {
+        assert_eq!(format_gold(0), "0");
+        assert_eq!(format_gold(7), "7");
+        assert_eq!(format_gold(999), "999");
+        assert_eq!(format_gold(1000), "1,000");
+        assert_eq!(format_gold(1234567), "1,234,567");
+        assert_eq!(format_gold(1_000_000_000), "1,000,000,000");
     }
 }
 
