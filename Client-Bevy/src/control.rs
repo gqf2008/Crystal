@@ -2733,7 +2733,16 @@ fn apply_control_commands(
                     .quests
                     .iter()
                     .filter(|e| e.taken)
-                    .map(|e| json!({ "id": e.id, "completed": e.completed }))
+                    // `tasks` = 任务进度行（C# QuestDialog 的「进度」段；KillTasks 形如
+                    // "TigerSnake 3/10"）。**KillTasks 的判据取自它**：客户端展示的进度是
+                    // 服务端 ChangeQuest 下发的真值，不是 UI 代理量（与 `taken` 同源）。
+                    .map(|e| {
+                        json!({
+                            "id": e.id,
+                            "completed": e.completed,
+                            "tasks": e.tasks,
+                        })
+                    })
                     .collect();
                 debug_assert_eq!(ids.len(), taken.len());
                 let payload = json!({
