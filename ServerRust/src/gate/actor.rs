@@ -158,7 +158,10 @@ impl GateActor {
             if let Some(account_ref) = self.account_ref.clone() {
                 crate::util::tasks::spawn("gate.account_logout", async move {
                     let _ = account_ref
-                        .ask(crate::actors::account::LogoutRequest { username })
+                        .ask(crate::actors::account::LogoutRequest {
+                            username,
+                            session_id,
+                        })
                         .await;
                 });
             }
@@ -679,7 +682,10 @@ impl Message<ShutdownAll> for GateActor {
                             if let Some(account_ref) = account_ref.clone() {
                                 crate::util::tasks::spawn("gate.account_logout", async move {
                                     let _ = account_ref
-                                        .ask(crate::actors::account::LogoutRequest { username })
+                                        .ask(crate::actors::account::LogoutRequest {
+                                            username,
+                                            session_id: sid,
+                                        })
                                         .await;
                                 });
                             }
@@ -1796,9 +1802,13 @@ impl Message<LoginResult> for GateActor {
                 // AccountActor 已置 is_online=true：回退置离线，否则该账号永卡在线
                 if let Some(account_ref) = self.account_ref.clone() {
                     let username = msg.username.clone();
+                    let sid = msg.session_id;
                     crate::util::tasks::spawn("gate.login_online_rollback", async move {
                         let _ = account_ref
-                            .ask(crate::actors::account::LogoutRequest { username })
+                            .ask(crate::actors::account::LogoutRequest {
+                                username,
+                                session_id: sid,
+                            })
                             .await;
                     });
                 }

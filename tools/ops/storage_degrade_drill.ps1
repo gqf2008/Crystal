@@ -10,9 +10,15 @@
 #   J2 日志里能看到这次写失败（明确的存储错误，而不是静默吞掉）
 #   J3 故障期间的**读路径不受影响**：同一时刻新会话仍能登录成功（登录不依赖写锁）
 #   J4 释放写锁后**恢复**：新会话正常下线，日志出现 "saved to database on disconnect"
+#   J5 落库失败**玩家看得到**：故障窗口内的会话收到 `S.Chat`+`ChatType::System` 的
+#      「存档失败：…」提示（owner 2026-09-24 拍板：失败一律直接反馈到客户端）
+#
+# 前置（J0）：基线（无故障）会话必须成功——否则后面各判据都是空转（2026-09-24 踩过：
+#   基线登录失败时报告只剩 J1=true，其余全 false，看起来像"服务端有问题"，其实是端口被别的东西占着）。
 #
 # 用法：
-#   pwsh tools/ops/storage_degrade_drill.ps1 -DeployDir <deploy> -OutFile tools/ops/out/storage_degrade.json
+#   pwsh tools/ops/storage_degrade_drill.ps1 -DeployDir <deploy> -OutFile tools/ops/out/storage_degrade.json \
+#       -Account <有角色的账号> -Password <密码> -NoticePattern '存档失败'
 param(
     [Parameter(Mandatory = $true)][string]$DeployDir,
     [string]$ExePath = '',
@@ -21,7 +27,9 @@ param(
     [string]$Password = '123456',
     [string]$DbPath = '',
     [int]$LockSeconds = 22,
-    [string]$OutFile = ''
+    [string]$OutFile = '',
+    # 客户端可见报错的文案判据（正则可调，便于做「断言本身会红」的阳性对照）
+    [string]$NoticePattern = '存档失败'
 )
 $ErrorActionPreference = 'Continue'
 $ops = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -47,6 +55,12 @@ if (-not $ready) { Write-Host 'server not ready'; exit 9 }
 # 0) 基线：正常登录一次（进图后 4s 下线 → 正常落库）
 $base = BotJson 4
 $baseOk = ($null -ne $base -and $base.summary.failed -eq 0)
+if (-not $baseOk) {
+    Write-Host ("FAIL(J0): 基线会话未成功（{0}）——故障窗口的结论会全部空转，本轮不产出报告。" -f `
+        ((@($base.sessions) | ForEach-Object { "$($_.account):$($_.stage):$($_.error)" }) -join ' | '))
+    Stop-Process -Id $proc.Id -Force -EA SilentlyContinue
+    exit 3
+}
 $linesBeforeFault = @(Get-Content $log -EA SilentlyContinue).Count
 
 # 1) 先注入写锁（20s 级），确认真拿住了
@@ -82,6 +96,14 @@ $victimOk = ($null -ne $victim -and $victim.summary.failed -eq 0)
 $duringLock = BotJson 3 @('--login-only')
 $j3 = ($null -ne $duringLock -and $duringLock.summary.failed -eq 0)
 
+# 3b) J5：故障窗口内的会话必须收到**客户端可见**的落库失败提示（S.Chat / ChatType::System）
+$noticeMsgs = @()
+foreach ($s in @(@($victim.sessions) + @($duringLock.sessions))) {
+    if ($null -ne $s -and $null -ne $s.system_messages) { $noticeMsgs += @($s.system_messages) }
+}
+$hit = @($noticeMsgs | Where-Object { $_ -match $NoticePattern })
+$j5 = $hit.Count -gt 0
+
 Wait-Job $lockJob -Timeout ($LockSeconds + 20) | Out-Null
 Remove-Job $lockJob -Force
 Start-Sleep 2
@@ -91,8 +113,15 @@ $proc.Refresh()
 $j1 = -not $proc.HasExited
 
 # 5) J2：这次写失败被明确记录（而不是静默吞掉/panic）
+# 2026-09-24：判据曾按旧日志格式 `Failed to (save|set)…`，而实现早在持久化改版时换成了
+# 可 grep/可告警的固定前缀 `PERSIST_LOST`（`db::persist_report`），于是 J2 长期假红。
+# 现在主判据是前缀本身，旧的两种写法保留为兼容分支。
 $text = Get-Content $log -EA SilentlyContinue
-$saveFail = @($text | Where-Object { $_ -match "Failed to (save|set).*database is locked|Failed to (save|set).*error returned from database" })
+$saveFail = @($text | Where-Object {
+        $_ -match 'PERSIST_LOST' -or
+        $_ -match "Failed to (save|set).*database is locked" -or
+        $_ -match "Failed to (save|set).*error returned from database"
+    })
 $j2 = $saveFail.Count -gt 0
 
 # 6) J4：释放写锁后恢复——新会话下线能正常落库（取故障窗口之后新出现的成功行）
@@ -108,7 +137,7 @@ $aliveAtEnd = -not $proc.HasExited
 Stop-Process -Id $proc.Id -Force -EA SilentlyContinue
 
 $report = [ordered]@{
-    ok = ($j1 -and $j2 -and $j3 -and $j4)
+    ok = ($j1 -and $j2 -and $j3 -and $j4 -and $j5)
     db = $DbPath
     lock_seconds = $LockSeconds
     lock_acquired = $lockHeld
@@ -118,12 +147,16 @@ $report = [ordered]@{
     J2_write_failure_logged = $j2
     J3_read_path_ok_during_fault = $j3
     J4_recovered_after_unlock = $j4
+    J5_client_notice_seen = $j5
+    # 报告里放**命中文案**（而不是前 5 条随便什么系统消息），便于人工核对
+    client_notice_messages = @($hit | Select-Object -First 5)
+    client_system_messages_total = $noticeMsgs.Count
+    notice_pattern = $NoticePattern
     save_failure_lines = $saveFail.Count
     baseline_saved_lines = $savedBefore
     recovered_saved_lines = $savedAfter
     victim_session_ok = $victimOk
     fault_window_lines = $linesBeforeFault
-    saved_ok_lines = $savedOk.Count
     server_alive_at_end = $aliveAtEnd
     excerpt = @($text | Where-Object { $_ -match 'database is locked' } | Select-Object -First 3)
 }

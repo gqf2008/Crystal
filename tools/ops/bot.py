@@ -29,6 +29,10 @@ OP_LOGIN = 5
 OP_NEW_CHARACTER = 6
 OP_STARTGAME = 8
 OP_LOGOUT = 9
+# 注意方向：**收到**的聊天是 ServerPacketIds::Chat = 30；ClientPacketIds::Chat = 13 是我们发出去的，
+# 别拿 13 去过滤收包（2026-09-24 在存储降级演练里踩过：过滤了 13，78 条 opcode=30 全被漏掉）。
+OP_CHAT = 30          # ServerPacketIds::Chat（SharedRust/src/enums.rs）
+CHAT_TYPE_SYSTEM = 5  # ChatType::System
 XOR_KEY = 0xAA  # gate/codec.rs::DEFAULT_XOR_KEY
 
 
@@ -52,6 +56,21 @@ def dotnet_string(s: str) -> bytes:
     return bytes(out) + b
 
 
+def read_dotnet_string(buf: bytes, pos: int) -> tuple[str, int]:
+    """读 DotNet 7-bit 长度前缀字符串，返回 (文本, 新位置)。"""
+    shift = 0
+    length = 0
+    while True:
+        b = buf[pos]
+        pos += 1
+        length |= (b & 0x7F) << shift
+        if not (b & 0x80):
+            break
+        shift += 7
+    text = buf[pos:pos + length].decode("utf-8", errors="replace")
+    return text, pos + length
+
+
 def recv_exact(sock: socket.socket, n: int) -> bytes:
     buf = b""
     while len(buf) < n:
@@ -71,10 +90,19 @@ def recv_frame(sock: socket.socket) -> tuple[int, bytes]:
 
 
 def drain(sock: socket.socket, stop: threading.Event, out: dict) -> None:
-    """后台读线程：只记录帧数/字节数，直到 stop。"""
+    """后台读线程：记录帧数/字节数 + **捕获 S.Chat 的系统消息**（`ChatType::System`），直到 stop。
+
+    为什么要捕获 Chat：owner 2026-09-24 拍板「落库失败一律直接反馈到客户端」，
+    服务端用 `S.Chat` + `ChatType::System(=5)` 发 `存档失败：…`（`db::persist_failure_notice`）。
+    存储降级演练要证明**玩家真的看得到**，不能只看服务端日志。
+    """
     frames = 0
     bytes_read = 0
     idle = 0
+    system_messages: list = []
+    out["system_messages"] = system_messages
+    opcodes: dict = {}
+    out["opcodes"] = opcodes
     try:
         while not stop.is_set():
             try:
@@ -86,6 +114,16 @@ def drain(sock: socket.socket, stop: threading.Event, out: dict) -> None:
                 continue
             frames += 1
             bytes_read += len(body) + 4
+            opcodes[str(opcode)] = opcodes.get(str(opcode), 0) + 1
+            # ServerPacketIds::Chat = 13；body = [dotnet string][chat_type u8]
+            if opcode == OP_CHAT and body:
+                try:
+                    text, pos = read_dotnet_string(body, 0)
+                    chat_type = body[pos] if pos < len(body) else -1
+                    if chat_type == CHAT_TYPE_SYSTEM:
+                        system_messages.append(text)
+                except Exception:
+                    pass
     except Exception as exc:  # 断开/超时都记下来，供错误率统计
         # 自己关掉 socket 造成的 10038 不是错误（主线程 join 不到位时的竞态）。
         # 这类噪声会把"已经跑得好好的会话"判成失败（实测 20 会话里 9 条假失败）。

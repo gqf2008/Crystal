@@ -426,6 +426,8 @@ pub struct LoginRequest {
 #[derive(Debug)]
 pub struct LogoutRequest {
     pub username: String,
+    /// 触发登出的会话 id（落库失败时要把「存档失败」提示发回这个会话）
+    pub session_id: u64,
 }
 
 // ============================================================
@@ -587,16 +589,29 @@ impl AccountActor {
                 let pool = self.db_pool.clone();
                 let account = account.clone();
                 let name = username.clone();
+                // owner 2026-09-24 拍板「落库失败一律直接反馈到客户端」——这次账号行写也在范围内：
+                // 此前只有 world 侧的 角色/宠物/英雄 会 notify，账号侧两条（登录簿记、登出置离线）
+                // 只打 `PERSIST_LOST` 日志，玩家看不到（2026-09-24 存储降级演练 J5 抓出来的缺口）。
+                let gate_ref = self.gate_ref.clone();
+                let sid = session_id;
                 let t_save = std::time::Instant::now();
                 crate::util::tasks::spawn("account.save_on_login", async move {
                     let t = std::time::Instant::now();
-                    db::persist_report(
+                    if db::persist_report(
                         "account_save",
                         &format!("phase=login account={name}"),
                         || db::save_account(&pool, &account),
                     )
                     .await
-                    .ok();
+                    .is_err()
+                    {
+                        crate::actors::world::notify_persist_failure(
+                            &gate_ref,
+                            sid,
+                            "account_save",
+                            "phase=login",
+                        );
+                    }
                     debug!(
                         "LOGIN_TIMING account_save_bg user={} ms={}",
                         name,
@@ -669,13 +684,23 @@ impl Message<LogoutRequest> for AccountActor {
         // 这次落库只是簿记；失败由 persist_report 响亮上报，不影响登出结果。
         let pool = self.db_pool.clone();
         let name = msg.username.clone();
+        let gate_ref = self.gate_ref.clone();
+        let sid = msg.session_id;
         crate::util::tasks::spawn("account.set_offline", async move {
             let t = std::time::Instant::now();
-            db::persist_report("account_offline", &format!("account={name}"), || {
+            if db::persist_report("account_offline", &format!("account={name}"), || {
                 db::set_account_offline(&pool, &name)
             })
             .await
-            .ok();
+            .is_err()
+            {
+                crate::actors::world::notify_persist_failure(
+                    &gate_ref,
+                    sid,
+                    "account_offline",
+                    "phase=logout",
+                );
+            }
             debug!(
                 "LOGIN_TIMING account_offline_bg user={} ms={}",
                 name,
