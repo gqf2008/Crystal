@@ -63,7 +63,9 @@ pub(crate) fn spawn_net_objects_when_ready(
                 location_y,
             } => spawn_ground_gold(
                 &mut commands,
+                &mut libs,
                 &mut images,
+                &mut cache,
                 &mut fonts,
                 &mut ui_font,
                 *gold,
@@ -394,11 +396,23 @@ fn spawn_ground_item(
             Visibility::default(),
         ))
         .id();
-    if let Some(h) =
-        crate::ui::sprite_ui::ui_image(libs, images, cache, LibraryName::Items, item.image as usize)
-    {
+    let icon =
+        crate::ui::sprite_ui::ui_image(libs, images, cache, ground_item_lib(), item.image as usize);
+    // 实机判据（按日志取值，不靠像素猜）：地面物品取 DNItems，不是背包用的 Items 库
+    tracing::info!(
+        "📦 地面物品 id={} '{}' → {}[{}]",
+        object_id,
+        item.name,
+        ground_item_lib().default_path(),
+        item.image
+    );
+    if let Some(h) = icon {
         commands.entity(e).with_children(|p| {
-            // 物品图标（原版 ItemObject.Draw 用 Items 库帧）
+            // 物品图标：原版 `ItemObject.Load(S.ObjectItem)` 是
+            // `BodyLibrary = Libraries.FloorItems; DrawFrame = info.Image;`
+            // （`Client/MirObjects/ItemObject.cs:32-36`，`Libraries.FloorItems` = `Data/DNItems`，
+            // `Client/MirGraphics/MLibrary.cs:85`）。`Items`(5380 帧) 与 `DNItems`(5280 帧) 是
+            // 同一套物品索引的两个不同美术库：前者是背包/商店图标，后者是地面掉落图。
             p.spawn((
                 Sprite::from_image(h),
                 Anchor::CENTER,
@@ -428,10 +442,44 @@ fn spawn_ground_item(
     }
 }
 
-/// #244 生成地面金币实体：金币块（金色彩块）+ "{N} 金币"标签（原版 ItemObject.Load(S.ObjectGold)）
+/// 地面物品/金币用的美术库（原版 `Libraries.FloorItems` = `Data/DNItems`）。
+///
+/// 单一出口：地面渲染的库选择只在这里，门禁钉住它（改回 `Items` 即红）。
+pub(crate) fn ground_item_lib() -> LibraryName {
+    LibraryName::FloorItems
+}
+
+/// 金币掉落图在 `DNItems` 里的帧号——照抄原版 `ItemObject.Load(S.ObjectGold)`
+/// （`Client/MirObjects/ItemObject.cs:52-60`）：<100 → 112、<200 → 113、<500 → 114、
+/// <1000 → 115、否则 116。此前本端统一画一个 14×14 的金色彩块（#244 落地的占位）。
+pub(crate) fn gold_frame(gold: u32) -> usize {
+    if gold < 100 {
+        112
+    } else if gold < 200 {
+        113
+    } else if gold < 500 {
+        114
+    } else if gold < 1000 {
+        115
+    } else {
+        116
+    }
+}
+
+/// 金币掉落名的文案——原版 `ClientTextKeys.GoldAmount`，中文串
+/// `Client/Localization/Chinese.json:295` = `"金币 ({0:###,###,###})"`；
+/// `{0:###,###,###}` 是 `ToString("###,###,###")` 风格的三位分节（与 HUD 金币同格式）。
+pub(crate) fn gold_label_text(gold: u32) -> String {
+    format!("金币 ({})", crate::game::hud::format_gold(gold))
+}
+
+/// #244 生成地面金币实体：`DNItems` 金币堆帧 + "{N} 金币"标签
+/// （原版 `ItemObject.Load(S.ObjectGold)` + `ItemObject.Draw`）
 fn spawn_ground_gold(
     commands: &mut Commands,
+    libs: &mut GameLibraries,
     images: &mut Assets<Image>,
+    cache: &mut UiImageCache,
     fonts: &mut Assets<Font>,
     ui_font: &mut UiFont,
     gold: u32,
@@ -442,15 +490,21 @@ fn spawn_ground_gold(
     if !ui_font.0.is_strong() {
         ui_font.0 = crate::ui::sprite_ui::load_ui_font(fonts);
     }
+    libs.0.ensure_initialized();
     let font = ui_font.0.clone();
     let wx = tx as f32 * TILE_WIDTH + TILE_WIDTH / 2.0;
     let wy = ty as f32 * TILE_HEIGHT + TILE_HEIGHT;
     let z = depth_z(wy);
-    let white = images.add(crate::map_renderer::make_image(
-        vec![255, 255, 255, 255],
-        1,
-        1,
-    ));
+    let icon =
+        crate::ui::sprite_ui::ui_image(libs, images, cache, ground_item_lib(), gold_frame(gold));
+    // 实机判据（按日志取值，不靠像素猜）：地面金币必须取 DNItems 的金币堆帧
+    tracing::info!(
+        "💰 地面金币 id={} gold={} → {}[{}]",
+        object_id,
+        gold,
+        ground_item_lib().default_path(),
+        gold_frame(gold)
+    );
     let e = commands
         .spawn((
             GroundGold { gold },
@@ -460,20 +514,38 @@ fn spawn_ground_gold(
         ))
         .id();
     commands.entity(e).with_children(|p| {
-        // 金币块（金色彩块，占位 FloorItems 图标）
+        // 金币堆图标（DNItems[112..=116]；取不到图才退回旧的金色彩块）
+        match icon.clone() {
+            Some(h) => {
+                p.spawn((
+                    Sprite::from_image(h),
+                    Anchor::CENTER,
+                    Transform::from_xyz(0.0, 0.0, 0.1),
+                ));
+            }
+            None => {
+                p.spawn((
+                    Sprite {
+                        image: images.add(crate::map_renderer::make_image(
+                            vec![255, 255, 255, 255],
+                            1,
+                            1,
+                        )),
+                        color: Color::srgb(1.0, 0.85, 0.2),
+                        custom_size: Some(Vec2::splat(14.0)),
+                        ..default()
+                    },
+                    Anchor::CENTER,
+                    Transform::from_xyz(0.0, 0.0, 0.1),
+                ));
+            }
+        }
+        // 金币标签：原版 `ItemObject.Load(S.ObjectGold)` 的
+        // `Name = ClientTextMap.GetLocalization(ClientTextKeys.GoldAmount, info.Gold)`，
+        // 中文串在 `Client/Localization/Chinese.json:295` = `"金币 ({0:###,###,###})"`
+        // → 前缀「金币 」+ 三位分节千分位（此前本端写成 "{N} 金币"，格式与顺序都不对）。
         p.spawn((
-            Sprite {
-                image: white.clone(),
-                color: Color::srgb(1.0, 0.85, 0.2),
-                custom_size: Some(Vec2::splat(14.0)),
-                ..default()
-            },
-            Anchor::CENTER,
-            Transform::from_xyz(0.0, 0.0, 0.1),
-        ));
-        // 金币标签
-        p.spawn((
-            Text2d::new(format!("{} 金币", gold)),
+            Text2d::new(gold_label_text(gold)),
             Anchor::TOP_LEFT,
             TextFont {
                 font: FontSource::Handle(font),
@@ -565,4 +637,65 @@ pub(crate) fn spawn_demo_actors_when_ready(
 /// 实现角色与建筑/树的经典交错遮挡）
 pub fn depth_z(world_y: f32) -> f32 {
     crate::map_renderer::depth_y(world_y)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 门禁：地面物品/金币必须取原版 `Libraries.FloorItems`（`Data/DNItems`），
+    /// 不是背包/商店图标库 `Items`。
+    ///
+    /// 原版依据：`Client/MirObjects/ItemObject.cs:32`（`S.ObjectItem`）与 `:49`（`S.ObjectGold`）
+    /// 都写 `BodyLibrary = Libraries.FloorItems`，而 `Client/MirGraphics/MLibrary.cs:85`
+    /// 把 `FloorItems` 绑定到 `Data/DNItems`。
+    ///
+    /// 阳性对照（落地时实做）：把 `ground_item_lib()` 改回 `LibraryName::Items` → 本测试立即红。
+    #[test]
+    fn ground_item_library_is_floor_items_dnitems() {
+        assert_eq!(
+            ground_item_lib(),
+            LibraryName::FloorItems,
+            "地面物品库必须是 DNItems（原版 ItemObject 用 Libraries.FloorItems）"
+        );
+        assert_ne!(
+            ground_item_lib(),
+            LibraryName::Items,
+            "Items 是背包/商店图标库；地面掉落图在 DNItems（两者索引同空间、美术不同）"
+        );
+        // 路径也钉住：DNItems 是原版 FloorItems 的实际数据文件
+        assert_eq!(ground_item_lib().default_path(), "DNItems");
+    }
+
+    /// 门禁：金币堆帧号逐档照抄原版 `ItemObject.Load(S.ObjectGold)`
+    /// （`Client/MirObjects/ItemObject.cs:52-60`）。
+    ///
+    /// 阳性对照（落地时实做）：把 `gold_frame` 的 `<200` 档改回 112 → 本测试红。
+    #[test]
+    fn gold_frame_matches_csharp_amount_tiers() {
+        assert_eq!(gold_frame(0), 112);
+        assert_eq!(gold_frame(99), 112);
+        assert_eq!(gold_frame(100), 113);
+        assert_eq!(gold_frame(199), 113);
+        assert_eq!(gold_frame(200), 114);
+        assert_eq!(gold_frame(499), 114);
+        assert_eq!(gold_frame(500), 115);
+        assert_eq!(gold_frame(999), 115);
+        assert_eq!(gold_frame(1000), 116);
+        assert_eq!(gold_frame(u32::MAX), 116);
+    }
+
+    /// 门禁：金币掉落名文案对齐原版中文本地化串
+    /// `Client/Localization/Chinese.json:295` = `"金币 ({0:###,###,###})"`。
+    ///
+    /// 阳性对照（落地时实做）：把 `gold_label_text` 改回旧写法
+    /// `format!("{} 金币", gold)` → 本测试立即红（顺序与千分位都不符）。
+    #[test]
+    fn gold_label_matches_csharp_chinese_localization() {
+        assert_eq!(gold_label_text(1), "金币 (1)");
+        assert_eq!(gold_label_text(999), "金币 (999)");
+        assert_eq!(gold_label_text(1000), "金币 (1,000)");
+        assert_eq!(gold_label_text(1234567), "金币 (1,234,567)");
+        assert_ne!(gold_label_text(1000), "1000 金币");
+    }
 }
