@@ -357,6 +357,8 @@ pub(crate) fn player_menu_ui_system(
                 // C# PlayerDialog.MailButton → MailComposeLetterDialog.ComposeMail(Name)
                 mgr.open.push(DialogKind::Mail);
                 mail.compose = true;
+                // #3103：玩家菜单邮件钮走写信窗（C# `PlayerDialog.MailButton`）
+                mail.compose_parcel = false;
                 mail.detail = None;
                 mail.attach = vec![None; 5];
                 mail.compose_gold = 0;

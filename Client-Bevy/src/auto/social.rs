@@ -467,6 +467,8 @@ pub(crate) fn auto_mail_compose_test(
                 mgr.toggle(client_bevy::game::dialogs::DialogKind::Mail);
             }
             mail.compose = true;
+            // #3103：写信窗（`MailComposeLetterDialog`，非待寄包裹窗）
+            mail.compose_parcel = false;
             mail.detail = None;
             input.texts = vec![
                 "bevy2char".to_string(),
@@ -483,7 +485,16 @@ pub(crate) fn auto_mail_compose_test(
                 return;
             }
             // 与发送按钮相同的代码路径
-            client_bevy::game::dialogs::mail::send_composed_mail(&net, &input, 100, &[], false);
+            // #3103：写信窗只发 `Message`（正文），不带金币/附件/贴票（C# 两窗共用的
+            // `send_composed_mail` 现按 (to, body, gold, attach, stamped) 传参）
+            client_bevy::game::dialogs::mail::send_composed_mail(
+                &net,
+                &input.texts[0],
+                &input.texts[2],
+                0,
+                &[],
+                false,
+            );
             mail.compose = false;
             tracing::info!("[MAILCOMPOSE] 发送邮件");
             *stage = 9;

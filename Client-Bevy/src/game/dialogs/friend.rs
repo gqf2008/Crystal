@@ -397,6 +397,8 @@ fn friend_ui_system(
                 compose_mail.write(ComposeMail {
                     to: f.name.clone(),
                     message: None,
+                    // C# `FriendDialog` 邮件钮 → `MailComposeLetterDialog.ComposeMail(Name)`
+                    parcel: false,
                 });
             }
         } else if act.is_whisper {

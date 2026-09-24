@@ -812,9 +812,10 @@ pub(crate) fn handle_social(
             }
         }
         x if x == ServerPacketIds::MailSendRequest as i16 => {
-            // C#：空包（打开写信框）
+            // C#：空包（邮局「邮寄」键 → 打开待寄包裹窗；#3103 交邮件模块问收件人名后开窗）
             if mail_system::MailSendRequest::read_body(&mut cur).is_ok() {
-                tracing::debug!("📧 邮件发送请求（打开写信框）");
+                tracing::debug!("📧 邮件发送请求（打开待寄包裹窗）");
+                server_events.write(ServerEvent::MailSendRequest);
             }
         }
         x if x == ServerPacketIds::MailSent as i16 => {

@@ -397,6 +397,8 @@ fn relationship_ui_system(
             compose_mail.write(ComposeMail {
                 to: state.lover_name.clone(),
                 message: None,
+                // C# `RelationshipDialog.cs:126` → 写信窗
+                parcel: false,
             });
             state.message = format!("写信给 {}", state.lover_name);
         }

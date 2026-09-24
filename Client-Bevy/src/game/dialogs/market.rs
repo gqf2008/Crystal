@@ -2169,6 +2169,8 @@ fn market_mail_system(
         compose.write(crate::game::dialogs::mail::ComposeMail {
             to: item.seller.clone(),
             message: Some(market_mail_message(&item.name, item.price)),
+            // C# `TrustMerchantDialog.cs:325` → `MailComposeLetterDialog.ComposeMail(Seller, message)`
+            parcel: false,
         });
         tracing::info!("✉️ 市场写信给 {}", item.seller);
     }

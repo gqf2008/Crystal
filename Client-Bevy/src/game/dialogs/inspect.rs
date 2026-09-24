@@ -367,6 +367,8 @@ fn inspect_ui_system(
             InspectBtnKind::Mail => {
                 mgr.open.push(DialogKind::Mail);
                 mail.compose = true;
+                // #3103：查看窗邮件钮走写信窗（`MailComposeLetterDialog`）
+                mail.compose_parcel = false;
                 mail.detail = None;
                 mail.attach = vec![None; 5];
                 mail.compose_gold = 0;
