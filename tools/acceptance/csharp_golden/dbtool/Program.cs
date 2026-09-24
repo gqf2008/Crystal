@@ -66,7 +66,8 @@ class Program
             return;
         }
         if (mode == "export") { Export(arg2 ?? "db_export.json"); return; }
-        Console.WriteLine("usage: dbtool <serverDir> list | dump <TypeFullName> | export <outfile>");
+        if (mode == "setpw") { SetPassword(arg2, args.Length > 3 ? args[3] : null); return; }
+        Console.WriteLine("usage: dbtool <serverDir> list | dump <TypeFullName> | export <outfile> | setpw <accountId> <newPassword>");
     }
 
     static Type[] SafeTypes(Assembly a)
@@ -89,6 +90,41 @@ class Program
 
     static void Export(string outFile)
     {
+        var env = LoadEnvir(out var loadAccountsError);
+        WriteExport(env, loadAccountsError, outFile);
+    }
+
+    // Give an existing sandbox account a known password, using the original AccountInfo.Password setter
+    // (same hashing the server uses). Only run this against a SANDBOX copy of Server.MirADB.
+    static void SetPassword(string accountId, string newPassword)
+    {
+        if (string.IsNullOrEmpty(accountId) || string.IsNullOrEmpty(newPassword))
+        {
+            Console.WriteLine("usage: setpw <accountId> <newPassword>");
+            return;
+        }
+        var env = LoadEnvir(out var err);
+        if (err.Length > 0) { Console.WriteLine("accounts did not load: " + err); return; }
+        var target = Seq(F(env, "AccountList")).FirstOrDefault(a => S(F(a, "AccountID")) == accountId);
+        if (target == null) { Console.WriteLine("account not found: " + accountId); return; }
+        var before = S(F(target, "password"));
+        target.GetType().GetProperty("Password")?.SetValue(target, newPassword);
+        var after = S(F(target, "password"));
+        Console.WriteLine($"account {accountId}: password hash changed = {before != after}; chars=" +
+            Seq(F(target, "Characters")).Count());
+        var envirType = allTypes.First(t => t.FullName == "Server.MirEnvir.Envir");
+        var saveAcc = envirType.GetMethod("SaveAccounts", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance,
+                                          null, Type.EmptyTypes, null);
+        if (saveAcc == null) { Console.WriteLine("SaveAccounts() not found"); return; }
+        saveAcc.Invoke(env, null);
+        Console.WriteLine("saved Server.MirADB");
+    }
+
+    static object LoadEnvir(out string loadAccountsError)
+    {
+        // Guard: the original Envir rewrites Server.MirDB (the *game* DB) during LoadDB()/init, even
+        // though this offline path cannot populate it (0 maps/items). Keep the shipped bytes.
+        ProtectGameDb();
         var envirType = allTypes.First(t => t.FullName == "Server.MirEnvir.Envir");
         object env = envirType.GetProperty("Main", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static)?.GetValue(null)
                   ?? envirType.GetField("Main", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static)?.GetValue(null)
@@ -98,7 +134,7 @@ class Program
         var loadDb = envirType.GetMethod("LoadDB", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
         var loadAcc = envirType.GetMethod("LoadAccounts", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
         Console.WriteLine("LoadDB(): " + S(loadDb?.Invoke(env, null)));
-        string loadAccountsError = "";
+        loadAccountsError = "";
         // The provided MirADB stores characters carrying BuffType.GameMaster, which this build's
         // Envir.GetBuffInfo() does not implement. Pre-register a BuffInfo so account loading can proceed.
         try
@@ -128,7 +164,24 @@ class Program
                 Console.WriteLine("LoadAccounts() FAILED: " + loadAccountsError);
             }
         }
+        ProtectGameDb();
+        return env;
+    }
 
+    static void ProtectGameDb()
+    {
+        var db = Path.Combine(Root, "Server.MirDB");
+        var bak = Path.Combine(Root, "Server.MirDB.offline-bak");
+        if (File.Exists(bak)) { File.Copy(bak, db, true); return; }
+        if (File.Exists(db))
+        {
+            File.Copy(db, bak, true);
+            Console.WriteLine($"Server.MirDB backed up ({new FileInfo(bak).Length} bytes)");
+        }
+    }
+
+    static void WriteExport(object env, string loadAccountsError, string outFile)
+    {
         var itemInfos = Seq(F(env, "ItemInfoList")).ToList();
         var nameByIndex = new Dictionary<long, string>();
         foreach (var ii in itemInfos)
