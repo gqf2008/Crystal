@@ -170,6 +170,10 @@ pub(crate) struct ObjectFxAnim {
     delay_left: f32,
     /// 当前 stage（`DelayedExplosion`：`stage != 2` 才循环）
     stage: u32,
+    /// 原版 `Effect.Blend`：true = 加法混合（`Mesh2d` + `ObjectFxBlendMaterial`），
+    /// false = 普通 alpha（`Sprite`）。探针 `spell_fx_probe` 会把它带给实机夹具——
+    /// 这样"这条特效到底走了哪条混合通道"是**实机可断言**的，不靠肉眼看截图。
+    pub(crate) blend_add: bool,
 }
 
 pub struct EffectsPlugin;
@@ -178,6 +182,8 @@ impl Plugin for EffectsPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<EffectsState>();
         app.add_message::<PendingEffect>();
+        // 对象特效的加法混合材质（原版 `Blend = true` 的 31 条走它、`blend = false` 的 8 条走普通 Sprite）
+        crate::game::object_fx_material::register_object_fx_material(app);
         app.add_systems(
             Update,
             (
@@ -205,6 +211,10 @@ fn spawn_pending_effects(
     mut libs: ResMut<GameLibraries>,
     mut cache: ResMut<UiImageCache>,
     time: Res<Time>,
+    // 加法混合材质（原版 `Blend = true` 的条目）：材质资源 + 单位四边形缓存 + 网格资源
+    mut fx_mats: ResMut<Assets<crate::game::object_fx_material::ObjectFxBlendMaterial>>,
+    mut fx_quad: ResMut<crate::game::object_fx_material::ObjectFxQuad>,
+    mut meshes: ResMut<Assets<Mesh>>,
     actors: Query<(&NetObjectId, &Transform)>,
     players: Query<&Transform, (With<LocalPlayer>, With<NetObjectId>)>,
     // 已存活的对象特效实体：光环 Up/Down 要清同组、DelayedExplosion 换 stage 要先移除旧实体
@@ -541,36 +551,64 @@ fn spawn_pending_effects(
                     else {
                         continue;
                     };
-                    commands.spawn((
-                        ObjectFxAnim {
-                            lib: f.lib,
-                            base,
-                            frames: f.frames,
-                            t: 0.0,
-                            age: 0.0,
-                            dur,
-                            frame_ms,
-                            follow_object_id: match f.target {
-                                fx::FxTarget::OwnerLocation => 0,
-                                _ => target_id,
-                            },
-                            name: key,
-                            repeat: f.repeat,
-                            hold_secs: hold_ms as f32 / 1000.0,
-                            delay_left: if f.delay_from_packet {
-                                delay_ms as f32 / 1000.0
-                            } else {
-                                0.0
-                            },
-                            stage: effect_type,
+                    let anim = ObjectFxAnim {
+                        lib: f.lib,
+                        base,
+                        frames: f.frames,
+                        t: 0.0,
+                        age: 0.0,
+                        dur,
+                        frame_ms,
+                        follow_object_id: match f.target {
+                            fx::FxTarget::OwnerLocation => 0,
+                            _ => target_id,
                         },
-                        Sprite {
-                            image: handle,
-                            ..default()
+                        name: key,
+                        repeat: f.repeat,
+                        hold_secs: hold_ms as f32 / 1000.0,
+                        delay_left: if f.delay_from_packet {
+                            delay_ms as f32 / 1000.0
+                        } else {
+                            0.0
                         },
-                        bevy::sprite::Anchor::CENTER,
-                        Transform::from_xyz(tf.translation.x, tf.translation.y, 21.0),
-                    ));
+                        stage: effect_type,
+                        blend_add: f.blend,
+                    };
+                    let tf21 = Transform::from_xyz(tf.translation.x, tf.translation.y, 21.0);
+                    if f.blend {
+                        // 原版 `Blend = true` → `Library.DrawBlend` → `DXManager.SetBlend(true)` = 加法混合。
+                        // 用 Mesh2d + 加法材质表达（Bevy 的 Sprite 只有普通 alpha，做不到 ADD）。
+                        let quad = crate::game::object_fx_material::object_fx_quad(
+                            &mut meshes,
+                            &mut fx_quad,
+                        );
+                        let size = images
+                            .get(&handle)
+                            .map(|i| i.size_f32())
+                            .unwrap_or(Vec2::splat(1.0));
+                        let mat =
+                            fx_mats.add(crate::game::object_fx_material::ObjectFxBlendMaterial {
+                                color: LinearRgba::WHITE,
+                                texture: handle,
+                            });
+                        commands.spawn((
+                            anim,
+                            Mesh2d(quad),
+                            MeshMaterial2d(mat),
+                            tf21.with_scale(Vec3::new(size.x.max(1.0), size.y.max(1.0), 1.0)),
+                        ));
+                    } else {
+                        // 原版 `Blend = false` → `Library.Draw`（当时批次为 `SpriteFlags.AlphaBlend`）= 普通 alpha
+                        commands.spawn((
+                            anim,
+                            Sprite {
+                                image: handle,
+                                ..default()
+                            },
+                            bevy::sprite::Anchor::CENTER,
+                            tf21,
+                        ));
+                    }
                 }
             }
             PendingEffect::Burst { target_id, color } => {
@@ -694,24 +732,31 @@ fn advance_object_fx(
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
     mut cache: ResMut<UiImageCache>,
+    mut fx_mats: ResMut<Assets<crate::game::object_fx_material::ObjectFxBlendMaterial>>,
     // B0001 回归：下面 q 写 Transform，actors 只读 Transform，`Without<ObjectFxAnim>`
     // 划界证明两个查询不相交（与 advance_spell_fx 同一处置）。
     actors: Query<(&NetObjectId, &Transform), Without<ObjectFxAnim>>,
-    mut q: Query<(Entity, &mut ObjectFxAnim, &mut Sprite, &mut Transform)>,
+    // 对象特效有两条渲染路径（与 spawn 侧一致）：
+    //   ① 原版 `Blend = true` → `Mesh2d` + 加法材质 `ObjectFxBlendMaterial`；
+    //   ② 原版 `Blend = false` → 普通 `Sprite`（alpha over）。
+    // 两条都要推进帧图，所以用 `Option` 承接、按存在的那条更新。
+    mut q: Query<(
+        Entity,
+        &mut ObjectFxAnim,
+        Option<&mut Sprite>,
+        Option<&mut MeshMaterial2d<crate::game::object_fx_material::ObjectFxBlendMaterial>>,
+        &mut Transform,
+    )>,
 ) {
-    for (e, mut fx, mut sprite, mut tf) in &mut q {
+    for (e, mut fx, mut sprite, mat, mut tf) in &mut q {
         let dt = time.delta_secs();
         if fx.delay_left > 0.0 {
             // 原版 `Effect.Draw` 在 `CMain.Time < StartTime` 时直接 return（不绘制）
             fx.delay_left -= dt;
-            if sprite.color.alpha() != 0.0 {
-                sprite.color.set_alpha(0.0);
-            }
+            set_object_fx_alpha(&mut sprite, &mat, &mut fx_mats, 0.0);
             continue;
         }
-        if sprite.color.alpha() == 0.0 {
-            sprite.color.set_alpha(1.0);
-        }
+        set_object_fx_alpha(&mut sprite, &mat, &mut fx_mats, 1.0);
         fx.t += dt;
         fx.age += dt;
         if fx.follow_object_id != 0 {
@@ -745,7 +790,39 @@ fn advance_object_fx(
         if let Some(h) =
             object_fx_handle(&mut libs, &mut images, &mut cache, fx.lib, fx.base + frame)
         {
-            sprite.image = h;
+            if let Some(s) = sprite.as_mut() {
+                s.image = h;
+            } else if let Some(m) = mat.as_ref() {
+                if let Some(mut data) = fx_mats.get_mut(&m.0) {
+                    data.texture = h;
+                }
+            }
+        }
+    }
+}
+
+/// 设置对象特效的不透明度（两条渲染路径：Sprite 的 `color.alpha` / 加法材质的 `color.alpha`）。
+///
+/// 原版 `Effect.Draw` 在 `CMain.Time < StartTime`（本端 `delay_left > 0`）时**不绘制**——
+/// 本端没有"不画"的直接开关，沿用既有做法把 alpha 压到 0 代替（`set_alpha(0.0)`）。
+/// 注意加法材质里 `color.alpha` 同时充当原版 `SetBlend(true, rate)` 的 `rate`。
+fn set_object_fx_alpha(
+    sprite: &mut Option<Mut<Sprite>>,
+    mat: &Option<Mut<MeshMaterial2d<crate::game::object_fx_material::ObjectFxBlendMaterial>>>,
+    mats: &mut Assets<crate::game::object_fx_material::ObjectFxBlendMaterial>,
+    alpha: f32,
+) {
+    if let Some(s) = sprite.as_mut() {
+        if s.color.alpha() != alpha {
+            s.color.set_alpha(alpha);
+        }
+        return;
+    }
+    if let Some(m) = mat.as_ref() {
+        if let Some(mut data) = mats.get_mut(&m.0) {
+            if data.color.alpha != alpha {
+                data.color.alpha = alpha;
+            }
         }
     }
 }
@@ -878,6 +955,12 @@ mod tests {
             ),
         ));
         world.insert_resource(bevy::prelude::Assets::<bevy::prelude::Image>::default());
+        world.insert_resource(bevy::prelude::Assets::<bevy::prelude::Mesh>::default());
+        // 对象特效的加法混合材质（spawn 侧若是 `Blend = true` 的条目就要用它）
+        world.insert_resource(bevy::prelude::Assets::<
+            crate::game::object_fx_material::ObjectFxBlendMaterial,
+        >::default());
+        world.insert_resource(crate::game::object_fx_material::ObjectFxQuad::default());
         world.insert_resource(crate::ui::sprite_ui::UiImageCache::default());
         world.insert_resource(crate::game::dialogs::option::OptionState {
             effect: true,
@@ -963,6 +1046,12 @@ mod tests {
             ..Default::default()
         });
         world.insert_resource(EffectsState::default());
+        // 对象特效的加法混合材质相关资源（spawn 侧 `Blend = true` 的条目会用到）
+        world.insert_resource(bevy::prelude::Assets::<bevy::prelude::Mesh>::default());
+        world.insert_resource(bevy::prelude::Assets::<
+            crate::game::object_fx_material::ObjectFxBlendMaterial,
+        >::default());
+        world.insert_resource(crate::game::object_fx_material::ObjectFxQuad::default());
         world.insert_resource(bevy::prelude::Time::<()>::default());
         world
             .resource_mut::<crate::map_renderer::GameLibraries>()
@@ -1039,6 +1128,13 @@ mod tests {
             ),
         ));
         app.insert_resource(crate::ui::sprite_ui::UiImageCache::default());
+        // 对象特效的加法混合材质相关资源（spawn 侧 `Blend = true` 的条目要它们；
+        // EffectsPlugin 里由 register_object_fx_material 注册，这里手工建 App 也要同样补上）
+        app.insert_resource(bevy::prelude::Assets::<bevy::prelude::Mesh>::default());
+        app.insert_resource(bevy::prelude::Assets::<
+            crate::game::object_fx_material::ObjectFxBlendMaterial,
+        >::default());
+        app.insert_resource(crate::game::object_fx_material::ObjectFxQuad::default());
         // 与 EffectsPlugin 相同的五条系统、同样的链式注册（.after/run_if 与冲突校验无关，从略）
         app.add_systems(
             Update,
@@ -1077,6 +1173,11 @@ mod tests {
         });
         world.insert_resource(EffectsState::default());
         world.insert_resource(bevy::prelude::Time::<()>::default());
+        world.insert_resource(bevy::prelude::Assets::<bevy::prelude::Mesh>::default());
+        world.insert_resource(bevy::prelude::Assets::<
+            crate::game::object_fx_material::ObjectFxBlendMaterial,
+        >::default());
+        world.insert_resource(crate::game::object_fx_material::ObjectFxQuad::default());
         world
             .resource_mut::<crate::map_renderer::GameLibraries>()
             .0
@@ -1148,6 +1249,72 @@ mod tests {
             0,
             "表里有的对象特效不应再退回占位染色方块"
         );
+    }
+
+    /// 门禁：护盾光环的 Up 会**先清同组再生成**（原版 `ShieldEffect.Clear(); Remove();`），
+    /// 门禁：对象特效的**混合通道**必须按原版 `Effect.Blend` 分流（2026-09-25 按 C# 源码钉死）：
+    /// - `Blend = true`（`Effect.cs:23` 默认值；`GameScene.ObjectEffect` 39 条里 31 条）
+    ///   → `Library.DrawBlend` → `DXManager.SetBlend(true)`（`DXManager.cs:378-379`）= **加法混合**
+    ///   → 本端必须走 `Mesh2d` + 加法材质 `ObjectFxBlendMaterial`（Bevy 的 `Sprite` 只有普通 alpha，做不到 ADD）；
+    /// - `Blend = false`（8 条：RedMoonEvil / 觉醒 4 条 / Behemoth / KingGuard×2）
+    ///   → `Library.Draw`（批次为 `SpriteFlags.AlphaBlend`）= **普通 alpha** → 本端继续用 `Sprite`。
+    ///
+    /// 旧实现对所有条目都 spawn `Sprite` ⇒ 发光类特效（护盾/治疗/传送/天罚…）被画成了普通贴图。
+    /// **阳性对照（实做）**：把 `if f.blend` 改成 `if false`（全走 Sprite）或 `if true` → 本测试立即红。
+    #[test]
+    fn object_fx_blend_channel_follows_csharp_effect_blend() {
+        let Some(mut world) = object_fx_test_world() else {
+            eprintln!("skip object_fx_blend_channel_follows_csharp_effect_blend: 无 Data 资产");
+            return;
+        };
+        // ① Blend = true：Teleport（表里没写 blend，走 DEFAULT=true）
+        write_object_effect(&mut world, mir2_shared::enums::SpellEffect::Teleport, 0, 0);
+        let mut mq = world.query::<(
+            &ObjectFxAnim,
+            Option<&MeshMaterial2d<crate::game::object_fx_material::ObjectFxBlendMaterial>>,
+            Option<&Sprite>,
+        )>();
+        let rows: Vec<(String, bool, bool)> = mq
+            .iter(&world)
+            .map(|(fx, mat, sprite)| (fx.name.to_string(), mat.is_some(), sprite.is_some()))
+            .collect();
+        assert_eq!(rows.len(), 1, "Teleport 应生成 1 条");
+        assert!(
+            rows[0].1 && !rows[0].2,
+            "Blend=true 的条目必须走加法材质、且**不能**再挂普通 Sprite（实测 {rows:?}）"
+        );
+
+        // ② Blend = false：RedMoonEvil（表里显式 `blend: false`）——用**新 world**，
+        // 避免同 world 里手工 despawn 与生成系统的"清同组"逻辑撞车（实测会报 Entity despawned）。
+        drop(world);
+        let Some(mut world2) = object_fx_test_world() else {
+            panic!("第二个测试 world 创建失败");
+        };
+        write_object_effect(
+            &mut world2,
+            mir2_shared::enums::SpellEffect::RedMoonEvil,
+            0,
+            0,
+        );
+        let mut mq2 = world2.query::<(
+            &ObjectFxAnim,
+            Option<&MeshMaterial2d<crate::game::object_fx_material::ObjectFxBlendMaterial>>,
+            Option<&Sprite>,
+        )>();
+        let rows2: Vec<(String, bool, bool)> = mq2
+            .iter(&world2)
+            .map(|(fx, mat, sprite)| (fx.name.to_string(), mat.is_some(), sprite.is_some()))
+            .collect();
+        assert!(
+            !rows2.is_empty(),
+            "RedMoonEvil 应生成条目（实测 {rows2:?}）"
+        );
+        for (name, has_mat, has_sprite) in &rows2 {
+            assert!(
+                *has_sprite && !*has_mat,
+                "Blend=false 的条目（{name}）应走普通 alpha 的 Sprite（实测 {rows2:?}）"
+            );
+        }
     }
 
     /// 门禁：护盾光环的 Up 会**先清同组再生成**（原版 `ShieldEffect.Clear(); Remove();`），

@@ -2599,7 +2599,9 @@ fn apply_control_commands(
                 // 输出按 (kind, library, base, follow) 排序——Query 迭代序不稳定，
                 // 夹具要靠「连读两次一致」做仪器自检，所以必须确定性（见
                 // LESSON_HashMap派生JSON输出必须先排序保证确定性）。
-                let mut rows: Vec<(String, String, u64, u64, usize, usize)> = Vec::new();
+                // 末位 = 混合通道（`Some(true)` 加法 / `Some(false)` 普通 alpha / `None` 非对象特效行）
+                let mut rows: Vec<(String, String, u64, u64, usize, usize, Option<bool>)> =
+                    Vec::new();
                 for fx in q.spell_fx.iter() {
                     rows.push((
                         "cast".to_string(),
@@ -2608,6 +2610,7 @@ fn apply_control_commands(
                         fx.follow_object_id as u64,
                         fx.frames,
                         (fx.dur * 1000.0) as usize,
+                        None,
                     ));
                 }
                 for m in q.spell_missiles.iter() {
@@ -2618,6 +2621,7 @@ fn apply_control_commands(
                         0,
                         m.frames,
                         (m.frame_ms * 1000.0) as usize,
+                        None,
                     ));
                 }
                 // 对象特效：kind 里带上 `SpellEffect` 枚举名，夹具据此判断「哪一类特效被画了」
@@ -2629,12 +2633,13 @@ fn apply_control_commands(
                         f.follow_object_id as u64,
                         f.frames,
                         (f.dur * 1000.0) as usize,
+                        Some(f.blend_add),
                     ));
                 }
                 rows.sort();
                 let active: Vec<Value> = rows
                     .into_iter()
-                    .map(|(kind, library, base, follow, frames, ms)| {
+                    .map(|(kind, library, base, follow, frames, ms, blend_opt)| {
                         json!({
                             "kind": kind,
                             "library": library,
@@ -2642,6 +2647,13 @@ fn apply_control_commands(
                             "frames": frames,
                             "follow_object_id": follow,
                             "ms": ms,
+                            // 混合通道：add = 原版 `Effect.Blend = true`（加法发光）；
+                            // alpha = 原版 `Blend = false`（普通 alpha）；null = 该行不是对象特效。
+                            "blend": match blend_opt {
+                                Some(true) => json!("add"),
+                                Some(false) => json!("alpha"),
+                                None => Value::Null,
+                            },
                         })
                     })
                     .collect();
