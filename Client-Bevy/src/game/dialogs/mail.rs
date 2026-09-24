@@ -2810,6 +2810,137 @@ mod tests {
         assert_eq!(parcel_place(false, false, true), Place);
     }
 
+    /// **系统级**端到端门禁：把两条拒绝路径真的走一遍点击系统 `mail_compose_click_system`
+    /// （不是只测纯函数）——纯函数门禁只能证明决策表对，证明不了「真的点下去会发生什么」：
+    /// 接线、面板原点、坐标判定、消息出口任一环断了，纯函数门禁照样绿。
+    ///
+    /// 覆盖：①已占用格 + 手上有选中物 → 不替换原附件 + 出系统提示（C# `MirItemCell.cs:1787-1791`）；
+    /// ②空格 + 不可邮寄（`DontTrade`）→ 不进展 + 出提示（`:1793-1797`）；
+    /// ③对照组：空格 + 可邮寄 → 正常入包并清选中（`:1799-1807`），证明系统没被改坏。
+    ///
+    /// 阳性对照：把 `parcel_place` 的 `occupied && has_selection` 分支改成 `Place` →
+    /// 第一个断言立即红（原附件被覆盖，且聊天里没有提示）。
+    #[test]
+    fn mail_parcel_click_system_refuses_swap_and_cannot_mail() {
+        use bevy::ecs::system::RunSystemOnce;
+        use bevy::input::ButtonInput;
+        use bevy::prelude::{MouseButton, Node, Vec2, With, World};
+        use bevy::window::Window;
+        use mir2_shared::enums::BindMode;
+
+        /// 附件格 i 的屏幕中心：与点击系统同一份几何（同一组常量 + 同一个 `parcel_origin`）。
+        fn cell_center(i: usize) -> Vec2 {
+            let (ox, oy) = parcel_origin(PARCEL_SIZE.0);
+            Vec2::new(
+                ox + PARCEL_CELL_X0 + i as f32 * PARCEL_CELL_STEP + PARCEL_CELL_SIZE.0 / 2.0,
+                oy + PARCEL_CELL_Y + PARCEL_CELL_SIZE.1 / 2.0,
+            )
+        }
+
+        fn click_cell(world: &mut World, i: usize) {
+            let pos = cell_center(i);
+            let mut q = world.query_filtered::<&mut Window, With<Window>>();
+            for mut win in q.iter_mut(world) {
+                win.set_cursor_position(Some(pos));
+            }
+            let mut mouse = ButtonInput::<MouseButton>::default();
+            mouse.press(MouseButton::Left);
+            world.insert_resource(mouse);
+            world
+                .run_system_once(mail_compose_click_system)
+                .expect("点击系统应成功");
+        }
+
+        fn chat_texts(world: &World) -> Vec<String> {
+            world
+                .resource::<crate::game::chat::ChatState>()
+                .lines
+                .iter()
+                .map(|l| l.0.clone())
+                .collect()
+        }
+
+        let mut world = World::new();
+        world.insert_resource(crate::network::NetConnection::default());
+        world.insert_resource(crate::game::chat::ChatState::default());
+        world.insert_resource(crate::game::dialogs::inventory::InvClickState::default());
+        world.insert_resource(ButtonInput::<MouseButton>::default());
+        world.spawn(Window::default());
+        world.spawn((MailComposeRoot(ComposeWin::Parcel), Node::default()));
+        let mut inv = crate::game::player_state::Inventory::default();
+        inv.items = vec![Some(crate::game::dialogs::inventory::InvItem {
+            unique_id: 888,
+            item_index: 782,
+            ..Default::default()
+        })];
+        world.spawn((crate::actor::LocalPlayer, inv));
+        let mut mail = MailState::default();
+        mail.compose = true;
+        mail.compose_parcel = true;
+        mail.stamped = true; // 解锁 5 个附件格（未贴票只有第 1 格可装）
+        mail.attach = vec![None; 5];
+        mail.attach[0] = Some(777); // 第 0 格已被占用
+        world.insert_resource(mail);
+        world
+            .resource_mut::<crate::game::dialogs::inventory::InvClickState>()
+            .selected = Some(0); // 手上选中背包第 0 格（uid=888）
+
+        // ① 已占用格 + 有选中物 → 拒绝交换：原附件不动、选中不被清、聊天出现提示
+        click_cell(&mut world, 0);
+        assert_eq!(
+            world.resource::<MailState>().attach[0],
+            Some(777),
+            "已占用格不得被替换（C# You cannot swap items）"
+        );
+        assert_eq!(
+            world
+                .resource::<crate::game::dialogs::inventory::InvClickState>()
+                .selected,
+            Some(0),
+            "拒绝时不得清掉手上的选中物"
+        );
+        assert!(
+            chat_texts(&world).iter().any(|t| t == PARCEL_REFUSE_SWAP),
+            "拒绝交换必须出系统提示，实际聊天：{:?}",
+            chat_texts(&world)
+        );
+
+        // ② 空格 + 不可邮寄（DontTrade）→ 不进展 + 出提示
+        world
+            .resource_mut::<MailState>()
+            .item_bind
+            .insert(782, BindMode::DONT_TRADE.bits());
+        click_cell(&mut world, 1);
+        assert_eq!(
+            world.resource::<MailState>().attach[1],
+            None,
+            "不可邮寄物不得进附件格"
+        );
+        assert!(
+            chat_texts(&world)
+                .iter()
+                .any(|t| t == PARCEL_REFUSE_UNMAILABLE),
+            "不可邮寄必须出系统提示，实际聊天：{:?}",
+            chat_texts(&world)
+        );
+
+        // ③ 对照组：空格 + 可邮寄 → 正常入包（并清掉选中）
+        world.resource_mut::<MailState>().item_bind.remove(&782);
+        click_cell(&mut world, 2);
+        assert_eq!(
+            world.resource::<MailState>().attach[2],
+            Some(888),
+            "可邮寄物应正常入包（对照组，防把系统改坏）"
+        );
+        assert_eq!(
+            world
+                .resource::<crate::game::dialogs::inventory::InvClickState>()
+                .selected,
+            None,
+            "入包后应清掉手上选中"
+        );
+    }
+
     /// 门禁（#3120 ② 残余·数据层）：`ItemInfoReceived` 带来的绑定位要能被缓存并驱动守卫，
     /// 且**未知索引不得拦截**（否则没拉过信息的物品会被假拒收）。
     #[test]
