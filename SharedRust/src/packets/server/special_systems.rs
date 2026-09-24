@@ -274,7 +274,7 @@ pub struct GameShopInfo {
 
 #[derive(Debug, Clone)]
 pub struct GameShopItem {
-    pub item_index: i32,   // 物品索引
+    pub item_index: i32, // 物品索引
     /// C# `Item.Info.Image`（`MirGameShopCell.DrawControl` 用 `Libraries.Items[Image]` 画格子图标）
     pub image: i32,
     pub gold_price: u32,   // 金币价格
@@ -406,6 +406,11 @@ pub struct Rankings {
     pub rankings: Vec<RankInfo>, // 排名列表
     /// 请求者自己的排名（0=未上榜，C# MyRank）
     pub my_rank: i32,
+    /// 该榜**总条数**（C# `S.Rankings.Count`，`Server/MirEnvir/Envir.cs:5198`）。
+    /// `rankings` 只是从 `RankIndex` 起的 20 行窗口，所以总数必须单独带——
+    /// 客户端用它算滚动上限（`RankCount - 20`，`RankingDialog.cs:179/269`），
+    /// 也是「能不能滚」的唯一判据（窗口行数恒为 ≤20）。
+    pub total: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -444,8 +449,8 @@ impl Packet for Rankings {
         // Listings(Vec<i64>)
         writer.write_i32::<LittleEndian>(0)?;
 
-        // Count
-        writer.write_i32::<LittleEndian>(self.rankings.len() as i32)?;
+        // Count（C# 语义是**该榜总条数**，不是窗口行数：客户端 ScrollBar 的 row 换算要用它）
+        writer.write_i32::<LittleEndian>(self.total as i32)?;
 
         Ok(())
     }
@@ -477,7 +482,20 @@ impl Packet for Rankings {
             });
         }
 
-        Ok(Self { rankings, my_rank })
+        // 尾部 [listings_count i32][total i32]：`total` = 该榜总条数（缺失时退化为窗口行数）
+        let total = match reader.read_i32::<LittleEndian>() {
+            Ok(_listings_count) => reader
+                .read_i32::<LittleEndian>()
+                .map(|t| t.max(0) as usize)
+                .unwrap_or(rankings.len()),
+            Err(_) => rankings.len(),
+        };
+
+        Ok(Self {
+            rankings,
+            my_rank,
+            total,
+        })
     }
 }
 

@@ -637,6 +637,7 @@ pub(crate) fn send_map_and_objects(
         to_client,
         &server::special_systems::Rankings {
             my_rank: 0,
+            total: 2,
             rankings: vec![
                 server::special_systems::RankInfo {
                     rank: 1,
