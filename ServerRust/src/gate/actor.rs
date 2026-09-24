@@ -5963,7 +5963,10 @@ fn forward_report_issue(
         .try_send();
 }
 
-/// GetRanking: [type: u8][online_only: u8]
+/// GetRanking: [type: u8][online_only: u8][page_offset: u8]
+///
+/// `page_offset` 是后补的第三字节（C# `RankIndex` = 客户端 `RowOffset`，窗口起点）：
+/// 旧客户端只发 2 字节时按 0（第一页）处理，见 `SharedRust::packets::client::misc::GetRanking`。
 fn forward_get_ranking(
     world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>,
     session_id: SessionId,
@@ -5975,9 +5978,10 @@ fn forward_get_ranking(
     } else {
         false
     };
+    let page_offset = payload.get(2).copied().unwrap_or(0);
     debug!(
-        "GetRanking: session={} type={} online_only={}",
-        session_id, rank_type, online_only
+        "GetRanking: session={} type={} online_only={} offset={}",
+        session_id, rank_type, online_only, page_offset
     );
     let world_ref = match world_ref {
         Some(w) => w,
@@ -5987,6 +5991,7 @@ fn forward_get_ranking(
         .tell(crate::actors::world::GetRankingRequest {
             session_id,
             rank_type,
+            page_offset,
             online_only,
         })
         .try_send();

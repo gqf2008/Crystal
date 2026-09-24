@@ -710,11 +710,22 @@ impl Packet for ReportIssue {
 }
 
 /// Get ranking information
+///
+/// wire：`[rank_index u8][online_only u8][page_offset u8]`
+///
+/// 两个"index"字段语义不同，别按名字猜（对照 C# `RankingDialog.RequestRanks`，
+/// `Client/MirScenes/Dialogs/RankingDialog.cs:280-284`）：
+/// - `rank_index` = C# `RankType`：0=总榜，1..5=职业榜（服务端按它选榜）；
+/// - `page_offset` = C# `RankIndex`：窗口起点（`RowOffset`，钳在 `[0, Count-20]`）。
+///
+/// `page_offset` 是后补的第三字节：旧客户端只发 2 字节时按 0（第一页）解析。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct GetRanking {
     pub rank_index: u8,
     /// 仅在线（C# RankingDialog OnlineOnly）
     pub online_only: bool,
+    /// 窗口起点（C# `RowOffset`）：滚轮/翻页移动一格 → 服务端回该窗口的 20 行。
+    pub page_offset: u8,
 }
 
 impl Packet for GetRanking {
@@ -723,15 +734,18 @@ impl Packet for GetRanking {
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
         let rank_index = reader.read_u8()?;
         let online_only = reader.read_u8()? != 0;
+        let page_offset = reader.read_u8().unwrap_or(0);
         Ok(Self {
             rank_index,
             online_only,
+            page_offset,
         })
     }
 
     fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
         writer.write_u8(self.rank_index)?;
         writer.write_u8(self.online_only as u8)?;
+        writer.write_u8(self.page_offset)?;
         Ok(())
     }
 }

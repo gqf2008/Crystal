@@ -234,7 +234,10 @@ pub(crate) fn handle_social(
         x if x == ServerPacketIds::Rankings as i16 => {
             use byteorder::ReadBytesExt;
             // 手动解析服务端实际 wire：[rank_type u8][my_rank i32][count i32]
-            //   [per: rank i32][name dotnet][class u8][level i32][exp i64]...[listings_count i32][count i32]
+            //   [per: rank i32][player_id u32][name dotnet][class u8][level i32][exp i64]
+            //   ...[listings_count i32][total i32]
+            // 末尾的 `total` = 该榜**总条数**（C# `S.Rankings.Count`，`Envir.cs:5198`）：
+            // `count` 只是本次窗口的行数（≤20），滚动上限只有 `total` 能给出。
             let body = &payload[PacketHeader::HEADER_SIZE..];
             let mut cur = std::io::Cursor::new(body);
             let _rank_type = cur.read_u8().unwrap_or(0);
@@ -299,9 +302,22 @@ pub(crate) fn handle_social(
                     });
                 }
                 if ok {
-                    let count = entries.len();
-                    server_events.write(ServerEvent::Rankings { entries, my_rank });
-                    tracing::info!("🏅 排行榜: {} 条", count);
+                    // 尾部 [listings_count i32][total i32]：`total` = 该榜总条数（缺字段则退化为窗口行数）
+                    let mut total = entries.len();
+                    let mut lc_buf = [0u8; 4];
+                    if std::io::Read::read_exact(&mut cur, &mut lc_buf).is_ok() {
+                        let mut total_buf = [0u8; 4];
+                        if std::io::Read::read_exact(&mut cur, &mut total_buf).is_ok() {
+                            total = i32::from_le_bytes(total_buf).max(0) as usize;
+                        }
+                    }
+                    let window = entries.len();
+                    server_events.write(ServerEvent::Rankings {
+                        entries,
+                        my_rank,
+                        total,
+                    });
+                    tracing::info!("🏅 排行榜: 窗口 {} 行 / 共 {} 条", window, total);
                 } else {
                     tracing::warn!("⚠️ Rankings 解析失败: (len={})", payload.len());
                 }

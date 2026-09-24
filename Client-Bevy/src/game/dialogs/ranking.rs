@@ -7,7 +7,9 @@
 //     [207..209]@(299,386)、滚动条 Prguse2[205/206]@(299,113)、
 //     仅在线 Prguse[2086/2087]@(190,H-20)、MyRank 82x22@(229,36)、20 行 @(32,98+i*15)
 //     四列 0/55/150/220）
-//   - 仍待办：滚动条拖动（服务端只回前 20 名 → C# 亦不动，见 `SCROLL_POS` 注释）
+//   - 滚动（2026-09-24 收口）：滚轮/滑块/翻页改 `RowOffset` → 延迟 0.5s 发
+//     `C.GetRanking{RankType, RankIndex=RowOffset}`，服务端回该窗口的 20 行 +
+//     总条数（C# 是**服务端分页**，不是客户端缓冲全榜；见 `rank_request_step`）
 // 网络：Ranking 请求 → 服务器回排名 → 显示
 // ============================================================================
 
@@ -49,6 +51,66 @@ pub const ROW_W: f32 = 270.0;
 pub const ROW_H: f32 = 15.0;
 /// 行内四列左边界：RankLabel(0,0)/NameLabel(55,0)/ClassLabel(150,0)/LevelLabel(220,0)（`:341-382`）
 pub const ROW_LABEL_X: [f32; 4] = [0.0, 55.0, 150.0, 220.0];
+
+/// 列表滚轮命中区（相对面板左上角）= 20 行列表本体；滑块轨道 = C# `ScrollBar` 从
+/// `PrevButton.Y+13 = 113` 滑到 `NextButton.Y = 386`（`RankingDialog.cs:17-30/158-166`，
+/// `GapPerRow = ScrollHeight / extraRows`）。
+pub const LIST_WHEEL_RECT: (f32, f32, f32, f32) = (ROW_X, ROW_Y0, ROW_W, ROW_COUNT as f32 * ROW_H);
+pub const SCROLL_TRACK: (f32, f32, f32, f32) = (299.0, 113.0, 16.0, 273.0);
+
+/// 滚动请求去抖（C# `NextRequestTime = CMain.Now + TimeSpan.FromSeconds(0.5)`，
+/// `RankingDialog.cs:181/190/277`）：拖滑块/连点翻页时不把每一格都发成一个请求。
+pub const RANK_REQUEST_DEBOUNCE_SECS: f64 = 0.5;
+
+/// 排行榜请求驱动器状态（C# `RankingDialog.NextRequestTime` 的等价物）。
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct RankRequestState {
+    /// 最近一次**已发出**的窗口起点（C# `LastRequest` 的等价物）
+    pub sent_offset: u8,
+    /// 待发包 `(窗口起点, 到期时刻)`；`None` = 无待发包
+    pub pending: Option<(u8, f64)>,
+}
+
+/// 纯函数：这一刻要不要发 `C.GetRanking`（C# `RankingDialog.NextRequestTime` 语义）。
+///
+/// - `urgent`（页签 / 仅在线 / 首次打开）→ 立即发：C# `SelectRank`(`:306`) 与
+///   `OnlineOnlyButton.Click`(`:190`) 都把 `NextRequestTime` 设成「现在」；
+/// - 否则窗口起点变化只在 **0.5s 内没有新变化**时发一次：C# `Move`(`:277`) 与
+///   `ScrollBar.OnMoving`(`:181`) 每格都把 `NextRequestTime` 推后 0.5s；
+/// - 返回 `Some(offset)` = 发包，`None` = 本轮不发。
+pub fn rank_request_step(
+    st: &mut RankRequestState,
+    offset: u8,
+    urgent: bool,
+    now: f64,
+) -> Option<u8> {
+    if urgent {
+        st.pending = None;
+        st.sent_offset = offset;
+        return Some(offset);
+    }
+    if offset == st.sent_offset {
+        // 又回到已发过的窗口：C# 此时会重发同一个窗口，效果等价于不发。
+        st.pending = None;
+        return None;
+    }
+    match st.pending {
+        // 目标没变 → 等 0.5s 到期（期间没有新的 Move 事件）
+        Some((want, due)) if want == offset => {
+            if now < due {
+                return None;
+            }
+            st.pending = None;
+            st.sent_offset = offset;
+            Some(offset)
+        }
+        // 目标变了（拖滑块/连点）→ 重新计时
+        _ => {
+            st.pending = Some((offset, now + RANK_REQUEST_DEBOUNCE_SECS));
+            None
+        }
+    }
+}
 
 /// 关闭键：`Prguse2[360..362]` 24x21 @(300,3)（`:47-58`）
 pub const CLOSE_POS: (f32, f32) = (300.0, 3.0);
@@ -144,15 +206,20 @@ pub struct RankEntry {
 #[derive(Resource, Default)]
 pub struct RankingState {
     pub visible: bool,
+    /// 当前窗口（服务端按 `RankIndex` 取回，最多 20 行；行号是榜内全局名次）
     pub entries: Vec<RankEntry>,
+    /// 该榜总条数（C# `RankCount` = `S.Rankings.Count`）——滚动上限 `total - 20` 只能由它给出
+    pub total: usize,
     /// 当前页签（0=All 1..5=职业，C# RankingDialog SelectRank）
     pub tab: u8,
     /// 仅在线（C# RankingDialog OnlineOnly）
     pub online_only: bool,
     /// 我的排名（C# MyRank；0=未上榜）
     pub my_rank: i32,
-    /// 当前页首行在过滤后列表中的下标（翻页游标；跨系统共享，见 `ranking_row_click_system`）
+    /// 当前窗口起点（C# `RowOffset`）：滚轮/滑块/翻页改它，`ranking_request_system` 发出去
     pub page_offset: usize,
+    /// 请求驱动器（去抖 + 已发窗口），见 [`rank_request_step`]
+    pub request: RankRequestState,
 }
 
 #[derive(Component)]
@@ -204,28 +271,16 @@ pub fn rank_class_name(class: u8) -> &'static str {
     }
 }
 
-/// 按页签过滤（0=全部，1..5=对应职业；服务端暂返回全职业，本地过滤对齐 C# 页签语义）
-pub fn filter_rank_tab(entries: &[RankEntry], tab: u8) -> Vec<RankEntry> {
-    if tab == 0 {
-        return entries.to_vec();
-    }
-    entries
-        .iter()
-        .filter(|e| e.class + 1 == tab)
-        .cloned()
-        .collect()
-}
-
 /// C# `GameScene.InspectTime = CMain.Time + 500`（`RankingDialog.cs:376-378`）——排行榜行点击 500ms 节流
 const RANK_INSPECT_COOLDOWN_SECS: f64 = 0.5;
 
-/// #1225：当前页第 `line` 行对应的条目（C# `RankingRow` 是全局序号，本端按 `offset + line` 的页窗口取值）。
-fn rank_row_entry<'a>(
-    filtered: &'a [RankEntry],
-    offset: usize,
-    line: usize,
-) -> Option<&'a RankEntry> {
-    filtered.get(offset + line)
+/// 当前窗口第 `line` 行的条目。
+///
+/// 榜是**服务端分页**的：`entries` 就是本页那 ≤20 行（页签过滤也在服务端做，
+/// `ServerRust/src/actors/world/npc.rs::rank_window`），所以行下标 = 窗口内下标，
+/// 不再叠加客户端偏移（叠加会把窗口再推一次，等于把行推出数据外）。
+fn rank_row_entry(entries: &[RankEntry], line: usize) -> Option<&RankEntry> {
+    entries.get(line)
 }
 
 /// #1225：行点击节流判定（C# `if (CMain.Time <= GameScene.InspectTime) return;`——相等也算冷却中）
@@ -256,7 +311,12 @@ impl Plugin for RankingPlugin {
         app.add_systems(OnExit(AppState::Game), cleanup_ranking);
         app.add_systems(
             Update,
-            (ranking_ui_system, ranking_row_click_system).run_if(in_state(AppState::Game)),
+            (
+                ranking_ui_system,
+                ranking_row_click_system,
+                ranking_request_system,
+            )
+                .run_if(in_state(AppState::Game)),
         );
     }
 }
@@ -297,6 +357,29 @@ fn spawn_ranking(
     commands
         .entity(panel)
         .insert((DialogRoot(DialogKind::Ranking), RankingWidget));
+
+    // 滚动条：C# `ScrollBar Prguse2[205]`（`RankingDialog.cs:158-166`）——位置条拖动/滚轮
+    // 都走共享的 `UiScrollList` + `scroll_list_ui_system`（与行会成员页同一套机制）。
+    let mut rank_thumb: Option<Entity> = None;
+    if let Ok(mut pcmd) = commands.get_entity(panel) {
+        pcmd.with_children(|p| {
+            let (_, thumb) = crate::ui::theme::spawn_scroll_bar_ui(p, SCROLL_TRACK, 39);
+            rank_thumb = Some(thumb);
+        });
+    }
+    commands
+        .entity(panel)
+        .insert(crate::ui::theme::UiScrollList {
+            rect_rel: LIST_WHEEL_RECT,
+            row_h: ROW_H,
+            visible: ROW_COUNT,
+            total: 0,
+            offset: 0,
+            step: 1,
+            track_rel: SCROLL_TRACK,
+            thumb: rank_thumb,
+            z: 39,
+        });
 
     commands.entity(panel).with_children(|p| {
         // 关闭 X：C# `CloseButton Prguse2[360..362]` 24x21 @(300,3)（`:47-58`）
@@ -486,7 +569,6 @@ fn spawn_ranking(
 fn ranking_ui_system(
     mut mgr: ResMut<DialogManager>,
     mut ranking: ResMut<RankingState>,
-    net: Res<NetConnection>,
     local_player: Query<&PlayerName, With<LocalPlayer>>,
     mut widgets: Query<&mut Visibility, With<RankingWidget>>,
     close: Query<(Entity, &Interaction), (With<RankingClose>, Without<RankingTab>)>,
@@ -505,8 +587,9 @@ fn ranking_ui_system(
     >,
     mut my_rank_text: Query<&mut Text, (With<RankingMyRank>, Without<RankingCell>)>,
     mut cells: Query<(&mut Text, &mut TextColor, &RankingCell)>,
+    // 滚轮/滑块（共享 `scroll_list_ui_system` 写 `offset`）——见下方双向同步
+    mut scroll: Query<&mut crate::ui::theme::UiScrollList, With<RankingWidget>>,
     mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
-    mut requested: Local<bool>,
 ) {
     let open = ranking.visible || mgr.is_open(DialogKind::Ranking);
     for mut vis in widgets.iter_mut() {
@@ -517,7 +600,6 @@ fn ranking_ui_system(
         };
     }
     if !open {
-        *requested = false;
         ranking.page_offset = 0;
         return;
     }
@@ -528,26 +610,25 @@ fn ranking_ui_system(
             mgr.close(DialogKind::Ranking);
         }
     }
-    // 打开瞬间请求排行榜（C# RankingDialog.Show → GetRanking）
-    if !*requested {
-        *requested = true;
-        net.send_packet(&mir2_shared::packets::client::misc::GetRanking {
-            rank_index: ranking.tab,
-            online_only: ranking.online_only,
-        });
-        tracing::info!("🏅 请求排行榜");
+    // 滚动上限只能由**总条数**给出（C# `RankCount`）：窗口恒为 ≤20 行，
+    // 拿窗口行数当 total 会算出 max_offset = 0 —— 那正是本项「滚不动」的成因。
+    let total = ranking.total.max(ranking.entries.len());
+    let max_offset = total.saturating_sub(ROW_COUNT);
+    // 滚轮/位置条（共享系统写 `UiScrollList.offset`）→ `page_offset`（C# `RowOffset`）
+    if let Ok(mut l) = scroll.single_mut() {
+        l.set_total(total);
+        ranking.page_offset = l.offset.min(max_offset);
     }
-    let filtered = filter_rank_tab(&ranking.entries, ranking.tab);
-    let max_offset = filtered.len().saturating_sub(ROW_COUNT);
-    // 页签切换
+    ranking.page_offset = ranking.page_offset.min(max_offset);
+    // 页签切换（C# `SelectRank`(`:297-307`)：清空行 + `RowOffset = 0` + 立刻换榜请求，
+    // 请求由 `ranking_request_system` 发——它看到 (tab, online_only) 变化就立即发包）
     for (e, inter, t) in &tabs {
         if edge(e, inter, &mut prev_inter) && ranking.tab != t.0 {
             ranking.tab = t.0;
             ranking.page_offset = 0;
-            net.send_packet(&mir2_shared::packets::client::misc::GetRanking {
-                rank_index: t.0,
-                online_only: ranking.online_only,
-            });
+            // 旧榜的行不要留到新榜响应回来（C# `Rows[i].Clear()`）
+            ranking.entries.clear();
+            ranking.total = 0;
             tracing::info!(
                 "🏅 排行榜页签 {}",
                 if t.0 == 0 {
@@ -570,15 +651,18 @@ fn ranking_ui_system(
         }
     }
     ranking.page_offset = ranking.page_offset.min(max_offset);
+    // 按钮/页签/仅在线改过的偏移写回滚动列表（滑块位置与 offset 同步由共享系统负责）
+    if let Ok(mut l) = scroll.single_mut() {
+        l.set_total(total);
+        l.offset = ranking.page_offset;
+    }
     // 仅在线（切换 + 帧同步）
     for (e, inter, ib, mut node) in &mut online {
         if edge(e, inter, &mut prev_inter) {
             ranking.online_only = !ranking.online_only;
             ranking.page_offset = 0;
-            net.send_packet(&mir2_shared::packets::client::misc::GetRanking {
-                rank_index: ranking.tab,
-                online_only: ranking.online_only,
-            });
+            ranking.entries.clear();
+            ranking.total = 0;
             tracing::info!("🏅 排行榜仅在线 {}", ranking.online_only);
         }
         let want = if ranking.online_only {
@@ -596,7 +680,7 @@ fn ranking_ui_system(
         .map(|n| n.0.clone())
         .unwrap_or_default();
     for (mut text, mut color, cell) in &mut cells {
-        let (line, want) = match (filtered.get(ranking.page_offset + cell.row), cell.field) {
+        let (line, want) = match (ranking.entries.get(cell.row), cell.field) {
             (Some(e), f @ 0..=3) => {
                 let s = match f {
                     0 => e.rank.to_string(),
@@ -642,12 +726,11 @@ fn ranking_row_click_system(
     if !(ranking.visible || mgr.is_open(DialogKind::Ranking)) {
         return;
     }
-    let filtered = filter_rank_tab(&ranking.entries, ranking.tab);
     for (e, inter, line) in &rows {
         if !edge(e, inter, &mut prev_inter) {
             continue;
         }
-        let Some(entry) = rank_row_entry(&filtered, ranking.page_offset, line.0) else {
+        let Some(entry) = rank_row_entry(&ranking.entries, line.0) else {
             continue;
         };
         let now = time.elapsed_secs_f64();
@@ -671,6 +754,51 @@ fn ranking_row_click_system(
     }
 }
 
+/// 排行榜请求驱动：把 `page_offset`（C# `RowOffset`）变成 `C.GetRanking`。
+///
+/// 独立成系统：`ranking_ui_system` 参数已 14 个（Bevy 上限 16），而请求还要
+/// 读 `Time`（去抖）与 `NetConnection`（发包）。
+///
+/// C# 参照 `RankingDialog.RequestRanks`（`RankingDialog.cs:280-284`）：
+/// 发 `{ RankType, RankIndex = RowOffset, OnlineOnly }`，服务端按 RankIndex 回窗口。
+/// 页签 / 仅在线 / 首次打开 → 立即发；滚轮 / 滑块 / 翻页 → 延迟 0.5s（`NextRequestTime`）。
+fn ranking_request_system(
+    mgr: Res<DialogManager>,
+    mut ranking: ResMut<RankingState>,
+    net: Res<NetConnection>,
+    time: Res<Time>,
+    mut requested: Local<bool>,
+    mut last_key: Local<(u8, bool)>,
+) {
+    let open = ranking.visible || mgr.is_open(DialogKind::Ranking);
+    if !open {
+        *requested = false;
+        return;
+    }
+    // 换榜是立即请求（C# `SelectRank` / `OnlineOnlyButton.Click` 都把 NextRequestTime 设为现在）
+    let key = (ranking.tab, ranking.online_only);
+    let urgent = !*requested || *last_key != key;
+    *last_key = key;
+    *requested = true;
+
+    // 服务端 `RankIndex` 是 u8；候选池上限 50（`ORDER BY ... LIMIT 50`）→ 偏移远小于 255，
+    // 这里的 min 只是防御（避免将来放大候选池后静默截断）。
+    let offset = ranking.page_offset.min(u8::MAX as usize) as u8;
+    if let Some(off) = rank_request_step(
+        &mut ranking.request,
+        offset,
+        urgent,
+        time.elapsed_secs_f64(),
+    ) {
+        net.send_packet(&mir2_shared::packets::client::misc::GetRanking {
+            rank_index: ranking.tab,
+            online_only: ranking.online_only,
+            page_offset: off,
+        });
+        tracing::info!("🏅 请求排行榜 榜={} 窗口起点={}", ranking.tab, off);
+    }
+}
+
 /// 消费服务端排行榜事件（网络层只广播 ServerEvent）
 fn ranking_server_events(
     mut events: MessageReader<crate::network::server_event::ServerEvent>,
@@ -679,12 +807,18 @@ fn ranking_server_events(
     use crate::network::server_event::ServerEvent;
     for ev in events.read() {
         match ev {
-            ServerEvent::Rankings { entries, my_rank } => {
+            ServerEvent::Rankings {
+                entries,
+                my_rank,
+                total,
+            } => {
                 ranking.entries = entries.clone();
                 ranking.my_rank = *my_rank;
+                ranking.total = *total;
             }
             ServerEvent::RankingsCleared => {
                 ranking.entries.clear();
+                ranking.total = 0;
             }
             _ => {}
         }
@@ -711,6 +845,40 @@ mod tests {
         );
     }
 
+    /// 门禁（2026-09-24，owner 队列「排行榜滚动是 no-op」）：列表滚动接的是共享
+    /// `UiScrollList`，偏移必须被钳在 `[0, total-visible]`（C# `RowOffset` 同样钳在
+    /// `[0, RankCount-20]`，`RankingDialog.cs:246-275`），否则滚轮会把行窗口推出数据外。
+    ///
+    /// 阳性对照：把 `set_total` 的钳位去掉（`offset` 保持原值）→ 第二条断言立即红。
+    #[test]
+    fn ranking_scroll_offset_is_clamped_like_csharp() {
+        let mut l = crate::ui::theme::UiScrollList {
+            rect_rel: LIST_WHEEL_RECT,
+            row_h: ROW_H,
+            visible: ROW_COUNT,
+            total: 0,
+            offset: 0,
+            step: 1,
+            track_rel: SCROLL_TRACK,
+            thumb: None,
+            z: 39,
+        };
+        // 不足一屏 → 不能滚
+        l.set_total(7);
+        assert_eq!(l.max_offset(), 0, "7 行 < 20 行：不可滚");
+        l.offset = 5;
+        l.set_total(7);
+        assert_eq!(l.offset, 0, "重新 set_total 必须把越界偏移夹回 0");
+        // 30 行 → 上限 10（= 30-20）
+        l.set_total(30);
+        assert_eq!(l.max_offset(), 10);
+        l.offset = 99;
+        l.set_total(30);
+        assert_eq!(l.offset, 10, "偏移上限 = total - ROW_COUNT");
+        // 轮盘每格 1 行（C# `Ranking_MouseWheel` 每次 ±1）
+        assert_eq!(l.step, 1);
+    }
+
     fn entry(rank: i32, class: u8) -> RankEntry {
         RankEntry {
             rank,
@@ -722,35 +890,61 @@ mod tests {
         }
     }
 
+    /// 门禁：滚轮/翻页的去抖（C# `NextRequestTime = Now + 0.5s`）——
+    /// 「滚一格就发一个包」会让拖滑块打出一串请求；「只在 0.5s 静默后才发」才是原版。
+    ///
+    /// 阳性对照：把 [`rank_request_step`] 里 `if now < due { return None; }` 去掉 → 第 2 条
+    /// 断言（0.25s 时不得发包）立即红。
     #[test]
-    fn rank_tab_filter() {
-        let entries = vec![
-            entry(1, 0),
-            entry(2, 1),
-            entry(3, 2),
-            entry(4, 3),
-            entry(5, 4),
-        ];
-        assert_eq!(filter_rank_tab(&entries, 0).len(), 5);
-        assert_eq!(filter_rank_tab(&entries, 1).len(), 1);
-        assert_eq!(filter_rank_tab(&entries, 1)[0].rank, 1);
-        assert_eq!(filter_rank_tab(&entries, 4)[0].rank, 4);
-        assert_eq!(filter_rank_tab(&entries, 5)[0].rank, 5);
-        assert!(filter_rank_tab(&entries, 6).is_empty());
+    fn rank_request_step_debounces_like_csharp() {
+        let mut st = RankRequestState::default();
+        // 首次打开（urgent）→ 立即发第 0 页
+        assert_eq!(
+            rank_request_step(&mut st, 0, true, 0.0),
+            Some(0),
+            "打开排行榜应立刻请求第一页"
+        );
+        // 滚一格：不立即发包（C# `Move` 只改 RowOffset 并推后 NextRequestTime）
+        assert_eq!(rank_request_step(&mut st, 1, false, 0.0), None);
+        assert_eq!(
+            rank_request_step(&mut st, 1, false, 0.25),
+            None,
+            "0.5s 静默前不得发包"
+        );
+        assert_eq!(
+            rank_request_step(&mut st, 1, false, 0.5),
+            Some(1),
+            "静默满 0.5s → 发该窗口"
+        );
+        // 拖滑块连跳（0.5 → 2、0.75 → 3）：每格重新计时，到期 1.25
+        assert_eq!(rank_request_step(&mut st, 2, false, 0.5), None);
+        assert_eq!(rank_request_step(&mut st, 3, false, 0.75), None);
+        assert_eq!(
+            rank_request_step(&mut st, 3, false, 1.0),
+            None,
+            "拖动过程中不得发包"
+        );
+        assert_eq!(rank_request_step(&mut st, 3, false, 1.25), Some(3));
+        // 目标未变时不重复发
+        assert_eq!(rank_request_step(&mut st, 3, false, 2.0), None);
+        // 换榜/切仅在线 → 立即发（offset 已被 ui 系统归零）
+        assert_eq!(
+            rank_request_step(&mut st, 0, true, 2.0),
+            Some(0),
+            "换榜应立刻请求该榜第一页"
+        );
     }
 
     /// #1225：行点击 → 当前页条目映射 + 500ms 节流（C# `RankingDialog.cs:374-380`）
     #[test]
     fn rank_row_click_window_and_throttle() {
-        let entries: Vec<RankEntry> = (1..=25).map(|i| entry(i, 0)).collect();
-        let filtered = filter_rank_tab(&entries, 0);
-        // 第一页第 0 行 = 第 1 名
-        assert_eq!(rank_row_entry(&filtered, 0, 0).map(|e| e.rank), Some(1));
-        // 第二页（offset=10）第 0 行 = 第 11 名、第 4 行 = 第 15 名
-        assert_eq!(rank_row_entry(&filtered, 10, 0).map(|e| e.rank), Some(11));
-        assert_eq!(rank_row_entry(&filtered, 10, 4).map(|e| e.rank), Some(15));
-        // 越界行（列表不足）→ None，不发包
-        assert!(rank_row_entry(&filtered, 20, 5).is_none());
+        // 服务端分页后 `entries` 就是本页窗口（行号由服务端算成榜内全局名次）
+        let window: Vec<RankEntry> = (11..=30).map(|i| entry(i, 0)).collect();
+        // 第 0 行 = 第 11 名（窗口起点 = 10）、第 4 行 = 第 15 名
+        assert_eq!(rank_row_entry(&window, 0).map(|e| e.rank), Some(11));
+        assert_eq!(rank_row_entry(&window, 4).map(|e| e.rank), Some(15));
+        // 越界行（窗口不足 20 行）→ None，不发包
+        assert!(rank_row_entry(&window, 20).is_none());
         // 节流：冷却期内不允许；`<=` 边界同样算冷却中（C# `CMain.Time <= InspectTime`）
         assert!(rank_inspect_allowed(1.0, 0.0));
         assert!(rank_inspect_allowed(1.51, 1.0));
@@ -767,17 +961,18 @@ mod tests {
         app.init_resource::<DialogManager>();
         app.insert_resource(NetConnection::default());
         app.add_systems(Update, ranking_row_click_system);
-        // 第二页（offset=10）第 1 行 → 第 12 名（player_id=120，仅 id 递增便于断言）
+        // 本页窗口（起点 10 → 第 11..22 名）第 1 行 = 第 12 名（player_id=120，id 递增便于断言）
         let mut ranking = RankingState {
             visible: true,
             ..Default::default()
         };
-        ranking.entries = (1..=12)
+        ranking.entries = (11..=22)
             .map(|i| RankEntry {
                 player_id: i as u32 * 10,
                 ..entry(i, 0)
             })
             .collect();
+        ranking.total = 41;
         ranking.page_offset = 10;
         app.insert_resource(ranking);
         let (tx, rx) = crossbeam_channel::unbounded::<Vec<u8>>();
@@ -798,7 +993,7 @@ mod tests {
             mir2_shared::packets::base::deserialize_packet(&mut cur).expect("应为 Inspect 包");
         assert_eq!(
             inspect.object_id, 120,
-            "应查看「当前页第 1 行」的条目（页窗口 offset + line）"
+            "应查看「本页窗口第 1 行」的条目（窗口由服务端按 RankIndex 取回）"
         );
         assert!(inspect.ranking, "排行榜查看须置 Ranking=true");
         assert_eq!(inspect.name, "p12");

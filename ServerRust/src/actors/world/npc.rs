@@ -4152,9 +4152,86 @@ impl Message<ReportIssueRequest> for WorldActor {
     }
 }
 
+/// 排行榜一行（已按等级/经验排好序的候选）
+#[derive(Debug, Clone, PartialEq)]
+pub struct RankCandidate {
+    /// 在线玩家为 object_id，离线（DB 补全）为 0
+    pub player_id: u32,
+    pub name: String,
+    pub class: u8,
+    pub level: i32,
+    pub experience: i64,
+}
+
+/// C# `S.Rankings` 的窗口行数（`Envir.cs:5219` `if (c > 19 ...) break`）
+pub const RANK_WINDOW: usize = 20;
+
+/// C# `Envir.GetRanking`（`Server/MirEnvir/Envir.cs:5188-5223`）的纯函数内核。
+///
+/// 逐条对齐原版：
+/// - `rank_type` 0 = 总榜，1..5 = 职业榜；榜 = 该职业的子集（C# `RankClass[RankType-1]`，
+///   下标就是 `MirClass` 字节：0 战士 / 1 法师 / 2 道士 / 3 刺客 / 4 弓箭手）；
+/// - 窗口 = 从 `page_offset` 起最多 [`RANK_WINDOW`] 行；
+/// - 行号是**榜内全局名次**（C# 客户端 `Rows[i].Update(listing, RowOffset + i + 1)`）；
+/// - 返回 `(窗口, 该榜总条数, 请求者在该榜的名次)`；总数由 `S.Rankings.Count` 带回，
+///   客户端用它算滚动上限（`RankCount - 20`）——只有窗口行数是不够的；
+/// - `rank_type > 6` 或 `page_offset >= 总条数` → `None`（C# 是直接 `return`，**不发包**）。
+pub fn rank_window(
+    entries: &[RankCandidate],
+    rank_type: u8,
+    page_offset: usize,
+    requester: &str,
+) -> Option<(
+    Vec<mir2_shared::packets::server::special_systems::RankInfo>,
+    usize,
+    i32,
+)> {
+    // C# `if (RankType > 6) return;`
+    if rank_type > 6 {
+        return None;
+    }
+    // C# `RankType == 0 ? RankTop : RankClass[RankType - 1]`：职业榜是总榜的职业子集，
+    // 名次在子集内重新编号（原版每个榜各自维护一份 List，插入排序时各自编号）。
+    let pool: Vec<&RankCandidate> = entries
+        .iter()
+        .filter(|e| rank_type == 0 || e.class + 1 == rank_type)
+        .collect();
+    let total = pool.len();
+    // C# `if (RankIndex >= listings.Count || RankIndex < 0) return;`
+    if page_offset >= total {
+        return None;
+    }
+    // C# `p.MyRank`：总榜取 `Info.Rank[0]`，职业榜只有「自己就是该职业」时非 0。
+    // 在子集内定位即同一语义（不在子集里 ⇒ 0）。
+    let my_rank = pool
+        .iter()
+        .position(|e| e.name == requester)
+        .map(|i| i as i32 + 1)
+        .unwrap_or(0);
+    let window = pool
+        .iter()
+        .skip(page_offset)
+        .take(RANK_WINDOW)
+        .enumerate()
+        .map(
+            |(i, e)| mir2_shared::packets::server::special_systems::RankInfo {
+                rank: (page_offset + i + 1) as i32,
+                player_id: e.player_id,
+                player_name: e.name.clone(),
+                class: e.class,
+                level: e.level,
+                experience: e.experience,
+            },
+        )
+        .collect();
+    Some((window, total, my_rank))
+}
+
 pub struct GetRankingRequest {
     pub session_id: u64,
     pub rank_type: u8,
+    /// 窗口起点（C# `RankIndex` = 客户端 `RowOffset`）：滚轮/翻页每格 ±1
+    pub page_offset: u8,
     pub online_only: bool,
 }
 
@@ -4162,8 +4239,8 @@ impl Message<GetRankingRequest> for WorldActor {
     type Reply = ();
     async fn handle(&mut self, msg: GetRankingRequest, _ctx: &mut Context<Self, Self::Reply>) {
         debug!(
-            "GetRanking: session={} type={}",
-            msg.session_id, msg.rank_type
+            "GetRanking: session={} type={} offset={}",
+            msg.session_id, msg.rank_type, msg.page_offset
         );
 
         // #1323：请求者名字（计算 MyRank）
@@ -4176,16 +4253,16 @@ impl Message<GetRankingRequest> for WorldActor {
         };
 
         // Collect online players
-        let mut entries: Vec<(u32, String, u8, i32, i64)> = Vec::new();
+        let mut entries: Vec<RankCandidate> = Vec::new();
         for record in self.players.values() {
             if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
-                entries.push((
-                    state.object_id,
-                    state.name.clone(),
-                    state.class as u8,
-                    state.level as i32,
-                    state.experience,
-                ));
+                entries.push(RankCandidate {
+                    player_id: state.object_id,
+                    name: state.name.clone(),
+                    class: state.class as u8,
+                    level: state.level as i32,
+                    experience: state.experience,
+                });
             }
         }
         // Supplement with DB-backed top players for more complete rankings
@@ -4204,40 +4281,49 @@ impl Message<GetRankingRequest> for WorldActor {
                         .unwrap_or(mir2_shared::enums::MirClass::Warrior) as u8;
                     let level: i32 = row.get("level");
                     let experience: i64 = row.get("experience");
-                    if !entries.iter().any(|(_, n, _, _, _)| n == &name) {
-                        entries.push((0, name, class, level, experience));
+                    if !entries.iter().any(|e| e.name == name) {
+                        entries.push(RankCandidate {
+                            player_id: 0,
+                            name,
+                            class,
+                            level,
+                            experience,
+                        });
                     }
                 }
             }
         }
 
-        // 按等级降序、经验降序排序
-        entries.sort_by(|a, b| b.3.cmp(&a.3).then_with(|| b.4.cmp(&a.4)));
+        // 按等级降序、经验降序排序（C# 每个榜各自插入排序，比较器同为 level→experience）
+        entries.sort_by(|a, b| {
+            b.level
+                .cmp(&a.level)
+                .then_with(|| b.experience.cmp(&a.experience))
+        });
 
-        // #1323：请求者自己的排名（C# MyRank；未上榜=0）
-        let my_rank = entries
-            .iter()
-            .position(|(_, n, _, _, _)| n == &requester_name)
-            .map(|i| i as i32 + 1)
-            .unwrap_or(0);
-        // 取前 20 名
-        let rankings: Vec<mir2_shared::packets::server::special_systems::RankInfo> = entries
-            .into_iter()
-            .take(20)
-            .enumerate()
-            .map(|(idx, (player_id, name, class, level, experience))| {
-                mir2_shared::packets::server::special_systems::RankInfo {
-                    rank: (idx + 1) as i32,
-                    player_id,
-                    player_name: name,
-                    class,
-                    level,
-                    experience,
-                }
-            })
-            .collect();
+        // C# `Envir.GetRanking`：选榜（总榜/职业榜）→ 取窗口 → 带总条数 + MyRank
+        let Some((rankings, total, my_rank)) = rank_window(
+            &entries,
+            msg.rank_type,
+            msg.page_offset as usize,
+            &requester_name,
+        ) else {
+            // C# 同名分支（`RankIndex` 越界 / `RankType > 6`）是直接 `return`——**不回包**。
+            // 客户端把 offset 钳在 `[0, total-20]`，正常路径不会走到这里（`total == 0` 除外）。
+            debug!(
+                "GetRanking: 越界/非法请求，按原版不发包 (type={} offset={} 候选={})",
+                msg.rank_type,
+                msg.page_offset,
+                entries.len()
+            );
+            return;
+        };
 
-        let packet = mir2_shared::packets::server::special_systems::Rankings { rankings, my_rank };
+        let packet = mir2_shared::packets::server::special_systems::Rankings {
+            rankings,
+            my_rank,
+            total,
+        };
         let mut body = Vec::new();
         if packet.write_body(&mut body).is_ok() {
             let _ = self
@@ -4700,5 +4786,82 @@ mod tests {
         assert!(!gameshop_stock_available(10, 11, 1));
         // 未购买过 → 全额可用
         assert!(gameshop_stock_available(10, 0, 10));
+    }
+
+    fn cand(name: &str, class: u8, level: i32) -> RankCandidate {
+        RankCandidate {
+            player_id: 0,
+            name: name.to_string(),
+            class,
+            level,
+            experience: 0,
+        }
+    }
+
+    /// 门禁：排行榜窗口 = C# `Envir.GetRanking`（`Server/MirEnvir/Envir.cs:5188-5223`）——
+    /// 总榜/职业榜、窗口起点、**榜内全局名次**、总条数（客户端滚动上限的唯一来源）。
+    ///
+    /// 阳性对照：把 `rank` 改回窗口内下标（`i + 1`）→ 名次断言立即红；
+    /// 把 `total` 改回窗口行数 → 总条数断言立即红。
+    #[test]
+    fn rank_window_matches_csharp_paging_and_class_tabs() {
+        // 41 名，等级严格递减（与 handler 的 level desc / experience desc 排序同序）
+        let pool: Vec<RankCandidate> = (0..41)
+            .map(|i| cand(&format!("p{:02}", i), (i % 5) as u8, 100 - i))
+            .collect();
+
+        // 第 1 页：20 行、名次 1..20、**总条数 41**（不是窗口行数）
+        let (w1, total, my) = rank_window(&pool, 0, 0, "p03").expect("第 1 页应有数据");
+        assert_eq!(w1.len(), RANK_WINDOW);
+        assert_eq!(
+            total, 41,
+            "总条数 = 该榜候选总数（客户端 total-20=21 才是可滚上限）"
+        );
+        assert_eq!(w1[0].rank, 1);
+        assert_eq!(w1[19].rank, 20);
+        assert_eq!(my, 4, "总榜 MyRank = 在总榜里的位置（p03 → 第 4）");
+
+        // 末页（起点 21）：20 行、名次 22..41（榜内全局名次，不是 1..20）
+        let (w2, _, _) = rank_window(&pool, 0, 21, "p03").expect("末页应有数据");
+        assert_eq!(w2.len(), 20);
+        assert_eq!(
+            w2[0].rank, 22,
+            "行号必须是榜内全局名次（C# Rows[i].Update(_, RowOffset + i + 1)）"
+        );
+        assert_eq!(w2[19].rank, 41);
+
+        // 职业榜：只含该职业（class + 1 == rank_type），名次在榜内重排。
+        // 41 人里 class=0（战士）9 人 → 名次 1..9、总数 9（< 20 ⇒ 客户端滚不动，正确）。
+        let (war, war_total, _) = rank_window(&pool, 1, 0, "p00").expect("战士榜应有数据");
+        assert!(war.iter().all(|e| e.class == 0), "职业榜不得混入别的职业");
+        assert_eq!(war_total, 9);
+        assert_eq!(war.len(), 9);
+        assert_eq!(war[0].rank, 1, "职业榜名次从 1 起（不是总榜名次）");
+        // 请求者不在该榜 → MyRank = 0（C# `p.MyRank = class == RankType-1 ? Rank[1] : 0`）
+        let (_, _, my_war) = rank_window(&pool, 1, 0, "p01").expect("战士榜应有数据");
+        assert_eq!(my_war, 0, "本人不是该职业 → 未上榜");
+
+        // 越界/非法：C# 是直接 return（**不发包**）→ None
+        assert!(rank_window(&pool, 0, 41, "p00").is_none(), "起点越界不发包");
+        assert!(
+            rank_window(&pool, 7, 0, "p00").is_none(),
+            "RankType > 6 不发包"
+        );
+        assert!(rank_window(&[], 0, 0, "p00").is_none(), "空榜不发包");
+    }
+
+    /// 门禁：窗口行数恒 ≤ 20（C# `if (c > 19 || c >= p.Count) break;`）
+    #[test]
+    fn rank_window_caps_at_twenty_rows() {
+        let pool: Vec<RankCandidate> = (0..50)
+            .map(|i| cand(&format!("q{}", i), 0, 50 - i))
+            .collect();
+        let (w, total, _) = rank_window(&pool, 0, 0, "q1").expect("应有数据");
+        assert_eq!(w.len(), 20);
+        assert_eq!(total, 50);
+        // 末页不足 20 行也不越界
+        let (w_last, _, _) = rank_window(&pool, 0, 30, "q1").expect("末页应有数据");
+        assert_eq!(w_last.len(), 20);
+        assert_eq!(w_last[0].rank, 31);
     }
 }

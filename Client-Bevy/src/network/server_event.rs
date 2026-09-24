@@ -558,8 +558,11 @@ pub enum ServerEvent {
     },
     /// Rankings：排行榜
     Rankings {
+        /// 当前窗口（服务端按 `RankIndex` 取的 ≤20 行；行号是榜内全局名次）
         entries: Vec<RankEntry>,
         my_rank: i32,
+        /// 该榜总条数（C# `S.Rankings.Count`）——滚动上限 `total - 20` 的唯一来源
+        total: usize,
     },
     /// GuildNoticeChange：行会公告更新
     GuildNotice {
