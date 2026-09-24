@@ -19,21 +19,28 @@ pub(crate) fn parse_shop_catalog_item(cur: &mut std::io::Cursor<&[u8]>) -> Optio
     let gold_price = cur.read_u32::<LittleEndian>().ok()?;
     let credit_price = cur.read_u32::<LittleEndian>().ok()?;
     let count = cur.read_i32::<LittleEndian>().ok()?;
-    let _class = cur.read_u8().ok()?;
+    // class 是 7-bit 字符串（与 SharedRust `GameShopItem::write_body` 同序）——原版按字符串比职业
+    let class = mir2_shared::binary::read_dotnet_string(cur).ok()?;
     let category = mir2_shared::binary::read_dotnet_string(cur).ok()?;
     let stock = cur.read_i32::<LittleEndian>().ok()?;
     let _is_bought = cur.read_u8().ok()?;
-    let _deal = cur.read_u8().ok()?;
+    let deal = cur.read_u8().ok()? != 0;
     let can_buy_credit = cur.read_u8().ok()? != 0;
     let can_buy_gold = cur.read_u8().ok()? != 0;
+    let top_item = cur.read_u8().ok()? != 0;
+    let date = cur.read_i64::<LittleEndian>().ok()?;
     Some(ShopCatalogItem {
         item_index,
         image,
         gold_price,
         credit_price,
         count,
+        class,
         category,
         stock,
+        deal,
+        top_item,
+        date,
         can_buy_gold,
         can_buy_credit,
     })
@@ -507,9 +514,12 @@ mod shop_catalog_tests {
     use super::parse_shop_catalog_item;
 
     /// #2791 单元②：`S.GameShopInfo` 商品项字节序（与 SharedRust `GameShopInfo::write_body`
-    /// 同序）：`[item_index i32][image i32][gold u32][credit u32][count i32][class u8][category 7-bit]
-    /// [stock i32][is_bought u8][deal u8][can_buy_credit u8][can_buy_gold u8]`
-    /// （`image` 为 2026-09-24 商城格子图标新增，`MirGameShopCell.DrawControl` 用 `Libraries.Items[Image]`）
+    /// 同序）：`[item_index i32][image i32][gold u32][credit u32][count i32][class 7-bit]
+    /// [category 7-bit][stock i32][is_bought u8][deal u8][can_buy_credit u8][can_buy_gold u8]
+    /// [top_item u8][date i64]`
+    /// （`image` 为 2026-09-24 商城格子图标新增；`class` 由 u8 改 **7-bit 字符串**、
+    /// 尾部补 `top_item/date` 为商城三段筛选新增——原版按字符串比职业、
+    /// `TopItems/NewItems` 段要 `TopItem`/`Date`）
     #[test]
     fn parses_can_buy_flags_from_item_tail() {
         use byteorder::{LittleEndian, WriteBytesExt};
@@ -519,8 +529,11 @@ mod shop_catalog_tests {
         body.write_u32::<LittleEndian>(100).unwrap();
         body.write_u32::<LittleEndian>(50).unwrap();
         body.write_i32::<LittleEndian>(2).unwrap();
-        body.write_u8(3).unwrap();
-        // category：C# 7-bit 长度前缀 + UTF-8
+        // class：C# 7-bit 长度前缀 + UTF-8（字符串，原版 ClassFilter 用）
+        let cls = "Warrior".as_bytes();
+        body.write_u8(cls.len() as u8).unwrap();
+        body.extend_from_slice(cls);
+        // category：同上
         let cat = "武器".as_bytes();
         body.write_u8(cat.len() as u8).unwrap();
         body.extend_from_slice(cat);
@@ -529,6 +542,8 @@ mod shop_catalog_tests {
         body.write_u8(1).unwrap(); // deal
         body.write_u8(1).unwrap(); // can_buy_credit
         body.write_u8(0).unwrap(); // can_buy_gold
+        body.write_u8(1).unwrap(); // top_item
+        body.write_i64::<LittleEndian>(1_760_000_000).unwrap(); // date
         let mut cur = std::io::Cursor::new(body.as_slice());
         let item = parse_shop_catalog_item(&mut cur).expect("应解析成功");
         assert_eq!(item.item_index, 221);
@@ -536,8 +551,15 @@ mod shop_catalog_tests {
         assert_eq!(item.gold_price, 100);
         assert_eq!(item.credit_price, 50);
         assert_eq!(item.count, 2);
+        assert_eq!(
+            item.class, "Warrior",
+            "class 是字符串（原版 ClassFilter 的判据）"
+        );
         assert_eq!(item.category, "武器");
         assert_eq!(item.stock, 5);
+        assert!(item.deal, "DealItems 段判据");
+        assert!(item.top_item, "TopItems 段判据");
+        assert_eq!(item.date, 1_760_000_000, "NewItems 段判据");
         assert!(item.can_buy_credit);
         assert!(!item.can_buy_gold);
     }

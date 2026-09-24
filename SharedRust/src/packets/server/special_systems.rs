@@ -280,11 +280,20 @@ pub struct GameShopItem {
     pub gold_price: u32,   // 金币价格
     pub credit_price: u32, // 点券价格
     pub count: i32,        // 数量
-    pub class: u8,         // 职业
-    pub category: String,  // 分类
-    pub stock: i32,        // 库存
-    pub is_bought: bool,   // 是否已购买
-    pub deal: bool,        // 是否特价
+    /// 职业：**字符串**，取值同 C# `GameShopItem.Class`（`"All"` / `"Warrior"` / `"Wizard"` /
+    /// `"Taoist"` / `"Assassin"` / `"Archer"`）——原版筛选就是按字符串比
+    /// （`GameshopDialog.UpdateShop`：`i.Class == ClassFilter || i.Class == "All" || ClassFilter == "Show All"`）。
+    /// 此前本端是 `u8` 且服务端硬填 255，职业筛选无从实现（owner 队列 `shop-class-tabs`）。
+    pub class: String,
+    pub category: String, // 分类
+    pub stock: i32,       // 库存
+    pub is_bought: bool,  // 是否已购买
+    /// 是否特价（C# `DealItems` 段筛选用；库表 `game_shop_items.deal`）
+    pub deal: bool,
+    /// 是否置顶（C# `TopItems` 段筛选用；库表 `game_shop_items.top_item`）
+    pub top_item: bool,
+    /// 上架时间（C# `NewItems` 段筛选用：`Date > Now - 7 天`；库表 `game_shop_items.date`，Unix 秒）
+    pub date: i64,
     /// C# `GameShopItem.CanBuyCredit`（`Shared/Data/ItemData.cs:793`）：商城付款方式
     /// 「用积分购买」对本商品是否可用（客户端 `MirGameShopCell.BuyProduct` 据此选 pType）
     pub can_buy_credit: bool,
@@ -309,13 +318,17 @@ impl Packet for GameShopInfo {
             writer.write_u32::<LittleEndian>(item.gold_price)?;
             writer.write_u32::<LittleEndian>(item.credit_price)?;
             writer.write_i32::<LittleEndian>(item.count)?;
-            writer.write_u8(item.class)?;
+            // class 改成 7-bit 字符串（原版按字符串比；旧 u8 恒为 255 无信息）
+            write_dotnet_string(writer, &item.class)?;
             write_dotnet_string(writer, &item.category)?;
             writer.write_i32::<LittleEndian>(item.stock)?;
             writer.write_u8(if item.is_bought { 1 } else { 0 })?;
             writer.write_u8(if item.deal { 1 } else { 0 })?;
             writer.write_u8(if item.can_buy_credit { 1 } else { 0 })?;
             writer.write_u8(if item.can_buy_gold { 1 } else { 0 })?;
+            // 后补字段（原版 TopItems / NewItems 段筛选的数据）
+            writer.write_u8(if item.top_item { 1 } else { 0 })?;
+            writer.write_i64::<LittleEndian>(item.date)?;
         }
 
         writer.write_u32::<LittleEndian>(self.credit)?;
@@ -337,7 +350,7 @@ impl Packet for GameShopInfo {
             let gold_price = reader.read_u32::<LittleEndian>()?;
             let credit_price = reader.read_u32::<LittleEndian>()?;
             let item_count = reader.read_i32::<LittleEndian>()?;
-            let class = reader.read_u8()?;
+            let class = read_dotnet_string(reader)?;
 
             let category = read_dotnet_string(reader)?;
 
@@ -346,6 +359,8 @@ impl Packet for GameShopInfo {
             let deal = reader.read_u8()? != 0;
             let can_buy_credit = reader.read_u8()? != 0;
             let can_buy_gold = reader.read_u8()? != 0;
+            let top_item = reader.read_u8()? != 0;
+            let date = reader.read_i64::<LittleEndian>()?;
 
             items.push(GameShopItem {
                 item_index,
@@ -360,6 +375,8 @@ impl Packet for GameShopInfo {
                 deal,
                 can_buy_credit,
                 can_buy_gold,
+                top_item,
+                date,
             });
         }
 
@@ -672,11 +689,13 @@ mod guild_buff_tests {
                 gold_price: 100,
                 credit_price: 50,
                 count: 2,
-                class: 3,
+                class: "Warrior".to_string(),
                 category: "武器".to_string(),
                 stock: 5,
                 is_bought: false,
                 deal: true,
+                top_item: true,
+                date: 1_760_000_000,
                 can_buy_credit: true,
                 can_buy_gold: false,
             }],
@@ -685,12 +704,16 @@ mod guild_buff_tests {
         };
         let mut body = Vec::new();
         packet.write_body(&mut body).unwrap();
-        // 尾部 = [can_buy_credit u8][can_buy_gold u8][credit u32][gold u32]
-        let tail = &body[body.len() - 10..];
+        // 尾部 = [can_buy_credit u8][can_buy_gold u8][top_item u8][date i64][credit u32][gold u32]
+        let tail = &body[body.len() - 19..];
+        let mut want = vec![1u8, 0, 1];
+        want.extend_from_slice(&1_760_000_000i64.to_le_bytes());
+        want.extend_from_slice(&11u32.to_le_bytes());
+        want.extend_from_slice(&22u32.to_le_bytes());
         assert_eq!(
             tail,
-            [1u8, 0, 11, 0, 0, 0, 22, 0, 0, 0],
-            "item 尾部两字节 = CanBuyCredit/CanBuyGold，再是 credit/gold"
+            want.as_slice(),
+            "item 尾部 = CanBuyCredit/CanBuyGold/top_item/date，再是 credit/gold"
         );
     }
 }

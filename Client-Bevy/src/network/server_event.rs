@@ -1030,7 +1030,13 @@ pub struct ShopCatalogItem {
     pub credit_price: u32,
     pub count: i32,
     pub category: String,
+    /// 职业（C# `GameShopItem.Class` 字符串：`"All"`/`"Warrior"`/…）——`ClassFilter` 的判据
+    pub class: String,
     pub stock: i32,
+    /// 特价 / 置顶 / 上架时间——C# `DealItems` / `TopItems` / `NewItems` 段的判据
+    pub deal: bool,
+    pub top_item: bool,
+    pub date: i64,
     pub can_buy_gold: bool,
     pub can_buy_credit: bool,
 }

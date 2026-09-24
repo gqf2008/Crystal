@@ -50,10 +50,20 @@ pub struct ShopItem {
     pub name: String,
     pub gold_price: u32,
     pub credit_price: u32,
+    /// 分类（C# `GameShopItem.Category`）——即原版 `TypeFilter` 的取值
     pub category: String,
+    /// 职业（C# `GameShopItem.Class`：`"All"`/`"Warrior"`/`"Wizard"`/`"Taoist"`/`"Assassin"`/`"Archer"`）
+    /// ——即原版 `ClassFilter` 的取值（原版按**字符串**比，`"All"` 商品对所有职业可见）
+    pub class: String,
     pub stock: i32,
     /// C# `Item.Count`（购买确认文案 `{3}` 用）
     pub count: i32,
+    /// 特价（C# `SectionFilter == "DealItems"` 的判据）
+    pub deal: bool,
+    /// 置顶（C# `SectionFilter == "TopItems"` 的判据）
+    pub top_item: bool,
+    /// 上架时间（C# `SectionFilter == "NewItems"`：`Date > Now - 7 天`）
+    pub date: i64,
     /// C# `GameShopItem.CanBuyGold/CanBuyCredit`（`ItemData.cs:793-794`）
     pub can_buy_gold: bool,
     pub can_buy_credit: bool,
@@ -84,6 +94,10 @@ pub struct GameShopState {
     pub categories: Vec<String>,
     /// 当前选中分类（空 = 全部）
     pub category: String,
+    /// 当前职业筛选（C# `ClassFilter`；`"Show All"` = 不限）
+    pub class_filter: String,
+    /// 当前区段筛选（C# `SectionFilter`：`"Show All"`/`"TopItems"`/`"DealItems"`/`"NewItems"`）
+    pub section_filter: String,
     /// 商品翻页（每页 8 格，C# `Page`/`maxPage`；过滤/搜索/换分类时归 0）
     pub page: usize,
     /// 各格选购数量（C# 每格自带 `Quantity`，`UpdateShop` 重建格子时归 1）
@@ -107,6 +121,10 @@ impl Default for GameShopState {
             search: String::new(),
             categories: Vec::new(),
             category: String::new(),
+            // C# `Show()` 里 `ClassFilter = User.Class.ToString()`、`SectionFilter = "Show All"`
+            // （`GameshopDialog.cs:508-509`）——开窗那帧会按玩家职业重设，这里只是初值
+            class_filter: "Show All".to_string(),
+            section_filter: "Show All".to_string(),
             page: 0,
             qty: [1; 8],
             // C# `GameshopDialog` 构造即 `PaymentTypeGold.Checked = true`（`:195`
@@ -222,6 +240,41 @@ pub struct GameShopCatUp;
 #[derive(Component)]
 pub struct GameShopCatDown;
 
+/// 商城三段筛选里的按钮：职业（C# `ClassFilter`）与区段（C# `SectionFilter`）。
+///
+/// C# `GameshopDialog` 的按钮表（`GameshopDialog.cs:212-377`）：
+/// - 职业：`Title[751..768]` 六档，`ALL@(539,37)`、其余 `@(568+23i,38)`；
+///   选中态 = **hover 帧**（`ResetClass` 把 `ALL.Index` 设成 752）⇔ 本端用 `ImageButton.pressed`；
+/// - 区段：`Title` 四档 @ `(138|209|280|351, 68)`，常态 770/776/772/774、选中 771/777/773/775；
+///   `New` 在原版初始 `Visible = false` 且从未置 true（死按钮）——本端同样隐藏。
+#[derive(Component, Clone, Copy, PartialEq, Eq)]
+pub enum ShopFilterBtn {
+    Class(usize),
+    Section(usize),
+}
+
+/// 职业筛选按钮：`(C# ClassFilter 值, 常态帧, 选中/hover 帧, x)`，y 统一 37/38（C# 常量）
+pub const CLASS_FILTERS: [(&str, usize, usize, f32); 6] = [
+    ("Show All", 751, 752, 539.0),
+    ("Warrior", 754, 755, 568.0),
+    ("Assassin", 757, 758, 591.0),
+    ("Taoist", 760, 761, 614.0),
+    ("Wizard", 763, 764, 637.0),
+    ("Archer", 766, 767, 660.0),
+];
+/// 职业按钮 y：`ALL` 用 37，其余 38（照抄 C# 常量，不做"对齐修正"）
+pub const CLASS_BTN_Y: [f32; 6] = [37.0, 38.0, 38.0, 38.0, 38.0, 38.0];
+
+/// 区段筛选按钮：`(C# SectionFilter 值, 常态帧, 选中帧, x)`，y 统一 68
+pub const SECTION_FILTERS: [(&str, usize, usize, f32); 4] = [
+    ("Show All", 770, 771, 138.0),
+    ("TopItems", 776, 777, 209.0),
+    ("DealItems", 772, 773, 280.0),
+    // C# `New.Visible = false`（`:263`）且从未置 true → 本端同样隐藏（保持原版"死按钮"）
+    ("NewItems", 774, 775, 351.0),
+];
+pub const SECTION_BTN_Y: f32 = 68.0;
+
 /// 付款方式复选框：金币（C# `PaymentTypeGold`，`Prguse[2086/2087]` @(250,449)）
 #[derive(Component)]
 pub struct GameShopPayGold;
@@ -262,20 +315,125 @@ pub struct GameShopPayFrames {
     pub checked: Option<Handle<Image>>,
 }
 
-/// 按名称+分类过滤商城商品（C# GameshopDialog Search + Filters：FriendlyName.Contains / category 相等，返回 items 下标）
-fn filter_shop_items(items: &[ShopItem], search: &str, category: &str) -> Vec<usize> {
+/// `NewItems` 段的时间窗（C# `Date > CMain.Now.AddDays(-7)`，`GameshopDialog.cs:670/723`）
+pub const NEW_ITEM_WINDOW_SECS: i64 = 7 * 24 * 3600;
+
+/// 当前 Unix 秒（只用于 `NewItems` 的 7 天窗；独立成函数便于门禁传固定时刻）
+pub(crate) fn now_unix() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
+}
+
+/// `MirClass` → C# `GameShopItem.Class` 字符串（原版 `GameScene.User.Class.ToString()`，
+/// 与库表 `game_shop_items.class_name` 同一套写法：`Warrior`/`Wizard`/`Taoist`/`Assassin`/`Archer`）
+pub(crate) fn class_filter_name(class: u8) -> &'static str {
+    match class {
+        0 => "Warrior",
+        1 => "Wizard",
+        2 => "Taoist",
+        3 => "Assassin",
+        4 => "Archer",
+        _ => "Show All",
+    }
+}
+
+/// C# `GameshopDialog.UpdateShop` 的筛选谓词（`GameshopDialog.cs:718-726`，逐条对齐）：
+/// `Class == ClassFilter || Class == "All" || ClassFilter == "Show All"`
+/// × `Category == TypeFilter || TypeFilter == "Show All"`
+/// ×（`Show All` / `TopItems && TopItem` / `DealItems && Deal` / `NewItems && Date > Now-7d`）。
+/// 搜索是**先**用 `FriendlyName.ToLower().Contains(kw)` 缩表（`:704-707`）。
+/// 本端 `category` 用空串表示"全部"（原版字面量是 `"Show All"`）。
+pub(crate) fn shop_item_matches(
+    it: &ShopItem,
+    kw: &str,
+    class_filter: &str,
+    category: &str,
+    section_filter: &str,
+    now_unix: i64,
+) -> bool {
+    if !kw.is_empty() && !it.name.to_lowercase().contains(kw) {
+        return false;
+    }
+    if class_filter != "Show All" && it.class != class_filter && it.class != "All" {
+        return false;
+    }
+    if !category.is_empty() && it.category != category {
+        return false;
+    }
+    match section_filter {
+        "TopItems" => it.top_item,
+        "DealItems" => it.deal,
+        "NewItems" => it.date > now_unix - NEW_ITEM_WINDOW_SECS,
+        _ => true,
+    }
+}
+
+/// C# `UpdateShop` 的过滤 + **名称升序排序**（`filteredShop.OrderBy(e => e.Info.FriendlyName)`，
+/// `GameshopDialog.cs:740`——排序在分页前，所以页内容也按名字排），返回 items 下标。
+///
+/// 排序口径差异（如实记录）：C# 的 `OrderBy` 用 `Comparer<string>.Default` ⇒
+/// **文化敏感**比较（`String.CompareTo`）；这里用 Rust 的码点序（`str::cmp`）。
+/// ASCII 名字两者一致；中文名（如"法师杖" vs "通用药"）可能排出不同次序——
+/// 本端无 ICU 之外的文化排序表，按码点稳定排序，不假装与 .NET 逐字一致。
+pub(crate) fn filter_shop_items(
+    items: &[ShopItem],
+    search: &str,
+    class_filter: &str,
+    category: &str,
+    section_filter: &str,
+    now_unix: i64,
+) -> Vec<usize> {
     let kw = search.trim().to_lowercase();
-    items
+    let mut v: Vec<usize> = items
         .iter()
         .enumerate()
         .filter(|(_, it)| {
-            if !category.is_empty() && it.category != category {
-                return false;
-            }
-            kw.is_empty() || it.name.to_lowercase().contains(&kw)
+            shop_item_matches(it, &kw, class_filter, category, section_filter, now_unix)
         })
         .map(|(i, _)| i)
-        .collect()
+        .collect();
+    // 稳定排序，与 C# `OrderBy` 一致（同名保持目录序）
+    v.sort_by(|a, b| items[*a].name.cmp(&items[*b].name));
+    v
+}
+
+/// C# `GetCategories()`（`GameshopDialog.cs:648-680`）：切职业 / 切区段 / 改搜索后
+/// `TypeFilter = "Show All"`、`Page/StartIndex = 0`，并按当前搜索 × 职业 × 区段重建分类表
+/// （第 0 项 = 全部；列表里只留"这个筛选下真实存在的分类"）。
+pub(crate) fn rebuild_categories(shop: &mut GameShopState, now_unix: i64) {
+    shop.category.clear();
+    shop.page = 0;
+    let kw = shop.search.trim().to_lowercase();
+    let mut cats: Vec<String> = vec![String::new()];
+    for it in &shop.items {
+        if !shop_item_matches(
+            it,
+            &kw,
+            &shop.class_filter,
+            "",
+            &shop.section_filter,
+            now_unix,
+        ) {
+            continue;
+        }
+        if !it.category.is_empty() && !cats.iter().any(|c| c == &it.category) {
+            cats.push(it.category.clone());
+        }
+    }
+    shop.categories = cats;
+}
+
+/// 取精灵原生尺寸（C# 这些按钮都没设 `Size` → 用 art 尺寸）
+fn lib_img_size(images: &Assets<Image>, h: &Handle<Image>) -> (f32, f32) {
+    images
+        .get(h)
+        .map(|img| {
+            let s = img.size_f32();
+            (s.x, s.y)
+        })
+        .unwrap_or((28.0, 20.0))
 }
 
 /// 第 i 格当前展示的商品（C# `UpdateShop`：`filteredShop[i + Page*8]`；空格 None）
@@ -298,7 +456,14 @@ fn shop_cell_icons_system(
     mut images: ResMut<Assets<Image>>,
     mut q: Query<(&GameShopCellIcon, &mut ImageNode, &mut Visibility)>,
 ) {
-    let filtered = filter_shop_items(&shop.items, &shop.search, &shop.category);
+    let filtered = filter_shop_items(
+        &shop.items,
+        &shop.search,
+        &shop.class_filter,
+        &shop.category,
+        &shop.section_filter,
+        now_unix(),
+    );
     for (icon, mut node, mut vis) in q.iter_mut() {
         let image = cell_item(&shop, &filtered, icon.0)
             .map(|it| it.image)
@@ -339,6 +504,35 @@ impl Plugin for GameShopPlugin {
             Update,
             (game_shop_ui_system, game_shop_pay_system).run_if(in_state(AppState::Game)),
         );
+        // 筛选按钮选中态（C# `ResetClass`/`ResetTabs` 换帧：职业选中=hover 帧、区段选中=第二帧）
+        app.add_systems(
+            Update,
+            shop_filter_button_visuals_system.run_if(in_state(AppState::Game)),
+        );
+    }
+}
+
+/// 职业/区段筛选按钮的选中态（C# `ResetClass` / `ResetTabs` 只换 `Index`，不重建按钮）。
+///
+/// 单独成一个系统：`game_shop_ui_system` 的参数表已经贴着 Bevy 上限，而这里只需要
+/// 读筛选状态 + 写按钮贴图。`ShopFilterBtn` 单个 marker 类型 ⇒ 一个查询搞定，无 B0001 风险。
+fn shop_filter_button_visuals_system(
+    shop: Res<GameShopState>,
+    mut q: Query<(
+        &ShopFilterBtn,
+        &crate::ui::theme::ImageButton,
+        &mut ImageNode,
+    )>,
+) {
+    for (kind, ib, mut node) in &mut q {
+        let active = match kind {
+            ShopFilterBtn::Class(i) => shop.class_filter == CLASS_FILTERS[*i].0,
+            ShopFilterBtn::Section(i) => shop.section_filter == SECTION_FILTERS[*i].0,
+        };
+        let want = if active { &ib.pressed } else { &ib.normal };
+        if node.image != *want {
+            node.image = want.clone();
+        }
     }
 }
 
@@ -442,6 +636,34 @@ fn spawn_game_shop(
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 209),
         ) {
             spawn_icon_button(p, n, h, pr, 120.0, 421.0, 16.0, 14.0, 10).insert(GameShopCatDown);
+        }
+        // 职业筛选六档（C# `ClassFilter`：`Title[751..768]`，`ALL@(539,37)`、其余 `@(568+23i,38)`；
+        // 选中态用 hover 帧——`ResetClass` 把 `ALL.Index` 设成 752，本端对应 `ImageButton.pressed`）
+        for (i, (_val, n_i, a_i, x)) in CLASS_FILTERS.iter().enumerate() {
+            if let (Some(n), Some(a)) = (
+                load_lib_image(&mut libs, &mut images, LibraryName::Title, *n_i),
+                load_lib_image(&mut libs, &mut images, LibraryName::Title, *a_i),
+            ) {
+                let (w, h) = lib_img_size(&images, &n);
+                spawn_icon_button(p, n, a.clone(), a, *x, CLASS_BTN_Y[i], w, h, 10)
+                    .insert(ShopFilterBtn::Class(i));
+            }
+        }
+        // 区段筛选四档（C# `SectionFilter` @(138|209|280|351, 68)，常态 770/776/772/774、
+        // 选中 771/777/773/775；第 4 档 `New` 在原版初始 `Visible=false` 且从未置 true）
+        for (i, (_val, n_i, a_i, x)) in SECTION_FILTERS.iter().enumerate() {
+            if let (Some(n), Some(a)) = (
+                load_lib_image(&mut libs, &mut images, LibraryName::Title, *n_i),
+                load_lib_image(&mut libs, &mut images, LibraryName::Title, *a_i),
+            ) {
+                let (w, h) = lib_img_size(&images, &n);
+                let mut cmds = spawn_icon_button(p, n, a.clone(), a, *x, SECTION_BTN_Y, w, h, 10);
+                cmds.insert(ShopFilterBtn::Section(i));
+                if i == 3 {
+                    // C# `New.Visible = false`（`GameshopDialog.cs:263`）——照原版保持不可见
+                    cmds.insert(Visibility::Hidden);
+                }
+            }
         }
         // 商品格 8 = 4列x2行（C# `Grid` `MirGameShopCell` 125x146 `Title[750]`：
         // 上行 @(152+i*132,115)，下行 @(152+i*132,275)；空槽整格隐藏与 C# 不建格一致）
@@ -738,6 +960,8 @@ struct ShopButtons<'w, 's> {
     cat_down: Query<'w, 's, (Entity, &'static Interaction), With<GameShopCatDown>>,
     page_prev: Query<'w, 's, (Entity, &'static Interaction), With<GameShopPagePrev>>,
     page_next: Query<'w, 's, (Entity, &'static Interaction), With<GameShopPageNext>>,
+    /// 三段筛选按钮（职业 / 区段）
+    filters: Query<'w, 's, (Entity, &'static Interaction, &'static ShopFilterBtn)>,
 }
 
 /// 显隐 + 渲染 + 关闭/翻页/分类 + 打开时请求目录
@@ -775,6 +999,8 @@ fn game_shop_ui_system(
     mut requested: Local<bool>,
     mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
     panel_origin: Query<&Node, With<GameShopWidget>>,
+    // C# `Show()` 里 `ClassFilter = User.Class.ToString()`（`GameshopDialog.cs:508`）
+    local_appearance: Query<&crate::actor::ActorAppearance, With<crate::actor::LocalPlayer>>,
 ) {
     fn edge(
         e: Entity,
@@ -803,6 +1029,14 @@ fn game_shop_ui_system(
     // 打开瞬间请求商城目录（C# GameshopDialog.Show → C.GameshopBuy{g_index=0}）
     if !*requested {
         *requested = true;
+        // C# `Show()`（`GameshopDialog.cs:504-513`）：开窗即把职业筛选设成**自己的职业**、
+        // 区段回 `Show All`，再 GetCategories（TypeFilter 归零 + 重建分类表）
+        shop.class_filter = local_appearance
+            .single()
+            .map(|a| class_filter_name(a.class as u8).to_string())
+            .unwrap_or_else(|_| "Show All".to_string());
+        shop.section_filter = "Show All".to_string();
+        rebuild_categories(&mut shop, now_unix());
         net.send_packet(&crate::network::GameshopBuyWire {
             g_index: 0,
             quantity: 0,
@@ -819,13 +1053,19 @@ fn game_shop_ui_system(
             // C# `Search.TextBox.KeyUp → GetCategories()`：TypeFilter="Show All"、
             // Page/StartIndex 归零、PositionBar 回 (120,117)（`GameshopDialog.cs:180-183/647-651`）
             shop.search = t.clone();
-            shop.category.clear();
-            shop.page = 0;
+            rebuild_categories(&mut shop, now_unix());
             shop.qty = [1; 8];
             cat_list.offset = 0;
         }
     }
-    let filtered = filter_shop_items(&shop.items, &shop.search, &shop.category);
+    let filtered = filter_shop_items(
+        &shop.items,
+        &shop.search,
+        &shop.class_filter,
+        &shop.category,
+        &shop.section_filter,
+        now_unix(),
+    );
     for (e, inter) in &buttons.close {
         if edge(e, inter, &mut prev_inter) {
             mgr.close(DialogKind::GameShop);
@@ -847,6 +1087,35 @@ fn game_shop_ui_system(
             shop.page += 1;
             shop.qty = [1; 8];
         }
+    }
+    // 三段筛选点击：
+    //   职业（C# `ClassFilter=X; TypeFilter="Show All"; GetCategories(); ResetClass();`）
+    //   区段（C# `SectionFilter=X; ResetTabs(); GetCategories();`）
+    // 两者都走 `GetCategories()` ⇒ 分类表按新筛选重建、回到第一页、分类滚动归零。
+    for (e, inter, b) in &buttons.filters {
+        if !edge(e, inter, &mut prev_inter) {
+            continue;
+        }
+        let (want, kind) = match b {
+            ShopFilterBtn::Class(i) => (CLASS_FILTERS[*i].0, "职业"),
+            ShopFilterBtn::Section(i) => (SECTION_FILTERS[*i].0, "区段"),
+        };
+        let changed = match b {
+            ShopFilterBtn::Class(_) => shop.class_filter != want,
+            ShopFilterBtn::Section(_) => shop.section_filter != want,
+        };
+        if !changed {
+            continue;
+        }
+        match b {
+            ShopFilterBtn::Class(_) => shop.class_filter = want.to_string(),
+            ShopFilterBtn::Section(_) => shop.section_filter = want.to_string(),
+        }
+        rebuild_categories(&mut shop, now_unix());
+        shop.qty = [1; 8];
+        cat_list.offset = 0;
+        cat_list.set_total(shop.categories.len());
+        tracing::info!("🛒 商城{}筛选: {}", kind, want);
     }
     for mut t in &mut ui_set.p7() {
         let s = format!("{} / {}", shop.page + 1, pages);
@@ -1146,7 +1415,14 @@ fn game_shop_pay_system(
     // 格内数量±（C# `quantityUp/Down.Click`：Shift=±10；上限 99、有库存压库存，下限 1。
     // C# 另有按 `StackSize` 的 5 组封顶，本端无堆叠数数据，从略）
     let shift = keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
-    let filtered = filter_shop_items(&shop.items, &shop.search, &shop.category);
+    let filtered = filter_shop_items(
+        &shop.items,
+        &shop.search,
+        &shop.class_filter,
+        &shop.category,
+        &shop.section_filter,
+        now_unix(),
+    );
     for (e, inter, cell) in &cell_btns.qty_up {
         if !open || !edge(e, inter, &mut prev_inter) {
             continue;
@@ -1299,8 +1575,12 @@ fn shop_server_events(
                         gold_price: it.gold_price,
                         credit_price: it.credit_price,
                         category: it.category.clone(),
+                        class: it.class.clone(),
                         stock: it.stock,
                         count: it.count,
+                        deal: it.deal,
+                        top_item: it.top_item,
+                        date: it.date,
                         can_buy_gold: it.can_buy_gold,
                         can_buy_credit: it.can_buy_credit,
                     })
@@ -1356,8 +1636,13 @@ mod tests {
             gold_price: 1,
             credit_price: 0,
             category: String::new(),
+            // C# 目录里没有职业限制的商品一律 `Class = "All"`（库表实测 106/106 都是 "All"）
+            class: "All".to_string(),
             stock: 1,
             count: 1,
+            deal: false,
+            top_item: false,
+            date: 0,
             can_buy_gold: true,
             can_buy_credit: true,
         }
@@ -1367,6 +1652,18 @@ mod tests {
         ShopItem {
             image: 0,
             category: category.to_string(),
+            ..item(name)
+        }
+    }
+
+    /// 带职业/区段数据造物（门禁用）
+    fn item_full(name: &str, cat: &str, class: &str, deal: bool, top: bool, date: i64) -> ShopItem {
+        ShopItem {
+            category: cat.to_string(),
+            class: class.to_string(),
+            deal,
+            top_item: top,
+            date,
             ..item(name)
         }
     }
@@ -1623,23 +1920,25 @@ mod tests {
             item_cat("太阳水", "药品"),
             item_cat("回城卷", "卷轴"),
         ];
-        assert_eq!(filter_shop_items(&items, "", "药品").len(), 2);
-        assert_eq!(filter_shop_items(&items, "", "卷轴").len(), 1);
-        assert_eq!(filter_shop_items(&items, "", "不存在").len(), 0);
+        let f = |s: &str, c: &str| filter_shop_items(&items, s, "Show All", c, "Show All", 0).len();
+        assert_eq!(f("", "药品"), 2);
+        assert_eq!(f("", "卷轴"), 1);
+        assert_eq!(f("", "不存在"), 0);
         // 分类 + 名称 叠加过滤
-        assert_eq!(filter_shop_items(&items, "金创", "药品").len(), 1);
-        assert_eq!(filter_shop_items(&items, "金创", "卷轴").len(), 0);
+        assert_eq!(f("金创", "药品"), 1);
+        assert_eq!(f("金创", "卷轴"), 0);
     }
 
     #[test]
     fn shop_search_filters_by_name() {
         let items = vec![item("金创药"), item("太阳水"), item("回城卷")];
-        assert_eq!(filter_shop_items(&items, "", "").len(), 3);
-        assert_eq!(filter_shop_items(&items, "药", "").len(), 1);
-        assert_eq!(filter_shop_items(&items, "水", "").len(), 1);
-        assert_eq!(filter_shop_items(&items, "不存在", "").len(), 0);
-        assert_eq!(filter_shop_items(&items, "  药  ", "").len(), 1);
-        assert_eq!(filter_shop_items(&items, "JINCHUANG", "").len(), 0);
+        let f = |s: &str| filter_shop_items(&items, s, "Show All", "", "Show All", 0).len();
+        assert_eq!(f(""), 3);
+        assert_eq!(f("药"), 1);
+        assert_eq!(f("水"), 1);
+        assert_eq!(f("不存在"), 0);
+        assert_eq!(f("  药  "), 1);
+        assert_eq!(f("JINCHUANG"), 0);
     }
 
     #[test]
@@ -1650,8 +1949,155 @@ mod tests {
             item("回城卷"),
             item("金创药·大"),
         ];
-        let idx = filter_shop_items(&items, "金创药", "");
+        let idx = filter_shop_items(&items, "金创药", "Show All", "", "Show All", 0);
         assert_eq!(idx, vec![0, 3]);
+    }
+
+    /// 门禁（owner 队列 `shop-class-tabs`）：**职业段**按 C# `ClassFilter` 语义筛选——
+    /// `Class == ClassFilter` 或 `Class == "All"`，`"Show All"` 时全放行（`GameshopDialog.cs:720`）。
+    ///
+    /// 阳性对照：把 `it.class != "All"` 这一支删掉 → 第二条断言（通用商品在职业筛选下仍可见）立即红。
+    #[test]
+    fn shop_class_filter_matches_csharp() {
+        let items = vec![
+            item_full("战士刀", "武器", "Warrior", false, false, 0),
+            item_full("法师杖", "武器", "Wizard", false, false, 0),
+            item_full("通用药", "药品", "All", false, false, 0),
+        ];
+        let n = |cf: &str| filter_shop_items(&items, "", cf, "", "Show All", 0).len();
+        assert_eq!(n("Show All"), 3, "不限职业 → 全部");
+        assert_eq!(
+            n("Wizard"),
+            2,
+            "法师筛选 = 法师专用 + 通用（Class==\"All\"）"
+        );
+        assert_eq!(
+            filter_shop_items(&items, "", "Wizard", "", "Show All", 0),
+            vec![1, 2],
+            "结果按名称升序（码点序：法(U+6CD5) < 通(U+901A)；C# 用文化敏感比较，见函数注释）"
+        );
+        assert_eq!(n("Archer"), 1, "弓箭手筛选 = 只有通用商品");
+    }
+
+    /// 门禁：**区段段**按 C# `SectionFilter` 语义筛选——`TopItems`→`TopItem`、
+    /// `DealItems`→`Deal`、`NewItems`→`Date > Now-7d`（`GameshopDialog.cs:723`）。
+    ///
+    /// 阳性对照：把 `"DealItems" => it.deal` 改成恒 `true` → 第三条断言立即红。
+    #[test]
+    fn shop_section_filter_matches_csharp() {
+        const NOW: i64 = 1_800_000_000;
+        let items = vec![
+            item_full("普通", "药品", "All", false, false, 0),
+            item_full("特价", "药品", "All", true, false, 0),
+            item_full("置顶", "药品", "All", false, true, 0),
+            item_full("新品", "药品", "All", false, false, NOW - 3600),
+            item_full(
+                "旧货",
+                "药品",
+                "All",
+                false,
+                false,
+                NOW - NEW_ITEM_WINDOW_SECS - 3600,
+            ),
+        ];
+        let n = |sf: &str| filter_shop_items(&items, "", "Show All", "", sf, NOW).len();
+        assert_eq!(n("Show All"), 5);
+        assert_eq!(n("DealItems"), 1, "只有特价");
+        assert_eq!(n("TopItems"), 1, "只有置顶");
+        assert_eq!(n("NewItems"), 1, "只有 7 天窗内上架的（旧货被挡）");
+    }
+
+    /// 门禁：结果**先排序再分页**——C# `filteredShop.OrderBy(FriendlyName)` 紧跟过滤
+    /// （`GameshopDialog.cs:740`），所以页内容按名字升序。
+    ///
+    /// 阳性对照：把 `v.sort_by(...)` 删掉 → 本测试红（返回目录序）。
+    #[test]
+    fn shop_filter_sorts_by_name_like_csharp() {
+        let items = vec![item("c"), item("a"), item("b")];
+        let idx = filter_shop_items(&items, "", "Show All", "", "Show All", 0);
+        assert_eq!(idx, vec![1, 2, 0], "按名称升序取原下标");
+    }
+
+    /// 门禁：`GetCategories()`（`GameshopDialog.cs:648-680`）重建分类表时必须**尊重当前
+    /// 职业/区段**，并把分类筛选归零、页码归零，第 0 项是"全部"。
+    ///
+    /// 阳性对照：把 `rebuild_categories` 里的 `shop_item_matches` 判定改成恒 `true`
+    /// → 第一条断言（法师筛选下不该出现"卷轴"）立即红。
+    #[test]
+    fn shop_rebuild_categories_respects_class_and_section() {
+        let mut shop = GameShopState::default();
+        shop.items = vec![
+            item_full("战士刀", "武器", "Warrior", false, false, 0),
+            item_full("法师杖", "武器", "Wizard", false, false, 0),
+            item_full("战士卷", "卷轴", "Warrior", false, false, 0),
+            item_full("法师药", "药品", "Wizard", false, false, 0),
+            item_full("通用药", "药品", "All", false, false, 0),
+        ];
+        shop.class_filter = "Wizard".to_string();
+        shop.category = "武器".to_string();
+        shop.page = 3;
+        rebuild_categories(&mut shop, 0);
+        assert_eq!(
+            shop.categories,
+            vec![String::new(), "武器".to_string(), "药品".to_string()],
+            "第 0 项=全部；法师筛选下没有战士专属的『卷轴』分类"
+        );
+        assert!(
+            shop.category.is_empty(),
+            "重建后 TypeFilter 归零（C# GetCategories）"
+        );
+        assert_eq!(shop.page, 0, "页码归零");
+
+        // 区段切换同理：只有特价时，分类表只剩特价商品所在分类
+        shop.items = vec![
+            item_full("特价药", "药品", "All", true, false, 0),
+            item_full("普通卷", "卷轴", "All", false, false, 0),
+        ];
+        shop.class_filter = "Show All".to_string();
+        shop.section_filter = "DealItems".to_string();
+        rebuild_categories(&mut shop, 0);
+        assert_eq!(shop.categories, vec![String::new(), "药品".to_string()]);
+    }
+
+    /// 门禁：`MirClass` → C# 职业字符串（原版 `User.Class.ToString()`，`GameshopDialog.cs:508`）
+    #[test]
+    fn class_filter_name_matches_csharp() {
+        assert_eq!(class_filter_name(0), "Warrior");
+        assert_eq!(class_filter_name(1), "Wizard");
+        assert_eq!(class_filter_name(2), "Taoist");
+        assert_eq!(class_filter_name(3), "Assassin");
+        assert_eq!(class_filter_name(4), "Archer");
+        assert_eq!(class_filter_name(9), "Show All", "未知职业退回不限");
+    }
+
+    /// 门禁：三段筛选按钮的几何/帧表照 C# 常量（`GameshopDialog.cs:212-377`）——
+    /// 位置、常态帧、选中帧一一对应；`New` 档在原版是 `Visible=false` 的死按钮。
+    #[test]
+    fn shop_filter_button_tables_match_csharp() {
+        assert_eq!(
+            CLASS_FILTERS,
+            [
+                ("Show All", 751, 752, 539.0),
+                ("Warrior", 754, 755, 568.0),
+                ("Assassin", 757, 758, 591.0),
+                ("Taoist", 760, 761, 614.0),
+                ("Wizard", 763, 764, 637.0),
+                ("Archer", 766, 767, 660.0),
+            ],
+            "职业六档：C# (539,37)/(568+23i,38)，帧 751..768"
+        );
+        assert_eq!(CLASS_BTN_Y, [37.0, 38.0, 38.0, 38.0, 38.0, 38.0]);
+        assert_eq!(
+            SECTION_FILTERS,
+            [
+                ("Show All", 770, 771, 138.0),
+                ("TopItems", 776, 777, 209.0),
+                ("DealItems", 772, 773, 280.0),
+                ("NewItems", 774, 775, 351.0),
+            ],
+            "区段四档：C# (138|209|280|351, 68)"
+        );
+        assert_eq!(SECTION_BTN_Y, 68.0);
     }
     /// P3-3 回归（2026-09-22）：商品名降级链必须是
     /// `it.name` → 本地物品名表 → （需要请求）→ `#id`。
