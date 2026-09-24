@@ -402,6 +402,8 @@ FodyWeavers.xsd
 # ② 跨图/复活夹具：两层传送菜单真换图；死亡→回城复活（含新发现的"没回绑定点地图"记录）
 !tools/acceptance/l5i_crossmap.ps1
 !tools/acceptance/l5j_revive.ps1
+# 窗口生命周期夹具：最小化窗口不得退进程（离线 ~25s；自带阳性对照 `-NoHandler` 必红）
+!tools/acceptance/l5t_minimize_survives.ps1
 # 运营就绪最小集（部署/回滚/压测/可观测性）：与 acceptance 夹具同等级纳入管理，
 # 判据脚本是上线门槛的一部分，不能只躺在某台机器上（ops/out 仍是本地产物，不纳入）
 !tools/ops/

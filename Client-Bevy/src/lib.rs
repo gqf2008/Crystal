@@ -13,6 +13,7 @@ pub mod map_renderer;
 pub mod map_tile_anim;
 pub mod network;
 pub mod objects;
+pub mod render_error;
 pub mod resources;
 pub mod scenes;
 pub mod ui;
