@@ -44,7 +44,7 @@ fn set_hidden_flag(
     hidden: bool,
 ) {
     if let Some((e, _)) = ids.iter().find(|(_, id)| id.0 == object_id) {
-        commands.entity(e).insert(HiddenObject { hidden });
+        crate::game::movement::safe_insert(commands, e, HiddenObject { hidden });
     }
 }
 
@@ -190,7 +190,7 @@ fn apply_object_state_events(
                             a.action = mir2_shared::enums::MirAction::SitDown;
                             a.frame_index = 0;
                             // #573：坐下标记——演示驱动不再转向（C# 坐姿对象不自动转身）
-                            commands.entity(e).insert(Sitting);
+                            crate::game::movement::safe_insert(&mut commands, e, Sitting);
                         } else if !sitting {
                             // #1354：起身——恢复站立动作并移除坐下标记
                             // #3028：换图重建可能已 despawn 该实体 → 落地时复查（见 movement::safe_remove）
@@ -323,10 +323,17 @@ fn apply_object_state_events(
                 for (ent, id, tint) in &poisons {
                     if id.0 == object_id {
                         if poisoned && tint.is_none() {
-                            commands.entity(ent).insert(crate::actor::PoisonTint);
+                            crate::game::movement::safe_insert(
+                                &mut commands,
+                                ent,
+                                crate::actor::PoisonTint,
+                            );
                             tracing::info!("☠️ 对象 {} 中毒（绿色染层）", object_id);
                         } else if !poisoned && tint.is_some() {
-                            commands.entity(ent).remove::<crate::actor::PoisonTint>();
+                            crate::game::movement::safe_remove::<crate::actor::PoisonTint>(
+                                &mut commands,
+                                ent,
+                            );
                             tracing::info!("💚 对象 {} 毒解", object_id);
                         }
                         break;
@@ -345,7 +352,11 @@ fn apply_object_state_events(
                         .find(|(_, id, m)| id.0 == object_id && m.is_none())
                         .map(|(e, _, _)| e);
                     if let Some(ent) = target {
-                        commands.entity(ent).insert(MountState { mount_type });
+                        crate::game::movement::safe_insert(
+                            &mut commands,
+                            ent,
+                            MountState { mount_type },
+                        );
                         crate::actor::attach_mount_layer(&mut commands, ent, mount_type);
                         tracing::info!("🐴 对象 {} 上马 type={}", object_id, mount_type);
                     }
@@ -355,7 +366,7 @@ fn apply_object_state_events(
                         .find(|(_, id, m)| id.0 == object_id && m.is_some())
                         .map(|(e, _, _)| e);
                     if let Some(ent) = target {
-                        commands.entity(ent).remove::<MountState>();
+                        crate::game::movement::safe_remove::<MountState>(&mut commands, ent);
                         // 与 spawn.rs 初始生成路径同源：坐骑层 + 坐骑 ghost 残影层
                         // 一并移除（ghost 无 SpriteLayer，内联只 despawn is_mount
                         // 图层时 ghost 必泄漏——上马一次叠一个，遮挡时叠画）
@@ -528,7 +539,7 @@ fn advance_level_up_fx(
     for (e, mut fx, mut sprite) in &mut q {
         fx.t += time.delta_secs();
         if fx.t >= fx.dur {
-            commands.entity(e).despawn();
+            crate::game::movement::safe_despawn(&mut commands, e);
             continue;
         }
         let idx = (fx.t / fx.dur * fx.frames as f32).floor() as usize;

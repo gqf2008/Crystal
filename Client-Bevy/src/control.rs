@@ -556,6 +556,10 @@ struct ControlQueries<'w, 's> {
     /// `player_input_enabled`（= 非 dead/fishing/paralysis），命中该门控时攻击**一次都不会发**，
     /// 而日志里看不出任何异常（P1 实测踩到过）。
     flags: Query<'w, 's, &'static crate::game::player_state::StatusFlags, With<LocalPlayer>>,
+    /// `combat_probe` 用（#3089 非空转判据）：已应用战斗事件计数（只读）。
+    /// 放在 `ControlQueries` 里而不是 `apply_control_commands` 的参数表上——
+    /// 那台系统已经是 16 个 SystemParam 的上限，多加一个会因 `ObserverSystem` 实现上限而编译失败。
+    applied: Res<'w, crate::game::combat::RealHitProbe>,
     players: Query<
         'w,
         's,
@@ -2457,6 +2461,14 @@ fn apply_control_commands(
                     "attack_mode": control_state.last_attack_mode.map(|m| format!("{m:?}")),
                     "attack_interval": control_state.attack_interval,
                     "since_last_attack": control_state.last_attack,
+                    // 非空转判据（#3089）：已应用战斗事件计数——实机夹具用它断言
+                    // 「Struck/PlayerStruck/Died 真的到达并被 apply_combat_events 处理过」。
+                    // 只读，来自 game::combat::RealHitProbe。
+                    "applied": {
+                        "struck": q.applied.struck_applied,
+                        "player_struck": q.applied.player_struck_applied,
+                        "died": q.applied.died_applied,
+                    },
                     "events": events,
                 });
                 tracing::info!(
