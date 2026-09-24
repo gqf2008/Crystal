@@ -38,6 +38,9 @@ pub struct MailEntry {
     /// #3103 读侧：`MailInfo.Locked`——C# `MailListDialog.DeleteButton.Click` 的守卫
     /// （`MailDialogs.cs:236` `if (SelectedMail == null || SelectedMail.Locked) return;`）
     pub locked: bool,
+    /// #3120 ①：列表行图标要看**第一个附件**（C# `MailItemRow.IconImage.Index = Mail.Items[0].Info.Image`，
+    /// `MailDialogs.cs:519`）。此前本端 `MailEntry` 把包里带的附件丢了，所以行只能显示文本。
+    pub items: Vec<MailAttachment>,
 }
 
 /// 邮件附件条目（C# `MailInfo.Items[i]`；读信窗的 5 个 `MirItemCell` 用它渲染）
@@ -361,6 +364,81 @@ fn mail_panel_origin(screen_w: f32) -> (f32, f32) {
 
 fn mail_row_y(index: usize) -> f32 {
     55.0 + index as f32 * MAIL_ROW_H
+}
+
+// ---------------------------------------------------------------------------
+// C# `MailItemRow`（`Client/MirScenes/Dialogs/MailDialogs.cs:421-569`）的行几何与判定。
+// 抽成纯函数/常量：探针 `mail_probe` 与实机夹具按同一份口径对账，避免"渲染改了一处、
+// 判据还按旧口径"的漂移。
+// ---------------------------------------------------------------------------
+
+/// `IconArea = new Size(34, 32)`（:430）——图标在其中的**居中**偏移见 `mail_row_icon_offset`
+pub const MAIL_ROW_ICON_AREA: (f32, f32) = (34.0, 32.0);
+/// 角标默认位置 `(5,17)`（:451/:460/:469）
+pub const MAIL_ROW_BADGE_POS: (f32, f32) = (5.0, 17.0);
+/// 未读角标被"挤到第二位"时的位置 `(20,17)`（:553/:561）
+pub const MAIL_ROW_BADGE_POS_SECOND: (f32, f32) = (20.0, 17.0);
+/// 选中底图 `(-5,-3)`（:479）
+pub const MAIL_ROW_SELECTED_OFFSET: (f32, f32) = (-5.0, -3.0);
+/// `SenderLabel @ (35,0) 130x31 VerticalCenter`（:487-489）
+pub const MAIL_ROW_SENDER_RECT: (f32, f32, f32, f32) = (35.0, 0.0, 130.0, 31.0);
+/// `MessageLabel @ (170,0) 115x31 VerticalCenter`（:496-498）
+pub const MAIL_ROW_INFO_RECT: (f32, f32, f32, f32) = (170.0, 0.0, 115.0, 31.0);
+/// 图标库/索引：`Items[Info.Image]` / `Prguse[541]`（有金币）/ `Prguse[540]`（空）（:517-531）
+pub const MAIL_ROW_ICON_EMPTY: u16 = 540;
+pub const MAIL_ROW_ICON_GOLD: u16 = 541;
+/// 角标索引：未读 550 / 锁定 551 / 包裹 552（:449/:458/:467）
+pub const MAIL_ROW_BADGE_UNREAD: u16 = 550;
+pub const MAIL_ROW_BADGE_LOCKED: u16 = 551;
+pub const MAIL_ROW_BADGE_PARCEL: u16 = 552;
+/// 选中底图 545（:477）
+pub const MAIL_ROW_SELECTED_BG: u16 = 545;
+
+/// 行图标来源（C# `UpdateInterface` 的三分支，:517-531）
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MailRowIcon {
+    /// 有附件 → `Libraries.Items[Items[0].Info.Image]`
+    Item(u16),
+    /// 无附件但有金币 → `Prguse[541]`
+    Gold,
+    /// 都没有 → `Prguse[540]`
+    Empty,
+}
+
+pub fn mail_row_icon(m: &MailEntry) -> MailRowIcon {
+    // C# 只看**第一个**附件（`Mail.Items[0].Info.Image`）
+    match m.items.first() {
+        Some(a) => MailRowIcon::Item(a.image),
+        None if m.gold > 0 => MailRowIcon::Gold,
+        None => MailRowIcon::Empty,
+    }
+}
+
+/// 图标在 `IconArea` 里的居中偏移（C# :533 `((34-w)/2, (32-h)/2)`）
+pub fn mail_row_icon_offset(w: f32, h: f32) -> (f32, f32) {
+    (
+        (MAIL_ROW_ICON_AREA.0 - w) / 2.0,
+        (MAIL_ROW_ICON_AREA.1 - h) / 2.0,
+    )
+}
+
+/// 未读角标的 x：**未取回包裹**或**已锁定**时挤到第二位 (20,17)（C# :546-562）
+pub fn mail_row_unread_x(m: &MailEntry) -> f32 {
+    if !m.collected || m.locked {
+        MAIL_ROW_BADGE_POS_SECOND.0
+    } else {
+        MAIL_ROW_BADGE_POS.0
+    }
+}
+
+/// 信息列文本：锁定邮件加 `[*] ` 前缀；换行压成空格（C# :566）
+pub fn mail_row_info_text(m: &MailEntry) -> String {
+    let flat = m.subject.replace("\r\n", " ").replace('\n', " ");
+    if m.locked {
+        format!("[*] {flat}")
+    } else {
+        flat
+    }
 }
 
 /// 请求写邮件（#2631 跨对话框解耦 Message）。
@@ -2262,6 +2340,82 @@ pub fn build_mail_items_idx(attach: &[Option<u64>]) -> [u64; 5] {
 mod tests {
     use super::*;
 
+    /// 门禁（#3120 ①）：列表行的几何与判定必须与 C# `MailItemRow` 逐字一致
+    /// （`Client/MirScenes/Dialogs/MailDialogs.cs:421-569`）。
+    /// **阳性对照**：改动任一常量（例如把角标第二位写成 (5,17)、把 `[*] ` 前缀去掉、
+    /// 或把图标三分支顺序调换）→ 本测试立即红。
+    #[test]
+    fn mail_row_matches_csharp_mail_item_row() {
+        // 几何常量（逐条引 C# 行号）
+        assert_eq!(MAIL_ROW_ICON_AREA, (34.0, 32.0), ":430 IconArea");
+        assert_eq!(MAIL_ROW_BADGE_POS, (5.0, 17.0), ":451/:460/:469");
+        assert_eq!(MAIL_ROW_BADGE_POS_SECOND, (20.0, 17.0), ":553/:561");
+        assert_eq!(MAIL_ROW_SELECTED_OFFSET, (-5.0, -3.0), ":479");
+        assert_eq!(MAIL_ROW_SENDER_RECT, (35.0, 0.0, 130.0, 31.0), ":487-489");
+        assert_eq!(MAIL_ROW_INFO_RECT, (170.0, 0.0, 115.0, 31.0), ":496-498");
+        assert_eq!(
+            (MAIL_ROW_ICON_EMPTY, MAIL_ROW_ICON_GOLD),
+            (540, 541),
+            ":524/:529"
+        );
+        assert_eq!(
+            (
+                MAIL_ROW_BADGE_UNREAD,
+                MAIL_ROW_BADGE_LOCKED,
+                MAIL_ROW_BADGE_PARCEL
+            ),
+            (550, 551, 552),
+            ":449/:458/:467"
+        );
+        assert_eq!(MAIL_ROW_SELECTED_BG, 545, ":477");
+
+        // 图标三分支：有附件取 Items[0].Info.Image；无附件有金币 → 541；否则 540
+        let mut m = MailEntry {
+            gold: 0,
+            ..Default::default()
+        };
+        assert_eq!(mail_row_icon(&m), MailRowIcon::Empty);
+        m.gold = 250;
+        assert_eq!(mail_row_icon(&m), MailRowIcon::Gold);
+        m.items = vec![MailAttachment {
+            name: "Saddle".into(),
+            image: 1234,
+            count: 1,
+            dura_ratio: None,
+        }];
+        assert_eq!(
+            mail_row_icon(&m),
+            MailRowIcon::Item(1234),
+            "有附件时金币图标让位"
+        );
+
+        // 图标在 IconArea 内居中：((34-w)/2, (32-h)/2)
+        assert_eq!(mail_row_icon_offset(34.0, 32.0), (0.0, 0.0));
+        assert_eq!(mail_row_icon_offset(20.0, 20.0), (7.0, 6.0));
+
+        // 未读角标位置：未取回包裹 或 已锁定 → 第二位 (20)；否则 (5)
+        let mut u = MailEntry {
+            unread: true,
+            collected: false,
+            locked: false,
+            ..Default::default()
+        };
+        assert_eq!(mail_row_unread_x(&u), 20.0, "未取回包裹 → 让位");
+        u.collected = true;
+        assert_eq!(mail_row_unread_x(&u), 5.0, "已取回且未锁定 → 第一位");
+        u.locked = true;
+        assert_eq!(mail_row_unread_x(&u), 20.0, "已锁定 → 让位");
+
+        // 信息列文本：锁定加 `[*] `；换行压空格
+        let mut t = MailEntry {
+            subject: "第一行\r\n第二行".into(),
+            ..Default::default()
+        };
+        assert_eq!(mail_row_info_text(&t), "第一行 第二行");
+        t.locked = true;
+        assert_eq!(mail_row_info_text(&t), "[*] 第一行 第二行");
+    }
+
     /// #2786：点「回复」→ 打开写信窗并把收件人预填为选中邮件的发件人
     ///（C# `MailDialogs.cs:191-196` `ComposeMail(SelectedMail.SenderName)`）
     #[test]
@@ -2279,6 +2433,7 @@ mod tests {
                 gold: 0,
                 collected: false,
                 locked: false,
+                items: Vec::new(),
             },
             MailEntry {
                 mail_id: 12,
@@ -2288,6 +2443,7 @@ mod tests {
                 gold: 0,
                 collected: false,
                 locked: false,
+                items: Vec::new(),
             },
         ];
         st.selected = Some(1);

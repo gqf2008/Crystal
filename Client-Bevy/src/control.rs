@@ -3100,9 +3100,34 @@ fn apply_control_commands(
                     .mails
                     .iter()
                     .map(|m| {
+                        // #3120 ①：把「行渲染该长什么样」按 C# `MailItemRow` 规则一并回传
+                        // （纯函数与渲染共用同一份口径），夹具据此对账渲染真值。
+                        let icon = crate::game::dialogs::mail::mail_row_icon(m);
                         json!({
                             "mail_id": m.mail_id, "sender": m.sender, "subject": m.subject,
                             "unread": m.unread, "gold": m.gold, "collected": m.collected,
+                            "locked": m.locked,
+                            "items": m.items.iter().map(|a| json!({
+                                "name": a.name, "image": a.image, "count": a.count,
+                            })).collect::<Vec<_>>(),
+                            // C# 行图标三分支（:517-531）
+                            "icon": match icon {
+                                crate::game::dialogs::mail::MailRowIcon::Item(image) =>
+                                    json!({"lib": "Items", "index": image}),
+                                crate::game::dialogs::mail::MailRowIcon::Gold =>
+                                    json!({"lib": "Prguse", "index":
+                                        crate::game::dialogs::mail::MAIL_ROW_ICON_GOLD}),
+                                crate::game::dialogs::mail::MailRowIcon::Empty =>
+                                    json!({"lib": "Prguse", "index":
+                                        crate::game::dialogs::mail::MAIL_ROW_ICON_EMPTY}),
+                            },
+                            // C# 未读角标 x：未取回或已锁定 → 第二位 (20,17)（:546-562）
+                            "unread_x": crate::game::dialogs::mail::mail_row_unread_x(m),
+                            "unread_visible": m.unread,
+                            "locked_visible": m.locked,
+                            "parcel_visible": !m.collected,
+                            // C# 信息列文本：锁定加 `[*] ` 前缀，换行压空格（:566）
+                            "info_text": crate::game::dialogs::mail::mail_row_info_text(m),
                         })
                     })
                     .collect();
