@@ -141,6 +141,22 @@ pub fn light_center(cell_x: usize, cell_y: usize, off_x: f32, off_y: f32) -> (f3
     let y = -((cell_y + 1) as f32 * TILE_HEIGHT as f32 + off_y - TILE_HEIGHT as f32 / 2.0 - 5.0);
     (x, y)
 }
+
+/// C# `GameScene.DrawLights` → `#region Map Lights` 的**前置条件**（与 MapControl/MapCode 同源）：
+/// 只有**该格有 Front 图**时才画地图灯光——
+/// ```text
+/// int imageIndex = (M2CellInfo[x, y].FrontImage & 0x7FFF) - 1;
+/// if (imageIndex == -1) continue;      // 没有前景图 → 不画
+/// int fileIndex = M2CellInfo[x, y].FrontIndex;
+/// if (fileIndex == -1) continue;       // 前景库缺失 → 不画
+/// ```
+/// **两个灯光生成路径（首帧构建 `chunks_build` 与 chunk 流式 `chunks`）都必须过这一关**：
+/// 漏掉它会在没有前景的格子上多画一圈光斑 —— owner 2026-09-24 反馈的「部分地图灯光错位」
+/// 就是这个（实测 `0.map` 99 个灯格里有 46 个无 Front 图、`2.map` 9 个里有 8 个）。
+pub fn map_light_on_cell(cell: &crate::resources::map_reader::CellInfo) -> bool {
+    (cell.front_image & 0x7FFF) != 0 && cell.front_index != -1
+}
+
 /// 生成 C# DXManager.CreateLights 同款径向渐变纹理（白心 → 边缘透明）
 pub fn make_light_texture(assets: &mut Assets<Image>, size: u32) -> Handle<Image> {
     let mut rgba = vec![0u8; (size * size * 4) as usize];
@@ -382,6 +398,33 @@ mod light_alignment_tests {
         }
         // 数值锚点：格 (10,20)、无偏移 → x = 480 - 24 + 10 = 466；y = -(21*32 - 21) = -651
         assert_eq!(light_center(10, 20, 0.0, 0.0), (466.0, -651.0));
+    }
+
+    /// 门禁：**有 light 但无 Front 图的格子不画灯**（C# Map Lights 的
+    /// `imageIndex == -1 → continue` / `fileIndex == -1 → continue`）。
+    ///
+    /// 阳性对照（落地时实做）：把 `map_light_on_cell` 的前置条件删掉（恒 `true`）→ 本测试立即红。
+    #[test]
+    fn map_light_requires_front_image() {
+        use crate::resources::map_reader::CellInfo;
+        let mut cell = CellInfo::new();
+        cell.light = 1;
+
+        // ① 无 Front 图（`FrontImage & 0x7FFF == 0`）→ 不画（实机 census：0.map 46/99、2.map 8/9、
+        //    D002.map 11/19 的灯格属于这一类；修复前它们都会多画一圈光斑）
+        cell.front_image = 0;
+        cell.front_index = 3;
+        assert!(!map_light_on_cell(&cell), "无 Front 图的灯格不得画灯");
+
+        // ② 前景库缺失（`FrontIndex == -1`）→ 不画
+        cell.front_image = 5;
+        cell.front_index = -1;
+        assert!(!map_light_on_cell(&cell), "FrontIndex == -1 不得画灯");
+
+        // ③ 正常前景格 → 画
+        cell.front_image = 5;
+        cell.front_index = 3;
+        assert!(map_light_on_cell(&cell), "有 Front 图必须画灯");
     }
 
     /// 门禁：光斑尺寸表必须与原版 `DXManager.LightSizes` 逐项一致（**11** 项、index 0 = 125×95）。
