@@ -188,6 +188,25 @@ pub const GOLD_TEXT_Y: f32 = 212.0;
 /// 负重文本对话框相对坐标（C# InventoryDialog.cs:190 WeightLabel (268,212) 26x14）
 pub const WEIGHT_TEXT_X: f32 = 268.0;
 pub const WEIGHT_TEXT_Y: f32 = 212.0;
+/// 面板子元素层（页签 / 金币 / 负重 / 删除钮 / **扩容钮**）。
+///
+/// 注意 `ZIndex` 是**同一父节点内的兄弟序**，跨窗口比较没有意义——本窗口的基础层整体
+/// 就是 8（`17 处 z=10` 是别的窗口的基础层，各有各的层号）。
+pub const INV_CHILD_Z: i32 = 8;
+
+/// 扩容钮层（与基础层同层，靠生成顺序压在其他基础元素上）
+pub const INV_ADD_Z: i32 = INV_CHILD_Z;
+
+/// 关闭钮层：**必须高于扩容钮**。
+///
+/// 依据 C# `InventoryDialog` 的创建顺序：`AddButton` 在 `:76`、`CloseButton` 在 `:101`
+/// ——`Sort = true` 时后创建的画在上层 ⇒ 原版是「关闭钮盖在扩容钮之上」。
+/// 本端此前两者同为 8，而扩容钮生成在关闭钮**之后**（`spawn` 顺序与 C# 相反）→ 平局时
+/// 扩容钮在上，点 X 会被吞（owner 队列 `inventory-zindex`）。
+/// 几何门禁 `add_button_hit_area_must_not_overlap_close_button` 只挡住了"命中区相交"
+/// 这一条路，层序这条得靠这里显式钉住。
+pub const INV_CLOSE_Z: i32 = INV_CHILD_Z + 1;
+
 /// 扩容按钮命中区尺寸（精灵 Title[483] 自然 48x25，绘于 (235,5)。原 23x23 小于可见
 /// 按钮——右半点了无反应；但放大到 C# 的 72x23 右缘压到 x=307，盖住关闭钮左缘 (289)，
 /// z=8 平局时后生成的扩容钮吞掉点 X 的点击（实机交互验证发现）。取自然精灵 48x25：
@@ -633,14 +652,19 @@ fn spawn_inventory_dialog(
             ) {
                 // DialogWidget：inventory_ui_system 的 buttons/money/all_vis 查询域
                 // 门槛（批49 迁移遗漏 → 页签/关闭/金币负重全部失效）
-                spawn_icon_button(p, n, h, pr, x, 7.0, 72.0, 23.0, 8)
+                spawn_icon_button(p, n, h, pr, x, 7.0, 72.0, 23.0, INV_CHILD_Z)
                     .insert((InvTab(idx), DialogWidget));
             }
         }
         // 关闭按钮（Prguse2 360/361/362）@(289,3)
-        if let Some(mut btn) =
-            spawn_close_button(p, &mut libs, &mut images, CLOSE_POS.0, CLOSE_POS.1, 8)
-        {
+        if let Some(mut btn) = spawn_close_button(
+            p,
+            &mut libs,
+            &mut images,
+            CLOSE_POS.0,
+            CLOSE_POS.1,
+            INV_CLOSE_Z,
+        ) {
             btn.insert((InvCloseBtn, DialogWidget));
         }
         // 金币/负重文本
@@ -676,7 +700,8 @@ fn spawn_inventory_dialog(
             load_lib_image(&mut libs, &mut images, LibraryName::Title, 484),
             load_lib_image(&mut libs, &mut images, LibraryName::Title, 485),
         ) {
-            spawn_icon_button(p, n, h, pr, 235.0, 5.0, ADD_BTN_W, ADD_BTN_H, 8).insert(InvAddBtn);
+            spawn_icon_button(p, n, h, pr, 235.0, 5.0, ADD_BTN_W, ADD_BTN_H, INV_ADD_Z)
+                .insert(InvAddBtn);
         }
         // 删除模式按钮（C# InventoryDialog DelItemButton：Prguse2 366/367/368 @(291,212)）
         if let (Some(n), Some(h), Some(pr)) = (
@@ -684,7 +709,7 @@ fn spawn_inventory_dialog(
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 367),
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 368),
         ) {
-            spawn_icon_button(p, n, h, pr, 291.0, 212.0, 20.0, 20.0, 8).insert(InvDelBtn);
+            spawn_icon_button(p, n, h, pr, 291.0, 212.0, 20.0, 20.0, INV_CHILD_Z).insert(InvDelBtn);
         }
     });
     // 格子背景不在此预生成：#276 由 inv_grid_sync_system 按 Inventory 组件 items.len()
@@ -3522,6 +3547,26 @@ mod tests {
             cls.1,
             cls.2,
             cls.3
+        );
+    }
+
+    /// 门禁（owner 队列 `inventory-zindex`）：关闭钮必须画在扩容钮**之上**。
+    ///
+    /// C# `InventoryDialog` 先建 `AddButton`（`:76`）后建 `CloseButton`（`:101`），
+    /// `Sort = true` ⇒ 关闭钮在上层；本端生成顺序相反，只能靠 z 把顺序摆正。
+    /// 上面那条几何门禁只保证"命中区不相交"，一旦有人把扩容钮命中区改宽（C# 原值就是
+    /// 72x23，右缘 307 盖住 X 左缘 289），平局 z 会让 X 再次点不动——这条把层序钉死。
+    ///
+    /// 阳性对照：把 `INV_CLOSE_Z` 改成 `INV_CHILD_Z`（即退回平局）→ 本测试立即红。
+    #[test]
+    fn close_button_z_is_above_expand_button() {
+        assert!(
+            INV_CLOSE_Z > INV_ADD_Z,
+            "关闭钮层 {INV_CLOSE_Z} 必须高于扩容钮层 {INV_ADD_Z}（C#：CloseButton 后创建 ⇒ 画在上层）"
+        );
+        assert_eq!(
+            INV_ADD_Z, INV_CHILD_Z,
+            "扩容钮仍在基础层（与页签/金币/负重同层）"
         );
     }
 }
