@@ -23,10 +23,12 @@ param(
     [string]$Pass = '123456',
     [string]$ClientHome = '',
     # 目标图必须**与进场图不同**（同图移动不触发地图重建 → 复现不出崩溃 → 夹具会假绿）。
-    # 默认去 SerpentValley(map 文件名 '2')；脚本会自证「换图后 map 变了」，没变直接 exit 3。
-    [string]$ToMap = '2',
-    [int]$ToX = 500,
-    [int]$ToY = 485
+    # 留空 = **自动挑一张与进场图不同的图**（角色存档是持久的：上一次跑完会把角色留在目标图上，
+    # 写死 '2' 的话下一次进场就在 '2' 上 → 同图 → 夹具永远 exit 3，这是夹具自身的腐烂）。
+    # 无论自动还是显式，脚本都会自证「换图后 map 变了」，没变直接 exit 3。
+    [string]$ToMap = '',
+    [int]$ToX = 0,
+    [int]$ToY = 0
 )
 $ErrorActionPreference = 'Continue'
 $env:PATH = 'D:\toolchains\msys64\ucrt64\bin;D:\toolchains\libpinyin-install\bin;' + $env:PATH
@@ -62,6 +64,14 @@ foreach ($i in 1..60) { Start-Sleep 1; $st = Rpc 'state'; if ($null -ne $st.tile
 if ($null -eq $st -or $null -eq $st.tile_x) { Write-Host '客户端未进场'; exit 9 }
 Write-Host ("[A] 进场 map={0} tile=({1},{2}) PASS" -f $st.map, $st.tile_x, $st.tile_y)
 $fromMap = $st.map
+
+# 目标图：留空则自动挑一张与进场图不同的（'0' BichonProvince ↔ '2' SerpentValley，
+# 两个落点都是既有夹具（l5a/l5i）验证过可站的坐标）。
+if (-not $ToMap) {
+    if ("$fromMap" -eq '0') { $ToMap = '2'; $ToX = 500; $ToY = 485 }
+    else { $ToMap = '0'; $ToX = 287; $ToY = 615 }
+    Write-Host ("[A] 自动选目标图: {0} ({1},{2})" -f $ToMap, $ToX, $ToY)
+}
 $probe0 = Rpc 'combat_probe'
 if ($null -eq $probe0 -or $null -eq $probe0.applied) {
     Write-Host 'FAIL(9): combat_probe.applied 不可读——无法证明战斗事件真的到达（拒绝空转）'
@@ -69,19 +79,48 @@ if ($null -eq $probe0 -or $null -eq $probe0.applied) {
 }
 $struckBase = [int]$probe0.applied.struck + [int]$probe0.applied.player_struck
 
-# B) 制造战斗事件：拉 6 只 Deer 到身边，攻击一次（Struck 事件由服务端回）
-Rpc 'chat' @{ message = '@recallmob Deer 6' } | Out-Null
-Start-Sleep -Seconds 2
-Rpc 'attack_mode' @{ mode = 1 } | Out-Null
-Rpc 'click' @{ x = 512; y = 400 } | Out-Null
-Start-Sleep -Seconds 2
-$near = Rpc 'nearby' @{ radius = 12 }
-Write-Host ("[B] 身边实体数={0}（含 Deer 用于产生 Struck）" -f (@($near.entities) | Measure-Object).Count)
+# B) 制造战斗事件：**必须真的挥砍到怪**（Struck 事件由服务端回）。
+#    两条 l5a 实测教训照抄（别改回去）：
+#      ① 不要自己 walk_to 追怪——`auto_attack` 自带 #1817 追击，而 control 的 `attack`
+#         会 `remove::<LocalMove>()`，在走位循环里反复 attack 会把刚起步的走位取消；
+#      ② 只在「本地位置连续两拍不变」时挥砍——本地移动是预测的、服务端位置滞后，
+#         近战由服务端按它自己视角的「正前方一格」结算，边追边打全是空挥（实测 56 次 attack 零伤害）。
+#    首版这里用的是「@recallmob + attack_mode + click 屏幕点」：实测 applied 增量恒为 0
+#    （Deer 拉过来了但一次都没结算），所以 B2 前置断言当场判 FAIL(3)——那次假绿就是这么来的。
+$target = $null
+foreach ($i in 1..10) {
+    Start-Sleep 1
+    $mons = @((Rpc 'nearby' @{ radius = 5000 }).entities | Where-Object { $_.kind -eq 'monster' })
+    $target = $mons | Select-Object -First 1
+    if ($null -ne $target) { break }
+    # 附近没怪才补拉一批（Deer 在多数地图刷新）
+    Rpc 'chat' @{ message = '@recallmob Deer 6' } | Out-Null
+}
+if ($null -eq $target) {
+    Write-Host 'FAIL(3): 5000px 内找不到任何怪——前置不成立（换图后「没崩」证明不了本夹具要证的路径）'
+    exit 3
+}
+Write-Host ("[B] 目标怪: {0} id={1} dist={2}" -f $target.name, $target.object_id, $target.dist)
+Rpc 'attack' @{ object_id = $target.object_id } | Out-Null
 
 # B2) 前置断言：战斗事件必须**真的应用过**（applied 增量 > 0），否则本夹具证明不了
 #     「换图同帧仍有 Struck 排队」这条路径 → 前置不成立，exit 3（不产出 PASS）。
-$probe1 = Rpc 'combat_probe'
-$struckAfter = if ($null -ne $probe1.applied) { [int]$probe1.applied.struck + [int]$probe1.applied.player_struck } else { $struckBase }
+$deadline = (Get-Date).AddSeconds(25)
+$lastTile = $null; $stable = 0; $struckAfter = $struckBase; $probe1 = $null
+while ((Get-Date) -lt $deadline) {
+    Start-Sleep -Milliseconds 500
+    $stNow = Rpc 'state'
+    $tileKey = "$($stNow.tile_x),$($stNow.tile_y)"
+    if ($tileKey -eq $lastTile) { $stable++ } else { $stable = 0; $lastTile = $tileKey }
+    $probe1 = Rpc 'combat_probe'
+    if ($null -ne $probe1 -and $null -ne $probe1.applied) {
+        $struckAfter = [int]$probe1.applied.struck + [int]$probe1.applied.player_struck
+    }
+    if ($struckAfter -gt $struckBase) { break }
+    if ($stable -ge 2 -and $null -ne $probe1.target_dist_tiles -and [int]$probe1.target_dist_tiles -le 1) {
+        Rpc 'attack' @{ object_id = $target.object_id } | Out-Null
+    }
+}
 $delta = $struckAfter - $struckBase
 Write-Host ("[B] combat_probe.applied struck+player_struck 基线={0} 攻击后={1} 增量={2}" -f $struckBase, $struckAfter, $delta)
 if ($delta -le 0) {
