@@ -391,6 +391,8 @@ pub fn send_mail_received_packet(
     body.extend_from_slice(&mail.timestamp.to_le_bytes());
     body.push(if mail.read { 1u8 } else { 0u8 });
     body.push(if mail.collected { 1u8 } else { 0u8 });
+    // #3103 读侧：`MailInfo.Locked`（客户端读信窗的删除守卫 / 列表删除守卫都用它）
+    body.push(if mail.locked { 1u8 } else { 0u8 });
     body.extend_from_slice(&(mail.gold as u32).to_le_bytes());
     body.push(mail.items.len() as u8);
     let _ = gate_ref
@@ -418,12 +420,24 @@ pub fn send_mail_content_packet(
     body.extend_from_slice(&mail.timestamp.to_le_bytes());
     body.push(if mail.read { 1u8 } else { 0u8 });
     body.push(if mail.collected { 1u8 } else { 0u8 });
+    // #3103 读侧：`MailInfo.Locked`（同上）
+    body.push(if mail.locked { 1u8 } else { 0u8 });
     body.extend_from_slice(&(mail.gold as u32).to_le_bytes());
     body.push(mail.items.len() as u8);
     // Send attachment item info
     for item in &mail.items {
         body.extend_from_slice(&item.unique_id.to_le_bytes());
         body.extend_from_slice(&(item.item_index as u32).to_le_bytes());
+        // #3103 读侧：`UserItem.Info.Image`（`Items` 库图标索引）——读包裹窗的 5 个
+        // 附件格要用它出图；C# 客户端拿的是整个 UserItem，本端线格式是手写的，故单列一字段。
+        body.extend_from_slice(
+            &item
+                .info
+                .as_ref()
+                .map(|i| i.image)
+                .unwrap_or(0)
+                .to_le_bytes(),
+        );
         write_dotnet_string(
             &mut body,
             &item
