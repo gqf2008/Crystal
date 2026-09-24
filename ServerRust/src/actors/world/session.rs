@@ -245,6 +245,11 @@ pub struct WorldMoveRequest {
     pub session_id: u64,
     pub direction: u8,
     pub is_run: bool,
+    /// Gate 收到包的时刻（派发前打戳）。速度检测必须用它而不是处理时刻：
+    /// WorldActor 邮箱在高 lag 下会积压数秒，成批处理时相邻包在处理时刻上
+    /// 只差 1~3ms → 全部误判 speed hack 拒掉（实机 2026-09-24：lag_pct=68.7%，
+    /// 12 步走 6 步被拒，客户端被拉回=橡皮筋）。
+    pub received_at: std::time::Instant,
 }
 
 /// 转向请求（从 GateActor 转发）
@@ -1734,8 +1739,10 @@ impl Message<WorldMoveRequest> for WorldActor {
         } else {
             MIN_MOVE_INTERVAL_MS
         };
+        // 用 Gate 收包时刻判定（见 WorldMoveRequest.received_at 注释）：处理时刻
+        // 在邮箱积压时会成批挤在一起，合法走位被误判 speed hack。
         if let Some(last) = self.last_move_time.get(&msg.session_id) {
-            let elapsed = last.elapsed();
+            let elapsed = msg.received_at.saturating_duration_since(*last);
             if elapsed < std::time::Duration::from_millis(interval_ms) {
                 warn!(
                     "Speed hack detected: session {} moved after {:?} (min={:?})",
@@ -1744,8 +1751,7 @@ impl Message<WorldMoveRequest> for WorldActor {
                 return; // 拒绝移动
             }
         }
-        self.last_move_time
-            .insert(msg.session_id, std::time::Instant::now());
+        self.last_move_time.insert(msg.session_id, msg.received_at);
 
         let move_type = if run { MoveType::Run } else { MoveType::Walk };
 

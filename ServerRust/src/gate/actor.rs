@@ -933,6 +933,7 @@ impl Message<ClientData> for GateActor {
                                 session_id: msg.session_id,
                                 direction,
                                 is_run: false,
+                                received_at: std::time::Instant::now(),
                             })
                             .await;
                     }
@@ -948,6 +949,7 @@ impl Message<ClientData> for GateActor {
                                 session_id: msg.session_id,
                                 direction,
                                 is_run: true,
+                                received_at: std::time::Instant::now(),
                             })
                             .await;
                     }
