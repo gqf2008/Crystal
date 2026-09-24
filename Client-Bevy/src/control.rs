@@ -272,6 +272,12 @@ enum ControlCommand {
     SpellFxProbe {
         reply: Sender<String>,
     },
+    /// 只读坐骑/身体图层探针（2026-09-25，#2961 项①）：
+    /// 返回本地玩家每个子图层的 `{lib, is_mount, is_ghost, alpha, visible}` + `occluded`。
+    /// 世界渲染不在 UI 节点里，所以遮挡半透明此前只能看截图；本探针把它变成可断言状态。
+    MountLayerProbe {
+        reply: Sender<String>,
+    },
     /// 只读 NPC 窗探针（2026-09-23）：每行文本 + 每条**行内链接的精确命中矩形**。
     /// 存在理由：NPC 窗是自绘文本、行内链接形如 `<Access/@Storage> Storage`，
     /// 链接段只覆盖行首那几个字——夹具按"行中心/行右半"点会静默无反应（⑤ 开仓库栽在这里）。
@@ -665,6 +671,22 @@ struct ControlQueries<'w, 's> {
     /// `spell_fx_probe` 用：渲染侧存活的**对象特效**（`S.ObjectEffect` → 真帧动画；
     /// 用于实机取证「护盾/治疗/传送…到底画了什么」，此前这是纯色方块）
     object_fx: Query<'w, 's, &'static crate::game::effects::ObjectFxAnim>,
+    /// `mount_layer_probe` 用：本地玩家的**子图层**（身体/坐骑/残影）。
+    /// 存在理由（#2961 项①）：坐骑遮挡半透明此前只有"截图目检"，没有可断言读数；
+    /// 世界渲染不进 UI 节点查询，所以必须直接读 sprite 实体的 alpha/可见性。
+    player_layers: Query<
+        'w,
+        's,
+        (
+            &'static ChildOf,
+            &'static Sprite,
+            &'static Visibility,
+            Option<&'static crate::actor::SpriteLayer>,
+            Option<&'static crate::actor::GhostLayer>,
+        ),
+    >,
+    /// `mount_layer_probe` 用：本地玩家根实体
+    local_player: Query<'w, 's, Entity, With<crate::actor::LocalPlayer>>,
     /// dialog_rect RPC：物理→逻辑坐标换算用的窗口 scale_factor
     primary_window: Query<'w, 's, &'static Window, With<PrimaryWindow>>,
     /// dialog_rect 诊断：任意实体的 Visibility 读取（关闭钮祖先链诊断）
@@ -984,6 +1006,20 @@ fn handle_conn(mut stream: std::net::TcpStream, tx: Sender<ControlCommand>) {
                 }
             }
             // 只读 UI 探针：列出覆盖该逻辑坐标的所有 UI 节点（P3-2 界面定位用）
+            "mount_layer_probe" => {
+                let (reply_tx, reply_rx) = bounded::<String>(1);
+                if tx
+                    .send(ControlCommand::MountLayerProbe { reply: reply_tx })
+                    .is_ok()
+                {
+                    let s = reply_rx
+                        .recv_timeout(std::time::Duration::from_secs(2))
+                        .unwrap_or_else(|_| "{}".to_string());
+                    serde_json::from_str::<Value>(&s).unwrap_or_else(|_| json!({}))
+                } else {
+                    json!({"error": "control channel closed"})
+                }
+            }
             "ui_nodes_at" => {
                 let x = params.get("x").and_then(|v| v.as_f64()).unwrap_or(-1.0) as f32;
                 let y = params.get("y").and_then(|v| v.as_f64()).unwrap_or(-1.0) as f32;
@@ -2659,6 +2695,54 @@ fn apply_control_commands(
                     .collect();
                 let payload = json!({ "ok": true, "count": active.len(), "active": active });
                 tracing::info!("🎮 control spell_fx_probe: count={}", payload["count"]);
+                let _ = reply.send(payload.to_string());
+            }
+            ControlCommand::MountLayerProbe { reply } => {
+                // 只读：本地玩家的子图层读数（身体/坐骑/残影）。世界渲染不在 UI 节点里，
+                // 这条是 #2961 项①（坐骑遮挡半透明）唯一可自动断言的观测面。
+                let payload = match q.local_player.single() {
+                    Ok(local) => {
+                        let mut rows: Vec<Value> = Vec::new();
+                        for (parent, sprite, vis, layer, ghost) in q.player_layers.iter() {
+                            if parent.parent() != local {
+                                continue;
+                            }
+                            let (lib, is_mount, is_ghost) = if let Some(g) = ghost {
+                                (format!("{:?}", g.lib), false, true)
+                            } else if let Some(l) = layer {
+                                (format!("{:?}", l.lib), l.is_mount, false)
+                            } else {
+                                continue;
+                            };
+                            rows.push(json!({
+                                "lib": lib,
+                                "is_mount": is_mount,
+                                "is_ghost": is_ghost,
+                                "alpha": sprite.color.alpha(),
+                                "visible": matches!(*vis, Visibility::Visible),
+                            }));
+                        }
+                        // 排序：Query 迭代序不稳定，而仪器自检要求"同状态连读两次一致"
+                        let mut encoded: Vec<String> = rows.iter().map(|r| r.to_string()).collect();
+                        encoded.sort();
+                        let layers: Vec<Value> = encoded
+                            .iter()
+                            .map(|s| serde_json::from_str::<Value>(s).unwrap_or(Value::Null))
+                            .collect();
+                        let occluded = layers
+                            .iter()
+                            .any(|l| l["is_ghost"] == json!(true) && l["visible"] == json!(true));
+                        json!({
+                            "ok": true,
+                            "occluded": occluded,
+                            // 原版 `PlayerObject.cs:5006` 遮挡时整段绘制 SetOpacity(0.5F)
+                            "csharp_ghost_alpha": 0.5,
+                            "layers": layers,
+                        })
+                    }
+                    Err(_) => json!({"ok": false, "error": "no local player"}),
+                };
+                tracing::info!("🎮 control mount_layer_probe: {payload}");
                 let _ = reply.send(payload.to_string());
             }
             ControlCommand::UiNodesAt { x, y, reply } => {

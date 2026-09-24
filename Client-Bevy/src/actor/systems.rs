@@ -242,7 +242,11 @@ pub(crate) fn update_local_ghost(
     let occluded = front.iter().any(|ft| {
         ft.bottom > foot_y && ft.left < br && ft.right > bl && ft.top < bb && ft.bottom > bt
     });
-    const GHOST_ALPHA: f32 = 0.55; // 与 macroquad PLAYER_GHOST_ALPHA 一致
+    /// 遮挡残影的不透明度。**对齐原版 C#**：`PlayerObject.Draw()`（`Client/MirObjects/PlayerObject.cs:5006`）
+    /// `if (Hidden && !DXManager.Blending) DXManager.SetOpacity(0.5F);` —— 该设置覆盖整段绘制
+    /// （`DrawMount()` → `DrawWeapon()` → `DrawBody()` → `DrawHead()` → `DrawWings()`），
+    /// 即**坐骑与身体同一个 0.5**。此前本端取 macroquad 的 0.55，属历史值、与原版不一致。
+    const GHOST_ALPHA: f32 = 0.5;
     const GHOST_LOCAL_Z: f32 = 0.5; // 本地 z 偏移：保证世界 z 高于所有 front 瓦片
 
     for (mut gs, mut gt, mut gv, gl, parent) in &mut ghosts {
@@ -814,6 +818,36 @@ mod ghost_tests {
             world.get::<Visibility>(remote_ghost),
             Some(&Visibility::Hidden),
             "远端玩家 ghost 不得被本地遮挡状态驱动"
+        );
+        // 判据（任务书 §#2961 项①）：**坐骑层与身体层必须同为半透明，且值等于原版 0.5**
+        // （C# `PlayerObject.cs:5006` `DXManager.SetOpacity(0.5F)` 覆盖 `DrawMount()`/`DrawBody()`）。
+        // 只断言"可见"是不够的：把 GHOST_ALPHA 写回 1.0（= 不半透明）或让坐骑单独走别的值都应当红。
+        let body_alpha = world
+            .get::<Sprite>(local_armour_ghost)
+            .map(|s| s.color.alpha());
+        let mount_alpha = world
+            .get::<Sprite>(local_mount_ghost)
+            .map(|s| s.color.alpha());
+        assert_eq!(
+            mount_alpha,
+            Some(0.5),
+            "坐骑残影必须与身体同值（原版 SetOpacity(0.5F)），实测 {mount_alpha:?}"
+        );
+        assert_eq!(
+            body_alpha, mount_alpha,
+            "身体与坐骑必须同一个 alpha（原版是同一段 Draw 里的同一个 Opacity）"
+        );
+        // 坐骑残影用的必须是**坐骑层**的图（不是身体的图）——否则会出现"身体残影盖住坐骑"的错层
+        let mount_layer_image = {
+            let mut q = world.query::<(&SpriteLayer, &Sprite)>();
+            q.iter(&world)
+                .find(|(l, _)| l.is_mount)
+                .map(|(_, s)| s.image.id())
+        };
+        let mount_ghost_image = world.get::<Sprite>(local_mount_ghost).map(|s| s.image.id());
+        assert_eq!(
+            mount_ghost_image, mount_layer_image,
+            "坐骑残影应镜像坐骑层的当前帧图"
         );
     }
 }
