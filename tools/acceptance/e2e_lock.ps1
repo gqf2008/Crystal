@@ -58,6 +58,9 @@
  嵌套调用（父脚本 → 子脚本）：拿到锁的进程会设环境变量 `CRYSTAL_E2E_LOCK_HELD_BY`，子进程
  （继承环境）`Enter-E2eLock` 直接**复用父进程的锁**、不重复抢——否则会自锁到超时。
  现实例子：`scripts/run_real_e2e.ps1 -IncludeInteractSweep` 会调用 `ui_interact_sweep.ps1`。
+ **但复用前必须验标记**：环境变量会沿进程树继承，父进程释放/退出后残留的标记会让后来者"假持锁"
+ （以为自己持着、实际没有任何串行化）。所以只有当「锁文件里的 pid == 标记里的 pid 且该进程仍活着」
+ 才复用；否则打黄字忽略标记、改走正常抢锁（`e2e_lock_selftest.ps1` 的 T2d 钉这条）。
 
  新增夹具的机械做法：`pwsh tools/acceptance/enroll_e2e_lock.ps1 -Apply`，或照抄已接入夹具的写法。
 #>
@@ -78,11 +81,29 @@ function Enter-E2eLock {
         [int]$StaleSec = 1800,
         [int]$PollSec = 5
     )
-    # 父进程已持有（本进程是它拉起的子脚本）：复用，不重复抢
+    # 父进程已持有（本进程是它拉起的子脚本）：复用，不重复抢。
+    # 但**必须先证明这个标记仍然有效**：环境变量沿进程树继承，父进程早就释放/退出之后，
+    # 残留的标记会让后来者「假持锁」（读不到锁文件却以为自己持着，实际并没有串行化）。
+    # 判据：锁文件里记的 pid == 标记里的 pid，且那个进程仍然活着。
     if ($env:CRYSTAL_E2E_LOCK_HELD_BY) {
-        $script:E2eLockInherited = $true
-        Write-Host ("[e2e-lock] 复用父进程已持有的锁（{0}）：{1}" -f $env:CRYSTAL_E2E_LOCK_HELD_BY, $ScriptName)
-        return $true
+        $token = [string]$env:CRYSTAL_E2E_LOCK_HELD_BY
+        $tokenPid = 0
+        if ($token -match 'pid=(\d+)') { $tokenPid = [int]$Matches[1] }
+        $filePid = 0
+        $fileOk = $false
+        try {
+            $h = Get-Content -LiteralPath $script:E2eLockPath -Raw -EA Stop | ConvertFrom-Json
+            if ($null -ne $h.pid) { $filePid = [int]$h.pid; $fileOk = $true }
+        } catch {}
+        $tokenAlive = ($tokenPid -gt 0) -and [bool](Get-Process -Id $tokenPid -EA SilentlyContinue)
+        if ($fileOk -and $tokenAlive -and ($filePid -eq $tokenPid)) {
+            $script:E2eLockInherited = $true
+            Write-Host ("[e2e-lock] 复用父进程已持有的锁（{0}）：{1}" -f $token, $ScriptName)
+            return $true
+        }
+        Write-Host ("[e2e-lock] 忽略残留的继承标记（{0}；锁文件 pid={1}、标记进程存活={2}）——改为正常抢锁" -f `
+            $token, $filePid, $tokenAlive) -ForegroundColor Yellow
+        Remove-Item Env:CRYSTAL_E2E_LOCK_HELD_BY -ErrorAction SilentlyContinue
     }
     $deadline = (Get-Date).AddSeconds($TimeoutSec)
     $waited = $false

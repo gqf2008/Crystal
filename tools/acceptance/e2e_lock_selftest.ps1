@@ -18,6 +18,8 @@
                       阳性对照＝活持有者且未超龄必须**不**回收、也不许删它的锁；
     T2c 嵌套继承    ：父脚本持锁时，子脚本必须**复用**父进程的锁（`CRYSTAL_E2E_LOCK_HELD_BY`）——
                       缺这条 `scripts/run_real_e2e.ps1 -IncludeInteractSweep` 会自锁到超时；
+    T2d 残留标记    ：继承标记指向的持有者已退出/与锁文件不一致时必须**忽略标记、照常抢锁**——
+                      环境变量会沿进程树继承，残留标记若被当真就会「假持锁」（没有任何串行化）；
     T3 接入覆盖面   ：`Get-E2eClientScripts` 认出来的每个实机入口都必须 dot-source 并有 Enter/Exit；
     T4 阳性对照     ：T4a 子进程**不拿锁**时 T1 的串行性断言必须变红；T4b 「会起客户端但没接入」的
                       临时脚本必须被判为不合规。
@@ -312,6 +314,73 @@ if ($null -eq $nested -or -not $nested.child_got) {
 Remove-Item -LiteralPath $lockPath -Force -EA SilentlyContinue
 Remove-Item Env:CRYSTAL_E2E_LOCK_HELD_BY -ErrorAction SilentlyContinue
 
+# ---------------- T2d 残留继承标记不得造成假持锁 ----------------
+Write-Host '== T2d 残留继承标记：标记指向的持有者已退出/不匹配时，必须改为正常抢锁（不能假持锁） =='
+$ghostChild = Join-Path $WorkDir 'ghost_token_child.ps1'
+$ghostSrc = @'
+param(
+    [string]$LockScript,
+    [string]$OutFile,
+    [string]$Token,
+    [int]$TimeoutSec = 4
+)
+$ErrorActionPreference = 'Stop'
+# 模拟"父进程留下的继承标记"（会沿进程树继承的那种）
+$env:CRYSTAL_E2E_LOCK_HELD_BY = $Token
+. $LockScript
+$sw = [System.Diagnostics.Stopwatch]::StartNew()
+$got = [bool](Enter-E2eLock -ScriptName 't2d-ghost' -TimeoutSec $TimeoutSec -PollSec 1)
+$sw.Stop()
+if ($got) { Exit-E2eLock }
+(@{ got = $got; elapsed_sec = [math]::Round($sw.Elapsed.TotalSeconds, 2) } |
+    ConvertTo-Json -Compress) | Set-Content -LiteralPath $OutFile -Encoding UTF8
+exit 0
+'@
+[System.IO.File]::WriteAllText($ghostChild, $ghostSrc, (New-Object System.Text.UTF8Encoding($false)))
+function Invoke-Ghost([string]$Token, [int]$Timeout) {
+    $out = Join-Path $WorkDir ('t2d_{0}.json' -f ([guid]::NewGuid().ToString('N').Substring(0, 6)))
+    $p = Start-Process -FilePath $pwshExe -WindowStyle Hidden -PassThru -ArgumentList @(
+        '-NoProfile', '-NoLogo', '-File', $ghostChild, '-LockScript', $lockScript, '-OutFile', $out,
+        '-Token', $Token, '-TimeoutSec', "$Timeout")
+    $null = $p.WaitForExit(90000)
+    if (Test-Path -LiteralPath $out) { Get-Content -LiteralPath $out -Raw | ConvertFrom-Json } else { $null }
+}
+# (a) 真持有者在场：残留标记（死 pid）不得让子进程"假持锁"
+$ghHolder = Start-Process -FilePath $pwshExe -WindowStyle Hidden -PassThru -ArgumentList @(
+    '-NoProfile', '-NoLogo', '-File', $childPath, '-LockScript', $lockScript,
+    '-OutFile', (Join-Path $WorkDir 't2d_holder.json'), '-HoldSec', '120', '-Name', 't2d-holder')
+$heldNow = $false
+for ($i = 1; $i -le 20; $i++) {
+    Start-Sleep -Milliseconds 500
+    $info = Get-E2eLockInfo
+    if ($info.held -and [int]$info.pid -eq $ghHolder.Id) { $heldNow = $true; break }
+}
+if (-not $heldNow) {
+    Add-Fail 'T2d' '前置不成立：造不出「真持有者在场」的局面'
+    Stop-Process -Id $ghHolder.Id -Force -EA SilentlyContinue
+} else {
+    $g1 = Invoke-Ghost -Token 'pid=999999 script=ghost-of-dead-holder' -Timeout 4
+    if ($null -eq $g1) {
+        Add-Fail 'T2d-a' 'Ghost 子进程没写出结论'
+    } elseif ($g1.got) {
+        Add-Fail 'T2d-a' ("残留继承标记让子进程假持锁了（{0:N1}s 内就返回成功）——真持有者还在，它必须排队" -f $g1.elapsed_sec)
+    } else {
+        Write-Host ("   T2d-a 通过：残留标记被忽略，子进程照常排队（等 {0:N1}s 后超时返回 false）" -f $g1.elapsed_sec)
+    }
+    # (b) 真持有者被强杀（锁文件成僵尸）后，带残留标记的子进程应能正常回收并拿到锁
+    Stop-Process -Id $ghHolder.Id -Force -EA SilentlyContinue
+    $g2 = Invoke-Ghost -Token 'pid=999999 script=ghost-of-dead-holder' -Timeout 10
+    if ($null -eq $g2) {
+        Add-Fail 'T2d-b' 'Ghost 子进程（僵尸锁场景）没写出结论'
+    } elseif (-not $g2.got) {
+        Add-Fail 'T2d-b' '僵尸锁 + 残留标记时子进程拿不到锁：忽略标记后没走回正常抢锁路径'
+    } else {
+        Write-Host ("   T2d-b 通过：忽略残留标记后照常回收僵尸锁并拿到锁（{0:N1}s）" -f $g2.elapsed_sec)
+    }
+}
+Remove-Item -LiteralPath $lockPath -Force -EA SilentlyContinue
+Remove-Item Env:CRYSTAL_E2E_LOCK_HELD_BY -ErrorAction SilentlyContinue
+
 # ---------------- T3 接入覆盖面 ----------------
 Write-Host '== T3 接入覆盖面：每个会起客户端的脚本都必须走锁 =='
 $targets = @(Get-E2eClientScripts -RepoRoot $RepoRoot)
@@ -371,6 +440,8 @@ $result = [ordered]@{
                           live_holder_stolen = $gotB2 }
         t2c = if ($null -ne $nested) { [ordered]@{ child_got = $nested.child_got
                           grandchild_got = $nested.grandchild_got; reuse_sec = $nested.elapsed_sec } } else { $null }
+        t2d = [ordered]@{ ghost_token_while_held = if ($null -ne $g1) { $g1.got } else { $null }
+                          ghost_token_zombie_reclaim = if ($null -ne $g2) { $g2.got } else { $null } }
         t3  = [ordered]@{ scanned = $targets.Count; missing = $violations }
         t4  = if ($SkipPositiveControl) { $null } else { [ordered]@{ nolock_overlap_sec = $m4.overlap_sec } }
     }
