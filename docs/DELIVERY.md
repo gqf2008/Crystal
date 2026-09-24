@@ -168,6 +168,28 @@ pwsh scripts/run_real_e2e.ps1 -IncludeInteractSweep            # 常规用例 + 
 结果 JSON（`tools/acceptance/ui_interact_results.json`）：`gate.exit_code` 与进程退出码一致，
 `gate.failures` / `gate.skips` 是逐条账本，`sweep` 是逐窗原始断言。
 
+### 5.4 实机资源互斥锁（起客户端 / 登录 e2e 账号前**必须**先拿）
+
+实机资源——客户端 + `test` 账号 + 本地服务端——一次只能有一组：多 agent 并行时谁先登录谁占住账号，
+其余会拿到 `login 失败 result=4 密码错误`（服务端日志实为 `Account already online`，见 §7 排障）。
+这是**资源互斥假红，不是产品缺陷**；`for ($i=1..8) { 跑夹具; sleep 60 }` 去撞「干净窗口」
+只会把交付时间耗在等待上。
+
+- **锁**：`tools/acceptance/e2e_lock.ps1`；锁文件 `%TEMP%\crystal_e2e_client_test.lock`
+  （跨 worktree、跨 agent 全局唯一，不是每个 worktree 一把）。
+- **用法**：`param()` 之后 dot-source 再 `Enter-E2eLock -ScriptName '<夹具名>'`；拿不到（返回 `$false`）→ `exit 2`。
+  能包 `try/finally` 的显式 `Exit-E2eLock`；结构上不便包一层的夹具只调用 `Enter`——
+  进程一退出，下一个调用者按「持有者 PID 已死」立刻接管。
+- **嵌套**：持锁进程设 `CRYSTAL_E2E_LOCK_HELD_BY`，子脚本（`run_real_e2e.ps1` → `ui_interact_sweep.ps1`）
+  自动复用同一把锁，不会自锁。该标记会被**复核**（父进程仍活着 + 锁文件确实由它持有），
+  残留标记不生效。
+- **自证**：`pwsh tools/acceptance/e2e_lock_selftest.ps1` —— 20 用例（获取/释放、争用排队不抢、
+  僵尸回收、PID 复用、超龄回收、读不全宽限、继承复核），秒级，不起客户端；
+  它把 `TEMP` 指向临时目录后再 dot-source，**不会碰真实锁**。
+  退出码：`0` 全过 / `1` 有用例红 / `2` 前置失败。
+- **覆盖**：`tools/acceptance/` 下全部会起客户端的夹具 + `scripts/run_real_e2e.ps1` 都已接入
+  （#3129 铺齐；本仓库任何**新增**夹具都必须先拿锁）。
+
 ---
 
 ## 6. 已知差异与限制（相对原版 C#）
