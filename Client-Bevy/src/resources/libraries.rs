@@ -89,6 +89,14 @@ pub enum ArrayLibType {
     Mounts,
     /// 武器特效 CWeaponEffect/{:02}.Lib（M62；DrawBlend 0.4 透明度）
     CWeaponEffect,
+    /// 刺客职业武器右/左：`AWeapon/{:02} R.Lib` / `AWeapon/{:02} L.Lib`
+    /// （C# `PlayerObject.cs:625-626`：`Index = Weapon - 100`，WeaponLibrary1=AWeaponsR、WeaponLibrary2=AWeaponsL）
+    AWeaponsR,
+    AWeaponsL,
+    /// 弓箭手职业武器：`ARWeapon/{:02}.Lib`（站立/行走以外动作）与 `ARWeapon/{:02} S.Lib`
+    /// （altAnim = 走路/奔跑/AttackRange1-2 时；C# `PlayerObject.cs:531-533`，`Index = Weapon - 200`）
+    ARWeapons,
+    ARWeaponsS,
 }
 
 impl ArrayLibType {
@@ -102,6 +110,10 @@ impl ArrayLibType {
             ArrayLibType::CHumEffect => "CHumEffect",
             ArrayLibType::Mounts => "Mounts",
             ArrayLibType::CWeaponEffect => "CWeaponEffect",
+            ArrayLibType::AWeaponsR => "AWeaponsR",
+            ArrayLibType::AWeaponsL => "AWeaponsL",
+            ArrayLibType::ARWeapons => "ARWeapons",
+            ArrayLibType::ARWeaponsS => "ARWeaponsS",
         }
     }
 
@@ -116,8 +128,68 @@ impl ArrayLibType {
             ArrayLibType::CHumEffect => format!("CHumEffect/{:02}", index),
             ArrayLibType::Mounts => format!("Mount/{:02}", index),
             ArrayLibType::CWeaponEffect => format!("CWeaponEffect/{:02}", index),
+            // 资产实测命名（`Data/AWeapon/00 L.Lib`、`Data/ARWeapon/00 S.Lib`）
+            ArrayLibType::AWeaponsR => format!("AWeapon/{:02} R", index),
+            ArrayLibType::AWeaponsL => format!("AWeapon/{:02} L", index),
+            ArrayLibType::ARWeapons => format!("ARWeapon/{:02}", index),
+            ArrayLibType::ARWeaponsS => format!("ARWeapon/{:02} S", index),
         }
     }
+}
+
+/// 武器外观层计划（纯函数，门禁可测）：照 C# `PlayerObject.cs:97-108 / 524-535 / 620-627`。
+///
+/// 规则（`Globals.ClassWeaponCount = 100`，`HasClassWeapon` 还要**职业匹配**）：
+/// - `0..99`   → 战士/法师/道士默认武器：`CWeapon/{shape:02}`（C# `CWeapons[Weapon]`）
+/// - `100..199`→ 刺客：`AWeapon/{shape-100} R` + `AWeapon/{shape-100} L`（左右两层）
+/// - `200..299`→ 弓箭手：`ARWeapon/{shape-200}` 或 altAnim（走/跑/远程攻击）时 `ARWeapon/{shape-200} S`
+/// - 职业与区间不匹配时，退回 `CWeapon/{shape:02}`（C# 走 `else` 分支；超范围时该库不存在 → 不画）
+///
+/// 为什么要有这条门禁（2026-09-24 定性）：本端 `ArrayLibType` 此前**只有 CWeapons**，
+/// 而库里 63 个 `shape 100..199` 的物品（HoaSword/MirSword4/… 刺客武器）会被当成
+/// `CWeapon/100..152` 去加载 —— 目录里只有 `00..78` ⇒ 贴图直接缺失（owner 报的
+/// 「CWeapons[793] 贴图缺失」就是这一类：拿 shape/索引去开不存在的职业武器库）。
+pub fn weapon_layer_plan(
+    class: mir2_shared::enums::MirClass,
+    shape: i16,
+    alt_anim: bool,
+) -> Vec<(ArrayLibType, u32)> {
+    use mir2_shared::enums::MirClass;
+    if shape < 0 {
+        return Vec::new();
+    }
+    let shape = shape as u32;
+    let class_matches = match shape / 100 {
+        0 => matches!(
+            class,
+            MirClass::Warrior | MirClass::Wizard | MirClass::Taoist
+        ),
+        1 => matches!(class, MirClass::Assassin),
+        2 => matches!(class, MirClass::Archer),
+        _ => false,
+    };
+    if class_matches {
+        match shape / 100 {
+            1 => {
+                let index = shape - 100;
+                return vec![
+                    (ArrayLibType::AWeaponsR, index),
+                    (ArrayLibType::AWeaponsL, index),
+                ];
+            }
+            2 => {
+                let index = shape - 200;
+                let lib = if alt_anim {
+                    ArrayLibType::ARWeaponsS
+                } else {
+                    ArrayLibType::ARWeapons
+                };
+                return vec![(lib, index)];
+            }
+            _ => {}
+        }
+    }
+    vec![(ArrayLibType::CWeapons, shape)]
 }
 
 impl std::fmt::Display for ArrayLibType {
@@ -533,5 +605,59 @@ impl Libraries {
     pub fn stats(&self) -> (usize, usize) {
         let map = self.map_libs.iter().filter(|l| l.is_some()).count();
         (self.libraries.len(), map)
+    }
+}
+
+#[cfg(test)]
+mod weapon_plan_tests {
+    use super::*;
+    use mir2_shared::enums::MirClass;
+
+    /// 门禁（2026-09-24 定性 owner 报的「CWeapons[793] 贴图缺失」）：**职业武器必须走各自的库**——
+    /// 刺客 `shape 100..199` → `AWeapon/{idx} R`+`L`、弓箭手 `shape 200..299` → `ARWeapon/{idx}`（altAnim 用 `S`），
+    /// 不能再落到 `CWeapon/{shape}`（目录只有 `00..78`，于是贴图直接缺失）。
+    ///
+    /// 阳性对照：把 `weapon_layer_plan` 里 `class_matches` 的 1/2 两个分支删掉（退回 CWeapons）→ 本测试立即红。
+    #[test]
+    fn weapon_layer_plan_matches_csharp_class_weapons() {
+        // 默认武器（战/法/道）仍走 CWeapons
+        assert_eq!(
+            weapon_layer_plan(MirClass::Warrior, 0, false),
+            vec![(ArrayLibType::CWeapons, 0)]
+        );
+        assert_eq!(
+            weapon_layer_plan(MirClass::Taoist, 19, false),
+            vec![(ArrayLibType::CWeapons, 19)]
+        );
+        // 刺客 100..199：右/左两层（C# WeaponLibrary1=AWeaponsR、WeaponLibrary2=AWeaponsL）
+        assert_eq!(
+            weapon_layer_plan(MirClass::Assassin, 100, false),
+            vec![(ArrayLibType::AWeaponsR, 0), (ArrayLibType::AWeaponsL, 0)]
+        );
+        assert_eq!(
+            weapon_layer_plan(MirClass::Assassin, 152, false)[0],
+            (ArrayLibType::AWeaponsR, 52)
+        );
+        // 弓箭手 200..299：站立用 ARWeapons，altAnim（走/跑/远程攻击）用 ARWeaponsS
+        assert_eq!(
+            weapon_layer_plan(MirClass::Archer, 200, false),
+            vec![(ArrayLibType::ARWeapons, 0)]
+        );
+        assert_eq!(
+            weapon_layer_plan(MirClass::Archer, 205, true),
+            vec![(ArrayLibType::ARWeaponsS, 5)]
+        );
+        // 职业与区间不匹配 → 退回 CWeapons（C# 的 else 分支）
+        assert_eq!(
+            weapon_layer_plan(MirClass::Warrior, 100, false),
+            vec![(ArrayLibType::CWeapons, 100)]
+        );
+        // 空/非法
+        assert!(weapon_layer_plan(MirClass::Assassin, -1, false).is_empty());
+        // 库路径命名照资产实测（Data/AWeapon/00 L.Lib、Data/ARWeapon/00 S.Lib）
+        assert_eq!(ArrayLibType::AWeaponsL.default_path(3), "AWeapon/03 L");
+        assert_eq!(ArrayLibType::AWeaponsR.default_path(3), "AWeapon/03 R");
+        assert_eq!(ArrayLibType::ARWeapons.default_path(1), "ARWeapon/01");
+        assert_eq!(ArrayLibType::ARWeaponsS.default_path(1), "ARWeapon/01 S");
     }
 }
