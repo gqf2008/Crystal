@@ -9,15 +9,20 @@
 
   原版对照（`Client/MirObjects/PlayerObject.cs` 的 MirAction.Spell 分支，机械生成到
   `Client-Bevy/src/game/spell_effects.rs`）：
-    DefaultArrow / DoubleShot / DelayedExplosion → 弹道 Magic3 base 1030 frames 5（**本夹具的断言项**）
-    HellFire        → 施法帧动画 Magic   base 920  frames 10   ← 见下「已知缺口」
-    EnergyRepulsor  → 施法帧动画 Magic2  base 190  frames 6    ← 见下「已知缺口」
-    Curse           → 弹道帧动画 Magic   base 1160 frames 3    ← 见下「已知缺口」
+    HellFire        → 施法帧动画 Magic   base 920  frames 10  （**断言项**，本角色已学）
+    EnergyRepulsor  → 施法帧动画 Magic2  base 190  frames 6   （观察到就记录，不作硬断言）
+    Curse           → 弹道帧动画 Magic   base 1160 frames 3    （观察到就记录）
+    DefaultArrow 等 → 弹道 Magic3 base 1030 frames 5           （只有 NPC 恰好远程攻击时才出现，不作断言）
 
-  **已知缺口（2026-09-25 实测，单列 issue）**：`--spell-verify` 里 `HellFire` 施放的那一秒内
-  `spell_fx_probe.count` 恒为 0，且客户端日志**没有** `🪄 MagicCast` 行 —— 即「自己施法」这条
-  链路没有产出施法特效（弹道那条正常）。本夹具因此只把**已验证的弹道路径**作为断言项，
-  施法三条列进 `known_gap` 报告项（不当作通过，也不让夹具因未修缺陷常红）。
+  **前置条件（必须先成立，否则判「前置不成立」而不是 FAIL）**：
+  ① 角色已学 HellFire（`--spell-verify` 打的是 HellFire/IceThrust/Curse/EnergyRepulsor）；
+  ② **MP 足够**——服务端在 MP 不足时**直接拒绝施法、不发 `MagicCast`**，客户端自然不会显示任何特效。
+  夹具用 `@LEVEL <当前等级+1>` 升一级（原版升级补满 HP/MP；实测库里 `mp 0 → 294`）建立前置，
+  并从 `UserInformation` 日志行解析 `mp=` 做**前置断言**（`mp<=0` → exit 3，不产出 PASS）。
+
+  > 留痕：本夹具第一版把「没有 cast 特效」当成产品缺陷报了 issue #3119，根因其实是**前置不成立**
+  > （角色 `mp=0`，而另一条探针 `--battle-vfx-test` 打的是它**没学**的 FireBall）。补 MP 后立刻观察到
+  > `cast|Magic|920|10`（= HellFire 的 C# 表项）。issue 已按证据更正。
 
   夹具用 `--spell-verify`（`src/auto/combat.rs::auto_spell_verify`）自动走到怪旁循环施法，
   再轮询探针收集实际出现的 (kind, library, base, frames)。
@@ -35,7 +40,8 @@ param(
     [string]$ExeSrc = '',
     [int]$ControlPort = 9041,
     [string]$Worktree = '',
-    [int]$TimeoutSec = 160,
+    # `--spell-verify` 要先走到怪旁才會施放（本機 D002 有障礙，實測常需 100~200s）
+    [int]$TimeoutSec = 240,
     [string]$Tag = 'spellfx'
 )
 $ErrorActionPreference = 'Continue'
@@ -48,6 +54,15 @@ $root = 'C:\Users\gxh\AppData\Local\Temp\orig-csharp-ab'
 $exe = "$root\sf_client.exe"
 $err = "$root\l5v_$Tag.err"
 $json = "$PSScriptRoot\l5v_spell_fx_results.json"
+
+# 实机资源（客户端 + e2e 账号 + 本地服务端）**必须串行**：先拿跨进程锁再起客户端。
+# 不拿锁会撞上「别的 agent 已登录同一账号」→ `result=4 密码错误`（服务端实为
+# `Account already online`），那是资源互斥假红，不是产品缺陷。
+. "$PSScriptRoot\e2e_lock.ps1"
+if (-not (Enter-E2eLock -ScriptName 'l5v_spell_fx' -TimeoutSec 1800)) {
+    Write-Host 'FAIL(2): 等 e2e 锁超时'
+    exit 2
+}
 
 function Rpc([string]$m, [hashtable]$q = @{}) {
     try {
@@ -66,7 +81,7 @@ function Rpc([string]$m, [hashtable]$q = @{}) {
 Get-CimInstance Win32_Process -Filter "Name='sf_client.exe'" -EA SilentlyContinue |
     ForEach-Object { Stop-Process -Id $_.ProcessId -Force -EA SilentlyContinue }
 Start-Sleep -Milliseconds 800
-if (-not (Test-Path $ExeSrc)) { Write-Host "缺少 exe: $ExeSrc"; exit 2 }
+if (-not (Test-Path $ExeSrc)) { Write-Host "缺少 exe: $ExeSrc"; Exit-E2eLock; exit 2 }
 Copy-Item -LiteralPath $ExeSrc -Destination $exe -Force
 if (Test-Path $err) { [System.IO.File]::Delete($err) }
 Start-Process -FilePath $exe `
@@ -86,9 +101,35 @@ if ($null -eq $st -or $null -eq $st.tile_x) {
     $why = (Select-String -Path $err -Pattern '登录失败|already online' -EA SilentlyContinue | Select-Object -Last 1).Line
     Write-Host ("FAIL(2): 未进场 - " + $why)
     Stop-Client
+    Exit-E2eLock
     exit 2
 }
 Write-Host ("进场 map={0} tile=({1},{2})" -f $st.map, $st.tile_x, $st.tile_y)
+
+# ---- 前置建立：升一级补满 HP/MP（原版升级语义；实测 mp 0 → 294），并断言 mp>0 ----
+function Get-PlayerLine {
+    (Select-String -Path $err -Pattern 'UserInformation' -EA SilentlyContinue | Select-Object -Last 1).Line
+}
+$line0 = Get-PlayerLine
+$lv = 0
+if ($line0 -match 'Lv\.(\d+)') { $lv = [int]$Matches[1] }
+if ($lv -gt 0) {
+    Rpc 'chat' @{ message = "@LEVEL $($lv + 1)" } | Out-Null
+    Start-Sleep -Seconds 3
+} else {
+    Write-Host '[前置] 未从日志解析到等级，跳过补 MP 这一步'
+}
+$line1 = Get-PlayerLine
+$mp = -1
+if ($line1 -match 'mp=(-?\d+)') { $mp = [int]$Matches[1] }
+Write-Host ("前置：等级 {0} → 行 '{1}'（解析 mp={2}）" -f $lv, $line1, $mp)
+if ($mp -le 0) {
+    Write-Host 'FAIL(3): 前置不成立——角色 MP <= 0，服务端不会接受任何施法（也就没有 MagicCast / 施法特效）。'
+    Write-Host '         需要先把角色 MP 补起来（如 GM `@LEVEL <等级+1>`）再跑本夹具。'
+    Stop-Client
+    Exit-E2eLock
+    exit 3
+}
 
 $p0 = Rpc 'spell_fx_probe'
 Start-Sleep -Milliseconds 250
@@ -96,6 +137,7 @@ $p1 = Rpc 'spell_fx_probe'
 if ($null -eq $p0 -or $null -eq $p0.count) {
     Write-Host 'FAIL(2): spell_fx_probe 不可用（未编译进二进制？）'
     Stop-Client
+    Exit-E2eLock
     exit 2
 }
 $self_ok = ($p0.count -eq $p1.count)
@@ -120,13 +162,14 @@ while ($sw.Elapsed.TotalSeconds -lt $TimeoutSec) {
 Stop-Client
 
 $expect = @(
-    @{ key = 'missile|Magic3|1030|5'; desc = 'DefaultArrow/DoubleShot/DelayedExplosion → 弹道 Magic3 base 1030 frames 5' }
+    @{ key = 'cast|Magic|920|10'; desc = 'HellFire → 施法帧动画 Magic base 920 frames 10（C# SPELL_FX["HellFire"]）' }
 )
-# 已知缺口（issue 另开）：自己施法的施法帧动画目前观察不到，故不作断言，只在报告里如实列出
-$known_gap = @(
-    'cast|Magic|920|10',
+# 观察到就记录、不作硬断言：探针在 150s 窗口内可能只来得及走位并施放第一个法术；
+# 它们是同一套 C# 表的其它条目，出现即佐证「自己施法」链路整体正常。
+$also_record = @(
     'cast|Magic2|190|6',
-    'missile|Magic|1160|3'
+    'missile|Magic|1160|3',
+    'missile|Magic3|1030|5'
 )
 $fail = @()
 foreach ($e in $expect) { if (-not $observed.ContainsKey($e.key)) { $fail += $e.desc } }
@@ -137,19 +180,30 @@ $result = [ordered]@{
     probe_first_two = @($p0.count, $p1.count)
     observed      = @($observed.Keys)
     missing       = $fail
-    known_gap     = $known_gap
+    also_record   = $also_record
+    mp            = $mp
 }
 $result | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $json -Encoding UTF8
 
 Write-Host ("观察到的特效条目数 = {0}；缺条目 = {1}" -f $observed.Count, ($fail -join '; '))
 Write-Host ("结论 JSON: " + $json)
+# 前置判据②：`--spell-verify` 必须**真的施放过**（它要先走到怪旁；没施放 = 前置不成立，不是 FAIL）
+$castLines = @(Select-String -Path $err -Pattern '\[SPELL\].*施放' -EA SilentlyContinue)
+Write-Host ("本轮探针施放次数 = {0}" -f $castLines.Count)
+if ($castLines.Count -eq 0) {
+    Write-Host ("FAIL(3): 前置不成立——{0}s 内 --spell-verify 没走到怪旁施法（提高 -TimeoutSec 或换到怪物更近的图再跑）" -f $TimeoutSec)
+    exit 3
+}
 if ($observed.Count -eq 0) {
     Write-Host 'FAIL(3): 整轮没有观察到任何特效实体——前置不成立（未施法/未学技能/无怪物）'
+    Exit-E2eLock
     exit 3
 }
 if ($fail.Count -gt 0) {
     Write-Host ('FAIL(1): 缺原版条目 - ' + ($fail -join '; '))
+    Exit-E2eLock
     exit 1
 }
 Write-Host '=== 全部 PASS ==='
+Exit-E2eLock
 exit 0
