@@ -37,6 +37,23 @@ pub const PANEL_H: f32 = 224.0;
 /// 关闭键 `Prguse2[360..362]` @(413,3)（`NPCDialogs.cs:139-140`，无 `Size` → 原生 24x21）
 pub const CLOSE_POS: (f32, f32) = (413.0, 3.0);
 
+/// 文本行几何：C# `TextLabel[i].Location = new Point(8, 34 + (i - _index) * 18)`、
+/// `Size = (420, 20)`，可见 `MaximumLines = 8` 行（`NPCDialogs.cs:42/410-417`）。
+pub const LINE_X: f32 = 8.0;
+pub const LINE_Y0: f32 = 34.0;
+pub const LINE_PITCH: f32 = 18.0;
+pub const LINE_COUNT: usize = 8;
+
+/// 滚轮命中区 = **整个对话框**（含标题栏与右侧空白）。
+///
+/// C# 在 `NPCDialog` 构造里就把 `MouseWheel += NPCDialog_MouseWheel` 挂在对话框**自身**
+/// （`Client/MirScenes/Dialogs/NPCDialogs.cs:64`）；`:502/547/566/604` 挂在 `TextLabel[i]`
+/// 与链接/颜色标签上的那几处是**重复挂载**（子控件不处理时事件冒泡到父控件）。
+///
+/// 此前本端取 (8,34,400,144)——只有 8 行文本框那一块，比原版小一圈：在原版能滚的
+/// 标题栏/右侧空白上滚不动（owner 队列 `scroll-hitrect-npc`）。
+pub const LIST_WHEEL_RECT: (f32, f32, f32, f32) = (0.0, 0.0, PANEL_W, PANEL_H);
+
 /// NPC 对话框状态（网络写入）
 #[derive(Resource, Default)]
 pub struct NpcDialogState {
@@ -156,7 +173,7 @@ fn spawn_npc_dialog(
         NpcDialogWidget,
         // #118 长对话页滚轮滚动（C# NPC 对话框支持 MouseWheel）
         UiScrollList {
-            rect_rel: (8.0, 34.0, 400.0, 144.0),
+            rect_rel: LIST_WHEEL_RECT,
             row_h: 18.0,
             visible: 8,
             total: 0,
@@ -205,13 +222,13 @@ fn spawn_npc_dialog(
             .insert((NpcQuest, Visibility::Hidden));
         }
         // 8 行文本（bevy_ui Text，CJK 主字体）
-        for i in 0..8usize {
+        for i in 0..LINE_COUNT {
             spawn_outlined_label(
                 p,
                 cjk.clone(),
                 "",
-                8.0,
-                34.0 + i as f32 * 18.0,
+                LINE_X,
+                LINE_Y0 + i as f32 * LINE_PITCH,
                 NPC_LINE_FONT_PX,
                 Color::WHITE,
                 8,
@@ -1198,5 +1215,41 @@ mod tests {
             .resource_mut::<crate::control::CursorProbe>()
             .pos = Some(Vec2::new(27.5, 42.0));
         app.update();
+    }
+
+    /// 门禁（owner 队列 `scroll-hitrect-npc`）：NPC 对话框的滚轮命中区 = **整个对话框**，
+    /// 因为 C# 把 `MouseWheel` 挂在对话框自身（`NPCDialogs.cs:64`），文本行/链接标签上那几处
+    /// 只是重复挂载。判据是「命中区必须等于面板、且覆盖全部 8 行文本」。
+    ///
+    /// 阳性对照：把 `LIST_WHEEL_RECT` 改回旧值 `(8,34,400,144)` → 第 1 条断言立即红；
+    /// 把 `LINE_COUNT` 加到 12（行区超出面板）→ 第 2 条断言红。
+    #[test]
+    fn npc_wheel_rect_is_whole_dialog_like_csharp() {
+        assert_eq!(
+            LIST_WHEEL_RECT,
+            (0.0, 0.0, PANEL_W, PANEL_H),
+            "C# `NPCDialog` 构造里把滚轮挂在对话框自身（NPCDialogs.cs:64）→ 命中区=整个面板"
+        );
+        let last_bottom = LINE_Y0 + (LINE_COUNT as f32 - 1.0) * LINE_PITCH + LINE_PITCH;
+        assert!(
+            last_bottom <= PANEL_H,
+            "8 行文本（最后一行底 {last_bottom}）必须在面板内，否则命中区覆盖不到"
+        );
+        assert!(
+            LIST_WHEEL_RECT.0 <= LINE_X && LIST_WHEEL_RECT.1 <= LINE_Y0,
+            "命中区左上角必须不晚于文本行区左上角"
+        );
+        // 旧值必须与新版不同，且确实比面板小（这就是当初「原版能滚、本端滚不动」的量）
+        let old = (8.0f32, 34.0f32, 400.0f32, 144.0f32);
+        assert_ne!(
+            LIST_WHEEL_RECT, old,
+            "不得退回「只有 8 行文本框」的旧命中区"
+        );
+        assert!(
+            old.2 < PANEL_W && old.3 < PANEL_H,
+            "旧命中区比面板小一圈（右侧 {:.0}px、底部 {:.0}px 滚不动）",
+            PANEL_W - old.2,
+            PANEL_H - old.3
+        );
     }
 }

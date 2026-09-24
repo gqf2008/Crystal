@@ -27,6 +27,38 @@ pub const PANEL_POS: (f32, f32) = (0.0, 224.0);
 /// 关闭键 `Prguse2[360..362]` @(217,3)（`NPCDialogs.cs:1113-1114`，无 `Size` → 原生 24x21）
 pub const CLOSE_POS: (f32, f32) = (217.0, 3.0);
 
+/// 商品行几何 = C# `MirGoodsCell`（205x32）@ `Cells[i].Location = (10, 34 + i*33)`
+/// （`Client/MirScenes/Dialogs/NPCDialogs.cs:1074-1084`、`Client/MirControls/MirGoodsCell.cs:20`）。
+///
+/// 此前本端按 macroquad 版压成 22px 行距、从 y=16 起 → 8 行只占面板上半，
+/// 滚轮命中区跟着短了一截（owner 队列 `scroll-hitrect-npcgoods`）。
+pub const ROW_X: f32 = 10.0;
+pub const ROW_Y0: f32 = 34.0;
+pub const ROW_PITCH: f32 = 33.0;
+pub const ROW_H: f32 = 32.0;
+pub const ROW_W: f32 = 205.0;
+pub const ROW_COUNT: usize = 8;
+/// 图标盒：C# `DrawItem` 把物品图**居中**画在 40x32 盒里（`MirGoodsCell.cs:139-141`），
+/// 故 32x32 图标落在 `(ROW_X + 4, y)`；本端 cell 自带 2px 内缩，取 32x32 不拉伸。
+pub const ICON_DX: f32 = 4.0;
+/// 价格/名称列：C# `NameLabel@(44,0)` / `PriceLabel@(44,14)` 是**相对 cell** 的（`:28/46`）
+/// → 面板内 x = `ROW_X + 44`。
+pub const LABEL_DX: f32 = 44.0;
+
+/// 滚轮命中区 = 8 个 `Cells` 的**并集**（C# 只给 `Cells[i]` 挂了 `MouseWheel`，
+/// `NPCDialogs.cs:1101`；面板自身没挂）→ x 10..215、y 34..297。
+/// 注意 C# 的 `NameLabel/PriceLabel/CountLabel` 都是 `NotControl`，鼠标事件不落在它们上，
+/// 所以宽度取 cell 的 205 而不是文本宽度。
+pub const LIST_WHEEL_RECT: (f32, f32, f32, f32) = (
+    ROW_X,
+    ROW_Y0,
+    ROW_W,
+    ROW_PITCH * (ROW_COUNT as f32 - 1.0) + ROW_H,
+);
+/// 滚动条：C# `UpButton@(219,35)`、`DownButton@(219,284)`、`PositionBar` 行程 49..282
+/// （`NPCDialogs.cs:1148-1196/1328-1330`）→ 轨道 y 49..282（233 高）。
+pub const SCROLL_TRACK: (f32, f32, f32, f32) = (219.0, 49.0, 4.0, 233.0);
+
 /// 商品条目
 #[derive(Debug, Clone)]
 pub struct GoodsEntry {
@@ -178,15 +210,15 @@ fn spawn_npc_goods(
         NpcGoodsWidget,
         // #124 长商品列表滚轮滚动（C# Up/Down；本实现用滑块条，位置在面板内右侧）
         UiScrollList {
-            rect_rel: (10.0, 16.0, 230.0, 176.0),
-            row_h: 22.0,
-            visible: 8,
+            rect_rel: LIST_WHEEL_RECT,
+            row_h: ROW_PITCH,
+            visible: ROW_COUNT,
             total: 0,
             offset: 0,
             // 每格 1 行：C# `NPCGoodsPanel_MouseWheel`（NPCDialogs.cs:1310-1318）
             // `int count = e.Delta / MouseWheelScrollDelta;` → `StartIndex -= count`
             step: 1,
-            track_rel: (220.0, 16.0, 4.0, 176.0),
+            track_rel: SCROLL_TRACK,
             thumb: None,
             z: 9,
         },
@@ -194,7 +226,7 @@ fn spawn_npc_goods(
 
     commands.entity(panel).with_children(|p| {
         // 滚动条（轨道+滑块，面板子节点，面板内右侧）
-        spawn_scroll_bar_ui(p, (220.0, 16.0, 4.0, 176.0), 9);
+        spawn_scroll_bar_ui(p, SCROLL_TRACK, 9);
         // 关闭按钮（C# (217,3)）
         if let Some(mut btn) =
             spawn_close_button(p, &mut libs, &mut images, CLOSE_POS.0, CLOSE_POS.1, 10)
@@ -210,21 +242,35 @@ fn spawn_npc_goods(
             spawn_icon_button(p, n, h, pr, 77.0, 304.0, 76.0, 25.0, 10).insert(NpcGoodsBuy);
         }
         // 8 行商品（#110：左侧通用 UiItemCell 图标 + 右侧名称/价格文本，对齐 C# MirGoodsCell）
-        for i in 0..8usize {
-            let y = 16.0 + i as f32 * 22.0;
-            spawn_item_cell_ui(p, &mut images, &cjk, 10.0, y, 32.0, 20.0, 9, i)
+        for i in 0..ROW_COUNT {
+            let y = ROW_Y0 + i as f32 * ROW_PITCH;
+            spawn_item_cell_ui(p, &mut images, &cjk, ROW_X + ICON_DX, y, ROW_H, ROW_H, 9, i)
                 .insert(NpcGoodsCell(i));
-            spawn_label(p, &cjk, "", 48.0, y + 2.0, 12.0, Color::WHITE, 9).insert(NpcGoodsLine(i));
+            // 名称/价格行：C# `NameLabel@(44,0)`（cell 相对）→ 面板内 (ROW_X+44, y)
+            spawn_label(
+                p,
+                &cjk,
+                "",
+                ROW_X + LABEL_DX,
+                y + 2.0,
+                12.0,
+                Color::WHITE,
+                9,
+            )
+            .insert(NpcGoodsLine(i));
         }
     });
 }
 
 /// 显示/隐藏 + 商品列表渲染 + 选中/购买/关闭
 #[allow(clippy::type_complexity)]
-/// 商品行命中矩形（面板原点 ox/oy + 相对坐标；i 0..8）
+/// 商品行命中矩形（面板原点 ox/oy + 相对坐标；i 0..8）= C# `Cells[i]` 的矩形。
+///
+/// **单一来源**：渲染位置（`spawn_npc_goods` 的行循环）、悬停/工具提示命中、滚轮命中区
+/// （[`LIST_WHEEL_RECT`]）三处此前各写一份且互相漂移（渲染 y=16+i*22 / 悬停宽度写成 468 /
+/// 滚轮只到 192）——现在全部由下面这组常量导出。
 fn npc_goods_row_rect(i: usize, ox: f32, oy: f32) -> (f32, f32, f32, f32) {
-    // 宽度=右界−左界（480−12）：旧实现误把绝对右界当宽度，命中带右扩 12px
-    (ox + 12.0, oy + 16.0 + i as f32 * 22.0, 468.0, 18.0)
+    (ox + ROW_X, oy + ROW_Y0 + i as f32 * ROW_PITCH, ROW_W, ROW_H)
 }
 
 fn npc_goods_dialog_sync_system(state: Res<NpcGoodsState>, mut mgr: ResMut<DialogManager>) {
@@ -519,13 +565,46 @@ mod tests {
     /// 商品行命中：初始原点等价于原固定坐标，拖动后跟随面板
     #[test]
     fn row_rect_origin_and_drag() {
-        // 初始 (0,224)：首行 y=240（=224+16），x 起 12（=0+12）
+        // 初始 (0,224)：C# `Cells[0] @ (10, 34)` → 首行 (10, 258)，205x32
         let (rx, ry, rw, rh) = npc_goods_row_rect(0, 0.0, 224.0);
-        assert_eq!((rx, ry, rw, rh), (12.0, 240.0, 468.0, 18.0));
-        assert_eq!(npc_goods_row_rect(7, 0.0, 224.0).1, 240.0 + 7.0 * 22.0);
+        assert_eq!((rx, ry, rw, rh), (10.0, 258.0, 205.0, 32.0));
+        assert_eq!(npc_goods_row_rect(7, 0.0, 224.0).1, 258.0 + 7.0 * 33.0);
         // 拖动到 (50,250)：跟随
         let (rx2, ry2, _, _) = npc_goods_row_rect(0, 50.0, 250.0);
-        assert_eq!((rx2, ry2), (62.0, 266.0));
+        assert_eq!((rx2, ry2), (60.0, 284.0));
+    }
+
+    /// 门禁（owner 队列 `scroll-hitrect-npcgoods`）：滚轮命中区 = 8 个 `Cells` 的**精确并集**
+    /// （C# 只给 `Cells[i]` 挂 `MouseWheel`，`NPCDialogs.cs:1101`），且必须与渲染/悬停同一组常量。
+    ///
+    /// 阳性对照：① 把 `LIST_WHEEL_RECT` 换成旧值 `(10,16,230,176)` → 第 1/2 条断言红；
+    /// ② 只改行距 `ROW_PITCH`（如退回 22）而不动命中区 → 第 1 条断言红（并集必须跟着走）。
+    #[test]
+    fn goods_wheel_rect_is_exact_union_of_cells() {
+        // 并集恒等：命中区 == 首行左上角 + 末行右下角
+        let (fx, fy, fw, fh) = npc_goods_row_rect(0, 0.0, 0.0);
+        let (lx, ly, lw, lh) = npc_goods_row_rect(ROW_COUNT - 1, 0.0, 0.0);
+        assert_eq!(
+            (
+                LIST_WHEEL_RECT.0,
+                LIST_WHEEL_RECT.1,
+                LIST_WHEEL_RECT.2,
+                LIST_WHEEL_RECT.3
+            ),
+            (fx, fy, lw, (ly + lh) - fy),
+            "命中区必须是 8 个 Cells 的精确并集（首行左上 → 末行右下）"
+        );
+        // C# 数字：x 10..215、y 34..297
+        assert_eq!(LIST_WHEEL_RECT, (10.0, 34.0, 205.0, 263.0));
+        assert_eq!(fy + LIST_WHEEL_RECT.3, 297.0, "末行底 = 34 + 7*33 + 32");
+        // 旧命中区（压到 y 192 为止）必须不含末行 → 这正是「底部 2-3 行滚不到」的量
+        let old_bottom = 16.0 + 176.0;
+        assert!(
+            old_bottom < ly + lh,
+            "旧命中区底部 {old_bottom} 必须在末行底 {} 之上（否则本项不成立）",
+            ly + lh
+        );
+        assert_eq!(fx, ROW_X, "命中区左边界 = cell 左边界");
     }
 
     use super::*;
