@@ -2624,7 +2624,7 @@ fn apply_control_commands(
                 for f in q.object_fx.iter() {
                     rows.push((
                         format!("object:{}", f.name),
-                        format!("{:?}", f.lib),
+                        f.lib.label(),
                         f.base as u64,
                         f.follow_object_id as u64,
                         f.frames,
