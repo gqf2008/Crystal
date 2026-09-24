@@ -81,6 +81,10 @@ param(
 # 拿不到锁就在这里排队；超时未拿到 → 退出码 2（前置失败）。约定见 e2e_lock.ps1 头部。
 . "$PSScriptRoot\e2e_lock.ps1"
 if (-not (Enter-E2eLock -ScriptName 'ui_interact_sweep' -TimeoutSec 1800)) { exit 2 }
+
+# 整段包 try/finally：任何 exit/return/异常路径都会释放锁（PowerShell 的 finally 在 exit 下也会执行），
+# 所以早退分支（前置不满足的 exit 2、未进图的 Stop-Gate）不会把锁漏给别人。
+try {
 $ErrorActionPreference = 'Stop'
 # PS7.3+：原生命令非零退出码默认会被当成异常（下面要读 git 的退出码）——显式关掉
 if (Get-Variable PSNativeCommandUseErrorActionPreference -ErrorAction SilentlyContinue) {
@@ -456,3 +460,7 @@ if ($failures.Count -gt 0) { $failures | ForEach-Object { Write-Host ("  FAIL  "
 if ($skips.Count -gt 0) { $skips | ForEach-Object { Write-Host ("  SKIP  " + $_) -ForegroundColor Yellow } }
 Write-Host ("结论 JSON: {0}" -f $JsonOut)
 exit $exitCode
+
+} finally {
+    Exit-E2eLock   # 幂等：没持锁时直接返回
+}

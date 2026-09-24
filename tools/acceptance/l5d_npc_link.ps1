@@ -14,6 +14,10 @@
 # 拿不到锁就在这里排队；超时未拿到 → 退出码 2（前置失败）。约定见 e2e_lock.ps1 头部。
 . "$PSScriptRoot\e2e_lock.ps1"
 if (-not (Enter-E2eLock -ScriptName 'l5d_npc_link' -TimeoutSec 1800)) { exit 2 }
+
+# 整段包 try/finally：任何 exit/return/异常路径都会释放锁（PowerShell 的 finally 在 exit 下也会执行），
+# 所以早退分支（例如中段的 if (...) { exit 5 }）不会把锁漏给别人：漏了要等 StaleSec=1800s 才回收。
+try {
 $ErrorActionPreference = 'Continue'
 $env:PATH = 'D:\toolchains\msys64\ucrt64\bin;D:\toolchains\libpinyin-install\bin;' + $env:PATH
 $env:LIBPINYIN_DIR = 'D:/toolchains/libpinyin-install'
@@ -75,3 +79,7 @@ Shot '3_click'
 $sp = Rpc 'storage_probe'
 Write-Host ("click hits = {0}" -f ($hit.hits -join ' | '))
 Write-Host ("storage_probe = {0}" -f ($sp | ConvertTo-Json -Compress))
+
+} finally {
+    Exit-E2eLock   # 幂等：没持锁时直接返回
+}
