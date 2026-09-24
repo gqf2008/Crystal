@@ -278,6 +278,13 @@ enum ControlCommand {
     MountLayerProbe {
         reply: Sender<String>,
     },
+    /// 只读 IME 字体探针（2026-09-25，#2961 项③）：
+    /// 返回「候选条 / 聊天输入框 / 聊天行」三处动态中文文本的**字体句柄标识**与共享 CJK 主字体句柄，
+    /// 外加 `all_cjk`（三处是否都等于 CJK 主字体）。判据取自 `#2961`：三处必须同源，
+    /// 否则重排时 Arial 无 CJK 字形会退化成豆腐（实机表现为候选词/聊天乱码）。
+    ImeProbe {
+        reply: Sender<String>,
+    },
     /// 只读 NPC 窗探针（2026-09-23）：每行文本 + 每条**行内链接的精确命中矩形**。
     /// 存在理由：NPC 窗是自绘文本、行内链接形如 `<Access/@Storage> Storage`，
     /// 链接段只覆盖行首那几个字——夹具按"行中心/行右半"点会静默无反应（⑤ 开仓库栽在这里）。
@@ -687,6 +694,21 @@ struct ControlQueries<'w, 's> {
     >,
     /// `mount_layer_probe` 用：本地玩家根实体
     local_player: Query<'w, 's, Entity, With<crate::actor::LocalPlayer>>,
+    /// `ime_probe` 用：三处**动态中文文本**实体的字体（候选条 / 聊天输入框 / 聊天行）。
+    /// 判据来自 #2961 项③：这三处必须都用**共享 CJK 主字体**的同一个句柄
+    /// （Arial 无 CJK 字形，重排会退化成豆腐/乱码）。
+    ime_texts: Query<
+        'w,
+        's,
+        (
+            Option<&'static crate::ui::pinyin_ime::PinyinBarText>,
+            Option<&'static crate::game::chat::ChatInputText>,
+            Option<&'static crate::game::chat::ChatLine>,
+            &'static TextFont,
+        ),
+    >,
+    /// `ime_probe` 用：共享 CJK 主字体句柄（三处都必须等于它）
+    cjk_font: Option<Res<'w, crate::ui::sprite_ui::UiCjkFont>>,
     /// dialog_rect RPC：物理→逻辑坐标换算用的窗口 scale_factor
     primary_window: Query<'w, 's, &'static Window, With<PrimaryWindow>>,
     /// dialog_rect 诊断：任意实体的 Visibility 读取（关闭钮祖先链诊断）
@@ -1010,6 +1032,20 @@ fn handle_conn(mut stream: std::net::TcpStream, tx: Sender<ControlCommand>) {
                 let (reply_tx, reply_rx) = bounded::<String>(1);
                 if tx
                     .send(ControlCommand::MountLayerProbe { reply: reply_tx })
+                    .is_ok()
+                {
+                    let s = reply_rx
+                        .recv_timeout(std::time::Duration::from_secs(2))
+                        .unwrap_or_else(|_| "{}".to_string());
+                    serde_json::from_str::<Value>(&s).unwrap_or_else(|_| json!({}))
+                } else {
+                    json!({"error": "control channel closed"})
+                }
+            }
+            "ime_probe" => {
+                let (reply_tx, reply_rx) = bounded::<String>(1);
+                if tx
+                    .send(ControlCommand::ImeProbe { reply: reply_tx })
                     .is_ok()
                 {
                     let s = reply_rx
@@ -2743,6 +2779,48 @@ fn apply_control_commands(
                     Err(_) => json!({"ok": false, "error": "no local player"}),
                 };
                 tracing::info!("🎮 control mount_layer_probe: {payload}");
+                let _ = reply.send(payload.to_string());
+            }
+            ControlCommand::ImeProbe { reply } => {
+                // 只读：三处动态中文文本的字体句柄 + 共享 CJK 主字体句柄。
+                // 句柄标识用 `AssetId` 的 Debug（同进程内稳定、可直接比较相等）。
+                fn handle_id(tf: &TextFont) -> Option<String> {
+                    match &tf.font {
+                        FontSource::Handle(h) => Some(format!("{:?}", h.id())),
+                        _ => None,
+                    }
+                }
+                let cjk_font = q.cjk_font.as_ref().map(|f| format!("{:?}", f.0.id()));
+                let mut candidate = None;
+                let mut input_box = None;
+                let mut chat_line = None;
+                for (bar, input, line, tf) in q.ime_texts.iter() {
+                    let id = handle_id(tf);
+                    if bar.is_some() {
+                        candidate = id.clone();
+                    }
+                    if input.is_some() {
+                        input_box = id.clone();
+                    }
+                    if line.is_some() && chat_line.is_none() {
+                        chat_line = id;
+                    }
+                }
+                let matches_cjk = |o: &Option<String>| o.is_some() && *o == cjk_font;
+                let all_cjk = cjk_font.is_some()
+                    && matches_cjk(&candidate)
+                    && matches_cjk(&input_box)
+                    && matches_cjk(&chat_line);
+                let payload = json!({
+                    "ok": true,
+                    "cjk_font": cjk_font,
+                    "candidate_font": candidate,
+                    "input_box_font": input_box,
+                    "chat_font": chat_line,
+                    // 判据（#2961 项③）：三处都必须用共享 CJK 主字体的**同一个句柄**
+                    "all_cjk": all_cjk,
+                });
+                tracing::info!("🎮 control ime_probe: {payload}");
                 let _ = reply.send(payload.to_string());
             }
             ControlCommand::UiNodesAt { x, y, reply } => {

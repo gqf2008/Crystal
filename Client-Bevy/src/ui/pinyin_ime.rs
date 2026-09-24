@@ -395,7 +395,7 @@ pub struct ImeFocus {
 struct PinyinBarBg;
 
 #[derive(Component)]
-struct PinyinBarText;
+pub(crate) struct PinyinBarText;
 
 // ----------------------------------------------------------------------------
 // 中/英模式 chip 实体（聚焦框右侧）
@@ -574,7 +574,7 @@ fn clear_ime_focus(mut focus: ResMut<ImeFocus>) {
 
 /// Update：绘制/更新候选条。全局运行（各 AppState 都可能输入中文）。
 /// ParamSet 规避 bg/text 两个查询对 Transform/Visibility 的可写访问冲突。
-fn pinyin_candidate_ui_system(
+pub(crate) fn pinyin_candidate_ui_system(
     mut commands: Commands,
     ime: Res<PinyinIme>,
     focus: Res<ImeFocus>,

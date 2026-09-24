@@ -325,11 +325,11 @@ struct ChatPanel;
 
 /// 第 i 行文本
 #[derive(Component)]
-struct ChatLine(usize);
+pub(crate) struct ChatLine(pub(crate) usize);
 
 /// 输入行文本
 #[derive(Component)]
-struct ChatInputText;
+pub(crate) struct ChatInputText;
 /// 输入框背景（激活时显示，提供可见的文本交互框）
 #[derive(Component)]
 struct ChatInputBg;
