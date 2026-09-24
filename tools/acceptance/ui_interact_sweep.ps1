@@ -77,6 +77,10 @@ param(
 # 拿不到锁就在这里排队；超时未拿到 → 退出码 2（前置失败）。约定见 e2e_lock.ps1 头部。
 . "$PSScriptRoot\e2e_lock.ps1"
 if (-not (Enter-E2eLock -ScriptName 'ui_interact_sweep' -TimeoutSec 1800)) { exit 2 }
+
+# 整段包 try/finally：任何 exit/return/异常路径都会释放锁（PowerShell 的 finally 在 exit 下也会执行），
+# 所以早退分支（例如中段的 if (...) { exit 5 }）不会把锁漏给别人：漏了要等 StaleSec=1800s 才回收。
+try {
 $ErrorActionPreference = 'Stop'
 # PS7.3+：原生命令非零退出码默认会被当成异常（下面要读 git 的退出码）——显式关掉
 if (Get-Variable PSNativeCommandUseErrorActionPreference -ErrorAction SilentlyContinue) {
@@ -252,9 +256,12 @@ try {
     }
 
     # ---------------- 起客户端 ----------------
-    # 只清理带 --e2e-user 标记的自动化实例：共享桌面/多 agent 环境下不误杀人工会话
+    # 只清理**本脚本自己这一路**（同 --control-port + --e2e-user）的残留实例。
+    # 早前只按进程名 client_bevy.exe + --e2e-user 过滤，会把**别的 agent 正在跑的实机验收**一起杀掉，
+    # 对方随后登录就拿到 result=4 密码错误（服务端实为 Account already online）——那是资源互斥假红，
+    # 不是产品缺陷，而且会让对方白查半天。锁已经把「同时只跑一组」管住了，这里只收自己那一路的残骸。
     Get-CimInstance Win32_Process -Filter "Name='client_bevy.exe'" -EA SilentlyContinue |
-        Where-Object { $_.CommandLine -match '--e2e-user' } |
+        Where-Object { $_.CommandLine -match '--e2e-user' -and $_.CommandLine -match "--control-port\s+$ControlPort\b" } |
         ForEach-Object { Stop-Process -Id $_.ProcessId -Force -EA SilentlyContinue }
     Start-Sleep -Milliseconds 800
     $clientArgs = @('--real-net', '--auto-enter', '--control-port', "$ControlPort", '--e2e-user', $TestUser, '--e2e-pass', $TestPass)
@@ -271,7 +278,13 @@ try {
         $tail = ''
         $errLog = Join-Path $AccDir 'interact_client.err.log'
         if (Test-Path $errLog) { $tail = (Get-Content $errLog -Tail 8 -EA SilentlyContinue) -join "`n    " }
-        Stop-Gate "未进入游戏（客户端提前退出？PATH/libpinyin 缺 DLL 会 0xC0000135 静默退）`n    日志尾：`n    $tail"
+        $hint = ''
+        if ($tail -match 'result=4|密码错误|already online|已在线') {
+            $hint = "`n    提示：日志里出现 result=4 —— 多半是**账号被没走锁的会话占着**（服务端实为 Account already online）。" +
+                    "`n    重跑本脚本修不了它：先看 pwsh tools/acceptance/e2e_lock.ps1 里的 Get-E2eLockInfo（谁在持锁），" +
+                    "`n    并确认有别的 agent 在直接起客户端/跑没接入锁的脚本。"
+        }
+        Stop-Gate "未进入游戏（客户端提前退出？PATH/libpinyin 缺 DLL 会 0xC0000135 静默退）$hint`n    日志尾：`n    $tail"
     }
     $enteredGame = $true
     Write-Host ("进图 tile=({0},{1})" -f $st.tile_x, $st.tile_y)
@@ -440,3 +453,7 @@ if ($failures.Count -gt 0) { $failures | ForEach-Object { Write-Host ("  FAIL  "
 if ($skips.Count -gt 0) { $skips | ForEach-Object { Write-Host ("  SKIP  " + $_) -ForegroundColor Yellow } }
 Write-Host ("结论 JSON: {0}" -f $JsonOut)
 exit $exitCode
+
+} finally {
+    Exit-E2eLock   # 幂等：没持锁时直接返回
+}

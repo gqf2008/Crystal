@@ -55,6 +55,10 @@ $ErrorActionPreference = "Stop"
 # -IncludeInteractSweep 会拉起 ui_interact_sweep.ps1：它继承本进程的环境变量、复用同一把锁，不会自锁。
 . (Join-Path (Split-Path -Parent $PSScriptRoot) 'tools\acceptance\e2e_lock.ps1')
 if (-not (Enter-E2eLock -ScriptName 'run_real_e2e' -TimeoutSec 1800)) { exit 2 }
+
+# 整段包 try/finally：任何 exit/return/异常路径都会释放锁（PowerShell 的 finally 在 exit 下也会执行），
+# 所以早退分支（例如中段的 if (...) { exit 5 }）不会把锁漏给别人：漏了要等 StaleSec=1800s 才回收。
+try {
 $repo = Split-Path -Parent $PSScriptRoot
 if (-not $ServerExe) { $ServerExe = Join-Path $repo "ServerRust\target\debug\mir2_server.exe" }
 if (-not $ClientExe) { $ClientExe = Join-Path $repo "Client-Bevy\target\debug\client_bevy.exe" }
@@ -321,3 +325,7 @@ if ($failCount -gt 0) {
 }
 Write-Output "✅ 全部用例通过"
 exit 0
+
+} finally {
+    Exit-E2eLock   # 幂等：没持锁时直接返回
+}

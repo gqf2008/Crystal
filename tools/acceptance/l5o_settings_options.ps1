@@ -36,6 +36,10 @@ param(
 # 拿不到锁就在这里排队；超时未拿到 → 退出码 2（前置失败）。约定见 e2e_lock.ps1 头部。
 . "$PSScriptRoot\e2e_lock.ps1"
 if (-not (Enter-E2eLock -ScriptName 'l5o_settings_options' -TimeoutSec 1800)) { exit 2 }
+
+# 整段包 try/finally：任何 exit/return/异常路径都会释放锁（PowerShell 的 finally 在 exit 下也会执行），
+# 所以早退分支（例如中段的 if (...) { exit 5 }）不会把锁漏给别人：漏了要等 StaleSec=1800s 才回收。
+try {
 $ErrorActionPreference = 'Continue'
 $env:PATH = 'D:\toolchains\msys64\ucrt64\bin;D:\toolchains\libpinyin-install\bin;' + $env:PATH
 $env:LIBPINYIN_DIR = 'D:/toolchains/libpinyin-install'
@@ -114,3 +118,7 @@ Write-Host '截图：tools/acceptance/l5o_settings.png（目检同排两颗按�
 Write-Host ("VERDICT: {0}（三档提示 + 方向 + 负对照）" -f $(if ($verdict) { 'PASS' } else { 'FAIL' }))
 if (-not $verdict) { exit 10 }
 exit 0
+
+} finally {
+    Exit-E2eLock   # 幂等：没持锁时直接返回
+}

@@ -236,6 +236,36 @@ Check 'T8.1 三个子进程都进过临界区（3 进 3 出、无超时）' `
 Check 'T8.2 任一时刻最多一个持有者（临界区不重叠）' ($maxDepth -eq 1) ("maxDepth=" + $maxDepth)
 Check 'T8.3 三个子进程都正常退出了' (@($kids | Where-Object { -not $_.HasExited }).Count -eq 0)
 
+# ---------------- T9 接入覆盖面（「有锁但某个入口没接」也要变红） ----------------
+# 这一条是「别再用 for(i=1..8) 撞干净窗口」能不能兑现的关键：只要有一个会起客户端的脚本没走锁，
+# 它和走了锁的脚本并行跑就照样撞 result=4。判据与批量接入器共用 e2e_lock.ps1 里的同一对函数。
+if (-not (Get-Command Get-E2eClientScripts -EA SilentlyContinue)) {
+    Write-Host '  [SKIP] T9 —— 被测锁脚本没提供 Get-E2eClientScripts（A/B 对照旧版时的正常情况）' -ForegroundColor DarkGray
+} else {
+    $repoRoot = (Resolve-Path "$PSScriptRoot\..\..").Path
+    $targets = @(Get-E2eClientScripts -RepoRoot $repoRoot)
+    $missing = @()
+    foreach ($t in $targets) {
+        $c = Test-E2eLockEnrollment -Path $t.Path
+        if (-not $c.ok) { $missing += ("{0}（{1}）" -f $t.Name, ($c.reasons -join '、')) }
+    }
+    Check 'T9.1 每个实机入口都 dot-source 了锁、有 Enter 且有 Exit' ($targets.Count -gt 0 -and $missing.Count -eq 0) `
+        ("扫描 {0} 个；缺锁定接入：{1}" -f $targets.Count, ($missing -join ' | '))
+
+    # 阳性对照：造一个「会起客户端但没接入锁」的脚本，覆盖面判据必须把它判为不合规
+    $fakeRepo = Join-Path $sandbox 'fake_repo'
+    $fakeAcc = Join-Path $fakeRepo 'tools\acceptance'
+    New-Item -ItemType Directory -Path $fakeAcc -Force | Out-Null
+    [System.IO.File]::WriteAllText((Join-Path $fakeAcc 'no_lock.ps1'),
+        "Start-Process client.exe -ArgumentList '--e2e-user','test','--e2e-pass','123456'`n",
+        (New-Object System.Text.UTF8Encoding($false)))
+    $fakeFound = @(Get-E2eClientScripts -RepoRoot $fakeRepo)
+    $fakeCheck = if ($fakeFound.Count -gt 0) { Test-E2eLockEnrollment -Path $fakeFound[0].Path } else { $null }
+    Check 'T9.2 阳性对照：没接入锁的实机入口必须被判不合规' `
+        ($fakeFound.Count -eq 1 -and $null -ne $fakeCheck -and -not $fakeCheck.ok) `
+        ("扫到 {0} 个；判语={1}" -f $fakeFound.Count, $(if ($null -ne $fakeCheck) { $fakeCheck.reasons -join '、' } else { '（没扫到）' }))
+}
+
 Reset-Lock
 Remove-Item -LiteralPath $sandbox -Recurse -Force -EA SilentlyContinue
 

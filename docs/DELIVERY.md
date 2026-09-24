@@ -178,8 +178,9 @@ pwsh scripts/run_real_e2e.ps1 -IncludeInteractSweep            # 常规用例 + 
 - **锁**：`tools/acceptance/e2e_lock.ps1`；锁文件 `%TEMP%\crystal_e2e_client_test.lock`
   （跨 worktree、跨 agent 全局唯一，不是每个 worktree 一把）。
 - **用法**：`param()` 之后 dot-source 再 `Enter-E2eLock -ScriptName '<夹具名>'`；拿不到（返回 `$false`）→ `exit 2`。
-  能包 `try/finally` 的显式 `Exit-E2eLock`；结构上不便包一层的夹具只调用 `Enter`——
-  进程一退出，下一个调用者按「持有者 PID 已死」立刻接管。
+  每个入口都**整段包 `try/finally` + `Exit-E2eLock`**（PowerShell 的 `finally` 在 `exit` 下也会执行，
+  所以早退分支如 `if (...) { exit 5 }` 也会释放——实测缺 exe 的早退路径 `exit 2` 后锁文件即被删除）。
+  万一漏了释放也不会卡住队列：进程一退出，下一个调用者按「持有者 PID 已死」立刻接管。
 - **嵌套**：持锁进程设 `CRYSTAL_E2E_LOCK_HELD_BY`，子脚本（`run_real_e2e.ps1` → `ui_interact_sweep.ps1`）
   自动复用同一把锁，不会自锁。该标记会被**复核**（父进程仍活着 + 锁文件确实由它持有），
   残留标记不生效。
@@ -187,8 +188,11 @@ pwsh scripts/run_real_e2e.ps1 -IncludeInteractSweep            # 常规用例 + 
   僵尸回收、PID 复用、超龄回收、读不全宽限、继承标记复核、**跨进程串行性**（3 个子进程抢同一把锁、
   临界区不许重叠）；秒级，不起客户端。它把 `TEMP` 指向临时目录后再 dot-source，**不会碰真实锁**
   （跑在真实锁上会与别的 agent 的实机任务互相污染）；退出码 `0` 全过 / `1` 有用例红 / `2` 前置失败。
-- **覆盖**：`tools/acceptance/` 下全部会起客户端的夹具 + `scripts/run_real_e2e.ps1` 都已接入
-  （#3129 铺齐；本仓库任何**新增**夹具都必须先拿锁）。
+- **覆盖**：`tools/acceptance/` 下全部会起客户端的夹具 + `scripts/run_real_e2e.ps1` 都已接入（#3129 铺齐），
+  且**由门禁钉住**：自证的 `T9.1` 会扫描「正文出现 `--e2e-user` 的脚本」（与接入器共用
+  `Get-E2eClientScripts` / `Test-E2eLockEnrollment` 同一判据），缺 dot-source / 缺 `Enter` / 缺 `Exit`
+  即红；`T9.2` 是阳性对照（临时造一个没接入的脚本必须被判不合规）。新增夹具忘了接入时：
+  `pwsh tools/acceptance/enroll_e2e_lock.ps1 -Apply`（幂等，只插不删），或照抄已接入夹具的写法。
 
 ---
 
