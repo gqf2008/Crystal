@@ -106,7 +106,22 @@ pub struct MissileFx {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum FxLib {
     Flat(SpellFxLibrary),
-    Monster(Monster),
+    /// 怪物库。必须带**两个**值：
+    /// - `rust` = 本端 `Monster` 枚举（可读、可查）；
+    /// - `lib` = **C# `Monster` 枚举值**，也就是 `Data/Monster/{:03}.Lib` 的资产索引。
+    ///
+    /// 为什么要分开：本端 `Monster` 枚举整体比 C# **大 3**（C# `Guard = 0` / 本端 `Guard = 3`；
+    /// 504 个同名项逐一核对**全部 +3**），而资产是按 **C# 值**编号的——`Monster/201.Lib`
+    /// 才是石像（667 帧，含原版 `ObjectEffect` 用的 632 帧），`Monster/204.Lib` 是另一只小怪
+    /// （224 帧，632 直接越界）。生成器从 `Shared/Enums.cs` 取 C# 值写进 `lib`，
+    /// 不能拿本端枚举值当资产索引用。
+    ///
+    /// 对照：actor 渲染走服务端 DB 的 `image` 字段，那本来就是 C# 值，所以没踩这个坑；
+    /// 只有「按 C# 源码生成的表」需要自己换算。
+    Monster {
+        rust: Monster,
+        lib: usize,
+    },
 }
 
 impl FxLib {
@@ -114,15 +129,31 @@ impl FxLib {
     pub fn flat(self) -> Option<LibraryName> {
         match self {
             FxLib::Flat(l) => Some(l.library()),
-            FxLib::Monster(_) => None,
+            FxLib::Monster { .. } => None,
         }
     }
 
-    /// 怪物库索引（`Flat` 返回 None）
+    /// 本端怪物枚举值（`Flat` 返回 None）
     pub fn monster(self) -> Option<Monster> {
         match self {
-            FxLib::Monster(m) => Some(m),
+            FxLib::Monster { rust, .. } => Some(rust),
             FxLib::Flat(_) => None,
+        }
+    }
+
+    /// 怪物库的**资产索引**（= C# `Monster` 枚举值；`Flat` 返回 None）
+    pub fn monster_lib(self) -> Option<usize> {
+        match self {
+            FxLib::Monster { lib, .. } => Some(lib),
+            FxLib::Flat(_) => None,
+        }
+    }
+
+    /// 诊断/探针用的短标签（`Flat(Magic)` / `Monster(StoningStatue)`）
+    pub fn label(self) -> String {
+        match self {
+            FxLib::Flat(l) => format!("Flat({l:?})"),
+            FxLib::Monster { rust, .. } => format!("Monster({rust:?})"),
         }
     }
 }
@@ -419,7 +450,7 @@ pub const RANGE_MISSILE: &[(&str, MissileFx)] = &[
 #[rustfmt::skip]  // 生成块：保持每条一行，便于 diff 与 --write 幂等
 pub const OBJECT_FX: &[(&str, &[ObjectFx])] = &[
     ("FurbolgWarriorCritical", &[
-        ObjectFx { lib: FxLib::Monster(Monster::FurbolgWarrior), start: 400, frames: 6, interval_ms: 600, ..ObjectFx::DEFAULT },
+        ObjectFx { lib: FxLib::Monster { rust: Monster::FurbolgWarrior, lib: 406 }, start: 400, frames: 6, interval_ms: 600, ..ObjectFx::DEFAULT },
     ]),
     ("FatalSword", &[
         ObjectFx { lib: FxLib::Flat(Magic2), start: 1940, frames: 4, interval_ms: 400, ..ObjectFx::DEFAULT },
@@ -434,7 +465,7 @@ pub const OBJECT_FX: &[(&str, &[ObjectFx])] = &[
         ObjectFx { lib: FxLib::Flat(Magic), start: 370, frames: 10, interval_ms: 800, ..ObjectFx::DEFAULT },
     ]),
     ("RedMoonEvil", &[
-        ObjectFx { lib: FxLib::Monster(Monster::RedMoonEvil), start: 32, frames: 6, interval_ms: 400, blend: false, ..ObjectFx::DEFAULT },
+        ObjectFx { lib: FxLib::Monster { rust: Monster::RedMoonEvil, lib: 62 }, start: 32, frames: 6, interval_ms: 400, blend: false, ..ObjectFx::DEFAULT },
     ]),
     ("TwinDrakeBlade", &[
         ObjectFx { lib: FxLib::Flat(Magic2), start: 380, frames: 6, interval_ms: 800, ..ObjectFx::DEFAULT },
@@ -456,7 +487,7 @@ pub const OBJECT_FX: &[(&str, &[ObjectFx])] = &[
     ]),
     ("MagicShieldDown", &[]),
     ("GreatFoxSpirit", &[
-        ObjectFx { lib: FxLib::Monster(Monster::GreatFoxSpirit), start: 375, rand_step: 20, rand_count: 3, frames: 20, interval_ms: 1400, ..ObjectFx::DEFAULT },
+        ObjectFx { lib: FxLib::Monster { rust: Monster::GreatFoxSpirit, lib: 134 }, start: 375, rand_step: 20, rand_count: 3, frames: 20, interval_ms: 1400, ..ObjectFx::DEFAULT },
     ]),
     ("Entrapment", &[
         ObjectFx { lib: FxLib::Flat(Magic2), start: 1010, frames: 10, interval_ms: 1500, ..ObjectFx::DEFAULT },
@@ -493,27 +524,27 @@ pub const OBJECT_FX: &[(&str, &[ObjectFx])] = &[
         ObjectFx { lib: FxLib::Flat(Magic3), start: 830, frames: 5, interval_ms: 500, blend: false, delay_from_packet: true, ..ObjectFx::DEFAULT },
     ]),
     ("TurtleKing", &[
-        ObjectFx { lib: FxLib::Monster(Monster::TurtleKing), start: 922, rand_step: 12, rand_count: 2, frames: 12, interval_ms: 1200, ..ObjectFx::DEFAULT },
+        ObjectFx { lib: FxLib::Monster { rust: Monster::TurtleKing, lib: 187 }, start: 922, rand_step: 12, rand_count: 2, frames: 12, interval_ms: 1200, ..ObjectFx::DEFAULT },
     ]),
     ("Behemoth", &[
-        ObjectFx { lib: FxLib::Monster(Monster::Behemoth), start: 788, frames: 10, interval_ms: 1500, target: FxTarget::OwnerLocation, ..ObjectFx::DEFAULT },
-        ObjectFx { lib: FxLib::Monster(Monster::Behemoth), start: 778, frames: 10, interval_ms: 1500, blend: false, target: FxTarget::OwnerLocation, ..ObjectFx::DEFAULT },
+        ObjectFx { lib: FxLib::Monster { rust: Monster::Behemoth, lib: 158 }, start: 788, frames: 10, interval_ms: 1500, target: FxTarget::OwnerLocation, ..ObjectFx::DEFAULT },
+        ObjectFx { lib: FxLib::Monster { rust: Monster::Behemoth, lib: 158 }, start: 778, frames: 10, interval_ms: 1500, blend: false, target: FxTarget::OwnerLocation, ..ObjectFx::DEFAULT },
     ]),
     ("Stunned", &[
-        ObjectFx { lib: FxLib::Monster(Monster::StoningStatue), start: 632, frames: 10, interval_ms: 1000, repeat: FxRepeat::PacketTime, ..ObjectFx::DEFAULT },
+        ObjectFx { lib: FxLib::Monster { rust: Monster::StoningStatue, lib: 201 }, start: 632, frames: 10, interval_ms: 1000, repeat: FxRepeat::PacketTime, ..ObjectFx::DEFAULT },
     ]),
     ("IcePillar", &[
-        ObjectFx { lib: FxLib::Monster(Monster::IcePillar), start: 18, frames: 8, interval_ms: 800, ..ObjectFx::DEFAULT },
+        ObjectFx { lib: FxLib::Monster { rust: Monster::IcePillar, lib: 231 }, start: 18, frames: 8, interval_ms: 800, ..ObjectFx::DEFAULT },
     ]),
     ("KingGuard", &[
-        ObjectFx { lib: FxLib::Monster(Monster::KingGuard), start: 753, frames: 10, interval_ms: 1000, blend: false, when: FxWhen::EffectTypeZero, ..ObjectFx::DEFAULT },
-        ObjectFx { lib: FxLib::Monster(Monster::KingGuard), start: 763, frames: 10, interval_ms: 1000, blend: false, when: FxWhen::EffectTypeNonZero, ..ObjectFx::DEFAULT },
+        ObjectFx { lib: FxLib::Monster { rust: Monster::KingGuard, lib: 252 }, start: 753, frames: 10, interval_ms: 1000, blend: false, when: FxWhen::EffectTypeZero, ..ObjectFx::DEFAULT },
+        ObjectFx { lib: FxLib::Monster { rust: Monster::KingGuard, lib: 252 }, start: 763, frames: 10, interval_ms: 1000, blend: false, when: FxWhen::EffectTypeNonZero, ..ObjectFx::DEFAULT },
     ]),
     ("FlamingMutantWeb", &[
-        ObjectFx { lib: FxLib::Monster(Monster::FlamingMutant), start: 330, frames: 10, interval_ms: 1000, repeat: FxRepeat::PacketTime, ..ObjectFx::DEFAULT },
+        ObjectFx { lib: FxLib::Monster { rust: Monster::FlamingMutant, lib: 200 }, start: 330, frames: 10, interval_ms: 1000, repeat: FxRepeat::PacketTime, ..ObjectFx::DEFAULT },
     ]),
     ("DeathCrawlerBreath", &[
-        ObjectFx { lib: FxLib::Monster(Monster::DeathCrawler), start: 272, dir_step: 4, frames: 4, interval_ms: 400, ..ObjectFx::DEFAULT },
+        ObjectFx { lib: FxLib::Monster { rust: Monster::DeathCrawler, lib: 261 }, start: 272, dir_step: 4, frames: 4, interval_ms: 400, ..ObjectFx::DEFAULT },
     ]),
     ("MoonMist", &[
         ObjectFx { lib: FxLib::Flat(Magic3), start: 705, frames: 10, interval_ms: 800, ..ObjectFx::DEFAULT },
@@ -904,6 +935,40 @@ mod tests {
             assert_eq!(v.len(), 2, "{name} 是两层（主层 + Blend=false 底图）");
             assert!(v.iter().all(|f| f.delay_from_packet));
             assert!(v.iter().any(|f| !f.blend));
+        }
+        // 怪物库：**资产索引必须是 C# `Monster` 枚举值**，不是本端枚举值
+        // （本端全体比 C# 大 3：C# Guard=0 / 本端 Guard=3）。
+        // 这条门禁就是当初漏掉的那个洞：本端 `StoningStatue = 204` 而资产是 `201.Lib`
+        // （667 帧，含原版用的 632 帧）；用 204 会取到另一只 224 帧的小怪、632 直接越界，
+        // 实机上表现为「对象特效一条都不出现」。
+        let expect_monster_lib = [
+            ("FurbolgWarriorCritical", "FurbolgWarrior", 406usize),
+            ("RedMoonEvil", "RedMoonEvil", 62),
+            ("GreatFoxSpirit", "GreatFoxSpirit", 134),
+            ("TurtleKing", "TurtleKing", 187),
+            ("Behemoth", "Behemoth", 158),
+            ("Stunned", "StoningStatue", 201),
+            ("IcePillar", "IcePillar", 231),
+            ("KingGuard", "KingGuard", 252),
+            ("FlamingMutantWeb", "FlamingMutant", 200),
+            ("DeathCrawlerBreath", "DeathCrawler", 261),
+        ];
+        for (case, monster, lib) in expect_monster_lib {
+            let v = object_fx(case).unwrap_or_else(|| panic!("{case} 应在表里"));
+            for f in v {
+                let FxLib::Monster { rust, lib: got } = f.lib else {
+                    panic!("{case} 应走怪物库");
+                };
+                assert_eq!(
+                    got, lib,
+                    "{case}（{monster}）的资产索引应为 C# 值 {lib}，实得 {got}"
+                );
+                assert_eq!(
+                    got,
+                    rust as usize - 3,
+                    "本端 Monster 枚举整体比 C# 大 3（C# Guard=0 / 本端 Guard=3）"
+                );
+            }
         }
         // `Critical` 被 C# 注释掉、`MagicShieldDown` 只做清理 → 表里是空切片（明确不画）
         assert_eq!(object_fx("Critical"), Some(&[][..]));

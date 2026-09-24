@@ -1851,6 +1851,22 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                                 time: 0,
                                             },
                                         );
+                                        // 第二条锚点走**怪物数组库**（`Libraries.Monsters[Monster.StoningStatue]`
+                                        // = `Data/Monster/201.Lib`，**C# 枚举值**才是资产索引——
+                                        // 本端 `Monster` 枚举整体比 C# 大 3）：扁平库（Magic/Magic2/Magic3/Effect）走
+                                        // `ui_image`，怪物库走 `ui_array_image`，两条取图路径都得有实机覆盖。
+                                        // 用 `Stunned` 是因为它带 `Repeat = p.Time > 0`（原版 stone 状态循环），
+                                        // time=6000 → 6 秒窗口，跨轮询稳定可见。
+                                        send(
+                                            &to_client,
+                                            &server::magic_combat::ObjectEffect {
+                                                object_id: 100,
+                                                effect: mir2_shared::enums::SpellEffect::Stunned,
+                                                effect_type: 0,
+                                                delay_time: 0,
+                                                time: 6000,
+                                            },
+                                        );
                                         send(
                                             &to_client,
                                             &server::combat::ObjectRangeAttack {
