@@ -97,6 +97,9 @@ pub enum ArrayLibType {
     /// （altAnim = 走路/奔跑/AttackRange1-2 时；C# `PlayerObject.cs:531-533`，`Index = Weapon - 200`）
     ARWeapons,
     ARWeaponsS,
+    /// 变形（`Transform/{:02}.Lib`）；C# `Libraries.Transform[Shape]`，
+    /// 商城试穿预览 `DrawTransform`（`MirGameShopCell.cs:585`）用
+    Transform,
 }
 
 impl ArrayLibType {
@@ -114,6 +117,7 @@ impl ArrayLibType {
             ArrayLibType::AWeaponsL => "AWeaponsL",
             ArrayLibType::ARWeapons => "ARWeapons",
             ArrayLibType::ARWeaponsS => "ARWeaponsS",
+            ArrayLibType::Transform => "Transform",
         }
     }
 
@@ -133,6 +137,7 @@ impl ArrayLibType {
             ArrayLibType::AWeaponsL => format!("AWeapon/{:02} L", index),
             ArrayLibType::ARWeapons => format!("ARWeapon/{:02}", index),
             ArrayLibType::ARWeaponsS => format!("ARWeapon/{:02} S", index),
+            ArrayLibType::Transform => format!("Transform/{:02}", index),
         }
     }
 }

@@ -18,6 +18,7 @@ use crate::game::dialogs::text_input::{
 use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
 use crate::map_renderer::GameLibraries;
 use crate::network::NetConnection;
+use crate::resources::libraries::ArrayLibType;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
 use crate::ui::sprite_ui::{shared_cjk_font, UiCjkFont, UiFont};
@@ -86,6 +87,8 @@ pub struct GameShopState {
     pub items: Vec<ShopItem>,
     pub gold: u32,
     pub item_names: HashMap<i32, String>,
+    /// 按需请求回来的 `ItemInfo` 关键字段（试穿预览用；`MirGameShopCell.cs:278/505-547/566`）
+    pub item_infos: HashMap<i32, ShopItemInfo>,
     /// P3-3：已发过 `RequestItemInfo` 的商品索引（按索引去重，避免每帧刷包）
     pub requested_item_info: std::collections::HashSet<i32>,
     /// 搜索关键词（C# GameshopDialog Search，本地按名称过滤）
@@ -109,6 +112,30 @@ pub struct GameShopState {
     pub pending: Option<ShopPending>,
     /// 确认框文案（C# `ConfirmPurchaseItemGold` / `ConfirmBuyItemCredits`）
     pub confirm_text: String,
+    /// 试穿预览状态（None = 未打开；C# `GameShopDialog.Viewer`，`:124-132`）
+    pub viewer: Option<ShopViewerState>,
+}
+
+/// 试穿预览需要的 `ItemInfo` 关键字段
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ShopItemInfo {
+    /// `ItemInfo.item_type`（`ItemType` 数值）
+    pub item_type: u8,
+    /// `ItemInfo.shape`
+    pub shape: i16,
+    /// `ItemInfo.required_gender` 的 bits（`RequiredGender` 位标志）
+    pub required_gender: u8,
+}
+
+/// 试穿预览状态（C# `GameShopViewer`：`ViewerItem` + `Direction`，`:317-319`）
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ShopViewerState {
+    /// 正在试穿的物品索引（C# `ViewerItem.ItemIndex`）
+    pub item_index: i32,
+    /// 朝向 1..8（C# `Direction`，初值 6）
+    pub direction: u8,
+    /// 面板相对商城对话框的位置（C# `:129` 按被点格子在左半/右半选）
+    pub pos: (f32, f32),
 }
 
 impl Default for GameShopState {
@@ -117,6 +144,7 @@ impl Default for GameShopState {
             items: Vec::new(),
             gold: 0,
             item_names: HashMap::new(),
+            item_infos: HashMap::new(),
             requested_item_info: std::collections::HashSet::new(),
             search: String::new(),
             categories: Vec::new(),
@@ -132,6 +160,7 @@ impl Default for GameShopState {
             pay_type: 1,
             pending: None,
             confirm_text: String::new(),
+            viewer: None,
         }
     }
 }
@@ -219,6 +248,37 @@ pub struct GameShopCellQtyUp(pub usize);
 #[derive(Component)]
 pub struct GameShopCellBuy(pub usize);
 
+/// 格内试穿钮（C# `PreviewItem` `Title[781..783]` @(8,122)；仅 Mount/Weapon/Armour/Transform 可见）
+#[derive(Component)]
+pub struct GameShopCellPreview(pub usize);
+
+/// 试穿预览面板（C# `GameShopViewer`）
+#[derive(Component)]
+pub struct GameShopViewerPanel;
+
+/// 试穿预览的四个图层（C# `PreviewImage` / `WeaponImage` / `WeaponImage2` / `MountImage`）
+#[derive(Component, Clone, Copy, PartialEq, Eq)]
+pub enum GameShopViewerLayer {
+    /// 身体/护甲层（`PreviewImage`）
+    Body,
+    /// 主手武器层（`WeaponImage`）
+    Weapon,
+    /// 副手武器层（刺客专属，`WeaponImage2`）
+    Weapon2,
+    /// 坐骑层（`MountImage`）
+    Mount,
+}
+
+/// 预览面板关闭钮（C# `CloseButton` `Prguse[361..363]` @(230,8)）
+#[derive(Component)]
+pub struct GameShopViewerClose;
+
+/// 预览转身钮（C# `LeftDirection`/`RightDirection` @(81,282)/(160,282)）
+#[derive(Component)]
+pub struct GameShopViewerTurn {
+    pub right: bool,
+}
+
 /// 页码标签（C# `PageNumberLabel` 83x17 居中 @(597,446)，"N / M"）
 #[derive(Component)]
 pub struct GameShopPageLabel;
@@ -274,6 +334,140 @@ pub const SECTION_FILTERS: [(&str, usize, usize, f32); 4] = [
     ("NewItems", 774, 775, 351.0),
 ];
 pub const SECTION_BTN_Y: f32 = 68.0;
+
+// ---------------------------------------------------------------------------
+// 试穿预览（C# `GameShopViewer`，`Client/MirControls/MirGameShopCell.cs:312-595`）
+// ---------------------------------------------------------------------------
+
+/// 预览面板：`Title[785]`，作为**商城对话框的子控件**（C# `Parent = GameShopDialog`，`:127`）。
+/// 位置按被点格子在左半还是右半决定：`X < 350 ? (416,115) : (151,115)`（`:129`）。
+pub const VIEWER_PANEL: (LibraryName, usize) = (LibraryName::Title, 785);
+pub const VIEWER_RIGHT_SIDE: (f32, f32) = (416.0, 115.0);
+pub const VIEWER_LEFT_SIDE: (f32, f32) = (151.0, 115.0);
+/// 四个图层都在 (105,160)（`:353/366/379/393`）
+pub const VIEWER_LAYER_POS: (f32, f32) = (105.0, 160.0);
+/// 关闭 `Prguse[361..363]` @(230,8)（`:335-348`）
+pub const VIEWER_CLOSE_POS: (f32, f32) = (230.0, 8.0);
+/// 左转 `Prguse2[240..242]` @(81,282)、右转 `Prguse2[243..245]` @(160,282)（`:404-438`）
+pub const VIEWER_PREV_POS: (f32, f32) = (81.0, 282.0);
+pub const VIEWER_NEXT_POS: (f32, f32) = (160.0, 282.0);
+/// `AnimationDelay = 150`（`:355/368/381/395`）
+pub const VIEWER_ANIM_MS: f32 = 150.0;
+/// `Direction` 初值 6、取值 1..8（`:318/416-417/434-435`）
+pub const VIEWER_DIRECTION0: u8 = 6;
+
+/// 预览面板放哪一侧：C# `Location = this.Location.X < 350 ? (416,115) : (151,115)`（`:129`）
+pub fn viewer_side(cell_x: f32) -> (f32, f32) {
+    if cell_x < 350.0 {
+        VIEWER_RIGHT_SIDE
+    } else {
+        VIEWER_LEFT_SIDE
+    }
+}
+
+/// 转身：`Direction` 在 1..8 环绕（`:414-438`）
+pub fn viewer_turn(direction: u8, right: bool) -> u8 {
+    let d = direction.clamp(1, 8);
+    if right {
+        if d >= 8 {
+            1
+        } else {
+            d + 1
+        }
+    } else if d <= 1 {
+        8
+    } else {
+        d - 1
+    }
+}
+
+/// 哪些类型可试穿（C# `MirGameShopCell.cs:278`：Mount / Weapon / Armour / Transform）
+pub fn viewer_previewable(item_type: u8) -> bool {
+    matches!(
+        item_type,
+        ITEM_TYPE_WEAPON | ITEM_TYPE_ARMOUR | ITEM_TYPE_MOUNT | ITEM_TYPE_TRANSFORM
+    )
+}
+
+/// 可试穿时购买钮右移让位（C# `:281` `BuyItem.Location = new Point(75, 122)`；常态 `(42,122)`）
+pub fn viewer_buy_x(previewable: bool) -> f32 {
+    if previewable {
+        75.0
+    } else {
+        42.0
+    }
+}
+
+/// 身体层（`PreviewImage`）帧号：
+/// 武器/护甲/变形 = 男 `32 + 6*(Dir-1)` / 女 `840 + 6*(Dir-1)`（`:492/567/583`）；
+/// 坐骑 = 男 `448 + 8*(Dir-1)` / 女 `1256 + 8*(Dir-1)`（`:466/468`）。
+pub fn viewer_body_index(female: bool, direction: u8, mounted: bool) -> usize {
+    let d = (direction.clamp(1, 8) - 1) as usize;
+    match (mounted, female) {
+        (true, false) => 448 + 8 * d,
+        (true, true) => 1256 + 8 * d,
+        (false, false) => 32 + 6 * d,
+        (false, true) => 840 + 6 * d,
+    }
+}
+
+/// 武器层帧号：`32 + 6*(Dir-1)`（`:510/550`）
+pub fn viewer_weapon_index(direction: u8) -> usize {
+    32 + 6 * (direction.clamp(1, 8) - 1) as usize
+}
+
+/// 坐骑层帧号：`32 + 8*(Dir-1)`（`:474`）
+pub fn viewer_mount_index(direction: u8) -> usize {
+    32 + 8 * (direction.clamp(1, 8) - 1) as usize
+}
+
+/// 武器层用哪个库 + 索引（C# `DrawWeapon`，`:505-547`）：
+/// - `shape 100..199` → `AWeapon/{shape-100} R` + `AWeapon/{shape-100} L`（左右两层）
+/// - `shape >= 200`   → `ARWeapon/{shape-200}`（单层）
+/// - `shape < 100`    → `CWeapon/{shape}`（单层）
+pub fn viewer_weapon_libs(shape: i16) -> (ArrayLibType, usize, Option<(ArrayLibType, usize)>) {
+    if (100..=199).contains(&shape) {
+        let i = (shape - 100) as usize;
+        (
+            ArrayLibType::AWeaponsR,
+            i,
+            Some((ArrayLibType::AWeaponsL, i)),
+        )
+    } else if shape >= 200 {
+        (ArrayLibType::ARWeapons, (shape - 200) as usize, None)
+    } else {
+        (ArrayLibType::CWeapons, shape.max(0) as usize, None)
+    }
+}
+
+/// 图层前后顺序（数值大者在前）——照抄 C# `BringToFront()` 调用序（**最后调用的在最前**，
+/// `MirGameShopCell.cs:499-545`）：返回 `(weapon_z, weapon2_z, body_z)`；坐骑层固定 0（最底）。
+pub fn viewer_layer_z(direction: u8, shape: i16, has_weapon2: bool) -> (i32, i32, i32) {
+    let d = direction.clamp(1, 8);
+    let weapon_front = (2..=4).contains(&d) || (shape >= 200 && (6..=8).contains(&d));
+    if !has_weapon2 {
+        return if weapon_front { (4, 0, 3) } else { (3, 0, 4) };
+    }
+    // 刺客双武器层（`:512-528`）
+    if (2..=3).contains(&d) {
+        (4, 2, 3) // weapon → body → weapon2（调用序），故 weapon 最前
+    } else if (7..=8).contains(&d) {
+        (2, 4, 3) // weapon → body → weapon2 调用序（`:524-526`）⇒ weapon2 > body > weapon
+    } else {
+        (3, 2, 4) // body 最前
+    }
+}
+
+/// C# `ItemType` 数值（`Shared/Enums.cs` / `SharedRust::enums::ItemType`）
+pub const ITEM_TYPE_WEAPON: u8 = 4;
+pub const ITEM_TYPE_ARMOUR: u8 = 5;
+pub const ITEM_TYPE_MOUNT: u8 = 22;
+pub const ITEM_TYPE_TRANSFORM: u8 = 40;
+
+/// 装备槽位：护甲（C# `EquipmentSlot.Armour`；本端 `Loadout.slots` 同序：武器 0、护甲 1、…、坐骑 10）
+const EQUIP_SLOT_ARMOUR: usize = 1;
+/// `RequiredGender::FEMALE` 的 bits（护甲试穿按**物品**的必需性别选帧，`MirGameShopCell.cs:566`）
+const GENDER_FEMALE: u8 = 0x02;
 
 /// 付款方式复选框：金币（C# `PaymentTypeGold`，`Prguse[2086/2087]` @(250,449)）
 #[derive(Component)]
@@ -437,6 +631,336 @@ fn lib_img_size(images: &Assets<Image>, h: &Handle<Image>) -> (f32, f32) {
 }
 
 /// 第 i 格当前展示的商品（C# `UpdateShop`：`filteredShop[i + Page*8]`；空格 None）
+/// 试穿预览帧缓存：`(库, 槽位, 帧号) → 句柄/艺术偏移/尺寸`。
+///
+/// C# 每帧直接从 `.Lib` 取图；Bevy 侧若每帧 `images.add` 会无界增长，故按三元组缓存
+/// （图层 4 个 × 帧 6/8 ⇒ 上界很小）。
+#[derive(Resource, Default)]
+pub struct ShopViewerFrameCache(
+    pub HashMap<(ArrayLibType, usize, usize), (Handle<Image>, (i16, i16), (f32, f32))>,
+);
+
+/// 取某个数组库的某一帧（带艺术偏移与尺寸；`UseOffSet` 规则与宠物/坐骑立绘同源）
+fn viewer_frame(
+    libs: &mut GameLibraries,
+    images: &mut Assets<Image>,
+    cache: &mut ShopViewerFrameCache,
+    lib: ArrayLibType,
+    slot: usize,
+    frame: usize,
+) -> Option<(Handle<Image>, (i16, i16), (f32, f32))> {
+    if let Some(v) = cache.0.get(&(lib, slot, frame)) {
+        return Some(v.clone());
+    }
+    let info = libs.0.get_array_image(lib, slot, frame)?;
+    let rgba = info.rgba.clone()?;
+    let (w, h) = (info.width.max(0) as u32, info.height.max(0) as u32);
+    let handle = images.add(crate::map_renderer::make_image(rgba, w, h));
+    let v = (handle, (info.offset_x, info.offset_y), (w as f32, h as f32));
+    cache.0.insert((lib, slot, frame), v.clone());
+    Some(v)
+}
+
+/// 某个图层这一帧要画什么：`(库, 槽位, 帧基址 + 动画帧, ZIndex)`
+type ViewerLayerSpec = Option<(ArrayLibType, usize, usize, i32)>;
+
+/// 试穿预览（C# `GameShopViewer`：`UpdateViewer` / `DrawWeapon` / `DrawArmour` / `DrawMount` /
+/// `DrawTransform`，`Client/MirControls/MirGameShopCell.cs:442-595`）。
+///
+/// 身体层用**玩家自己**的护甲与性别（`GameScene.User.Equipment[Armour]` / `User.Gender`），
+/// 护甲试穿则按**物品的** `RequiredGender` 选帧（`:566`）；武器层按 `shape` 选职业武器库
+/// （`:505-547`）；坐骑层用 `Mounts[shape]`（`:473`）。图层前后照 `BringToFront()` 调用序。
+#[allow(clippy::too_many_arguments)]
+fn shop_viewer_system(
+    mut shop: ResMut<GameShopState>,
+    mut libs: ResMut<GameLibraries>,
+    mut images: ResMut<Assets<Image>>,
+    mut cache: ResMut<ShopViewerFrameCache>,
+    time: Res<Time>,
+    loadout_q: Query<&crate::game::player_state::Loadout, With<crate::actor::LocalPlayer>>,
+    appearance_q: Query<&crate::actor::ActorAppearance, With<crate::actor::LocalPlayer>>,
+    mut panel: Query<
+        (&mut Node, &mut Visibility, &GameShopViewerPanel),
+        (
+            Without<GameShopViewerLayer>,
+            Without<GameShopViewerClose>,
+            Without<GameShopViewerTurn>,
+            Without<GameShopCellPreview>,
+            Without<GameShopCellBuy>,
+        ),
+    >,
+    mut layers: Query<
+        (
+            &GameShopViewerLayer,
+            &mut ImageNode,
+            &mut Node,
+            &mut Visibility,
+            &mut ZIndex,
+        ),
+        (
+            Without<GameShopViewerPanel>,
+            Without<GameShopViewerClose>,
+            Without<GameShopViewerTurn>,
+            Without<GameShopCellPreview>,
+            Without<GameShopCellBuy>,
+        ),
+    >,
+    // 格内试穿钮：显隐 + 点击（C# `PreviewItem.Visible` / `.Click`，`:111-133/278-282`）
+    mut previews: Query<
+        (Entity, &Interaction, &GameShopCellPreview, &mut Visibility),
+        (
+            Without<GameShopViewerPanel>,
+            Without<GameShopViewerLayer>,
+            Without<GameShopViewerClose>,
+            Without<GameShopViewerTurn>,
+            Without<GameShopCellBuy>,
+        ),
+    >,
+    // 格内购买钮：可试穿时右移到 x=75（C# `BuyItem.Location`，`:281`）
+    mut buy_nodes: Query<
+        (&GameShopCellBuy, &mut Node),
+        (
+            Without<GameShopViewerPanel>,
+            Without<GameShopViewerLayer>,
+            Without<GameShopCellPreview>,
+            Without<GameShopViewerClose>,
+            Without<GameShopViewerTurn>,
+        ),
+    >,
+    close: Query<(Entity, &Interaction), (With<GameShopViewerClose>, Without<GameShopViewerTurn>)>,
+    turn: Query<(Entity, &Interaction, &GameShopViewerTurn), Without<GameShopViewerClose>>,
+    mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
+) {
+    fn edge(
+        e: Entity,
+        inter: &Interaction,
+        prev: &mut std::collections::HashMap<Entity, Interaction>,
+    ) -> bool {
+        let was = prev.insert(e, *inter);
+        *inter == Interaction::Pressed && was != Some(Interaction::Pressed)
+    }
+    // 关闭（C# `CloseButton.Click → Visible = false`，`:345-348`）
+    for (e, inter) in &close {
+        if edge(e, inter, &mut prev_inter) {
+            shop.viewer = None;
+        }
+    }
+
+    // 格内试穿钮：显隐 + 购买钮让位 + 点击开预览（C# `MirGameShopCell.UpdateText/Click`，`:111-133/278-282`）
+    {
+        let now = now_unix();
+        let filtered = filter_shop_items(
+            &shop.items,
+            &shop.search,
+            &shop.class_filter,
+            &shop.category,
+            &shop.section_filter,
+            now,
+        );
+        let previewable: Vec<bool> = (0..8)
+            .map(|i| {
+                cell_item(&shop, &filtered, i)
+                    .and_then(|it| shop.item_infos.get(&it.item_index))
+                    .map(|info| viewer_previewable(info.item_type))
+                    .unwrap_or(false)
+            })
+            .collect();
+        let mut open_request: Option<(i32, f32)> = None;
+        for (e, inter, p, mut vis) in &mut previews {
+            let show = *previewable.get(p.0).unwrap_or(&false);
+            let want = if show {
+                Visibility::Visible
+            } else {
+                Visibility::Hidden
+            };
+            if *vis != want {
+                *vis = want;
+            }
+            if show && edge(e, inter, &mut prev_inter) {
+                if let Some(it) = cell_item(&shop, &filtered, p.0) {
+                    open_request = Some((it.item_index, cell_pos(p.0).0));
+                }
+            }
+        }
+        for (b, mut node) in &mut buy_nodes {
+            let x = viewer_buy_x(*previewable.get(b.0).unwrap_or(&false));
+            if node.left != Val::Px(x) {
+                node.left = Val::Px(x);
+            }
+        }
+        if let Some((item_index, cell_x)) = open_request {
+            shop.viewer = Some(ShopViewerState {
+                item_index,
+                // C# `PreviewItem.Click` 每次新建 `GameShopViewer` ⇒ `Direction` 回到初值 6（`:318`）
+                direction: VIEWER_DIRECTION0,
+                pos: viewer_side(cell_x),
+            });
+            tracing::info!(
+                "🛒 试穿预览: item={} pos={:?}",
+                item_index,
+                viewer_side(cell_x)
+            );
+        }
+    }
+    // 转身（C# `Direction±1` 且 1..8 环绕，`:414-438`）
+    for (e, inter, t) in &turn {
+        if edge(e, inter, &mut prev_inter) {
+            if let Some(v) = shop.viewer.as_mut() {
+                v.direction = viewer_turn(v.direction, t.right);
+            }
+        }
+    }
+
+    let Some(viewer) = shop.viewer else {
+        for (_, mut vis, _) in &mut panel {
+            if *vis != Visibility::Hidden {
+                *vis = Visibility::Hidden;
+            }
+        }
+        return;
+    };
+    // 面板位置/显隐（C# `:129` 决定左/右半）
+    for (mut node, mut vis, _) in &mut panel {
+        if node.left != Val::Px(viewer.pos.0) {
+            node.left = Val::Px(viewer.pos.0);
+        }
+        if node.top != Val::Px(viewer.pos.1) {
+            node.top = Val::Px(viewer.pos.1);
+        }
+        if *vis != Visibility::Visible {
+            *vis = Visibility::Visible;
+        }
+    }
+
+    let info = shop
+        .item_infos
+        .get(&viewer.item_index)
+        .copied()
+        .unwrap_or_default();
+    let dir = viewer.direction.clamp(1, 8);
+    let female_player = appearance_q
+        .single()
+        .map(|a| a.gender == mir2_shared::enums::MirGender::Female)
+        .unwrap_or(false);
+    // 玩家自己穿的护甲 shape（身体层用它；C# `:461/487`）
+    let equipped_armour = loadout_q
+        .single()
+        .ok()
+        .and_then(|l| l.slots.get(EQUIP_SLOT_ARMOUR))
+        .and_then(|s| s.as_ref())
+        .and_then(|it| shop.item_infos.get(&(it.item_index)).copied())
+        .map(|i| i.shape.max(0) as usize)
+        .unwrap_or(0);
+
+    let mounted = info.item_type == ITEM_TYPE_MOUNT;
+    let frames = if mounted { 8usize } else { 6 };
+    let anim = ((time.elapsed_secs() * 1000.0 / VIEWER_ANIM_MS).max(0.0) as usize) % frames;
+
+    // 各层这一帧要画的东西
+    let (body_shape_lib, body_base): (ArrayLibType, usize) = match info.item_type {
+        ITEM_TYPE_ARMOUR => (
+            ArrayLibType::CArmours,
+            // 护甲预览按**物品的** RequiredGender 选帧（`:566-569`）
+            viewer_body_index(info.required_gender == GENDER_FEMALE, dir, false),
+        ),
+        ITEM_TYPE_TRANSFORM => (
+            ArrayLibType::Transform,
+            viewer_body_index(false, dir, false),
+        ),
+        _ => (
+            ArrayLibType::CArmours,
+            viewer_body_index(female_player, dir, mounted),
+        ),
+    };
+    let body_slot = if info.item_type == ITEM_TYPE_ARMOUR {
+        info.shape.max(0) as usize
+    } else {
+        equipped_armour
+    };
+    let body: ViewerLayerSpec = Some((
+        body_shape_lib,
+        body_slot,
+        body_base + anim,
+        viewer_layer_z(dir, info.shape, false).2 + 41,
+    ));
+    let (weapon_lib, weapon_slot, weapon2) = viewer_weapon_libs(info.shape);
+    let (wz, w2z, _) = viewer_layer_z(dir, info.shape, weapon2.is_some());
+    let weapon: ViewerLayerSpec = if info.item_type == ITEM_TYPE_WEAPON {
+        Some((
+            weapon_lib,
+            weapon_slot,
+            viewer_weapon_index(dir) + anim,
+            wz + 41,
+        ))
+    } else {
+        None
+    };
+    let weapon2: ViewerLayerSpec = match (info.item_type, weapon2) {
+        (ITEM_TYPE_WEAPON, Some((lib, slot))) => {
+            Some((lib, slot, viewer_weapon_index(dir) + anim, w2z + 41))
+        }
+        _ => None,
+    };
+    let mount: ViewerLayerSpec = if mounted {
+        Some((
+            ArrayLibType::Mounts,
+            info.shape.max(0) as usize,
+            viewer_mount_index(dir) + anim,
+            // 坐骑层在身体之下（C# 只设 Visible，不 BringToFront）
+            41,
+        ))
+    } else {
+        None
+    };
+
+    for (layer, mut img, mut node, mut vis, mut z) in &mut layers {
+        let spec = match layer {
+            GameShopViewerLayer::Body => body,
+            GameShopViewerLayer::Weapon => weapon,
+            GameShopViewerLayer::Weapon2 => weapon2,
+            GameShopViewerLayer::Mount => mount,
+        };
+        let Some((lib, slot, frame, zval)) = spec else {
+            if *vis != Visibility::Hidden {
+                *vis = Visibility::Hidden;
+            }
+            continue;
+        };
+        let Some((h, off, (w, hh))) =
+            viewer_frame(&mut libs, &mut images, &mut cache, lib, slot, frame)
+        else {
+            if *vis != Visibility::Hidden {
+                *vis = Visibility::Hidden;
+            }
+            continue;
+        };
+        if img.image != h {
+            img.image = h;
+        }
+        // `UseOffSet`：绘制点 = 图层 Location + 该帧艺术偏移（`MirImageControl.cs:7`）
+        let dx = VIEWER_LAYER_POS.0 + off.0 as f32;
+        let dy = VIEWER_LAYER_POS.1 + off.1 as f32;
+        if node.left != Val::Px(dx) {
+            node.left = Val::Px(dx);
+        }
+        if node.top != Val::Px(dy) {
+            node.top = Val::Px(dy);
+        }
+        if node.width != Val::Px(w) {
+            node.width = Val::Px(w);
+        }
+        if node.height != Val::Px(hh) {
+            node.height = Val::Px(hh);
+        }
+        if z.0 != zval {
+            z.0 = zval;
+        }
+        if *vis != Visibility::Visible {
+            *vis = Visibility::Visible;
+        }
+    }
+}
+
 /// 格子图标索引（纯函数，门禁可测）：C# 用 `Libraries.Items[Item.Info.Image]`；
 /// `image <= 0` 视为无图（空槽/未下发图号）。
 pub(crate) fn shop_cell_icon_index(image: i32) -> Option<usize> {
@@ -493,6 +1017,7 @@ impl Plugin for GameShopPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<GameShopState>();
         app.init_resource::<GameShopPayFrames>();
+        app.init_resource::<ShopViewerFrameCache>();
         app.add_systems(Update, shop_server_events.run_if(in_state(AppState::Game)));
         app.add_systems(
             Update,
@@ -509,6 +1034,8 @@ impl Plugin for GameShopPlugin {
             Update,
             shop_filter_button_visuals_system.run_if(in_state(AppState::Game)),
         );
+        // 试穿预览（C# `GameShopViewer`）
+        app.add_systems(Update, shop_viewer_system.run_if(in_state(AppState::Game)));
     }
 }
 
@@ -810,6 +1337,17 @@ fn spawn_game_shop(
                     spawn_icon_button(cp, n, h, pr, 42.0, 122.0, 42.0, 22.0, 2)
                         .insert(GameShopCellBuy(i));
                 }
+                // 试穿钮（C# `PreviewItem` `Title[781..783]` @(8,122)，仅 Mount/Weapon/Armour/Transform 可见；
+                // 此时 BuyItem 右移到 x=75，`:111-133/278-282`）
+                if let (Some(n), Some(h), Some(pr)) = (
+                    load_lib_image(&mut libs, &mut images, LibraryName::Title, 781),
+                    load_lib_image(&mut libs, &mut images, LibraryName::Title, 782),
+                    load_lib_image(&mut libs, &mut images, LibraryName::Title, 783),
+                ) {
+                    let mut cmds = spawn_icon_button(cp, n, h, pr, 8.0, 122.0, 42.0, 22.0, 2);
+                    cmds.insert(GameShopCellPreview(i));
+                    cmds.insert(Visibility::Hidden);
+                }
             });
         }
         // 页码 + 翻页（C# `PageNumberLabel` 83x17 @(597,446)、
@@ -906,6 +1444,94 @@ fn spawn_game_shop(
                 e.insert(GameShopCreditLabel);
             }
         }
+        // ===== 试穿预览面板（C# `GameShopViewer`，`MirGameShopCell.cs:312-440`）=====
+        // 作为商城对话框的子控件（C# `Parent = GameShopDialog`），默认隐藏；
+        // 四个图层都在 (105,160)、`UseOffSet=true`、`AnimationDelay=150`。
+        if let Some(bg) = load_lib_image(&mut libs, &mut images, VIEWER_PANEL.0, VIEWER_PANEL.1) {
+            let (vw, vh) = lib_img_size(&images, &bg);
+            let mut viewer = spawn_container(p, VIEWER_LEFT_SIDE.0, VIEWER_LEFT_SIDE.1, vw, vh, 40);
+            viewer.insert(GameShopViewerPanel);
+            viewer.insert(Visibility::Hidden);
+            viewer.with_children(|vp| {
+                vp.spawn((ImageNode::new(bg.clone()), ZIndex(40)));
+                // 四个图层（顺序无关，前后由 ZIndex 每帧按方向重排）
+                for layer in [
+                    GameShopViewerLayer::Mount,
+                    GameShopViewerLayer::Weapon2,
+                    GameShopViewerLayer::Weapon,
+                    GameShopViewerLayer::Body,
+                ] {
+                    vp.spawn((
+                        Node {
+                            position_type: PositionType::Absolute,
+                            left: Val::Px(VIEWER_LAYER_POS.0),
+                            top: Val::Px(VIEWER_LAYER_POS.1),
+                            ..default()
+                        },
+                        ImageNode::new(bg.clone()),
+                        layer,
+                        Visibility::Hidden,
+                        ZIndex(41),
+                    ));
+                }
+                // 关闭（`Prguse[361..363]` @(230,8)）
+                if let (Some(n), Some(h), Some(pr)) = (
+                    load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 361),
+                    load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 362),
+                    load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 363),
+                ) {
+                    spawn_icon_button(
+                        vp,
+                        n,
+                        h,
+                        pr,
+                        VIEWER_CLOSE_POS.0,
+                        VIEWER_CLOSE_POS.1,
+                        24.0,
+                        21.0,
+                        45,
+                    )
+                    .insert(GameShopViewerClose);
+                }
+                // 左/右转身（`Prguse2[240..242]` @(81,282) / `[243..245]` @(160,282)）
+                if let (Some(n), Some(h), Some(pr)) = (
+                    load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 240),
+                    load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 241),
+                    load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 242),
+                ) {
+                    spawn_icon_button(
+                        vp,
+                        n,
+                        h,
+                        pr,
+                        VIEWER_PREV_POS.0,
+                        VIEWER_PREV_POS.1,
+                        16.0,
+                        14.0,
+                        45,
+                    )
+                    .insert(GameShopViewerTurn { right: false });
+                }
+                if let (Some(n), Some(h), Some(pr)) = (
+                    load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 243),
+                    load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 244),
+                    load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 245),
+                ) {
+                    spawn_icon_button(
+                        vp,
+                        n,
+                        h,
+                        pr,
+                        VIEWER_NEXT_POS.0,
+                        VIEWER_NEXT_POS.1,
+                        16.0,
+                        14.0,
+                        45,
+                    )
+                    .insert(GameShopViewerTurn { right: true });
+                }
+            });
+        }
     });
     commands.entity(panel).insert(UiScrollList {
         rect_rel: (11.0, 102.0, 125.0, 336.0),
@@ -961,6 +1587,8 @@ struct ShopButtons<'w, 's> {
     page_prev: Query<'w, 's, (Entity, &'static Interaction), With<GameShopPagePrev>>,
     page_next: Query<'w, 's, (Entity, &'static Interaction), With<GameShopPageNext>>,
     /// 三段筛选按钮（职业 / 区段）
+    /// （格内试穿钮的显隐/点击在 `shop_viewer_system` 里处理：`ui_set.p0()` 也写
+    /// `Visibility`，放这里会 B0001）
     filters: Query<'w, 's, (Entity, &'static Interaction, &'static ShopFilterBtn)>,
 }
 
@@ -1613,11 +2241,26 @@ fn shop_server_events(
                     shop.item_names.insert(*idx, name.clone());
                 }
             }
-            ServerEvent::ItemInfoReceived { index, name } => {
+            ServerEvent::ItemInfoReceived {
+                index,
+                name,
+                item_type,
+                shape,
+                required_gender,
+            } => {
                 // P3-3：按需请求的回应——写进表，下一帧格子就会显示真名
                 if remember_item_name(&mut shop.item_names, *index, name) {
                     shop.requested_item_info.remove(index);
                 }
+                // 试穿预览要用的 ItemInfo 三件套（类型 / shape / 需性别）
+                shop.item_infos.insert(
+                    *index,
+                    ShopItemInfo {
+                        item_type: *item_type,
+                        shape: *shape,
+                        required_gender: *required_gender,
+                    },
+                );
             }
             _ => {}
         }
@@ -2150,5 +2793,181 @@ mod tests {
             resolve_shop_name("", &names, 1271),
             ("#1271".to_string(), true)
         );
+    }
+
+    // -----------------------------------------------------------------------
+    // 商城试穿预览（C# `GameShopViewer`，`Client/MirControls/MirGameShopCell.cs:312-595`）
+    // 四条门禁：帧号 / 武器库 / 图层前后 / 类型门控与坐标。
+    // 阳性对照做法见各条注释末尾（改回旧值或对调分支即应立红）。
+    // -----------------------------------------------------------------------
+
+    /// 帧号必须逐条等于 C#：身体层武器/护甲/变形 男 `32+6*(Dir-1)`／女 `840+6*(Dir-1)`
+    /// （`:492/567/583`），坐骑 男 `448+8*(Dir-1)`／女 `1256+8*(Dir-1)`（`:466/468`）；
+    /// 武器层与坐骑层 `32+6*(Dir-1)`／`32+8*(Dir-1)`（`:510/474`）；`Direction` 初值 6（`:318`）。
+    /// 阳性对照：把 `6` 改成 `8`（或把男女基址对调）后本测试即红。
+    #[test]
+    fn viewer_frame_indices_match_csharp() {
+        for d in 1..=8u8 {
+            let i = (d - 1) as usize;
+            assert_eq!(
+                viewer_body_index(false, d, false),
+                32 + 6 * i,
+                "male body dir={d}"
+            );
+            assert_eq!(
+                viewer_body_index(true, d, false),
+                840 + 6 * i,
+                "female body dir={d}"
+            );
+            assert_eq!(
+                viewer_body_index(false, d, true),
+                448 + 8 * i,
+                "male mount-body dir={d}"
+            );
+            assert_eq!(
+                viewer_body_index(true, d, true),
+                1256 + 8 * i,
+                "female mount-body dir={d}"
+            );
+            assert_eq!(viewer_weapon_index(d), 32 + 6 * i, "weapon layer dir={d}");
+            assert_eq!(viewer_mount_index(d), 32 + 8 * i, "mount layer dir={d}");
+        }
+        // 越界方向按 1..8 夹取（C# 的 Direction 由按钮维护在 1..8 内）
+        assert_eq!(viewer_body_index(false, 0, false), 32);
+        assert_eq!(viewer_body_index(false, 9, false), 32 + 6 * 7);
+        assert_eq!(VIEWER_DIRECTION0, 6);
+    }
+
+    /// 武器层取哪个库 + 索引，照抄 `DrawWeapon`（`:505-547`）：
+    /// `100..=199` → `AWeapon/{shape-100} R`+`L` 双层；`>=200` → `ARWeapon/{shape-200}`；
+    /// `<100` → `CWeapon/{shape}`。
+    /// 阳性对照：把 `>=200` 分支删掉（落进 CWeapons）或把区间边界写成 `100..199` 即红。
+    #[test]
+    fn viewer_weapon_libs_match_csharp() {
+        use ArrayLibType::*;
+        assert_eq!(viewer_weapon_libs(0), (CWeapons, 0, None));
+        assert_eq!(viewer_weapon_libs(19), (CWeapons, 19, None));
+        assert_eq!(viewer_weapon_libs(99), (CWeapons, 99, None));
+        assert_eq!(
+            viewer_weapon_libs(100),
+            (AWeaponsR, 0, Some((AWeaponsL, 0)))
+        );
+        assert_eq!(
+            viewer_weapon_libs(150),
+            (AWeaponsR, 50, Some((AWeaponsL, 50)))
+        );
+        assert_eq!(
+            viewer_weapon_libs(199),
+            (AWeaponsR, 99, Some((AWeaponsL, 99)))
+        );
+        assert_eq!(viewer_weapon_libs(200), (ARWeapons, 0, None));
+        assert_eq!(viewer_weapon_libs(250), (ARWeapons, 50, None));
+    }
+
+    /// 复刻 C# `GameShopViewer` 的 `BringToFront()` 调用序（`DrawWeapon`，`:499-545`）。
+    /// 子控件创建序：CloseButton → WeaponImage → WeaponImage2 → MountImage → PreviewImage
+    /// （`:333-395`），Crystal 里**后创建者在上**，故初始层序（前→后）= body > weapon2 > weapon1。
+    /// 返回**可见层**的前→后顺序（非刺客 shape 只有 body 与 weapon1）。
+    fn csharp_weapon_layer_order(direction: u8, shape: i16) -> Vec<&'static str> {
+        fn front(stack: &mut Vec<&'static str>, what: &'static str) {
+            stack.retain(|x| *x != what);
+            stack.insert(0, what);
+        }
+        let d = direction.clamp(1, 8);
+        let mut stack: Vec<&'static str> = vec!["body", "weapon2", "weapon1"];
+
+        // `MirGameShopCell.cs:506-509`
+        if d > 1 && d < 5 {
+            front(&mut stack, "weapon1");
+        } else {
+            front(&mut stack, "body");
+        }
+        // `:512-528`（刺客双武器层）
+        if (100..=199).contains(&shape) {
+            if (2..=3).contains(&d) {
+                front(&mut stack, "weapon2");
+                front(&mut stack, "body");
+                front(&mut stack, "weapon1");
+            } else if d == 7 || d == 8 {
+                front(&mut stack, "weapon1");
+                front(&mut stack, "body");
+                front(&mut stack, "weapon2");
+            } else {
+                front(&mut stack, "weapon1");
+                front(&mut stack, "body");
+            }
+        }
+        // `:537-544`（弓箭手武器在 6..8 方向压到最前）
+        if shape >= 200 && (6..=8).contains(&d) {
+            front(&mut stack, "body");
+            front(&mut stack, "weapon1");
+        }
+        stack.retain(|x| *x != "weapon2" || (100..=199).contains(&shape));
+        stack
+    }
+
+    /// 图层前后必须与 C# 的 `BringToFront()` 调用序一致（数值大者在前）。
+    /// 阳性对照：把双武器层 `7..=8` 分支改回 `(3,4,2)`（即只按调用先后排、漏掉 body 压中间）即红。
+    #[test]
+    fn viewer_layer_z_matches_csharp_bring_to_front_order() {
+        for d in 1..=8u8 {
+            for shape in [0i16, 49, 99, 100, 150, 199, 200, 250] {
+                let expected = csharp_weapon_layer_order(d, shape);
+                let (z_weapon1, z_weapon2, z_body) =
+                    viewer_layer_z(d, shape, (100..=199).contains(&shape));
+                let z_of = |name: &str| match name {
+                    "weapon1" => z_weapon1,
+                    "weapon2" => z_weapon2,
+                    _ => z_body,
+                };
+                for i in 0..expected.len() {
+                    for j in (i + 1)..expected.len() {
+                        assert!(
+                            z_of(expected[i]) > z_of(expected[j]),
+                            "dir={d} shape={shape}: C# 层序 {expected:?} 要求 {} 在 {} 之前，\
+                             但 z=(w1={z_weapon1}, w2={z_weapon2}, body={z_body})",
+                            expected[i],
+                            expected[j]
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    /// 类型门控与坐标必须等于 C#：可试穿 `Type ∈ {Weapon, Armour, Mount, Transform}`（`:278`），
+    /// 可试穿时购买钮右移到 `(75,122)`、否则 `(42,122)`（`:281`）；面板按格子左右半选边
+    /// `X < 350 ? (416,115) : (151,115)`（`:129`）；转身 1..8 环绕；面板/图层/按钮坐标与
+    /// `AnimationDelay=150`（`:335/353/404/424/355`）。
+    /// 阳性对照：删掉 `Transform` 分支、或把 `viewer_side` 的阈值写成 `<= 350` 即红。
+    #[test]
+    fn viewer_gate_and_layout_match_csharp() {
+        for t in [
+            ITEM_TYPE_WEAPON,
+            ITEM_TYPE_ARMOUR,
+            ITEM_TYPE_MOUNT,
+            ITEM_TYPE_TRANSFORM,
+        ] {
+            assert!(viewer_previewable(t), "type {t} 应可试穿");
+        }
+        for t in [0u8, 1, 2, 3, 6, 7, 20, 21, 23, 39, 41, 255] {
+            assert!(!viewer_previewable(t), "type {t} 不应可试穿");
+        }
+        assert_eq!(viewer_buy_x(true), 75.0);
+        assert_eq!(viewer_buy_x(false), 42.0);
+        assert_eq!(viewer_side(0.0), VIEWER_RIGHT_SIDE);
+        assert_eq!(viewer_side(349.9), VIEWER_RIGHT_SIDE);
+        assert_eq!(viewer_side(350.0), VIEWER_LEFT_SIDE);
+        assert_eq!(viewer_side(1024.0), VIEWER_LEFT_SIDE);
+        assert_eq!(viewer_turn(6, true), 7);
+        assert_eq!(viewer_turn(8, true), 1);
+        assert_eq!(viewer_turn(1, false), 8);
+        assert_eq!(viewer_turn(6, false), 5);
+        assert_eq!(VIEWER_PANEL, (LibraryName::Title, 785));
+        assert_eq!(VIEWER_LAYER_POS, (105.0, 160.0));
+        assert_eq!(VIEWER_CLOSE_POS, (230.0, 8.0));
+        assert_eq!(VIEWER_PREV_POS, (81.0, 282.0));
+        assert_eq!(VIEWER_NEXT_POS, (160.0, 282.0));
+        assert_eq!(VIEWER_ANIM_MS, 150.0);
     }
 }

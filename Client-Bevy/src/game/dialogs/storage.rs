@@ -1329,7 +1329,7 @@ fn storage_server_events(
         }
         // P3-3：按需请求的回包——写进表（原版 `MirScene.cs:233` NewItemInfo → ItemInfoList），
         // 并把仍在占位的仓库格立刻刷成真名。
-        if let ServerEvent::ItemInfoReceived { index, name } = ev {
+        if let ServerEvent::ItemInfoReceived { index, name, .. } = ev {
             if crate::game::item_names::remember_item_name(&mut storage.item_names, *index, name) {
                 storage.requested_item_info.remove(index);
                 for slot in storage.items.iter_mut() {

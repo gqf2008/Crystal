@@ -2728,6 +2728,15 @@ fn apply_control_commands(
                             "class": it.class, "category": it.category,
                             "deal": it.deal, "top_item": it.top_item, "date": it.date,
                             "gold": it.gold_price, "credit": it.credit_price,
+                            // 试穿预览判据（ItemInfo 按需回包缓存）：类型/shape/需性别
+                            "item_type": q.shop.item_infos.get(&it.item_index).map(|i| i.item_type).unwrap_or(0),
+                            "shape": q.shop.item_infos.get(&it.item_index).map(|i| i.shape).unwrap_or(-1),
+                            "previewable": q
+                                .shop
+                                .item_infos
+                                .get(&it.item_index)
+                                .map(|i| crate::game::dialogs::game_shop::viewer_previewable(i.item_type))
+                                .unwrap_or(false),
                         })
                     })
                     .collect();
@@ -2741,6 +2750,12 @@ fn apply_control_commands(
                     "pages": pages,
                     "total_items": q.shop.items.len(),
                     "filtered": filtered.len(),
+                    // 试穿预览状态（None = 未打开）
+                    "viewer": q.shop.viewer.map(|v| json!({
+                        "item_index": v.item_index,
+                        "direction": v.direction,
+                        "pos": [v.pos.0, v.pos.1],
+                    })),
                     "rows": rows,
                 });
                 tracing::info!(
