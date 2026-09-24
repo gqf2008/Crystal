@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <Nullable>disable</Nullable>
+    <AssemblyName>dbtool</AssemblyName>
+    <RootNamespace>dbtool</RootNamespace>
+    <EnableDefaultCompileItems>true</EnableDefaultCompileItems>
+  </PropertyGroup>
+  <!-- No compile-time references needed: the original Server.Library/Shared assemblies are
+       loaded by reflection at runtime from the server directory given on the command line. -->
+</Project>
