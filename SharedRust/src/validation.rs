@@ -37,7 +37,10 @@ mod tests {
         assert!(!character_name_valid(""));
         assert!(!character_name_valid("a"));
         assert!(!character_name_valid("ab"));
-        assert!(!character_name_valid("小明"), "2 字中文名必须判非法（服务端就是这么判的）");
+        assert!(
+            !character_name_valid("小明"),
+            "2 字中文名必须判非法（服务端就是这么判的）"
+        );
     }
 
     #[test]
@@ -46,7 +49,9 @@ mod tests {
         assert!(character_name_valid("小明明"));
         assert!(character_name_valid("abc_def"));
         assert!(character_name_valid(&"x".repeat(MAX_CHARACTER_NAME_CHARS)));
-        assert!(!character_name_valid(&"x".repeat(MAX_CHARACTER_NAME_CHARS + 1)));
+        assert!(!character_name_valid(
+            &"x".repeat(MAX_CHARACTER_NAME_CHARS + 1)
+        ));
     }
 
     #[test]
