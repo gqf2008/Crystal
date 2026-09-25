@@ -741,10 +741,20 @@ pwsh tools/ops/check_process_scope.ps1 -Strict      # allowlist 里的一起报�
 都不会被误判。**自带沙箱正/负对照**（4 个临时脚本：2 个乱杀必须被抓、2 个合规写法不许被误判），
 判据空了直接 exit 2 —— 门禁自己不许假绿。
 
-待迁移清单（本轮只记名、不静默放过）：`fault_injection.ps1`（杀服务端就是故障注入的目的）、
-`l5y_reconnect.ps1`（断线重连要真杀服务端）、`run_real_e2e.ps1`（仓库级 harness 开跑前清场）。
-2026-09-25 已改齐：`capacity_ramp.ps1`（清场 + RSS 取数都改成只认自己的 PID）、`login_latency_probe.ps1`
+2026-09-25 已改齐：`capacity_ramp.ps1`（清场 + RSS 取数都只认自己的 PID）、`login_latency_probe.ps1`
 （原先按 `$ExePath` 过滤后仍按进程名杀，现改为**前置失败**让操作者处置残留，不再静默清理）。
+
+**最后三条也改完了（2026-09-25 晚）——现在这张"待迁移清单"是空的**：
+
+- `fault_injection.ps1`：`Stop-All` 改成"只停**本脚本启动过的 PID** + 按**自己 deploy 目录的 exe 路径**兜底"；
+  故障注入那一步（无优雅关闭地杀服务端）改成 `Stop-Process -Id $srv.proc.Id`（杀自己那个实例）。
+- `l5y_reconnect.ps1`：清场只清**自己的 exe 路径**（服务端）+ 自己那份**唯一命名**的客户端副本（硬链接）；
+  停机那一步改成按 **PID** 杀自己起的 `$srv1`；并新增**前置守卫**：7000 被**别人的**实例占着就直接
+  `exit 2` 并打印占用者（以前是靠"按名杀全场"顺手清掉 —— 那会把共享开发服一起带走）。
+- `run_real_e2e.ps1`：开跑前的"清场"改成只清**自己那份构建的 exe 路径**（`ExecutablePath -eq $ServerExe`）。
+
+门禁随之扩展：**按 `ExecutablePath`/`CommandLine` 收窄**的清场算合规（沙箱负对照加到 5 条），
+`Allowlist` 清空、`-Strict` 也绿。
 
 **批次收尾（2026-09-25 晚，批次 issue #3181）**：另外 20 个实机夹具（`l5a`…`l5s`、`l5g*`）原先在起客户端前
 `Get-CimInstance -Filter "Name='client_bevy.exe'" | Stop-Process`（跨行管道形态，会把**别的 agent 的验收**和

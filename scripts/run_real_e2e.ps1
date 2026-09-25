@@ -249,7 +249,12 @@ if ($wantRefine -and $pyCmd) {
 }
 
 # 1) 启动服务端
-Get-Process -Name mir2_server -ErrorAction SilentlyContinue | Stop-Process -Force
+# 只清**自己这份构建**留下的旧实例（按 exe 路径过滤）。绝不按公共名清场：
+# 本机常态是 7000 上有别人在用的常驻开发服、别的 worktree 也在跑自己的 exe——
+# 按名清场会把它们一起带走（对方随后报 result=4/连不上，是资源互斥假红）。
+Get-CimInstance Win32_Process -Filter "Name='mir2_server.exe'" -ErrorAction SilentlyContinue |
+    Where-Object { $_.ExecutablePath -eq $ServerExe } |
+    ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
 $srvErr = Join-Path $tmp "server.err.log"; $srvOut = Join-Path $tmp "server.log"
 $srv = Start-Process -FilePath $ServerExe -ArgumentList $srvArgs -WorkingDirectory $ServerWorkDir -RedirectStandardError $srvErr -RedirectStandardOutput $srvOut -PassThru -WindowStyle Hidden
 Start-Sleep -Seconds 15

@@ -49,6 +49,9 @@ try {
         Write-Host ("前置失败：找不到客户端产物 {0}（先 cargo build --bin client_bevy）" -f $clientExe)
         exit 2
     }
+    # 唯一进程名（同批次 #3181 的 20 个夹具）：只启动/清理自己这份改名的客户端副本（硬链接，不占额外磁盘）。
+    $clientSrc = $clientExe
+    $clientExe = Join-Path (Split-Path -Parent $clientExe) 'l5y_client.exe'
 
     # 受测服务端工作目录：优先参数，其次仓库 ServerRust，再次 %TEMP%\e2e_workdir（真机 E2E 用的那个库）
     $candidates = @()
@@ -90,8 +93,26 @@ try {
         return $false
     }
 
-    Get-Process -Name mir2_server, client_bevy -ErrorAction SilentlyContinue | Stop-Process -Force
+    # 清场只清**自己的**：本夹具的 exe 路径（服务端）+ 自己那份唯一命名的客户端副本。
+    # 绝不按公共名清场——同机可能有别人的服务端（7000 常驻开发服）与别的 agent 的客户端。
+    Get-CimInstance Win32_Process -Filter "Name='mir2_server.exe'" -ErrorAction SilentlyContinue |
+        Where-Object { $_.ExecutablePath -eq $serverExe } |
+        ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+    Get-CimInstance Win32_Process -Filter "Name='l5y_client.exe'" -ErrorAction SilentlyContinue |
+        ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
     Start-Sleep 2
+    # 7000 被**别人的**实例占着就明确前置失败（以前是靠"按名杀全场"顺手清掉，那会误杀共享开发服）
+    $occupier = Get-NetTCPConnection -LocalPort 7000 -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($occupier) {
+        $occExe = (Get-CimInstance Win32_Process -Filter ("ProcessId=" + $occupier.OwningProcess) -ErrorAction SilentlyContinue).ExecutablePath
+        if ($occExe -and $occExe -ne $serverExe) {
+            Write-Host ("前置失败：7000 已被别的实例占用（pid={0} exe={1}）——本夹具要在 7000 上起自己的服务端；" -f $occupier.OwningProcess, $occExe)
+            Write-Host '          请先停掉它（例如共享开发服），跑完再按原样重启；本夹具不会替你杀别的进程。'
+            exit 2
+        }
+    }
+    try { New-Item -ItemType HardLink -Path $clientExe -Target $clientSrc -Force -ErrorAction Stop | Out-Null }
+    catch { Copy-Item -LiteralPath $clientSrc -Destination $clientExe -Force }
     $srv1 = Start-TestServer 'boot'
     Write-Host ("[A] 服务端已起 pid={0}" -f $srv1.Id)
     for ($i = 0; $i -lt 40; $i++) { Start-Sleep 1; if (Get-NetTCPConnection -LocalPort 7000 -State Listen -EA SilentlyContinue) { break } }
@@ -113,7 +134,8 @@ try {
         exit 2
     }
     Write-Host '[B] 客户端已进图 → 杀掉服务端（模拟重启/闪断）'
-    Get-Process -Name mir2_server -ErrorAction SilentlyContinue | Stop-Process -Force
+    # 故障注入：杀掉**本次自己起的**那个服务端实例（按 PID），不按公共名清场
+    if ($srv1 -and -not $srv1.HasExited) { Stop-Process -Id $srv1.Id -Force -ErrorAction SilentlyContinue }
     Start-Sleep $OutageSec
     $srv2 = Start-TestServer 'restart'
     Write-Host ("[B] 服务端已重启 pid={0}（停机 {1}s）" -f $srv2.Id, $OutageSec)
@@ -133,7 +155,14 @@ try {
         $(if ($recovered) { 'PASS' } else { 'FAIL' }))
     if (-not $ok) { exit 5 }
 } finally {
-    Get-Process -Name client_bevy, mir2_server -ErrorAction SilentlyContinue |
-        Stop-Process -Force -ErrorAction SilentlyContinue
+    # 收尾：只清自己的（唯一命名客户端 + 本次自己的服务端 PID；再按自己的 exe 路径兜底扫一遍）
+    foreach ($p in @($srv1, $srv2)) {
+        if ($p -and -not $p.HasExited) { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue }
+    }
+    Get-CimInstance Win32_Process -Filter "Name='l5y_client.exe'" -ErrorAction SilentlyContinue |
+        ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+    Get-CimInstance Win32_Process -Filter "Name='mir2_server.exe'" -ErrorAction SilentlyContinue |
+        Where-Object { $_.ExecutablePath -eq $serverExe } |
+        ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
     Exit-E2eLock
 }

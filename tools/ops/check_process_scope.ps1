@@ -18,14 +18,12 @@
 #       pwsh tools/ops/check_process_scope.ps1 -SkipSelfTest   # 跳过沙箱正/负对照
 param(
     [string[]]$ScanDir = @(),
-    # 待迁移清单：这几处的"杀"是演练目的本身、仓库级 harness 的清场，或**整批待迁移的验收夹具**
-    # （同一模式，已开批次 issue #3181，逐条记名、不静默放过）。迁移完一条就删一条，`-Strict` 用来
-    # 在全部迁完后把这张表清空。
-    [hashtable]$Allowlist = @{
-        'fault_injection.ps1' = '杀服务端就是本演练的目的（故障注入）；待迁移到按自己 PID'
-        'l5y_reconnect.ps1'   = '断线重连需要真杀服务端；待迁移到按自己 PID'
-        'run_real_e2e.ps1'    = '仓库级 harness 开跑前清场；待迁移到按自己 PID'
-    },
+    # 待迁移清单：**已清空**（2026-09-25）——原先记名的三条（fault_injection / l5y_reconnect /
+    # run_real_e2e）都已改成"只清自己的"：故障注入按自己的 **PID** 杀；l5y 按自己的 PID + 自己的 exe 路径；
+    # run_real_e2e 按**自己那份构建的 exe 路径**过滤。加上批次 #3181 的 20 个夹具迁移到唯一命名副本后，
+    # 全仓扫描下来已经**没有任何"按进程名杀共享资源"**了。
+    # 保留这个参数是为了将来真需要临时豁免时有地方记名（`-Strict` 会连它们一起报红）。
+    [hashtable]$Allowlist = @{},
     [switch]$Strict,
     [switch]$SkipSelfTest
 )
@@ -71,8 +69,12 @@ function Find-ProcessNameKill {
         $violation = $false
         while ($j -lt $code.Count) {
             if ($code[$j] -match 'Stop-Process') {
-                # 带"每次运行唯一"的判别（CommandLine 上的端口/唯一名）→ 只清自己的，不算违规
-                $violation = @($code[$i..$j] | Where-Object { $_ -match 'CommandLine' }).Count -eq 0
+                # 管道里带"只认自己那份"的判别就不算违规：
+                #   · CommandLine —— 按本次运行唯一的端口/唯一名过滤；
+                #   · ExecutablePath / $_ .Path —— 按**自己那份构建的 exe 路径**过滤
+                #     （2026-09-25 收口 fault_injection / l5y_reconnect / run_real_e2e 时用的形态：
+                #      它们要清的是"自己 deploy 目录/自己 build 出来的实例"，不是同机所有同名进程）。
+                $violation = @($code[$i..$j] | Where-Object { $_ -match 'CommandLine|ExecutablePath|\.Path\s' }).Count -eq 0
                 break
             }
             if ($code[$j].TrimEnd() -notmatch '\|$') { break }
@@ -126,6 +128,11 @@ if (-not $SkipSelfTest) {
             "Get-CimInstance Win32_Process -Filter `"Name='client_bevy.exe'`" |`n" +
             "    Where-Object { `$_.CommandLine -match `"--control-port\s+`$Port\b`" } |`n" +
             "    ForEach-Object { Stop-Process -Id `$_.ProcessId -Force }`n", $enc)
+        # 负对照 5：按**自己那份 exe 路径**过滤的清场——允许（只清自己的构建，不碰同机同名进程）
+        [System.IO.File]::WriteAllText((Join-Path $sb 'good_path_scoped.ps1'),
+            "Get-CimInstance Win32_Process -Filter `"Name='mir2_server.exe'`" |`n" +
+            "    Where-Object { `$_.ExecutablePath -eq `$ServerExe } |`n" +
+            "    ForEach-Object { Stop-Process -Id `$_.ProcessId -Force }`n", $enc)
         $bad1 = @(Find-ProcessNameKill -Path (Join-Path $sb 'bad_pipeline.ps1'))
         $bad2 = @(Find-ProcessNameKill -Path (Join-Path $sb 'bad_stopbyname.ps1'))
         $bad3 = @(Find-ProcessNameKill -Path (Join-Path $sb 'bad_crossline.ps1'))
@@ -133,6 +140,7 @@ if (-not $SkipSelfTest) {
         $ok2 = @(Find-ProcessNameKill -Path (Join-Path $sb 'good_unique_name.ps1'))
         $ok3 = @(Find-ProcessNameKill -Path (Join-Path $sb 'good_probe.ps1'))
         $ok4 = @(Find-ProcessNameKill -Path (Join-Path $sb 'good_scoped.ps1'))
+        $ok5 = @(Find-ProcessNameKill -Path (Join-Path $sb 'good_path_scoped.ps1'))
         $problems = @()
         if ($bad1.Count -eq 0) { $problems += '正对照1（Get-Process 管道杀 mir2_server）没被抓到 —— 判据空了' }
         if ($bad2.Count -eq 0) { $problems += '正对照2（Stop-Process -Name client_bevy）没被抓到 —— 判据空了' }
@@ -141,11 +149,12 @@ if (-not $SkipSelfTest) {
         if ($ok2.Count -ne 0) { $problems += '负对照2（按自己唯一命名杀）被误判为违规' }
         if ($ok3.Count -ne 0) { $problems += '负对照3（存在性探测，后面接 exit 9）被误判为违规' }
         if ($ok4.Count -ne 0) { $problems += '负对照4（带 CommandLine 唯一判别的清残留）被误判为违规' }
+        if ($ok5.Count -ne 0) { $problems += '负对照5（按自己 exe 路径过滤的清场）被误判为违规' }
         if ($problems.Count -gt 0) {
             foreach ($p in $problems) { Write-Host ("  [自检红] " + $p) -ForegroundColor Red }
             Fail ("本门禁自身判据不可信（沙箱 $sb）")
         }
-        Write-Host '自检：沙箱正对照 3/3 乱杀被抓（含跨行管道）、负对照 4/4 合规写法未被误判 ✅'
+        Write-Host '自检：沙箱正对照 3/3 乱杀被抓（含跨行管道）、负对照 5/5 合规写法未被误判 ✅'
     } finally {
         Remove-Item -LiteralPath $sb -Recurse -Force -ErrorAction SilentlyContinue
     }

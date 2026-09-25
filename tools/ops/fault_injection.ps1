@@ -24,19 +24,35 @@ $ops = Split-Path -Parent $MyInvocation.MyCommand.Path
 . (Join-Path $ops '_run_bot.ps1')
 $exe = Join-Path $DeployDir 'mir2_server.exe'
 $results = [ordered]@{}
+# 本脚本启动过的服务端（**按 PID 管控**）。2026-09-25：原先 `Stop-All` 按公共名
+# `Get-Process -Name mir2_server | Stop-Process` 清场，会把同机别人的服务端（7000 上的常驻开发服、
+# 别的 agent 的演练）一起带走。现在只停自己启动的实例 +（兜底）从**本 deploy 目录的 exe** 起的残留。
+$script:FaultProcs = @()
 
 function Start-Srv([string]$tag, [int]$port) {
     $env:RUST_LOG = 'crystal_server=info'
     $log = Join-Path $DeployDir "fault.$tag.log"
     $p = Start-Process -FilePath $exe -WorkingDirectory $DeployDir `
         -RedirectStandardOutput $log -RedirectStandardError (Join-Path $DeployDir "fault.$tag.err.log") -PassThru
+    $script:FaultProcs += $p
     for ($i = 0; $i -lt $ReadyTimeoutSec; $i++) {
         Start-Sleep 1
         if ((Get-Content $log -ErrorAction SilentlyContinue) -match 'Gate listening') { return @{ proc = $p; log = $log; ready = $true } }
     }
     return @{ proc = $p; log = $log; ready = $false }
 }
-function Stop-All { Get-Process -Name mir2_server -ErrorAction SilentlyContinue | Stop-Process -Force; Start-Sleep 3 }
+function Stop-All {
+    # 只停自己启动过的（PID），再按 **exe 路径**兜底清理本 deploy 目录的残留；
+    # 绝不按公共名清场（见文件头/上方注释）。
+    foreach ($p in @($script:FaultProcs)) {
+        if ($p -and -not $p.HasExited) { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue }
+    }
+    $script:FaultProcs = @()
+    Get-CimInstance Win32_Process -Filter "Name='mir2_server.exe'" -ErrorAction SilentlyContinue |
+        Where-Object { $_.ExecutablePath -eq $exe } |
+        ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+    Start-Sleep 3
+}
 function Bot([int]$port, [int]$hold, [string[]]$extra = @()) {
     # 2026-09-25：改走带超时的共用 helper（原先 `& python bot.py …` 同步无超时 ⇒ 可能整轮静默挂死）
     $r = Invoke-BotJson -OpsDir $ops -BotArgs (@('--host', '127.0.0.1', '--port', "$port", '--accounts', $Account,
@@ -67,7 +83,8 @@ if ($srv.ready) {
     } -ArgumentList $ops, $Port, $Account, $Password
     Start-Sleep 8                       # 等它进图
     $tKill = Get-Date
-    Get-Process -Name mir2_server -ErrorAction SilentlyContinue | Stop-Process -Force   # 无优雅关闭
+    # 故障注入：**无优雅关闭**地杀掉本次场景自己起的那个实例（按 PID，不按公共名）
+    Stop-Process -Id $srv.proc.Id -Force -ErrorAction SilentlyContinue
     # 会话线程会在写失败/读 EOF 时结束；等它产出结论
     Wait-Job $job -Timeout ($KillDetectSec + 10) | Out-Null
     Remove-Job $job -Force
