@@ -3597,6 +3597,37 @@ impl WorldActor {
                 big,
                 crate::actors::player::live_player_actors()
             );
+            // 「这一轮变化最大的 8 个精确尺寸」：把「每轮 +0.5MB 在 257B–16KB 档」下一步缩成
+            // 「每轮 +N 个 size=X 的对象」，X 往往直接指向结构/缓冲区。
+            // report_changed_sizes 全程不分配（emit 直接打印），所以不会污染下一次读数。
+            let (dpos, dneg) =
+                crate::mem_probe::report_changed_sizes(8, |size, live, count, dbytes, dcount| {
+                    info!(
+                        "MEM_PROBE_DELTA size={} live_bytes={} count={} dbytes={} dcount={}",
+                        size, live, count, dbytes, dcount
+                    );
+                });
+            // 正/负增量之和：一起看就知道本轮增长是**集中**（少数尺寸在攒）还是**弥散**。
+            info!(
+                "MEM_PROBE_NET dpos={} dneg={} dnet={}",
+                dpos,
+                dneg,
+                dpos + dneg
+            );
+            // 累计增长榜（相对第一次 dump 的基线）：每轮 +几 KB 的泄漏在 8 轮后会从噪声里浮出来。
+            let (cpos, cneg) =
+                crate::mem_probe::report_cumulative(10, |size, live, count, dbytes, dcount| {
+                    info!(
+                        "MEM_PROBE_CUM size={} live_bytes={} count={} cum_dbytes={} cum_dcount={}",
+                        size, live, count, dbytes, dcount
+                    );
+                });
+            info!(
+                "MEM_PROBE_CUMNET cum_pos={} cum_neg={} cum_net={}",
+                cpos,
+                cneg,
+                cpos + cneg
+            );
         }
         info!(
             "Map {} spawns cleaned (npcs={} monsters={})",

@@ -228,7 +228,12 @@ function Get-E2eClientScripts {
       临时取数脚本不在此列——那种脚本归「谁写谁拿锁」，见本文件头部的约定。
     #>
     param([string]$RepoRoot = (Resolve-Path "$PSScriptRoot\..\..").Path)
-    $selfNames = @('e2e_lock.ps1', 'e2e_lock_selftest.ps1', 'enroll_e2e_lock.ps1')
+    # 这几份是「工具/判据脚本」：正文里**提到** `client_bevy.exe` / `--e2e-user` 这类字样（判据本身要写它们），
+    # 但并不会去起客户端、也不该拿实机锁。判据目前只看「文件里是否出现这些字样」，所以必须按名字排除——
+    # 2026-09-25 实测：新增的 check_process_scope.ps1（按进程名清共享资源的静态门禁，正文里写了
+    # `Name='client_bevy.exe'`）被误判成实机入口，T9.2/T9.2b/T9.5 立刻变红。把「提到」与「真的起客户端」
+    # 区分开是更彻底的修法（未做），在那之前新加同类工具脚本要一并加进这张表。
+    $selfNames = @('e2e_lock.ps1', 'e2e_lock_selftest.ps1', 'enroll_e2e_lock.ps1', 'check_process_scope.ps1')
     $skipDirs = '\\(\.git|target|node_modules)\\'
     $out = @()
     $files = @(Get-ChildItem -LiteralPath $RepoRoot -Recurse -File -Filter *.ps1 -EA SilentlyContinue |
