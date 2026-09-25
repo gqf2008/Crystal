@@ -463,3 +463,9 @@ Mir2Test.ini
 !tools/ops/restart_e2e_server.ps1
 !tools/acceptance/l5ac_newchar_create.ps1
 !tools/acceptance/l5ad_rightclick_move.ps1
+!tools/acceptance/ui_shot_matrix.py
+!tools/acceptance/contact_sheet.py
+!tools/acceptance/crop_kind.py
+!tools/acceptance/font_audit.py
+!tools/acceptance/rpc.py
+!tools/acceptance/capture.ps1
