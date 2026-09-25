@@ -220,11 +220,24 @@ function Get-E2eClientScripts {
         `--e2e-user`（自动化登录账号）/ `client_bevy.exe` / `--real-net` / `--auto-enter`。
       不只看 `--e2e-user`：`l5r_ranged_projectile`、`l5t_minimize_survives` 这类不传 e2e 账号
       但照样起客户端的脚本，也必须接入锁（#3129 的覆盖口径就是「会起客户端」）。
-      扫描面：**整个仓库**的 *.ps1（排除 .git / target / node_modules 与锁自身的三个脚本）。
+      扫描面：**整个仓库**的 *.ps1 / *.bat / *.cmd（排除 .git / target / node_modules 与锁自身的脚本）。
       不要退回「写死目录清单」——原先只扫 `tools\acceptance` 与 `scripts`，结果
       `tools\ops\package_windows_rehearsal.ps1` 明明起客户端（`client_bevy.exe --e2e-user`）
       却扫不进来；它一旦被改掉那把锁，门禁照样绿（假绿盲区）。整仓扫描让任何新目录里的
       实机入口自动纳入判据，不必再维护目录清单。
+
+      为什么扫描面不只 *.ps1（2026-09-25 补）：实测在同一临时目录放 `launch_client.bat`
+      （内容 `start "" client_bevy.exe --e2e-user bevychar --real-net`），只认 *.ps1 的实现
+      对这一条返回 0 —— 也就是说**用 .bat/.cmd 起客户端可以整体绕开锁与门禁**（假绿通道），
+      而实机资源互斥假红（`login 失败 result=4 密码错误`，服务端实为 Account already online）
+      照旧会发生。扩展名不在覆盖范围内，等于给这套锁留了一个后门。
+
+      接入判据按类型分档（非 PowerShell 启动器没法 dot-source 锁脚本）：
+        - *.ps1：dot-source `e2e_lock.ps1` + `Enter-E2eLock` + 成对 `Exit-E2eLock`（判据同 T9.2/T9.2b）；
+        - 其他（.bat/.cmd）：正文必须点名锁（出现 `e2e_lock`）**或**点名调用某个**已接入的
+          *.ps1 入口**（把拿锁这件事委托给它），否则判不合规。这类文件由
+          `enroll_e2e_lock.ps1` 报告为「需人工接入」——它只是文本启动器，接入器不会（也不该）
+          去改它的正文，更不会假装插入了 Enter/Exit。
       临时取数脚本不在此列——那种脚本归「谁写谁拿锁」，见本文件头部的约定。
     #>
     param([string]$RepoRoot = (Resolve-Path "$PSScriptRoot\..\..").Path)
@@ -236,20 +249,82 @@ function Get-E2eClientScripts {
     $selfNames = @('e2e_lock.ps1', 'e2e_lock_selftest.ps1', 'enroll_e2e_lock.ps1', 'check_process_scope.ps1')
     $skipDirs = '\\(\.git|target|node_modules)\\'
     $out = @()
-    $files = @(Get-ChildItem -LiteralPath $RepoRoot -Recurse -File -Filter *.ps1 -EA SilentlyContinue |
-        Where-Object { $_.FullName -notmatch $skipDirs })
+    # 会起客户端的入口不只 *.ps1：.bat/.cmd 一样能 start 客户端（见上面 docstring 的实测）。
+    $exts = @('.ps1', '.bat', '.cmd')
+    $files = @(Get-ChildItem -LiteralPath $RepoRoot -Recurse -File -EA SilentlyContinue |
+        Where-Object { $exts -contains $_.Extension.ToLowerInvariant() -and $_.FullName -notmatch $skipDirs })
+    $texts = @{}
     foreach ($f in $files) {
         if ($selfNames -contains $f.Name) { continue }
         $text = Get-Content -LiteralPath $f.FullName -Raw -EA SilentlyContinue
-        if ($null -eq $text) { continue }
+        if ($null -ne $text) { $texts[$f.FullName] = $text }
+    }
+    # 判据 A（直连入口）：正文自己就带「起客户端」字样。
+    $direct = @()
+    foreach ($f in $files) {
+        if (-not $texts.ContainsKey($f.FullName)) { continue }
+        $text = $texts[$f.FullName]
         if ($text -notmatch '--e2e-user|client_bevy\.exe|--real-net|--auto-enter') { continue }
-        $out += [pscustomobject]@{
+        $kind = $f.Extension.ToLowerInvariant().TrimStart('.')
+        # *.ps1 是唯一严格口径（dot-source + Enter + Exit）；非 PowerShell 启动器没有 dot-source
+        # 的写法，它那一档在最后统一按「点名锁 / 委托已接入入口」判定。
+        $strict = (($text -match 'e2e_lock\.ps1') -and ($text -match 'Enter-E2eLock') -and
+                   ($text -match 'Exit-E2eLock'))
+        $direct += [pscustomobject]@{
             Name       = $f.Name
             Path       = $f.FullName
             Dir        = $f.DirectoryName
+            Kind       = $kind
+            Direct     = $true
             EnterCount = ([regex]::Matches($text, 'Enter-E2eLock')).Count
             ExitCount  = ([regex]::Matches($text, 'Exit-E2eLock')).Count
+            Locked     = $(if ($kind -eq 'ps1') { $strict } else { $false })
         }
+    }
+    $out += $direct
+    # 判据 B（包装入口）：正文没有客户端字样，但**调用了**上面某个「真起客户端」的脚本
+    # （典型：一个 .bat 只写 `call pwsh -File ...\l5h_buy_item.ps1`）。只认调用形态
+    # （call / & / pwsh / powershell / Start-Process / Invoke- / -File），不认「只是提到」——
+    # flag_coverage_check.ps1 把 run_real_e2e.ps1 写进默认参数值，那是静态门禁、不是入口。
+    $wrappers = @()
+    foreach ($f in $files) {
+        if (-not $texts.ContainsKey($f.FullName)) { continue }
+        if (@($direct | Where-Object { $_.Path -eq $f.FullName }).Count -gt 0) { continue }
+        $text = $texts[$f.FullName]
+        $callsEntry = $false
+        foreach ($d in $direct) {
+            $esc = [regex]::Escape($d.Name)
+            foreach ($ln in ($text -split "`r`n|`n")) {
+                if ($ln -notmatch $esc) { continue }
+                if ($ln -match '(?i)\bcall\b|\bpwsh\b|\bpowershell\b|Start-Process|Invoke-|-File\b|&') {
+                    $callsEntry = $true
+                    break
+                }
+            }
+            if ($callsEntry) { break }
+        }
+        if (-not $callsEntry) { continue }
+        $wrappers += [pscustomobject]@{
+            Name       = $f.Name
+            Path       = $f.FullName
+            Dir        = $f.DirectoryName
+            Kind       = $f.Extension.ToLowerInvariant().TrimStart('.')
+            Direct     = $false
+            EnterCount = 0
+            ExitCount  = 0
+            Locked     = $false
+        }
+    }
+    $out += $wrappers
+    # 统一判定（非 *.ps1 直连入口 + 所有包装入口）：启动器/包装脚本自己不写 Enter/Exit，它的
+    # 「成对释放」由被它调用的 .ps1 负责，所以只判「点名了 e2e_lock，或点名调用某个已接入入口」
+    # 这一个量（缺它即红，且不会因为文件里没有 `Exit-E2eLock` 字样而给出必然假红）。
+    $enrolled = @($direct | Where-Object { $_.Locked } | ForEach-Object { $_.Name })
+    foreach ($e in @($direct + $wrappers)) {
+        if ($e.Direct -and $e.Kind -eq 'ps1') { continue }
+        $text = $texts[$e.Path]
+        $e.Locked = (($text -match 'e2e_lock') -or
+                     (@($enrolled | Where-Object { $text -match [regex]::Escape($_) }).Count -gt 0))
     }
     $out
 }
