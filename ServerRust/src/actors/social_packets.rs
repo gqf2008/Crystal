@@ -395,6 +395,35 @@ pub fn send_mail_received_packet(
     body.push(if mail.locked { 1u8 } else { 0u8 });
     body.extend_from_slice(&(mail.gold as u32).to_le_bytes());
     body.push(mail.items.len() as u8);
+    // #3120 ①（服务端侧补齐）：**列表条目格式也要带附件**。
+    // 客户端 `parse_entry` 会按 `item_count` 逐条读 {uid,idx,image,name,count,dura,max}；
+    // 这里原来只写计数、不写条目 ⇒ 任何带附件的邮件（商城购买、拍卖成交、邮件附件…）
+    // 在客户端一律 `⚠️ ReceiveMail 解析失败`，条目被静默丢掉（2026-09-25 实测：商城购买
+    // 金币已扣、邮件已入玩家邮箱，但客户端列表里看不到 —— `--gameshop-test` 因此假红）。
+    // 布局与同文件的 `send_mail_content_packet` 保持一致（客户端两种格式复用同一段解析）。
+    for item in &mail.items {
+        body.extend_from_slice(&item.unique_id.to_le_bytes());
+        body.extend_from_slice(&(item.item_index as u32).to_le_bytes());
+        body.extend_from_slice(
+            &item
+                .info
+                .as_ref()
+                .map(|i| i.image)
+                .unwrap_or(0)
+                .to_le_bytes(),
+        );
+        write_dotnet_string(
+            &mut body,
+            &item
+                .info
+                .as_ref()
+                .map(|i| i.name.clone())
+                .unwrap_or_default(),
+        );
+        body.extend_from_slice(&item.count.to_le_bytes());
+        body.extend_from_slice(&item.current_dura.to_le_bytes());
+        body.extend_from_slice(&item.max_dura.to_le_bytes());
+    }
     let _ = gate_ref
         .tell(SendToClient {
             session_id,
