@@ -8546,6 +8546,36 @@ impl Actor for WorldActor {
             "Resolved {} kill tasks, {} item tasks, {} flag tasks from quest files",
             resolved_kill, resolved_item, resolved_flag
         );
+        // 2026-09-25：奖励静默为 0 的可发现性检查。奖励真源是任务脚本文件里的
+        // [@ExpReward]/[@GoldReward]/[@CreditReward]/[@FixedRewards]/[@SelectRewards]
+        // （DB `quest_infos` 那几列本来就可能是 0），所以「库里有任务、却一个带奖励的都没有」
+        // 几乎总是**数据根/工作目录不对**，玩家侧表现为「交任务没奖励」。此前完全静默。
+        let quests_with_reward = quest_infos_list
+            .iter()
+            .filter(|q| {
+                q.exp_reward > 0
+                    || q.gold_reward > 0
+                    || q.credit_reward > 0
+                    || !q.fixed_rewards.is_empty()
+                    || !q.select_rewards.is_empty()
+            })
+            .count();
+        if quest_infos_list.is_empty() {
+            warn!("任务库为空（quest_infos 0 行）——检查数据库初始化");
+        } else if quests_with_reward == 0 {
+            warn!(
+                "任务奖励全部为 0（库内 {} 个任务，任务脚本目录 {}）——数据根/工作目录可能不对，玩家侧会表现为「交任务没奖励」",
+                quest_infos_list.len(),
+                args.quest_dir.display()
+            );
+        } else {
+            info!(
+                "Quest rewards resolved: {}/{} 个任务带奖励（脚本目录 {}）",
+                quests_with_reward,
+                quest_infos_list.len(),
+                args.quest_dir.display()
+            );
+        }
         let quest_infos: HashMap<i32, db::QuestInfo> =
             quest_infos_list.into_iter().map(|q| (q.index, q)).collect();
 

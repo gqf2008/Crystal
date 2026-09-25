@@ -862,9 +862,59 @@ pub fn load_config(path: &str) -> anyhow::Result<ServerConfig> {
     Ok(config)
 }
 
+/// 数据根（`[server].map_data_dir`）下的子目录。
+///
+/// 2026-09-25：任务脚本与 NPC 脚本目录此前在 `main.rs` 里写死成**相对进程 cwd** 的常量
+/// （`Daneo1989/Envir/Quests`），既不跟随可配置的数据根，也没有「目录不存在」的报错——
+/// 只换工作目录启动就会把任务文件全部读空、任务奖励静默变 0（玩家侧表现为「交任务没奖励」）。
+/// 统一走这里，口径与同文件的 `Configs/` 一致；`map_data_dir` 为空时保留旧的相对路径回退。
+pub fn data_subdir(map_data_dir: &str, rel: &str) -> std::path::PathBuf {
+    let root = map_data_dir.trim();
+    if root.is_empty() {
+        std::path::PathBuf::from("Daneo1989").join(rel)
+    } else {
+        std::path::PathBuf::from(root).join(rel)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 2026-09-25：任务/NPC 脚本目录必须跟随 `map_data_dir`（否则换工作目录启动时任务数据静默全丢）
+    #[test]
+    fn data_subdir_follows_map_data_dir() {
+        assert_eq!(
+            data_subdir("E:/data/Daneo1989", "Envir/Quests"),
+            std::path::PathBuf::from("E:/data/Daneo1989/Envir/Quests")
+        );
+        assert_eq!(
+            data_subdir("/opt/crystal/Daneo1989", "Envir/NPCs"),
+            std::path::PathBuf::from("/opt/crystal/Daneo1989/Envir/NPCs")
+        );
+    }
+
+    /// 回归锁（阳性对照）：目录**不许**停在写死的相对常量上——写死时 cwd 一换就读不到任务文件。
+    /// 把 `data_subdir` 改回 `PathBuf::from("Daneo1989").join(rel)` 时本用例立即红。
+    #[test]
+    fn quest_dir_is_not_a_fixed_relative_constant() {
+        let q = data_subdir("D:/somewhere/Daneo1989", "Envir/Quests");
+        assert_ne!(q, std::path::PathBuf::from("Daneo1989/Envir/Quests"));
+        assert!(q.starts_with("D:/somewhere/Daneo1989"));
+    }
+
+    /// `map_data_dir` 为空/纯空白时才回退旧相对路径（兼容老配置）
+    #[test]
+    fn data_subdir_falls_back_to_legacy_relative_when_root_empty() {
+        assert_eq!(
+            data_subdir("", "Envir/Quests"),
+            std::path::PathBuf::from("Daneo1989/Envir/Quests")
+        );
+        assert_eq!(
+            data_subdir("   ", "Envir/NPCs"),
+            std::path::PathBuf::from("Daneo1989/Envir/NPCs")
+        );
+    }
 
     /// #2360：RarityConfig 默认值与 C# Settings/MonsterRarityData 对齐
     #[test]

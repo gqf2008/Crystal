@@ -146,7 +146,7 @@ macOS 产物未签名：首次打开被 Gatekeeper 拦截时右键 → 打开，
 ## 4. 启动
 
 ```bash
-# 1) 服务端（工作目录必须是 ServerRust：db 路径是相对路径）
+# 1) 服务端（工作目录必须是 ServerRust：db 路径默认是相对路径）
 cd ServerRust
 cargo run --release --bin mir2_server        # 或用发布包 ./mir2_server
 
@@ -154,6 +154,10 @@ cargo run --release --bin mir2_server        # 或用发布包 ./mir2_server
 cd Client-Bevy
 cargo run --bin client_bevy                  # 或用发布包 client_bevy.exe
 ```
+
+> 任务脚本与 NPC 脚本目录**跟随 `[server].map_data_dir`**（`<map_data_dir>/Envir/Quests`、`<map_data_dir>/Envir/NPCs`）。
+> 工作目录只影响 `[database].path` 这类相对路径；数据根不对时启动日志会给出 `quest_dir 不存在` 与
+> `任务奖励全部为 0` 两条告警（见 §7）。
 
 `config.ini` 的 `UseMock=true` 时客户端完全离线（内置 mock 服务端），适合无服务端时看界面。
 
@@ -330,6 +334,7 @@ pwsh scripts/run_real_e2e.ps1 -IncludeInteractSweep            # 常规用例 + 
 | 客户端秒退、错误码 `0xC0000135` | 缺 MSYS2 UCRT64 运行库 DLL。用发布包（已自带），或把 `msys64/ucrt64/bin` 加进 `PATH` |
 | 客户端黑屏 / 缺图 / 中文变方框 | `Data/` 不在可执行文件同目录（或路径不对） |
 | 服务端报 `map file not found` | `Daneo1989/` 缺失或与 `server.map_data_dir` 不一致 |
+| 交任务没奖励 / 任务对话为空 / 任务列表空 | 任务与 NPC 脚本目录 = `<server.map_data_dir>/Envir/{Quests,NPCs}`；数据根不对时启动日志有 `quest_dir 不存在` 与 `任务奖励全部为 0` 告警（正常为 `Resolved N kill tasks…` + `Quest rewards resolved: x/y`） |
 | 登录提示「密码错误」但密码没错 | 该账号**已在线**（服务端拒绝重复登录，C# 同语义）。等前一个连接断开（或重启服务端）再登 |
 | `refine-test` 报「未收到 NPCRefine / 未收到精炼结果」 | 前置没做：角色不在铁匠旁（`CallNPC` 距离 ≤2 格）或没跑 `scripts/e2e_refine_prep.py prepare`（`run_real_e2e.ps1` 会自动做） |
 | 端口被占用 | `config/server.toml` 的 `network.listen_addr`；客户端同步改 `config.ini` 的 `ServerAddr` |
