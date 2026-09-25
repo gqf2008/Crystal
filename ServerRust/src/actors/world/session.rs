@@ -1256,6 +1256,12 @@ impl Message<StartGameRequest> for WorldActor {
             )
             .await
         };
+        // 关键：`spawn_npcs_and_monsters(…).await` 期间 actor 任务可能被调度到**另一条线程**，
+        // 而标签是线程局部的 ⇒ await 之后必须在当前线程**重新打标**，否则这一段（入库循环、
+        // 精英广播、发包）会全部记到 `unknown`（实测：不重新打标时 materialize 只显示 await 前那 1.9MB，
+        // 每轮增长的 ~450KB 全落在 unknown/cleanup 里，看不出归属）。
+        #[cfg(feature = "mem-probe")]
+        let _tag_spawn_after = crate::mem_probe::TagGuard::enter(crate::mem_probe::TAG_MATERIALIZE);
         #[cfg(feature = "mem-probe")]
         probe_phase("materialize_end", spawn_map_index);
         // 空配置（测试 harness 无刷怪配置 / 该图真的没有刷怪点）不置「已物化」标记，
@@ -1372,12 +1378,18 @@ impl Message<StartGameRequest> for WorldActor {
             self.map_spawns_ready.insert(spawn_map_index);
         }
         if !reused_map_spawns {
+            #[cfg(feature = "mem-probe")]
+            probe_phase("ins_mon_begin", spawn_map_index);
             for monster in new_monsters {
                 self.monsters.insert(monster.object_id, monster);
             }
+            #[cfg(feature = "mem-probe")]
+            probe_phase("ins_mon_end", spawn_map_index);
         }
 
         // 初始生成精英广播
+        #[cfg(feature = "mem-probe")]
+        probe_phase("elite_begin", spawn_map_index);
         for name in &elite_broadcasts {
             let map_name = self
                 .map_infos
@@ -1391,7 +1403,11 @@ impl Message<StartGameRequest> for WorldActor {
             );
         }
         #[cfg(feature = "mem-probe")]
+        probe_phase("elite_end", spawn_map_index);
+        #[cfg(feature = "mem-probe")]
         drop(_tag_spawn);
+        #[cfg(feature = "mem-probe")]
+        drop(_tag_spawn_after);
 
         // 同步当前地图上的地面物品给新玩家
         let map_index_val = loaded_state.map_index;
@@ -3520,12 +3536,13 @@ fn probe_phase(phase: &str, map_index: u16) {
     if std::env::var("MIR2_LEAK_PROBE").is_ok() {
         let (live, allocs, deallocs) = crate::mem_probe::stats();
         tracing::info!(
-            "MEM_PROBE_PHASE phase={} map={} live_bytes={} allocs={} deallocs={}",
+            "MEM_PROBE_PHASE phase={} map={} live_bytes={} allocs={} deallocs={} tag_materialize={}",
             phase,
             map_index,
             live,
             allocs,
-            deallocs
+            deallocs,
+            crate::mem_probe::tag_live(crate::mem_probe::TAG_MATERIALIZE)
         );
     }
 }
@@ -3583,6 +3600,21 @@ impl WorldActor {
         // 动机：每轮物化都会分配**新的** object_id，若辅助表只在怪物死亡时删条目，
         // 那么"整图清理"就只删掉 monsters/npcs、把这些条目永久留下（每轮 ~1912 怪的量级）。
         if std::env::var("MIR2_LEAK_PROBE").is_ok() {
+            // 2026-09-25 加：**容量**与结构体尺寸。动机＝实测「一轮 1912 只怪比一轮 0 只怪在 idle
+            // 高出约 3MB」，而清理只释放 14KB —— 若 monsters 表清空后**容量不退**，那 ~3MB 就是
+            // 「表缓冲留在高水位」，与「每轮 +400KB（与怪数成正比）」是两件不同的事。
+            // `容量 × size_of::<MonsterState>()` 直接把这块算出来。
+            info!(
+                "MAP_CAP size_monster={} size_npc={} monsters_len={} monsters_cap={} monsters_buf_bytes~{} npcs_len={} npcs_cap={} map_spawns_ready_cap={}",
+                std::mem::size_of::<MonsterState>(),
+                std::mem::size_of::<NpcState>(),
+                self.monsters.len(),
+                self.monsters.capacity(),
+                self.monsters.capacity() * std::mem::size_of::<MonsterState>(),
+                self.npcs.len(),
+                self.npcs.capacity(),
+                self.map_spawns_ready.capacity()
+            );
             info!(
                 "MAP_PROBE map={} monsters={} npcs={} monster_targets={} pet_targets={} cursed_monsters={} hallucinated={} revealed_hp={} pet_enhanced={} pet_levels={} respawn_queue={} world_boss_queue={} ground_items={} map_spawns_ready={} \
                  player_heroes={} players={} last_move={} last_turn={} last_chat={} last_teleport={} last_probe={} gm_protected={}",

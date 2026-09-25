@@ -13810,6 +13810,10 @@ async fn spawn_npcs_and_monsters(
     ctx: &SpawnContext<'_>,
     walkable: Option<&MapData>,
 ) -> (Vec<NpcState>, Vec<MonsterState>) {
+    // 归因标签：本函数**整段没有 await**（已核对：0 处 .await、399 行同步代码），
+    // 所以这里的标签不会因为"让出线程"被其它任务串味——可以当精确归属用。
+    #[cfg(feature = "mem-probe")]
+    let _tag_spawn_fn = crate::mem_probe::TagGuard::enter(crate::mem_probe::TAG_SPAWN_FN);
     // Try DB-loaded configs first, fall back to TOML
     let config = if let Some(mi) = ctx.map_info {
         spawn_config_from_db(mi, ctx.monster_infos, ctx.npc_infos, ctx.routes)

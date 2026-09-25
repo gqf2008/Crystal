@@ -66,7 +66,9 @@ pub const TAG_LOGOUT: usize = 4;
 pub const TAG_CLEANUP: usize = 5;
 pub const TAG_TICK: usize = 6;
 pub const TAG_DB: usize = 7;
-pub const TAG_N: usize = 8;
+/// `spawn_npcs_and_monsters` 本体（**整段无 await**，所以这个标签没有"让出线程"造成的误归因）。
+pub const TAG_SPAWN_FN: usize = 8;
+pub const TAG_N: usize = 9;
 pub const TAG_NAMES: [&str; TAG_N] = [
     "unknown",
     "materialize",
@@ -76,6 +78,7 @@ pub const TAG_NAMES: [&str; TAG_N] = [
     "cleanup",
     "tick",
     "db",
+    "spawn_fn",
 ];
 const TAG_HEADER: usize = 16;
 static LIVE_BY_TAG: [AtomicUsize; TAG_N] = [const { AtomicUsize::new(0) }; TAG_N];
@@ -150,6 +153,16 @@ fn track_tag(tag: usize, size: usize, add: bool) {
     } else {
         LIVE_BY_TAG[tag].fetch_sub(size, Ordering::Relaxed);
     }
+}
+
+/// 某个标签当前挂着多少活跃字节（线程局部标签本身在分配时就记进了对应槽位）。
+/// 用途：在**同步窗口**（无 await）前后各读一次，差值就是"这段时间里本线程按该标签分配的净字节"——
+/// 它不受其它线程/任务的分配干扰，比全局 `live_bytes` 的窗口差干净得多。
+pub fn tag_live(tag: usize) -> usize {
+    if tag >= TAG_N {
+        return 0;
+    }
+    LIVE_BY_TAG[tag].load(Ordering::Relaxed)
 }
 
 /// 记一次精确尺寸的分配/释放。超过 `EXACT_MAX` 的尺寸不记（仍然计入总量与三档分桶）。
