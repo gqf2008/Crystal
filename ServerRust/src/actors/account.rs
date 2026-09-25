@@ -53,6 +53,16 @@ fn verify_password(password: &str, hash: &str) -> (bool, bool) {
                 if computed == expected_hash {
                     return (true, true); // Verified, but needs Argon2 migration
                 }
+                // C# 侧的兼容路径：`Crypto.HashPassword` 是
+                // `Encoding.UTF8.GetString(pbkdf2.GetBytes(24))`（Server/Utils/Crypto.cs:20-23），
+                // 它把 24 字节哈希当 UTF-8 **字符串**存盘——非法序列会被 .NET 替换成 U+FFFD，
+                // 于是落盘的是「损失转换后的字节」（实测 .MirADB 里三个账号分别是 52/40/42 字节）。
+                // C# 服务端两侧都走同一损失转换所以能比对；Rust 这里必须**复刻同一步**才能
+                // 让从 .MirADB 迁过来的账号用原密码登录（否则一律验不过、只能 GM 重置）。
+                let lossy = String::from_utf8_lossy(&computed);
+                if lossy.as_bytes() == expected_hash.as_slice() {
+                    return (true, true); // Verified（C# 损失形态），仍需迁到 Argon2
+                }
             }
         }
         return (false, false);
@@ -1058,6 +1068,58 @@ impl Message<AccountChangePassword> for AccountActor {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 门禁：**从 C# `.MirADB` 迁过来的账号必须能用原密码登录**。
+    ///
+    /// C# `Crypto.HashPassword` 是 `Encoding.UTF8.GetString(pbkdf2.GetBytes(24))`——把 24 字节哈希
+    /// 当 UTF-8 字符串存盘，非法序列会变成 U+FFFD（实测 .MirADB 里三个账号的该字段是 52/40/42 字节）。
+    /// 因此校验不能只比原始字节，必须**复刻那一步损失转换**。
+    /// 本测试特意搜索一个「损失形态 ≠ 原始字节」的样本，否则测不到这条分支。
+    ///
+    /// 阳性对照：删掉 `from_utf8_lossy` 那次比较 → 本测试第一条断言立即红。
+    #[test]
+    fn migrated_csharp_pbkdf2_hash_verifies_with_original_password() {
+        let mut found: Option<(Vec<u8>, Vec<u8>, Vec<u8>)> = None;
+        for i in 0..20_000u32 {
+            let salt = format!("salt-{i}").into_bytes();
+            let mut computed = vec![0u8; 24];
+            pbkdf2_hmac::<Sha1>(b"hunter2", &salt, 50, &mut computed);
+            let lossy = String::from_utf8_lossy(&computed).as_bytes().to_vec();
+            if lossy != computed {
+                found = Some((salt, computed, lossy));
+                break;
+            }
+        }
+        let (salt, raw, lossy) = found.expect("应能找到一个「损失形态≠原始字节」的样本");
+
+        let stored_csharp = format!(
+            "pbkdf2_sha1${}${}",
+            data_encoding::BASE64.encode(&salt),
+            data_encoding::BASE64.encode(&lossy)
+        );
+        assert_eq!(
+            verify_password("hunter2", &stored_csharp),
+            (true, true),
+            "C# 损失形态必须能验过（否则迁移过来的账号无法登录）"
+        );
+        assert_eq!(
+            verify_password("wrong-password", &stored_csharp),
+            (false, false),
+            "负控：错误密码必须不过"
+        );
+
+        // 兼容：若历史数据里存的是原始 24 字节（合法 UTF-8 的情形），也照旧能验。
+        let stored_raw = format!(
+            "pbkdf2_sha1${}${}",
+            data_encoding::BASE64.encode(&salt),
+            data_encoding::BASE64.encode(&raw)
+        );
+        assert_eq!(
+            verify_password("hunter2", &stored_raw),
+            (true, true),
+            "原始 24 字节形态仍须支持"
+        );
+    }
     use kameo::actor::Spawn;
 
     /// 红绿回归：登录不存在账号的自动注册必须受 AllowNewAccount 门控（严重9）。

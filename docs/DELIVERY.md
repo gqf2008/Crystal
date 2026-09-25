@@ -54,18 +54,33 @@ macOS 产物未签名：首次打开被 Gatekeeper 拦截时右键 → 打开，
 
   旧格式 `.MirADB` 用 `migrate` 子命令（用法见 `ServerRust/src/bin/migrate.rs` 顶部注释）。
 
-  > **⚠️ 2026-09-25 实测：`.MirADB` 迁移对当前发布数据（v112）仍不可用，别用它导生产账号。**
-  > 用真实 `Server.MirADB`（v112、3 个账号）实跑：本 PR 已修掉两个独立缺陷——
-  > ① **Windows 下 DB URL 拼错**（原样 `sqlite://C:\...` 直接 `code 14 unable to open database file`，
-  > 且 sqlx 不会替你建目录/文件）；②**三处「格子是否有物品」标志判反**（C# `AccountInfo.Save:242-248`
-  > 与 `CharacterInfo.Save:434-455` 都是 `writer.Write(X != null); if (X == null) continue;`，
-  > 即 **true 才跟一个 UserItem**；工具原本写成「true 就跳过」⇒ 每个空格都去读整件物品，整段错位到 EOF）。
-  > 修完后仍会在**角色段**错位：C# 的角色记录里 `UserMagic`（`Spell u8 + Level u8 + Key u8 + Experience u16 + IsTemp`）、
-  > `PetInfo`、`QuestProgressInfo`（v≥90 起是「index + 两个 i64 + 可变长进度表」）等子结构与工具体现的扁平字段不一致，
-  > 实测断点：账号头解析正常（`account_id=gqf`、`char_count=4`），角色 #0 内约 pos≈1515 起失真、最终 EOF。
-  > 结论：**账号/角色迁移请等角色段按 C# 重写**；当前需要账号时走客户端注册（第 3 步）即可。
-  > 排查这类错位用 `MIR2_MIGRATE_TRACE=1`（本 PR 加的读取轨迹：逐条打印 `i32/str` 的**位置与长度**，
-  > 比只看最后一句 `failed to fill whole buffer` 有效得多）。
+  > **✅ 2026-09-25 实测：`.MirADB` 迁移对当前发布数据（v112）已可用**（此前从没验证过，实跑发现整条链路是坏的）。
+  > 用真实 `Server.MirADB`（20455 字节、v112、3 账号 8 角色）跑通，判据是**读到的位置恰好等于文件大小**：
+  >
+  > ```
+  > Accounts migrated: 3 / Characters migrated: 8 / Errors: 0
+  > File consumed: 20455 / 20455 bytes（完全对齐）
+  > Verification: 3 accounts, 8 characters, 13 backpack items in DB
+  > ```
+  >
+  > 修掉的缺陷（都对着 C# 权威源码核过）：① Windows 下 DB URL 拼错（`sqlite://C:\…` → `code 14`，且 sqlx 不建目录/文件）；
+  > ②三处「格子是否有物品」标志判反（C# `AccountInfo.Save:242-248`、`CharacterInfo.Save:434-455` 都是
+  > `writer.Write(X != null); if (X == null) continue;` ⇒ **true 才跟一个 `UserItem`**）；
+  > ③ `UserItem.Slots` 的极性**与②相反**（C# `ItemData.cs:397-402/479`：`true` 表示该孔为空）；
+  > ④ `UserItem` 的 `Awake`（`Type u8 + count i32 + count×u8`）、`ExpireInfo`（单个 i64）、
+  > `RentalInformation`（string+i16+i64+bool）、`SealedInfo`（i64，v>92 再加 i64）四处结构与工具不符；
+  > ⑤ `UserMagic`（`Spell u8+Level u8+Key u8+Experience u16+IsTemp+CastTime i64`）；
+  > ⑥ 任务进度表按 v≥90 的**非 orphan** 布局（每个 kill/item 只写一个 i32、flag 写一个 bool）；
+  > ⑦ `RentedItems`（`u64+string+string+i64`）；⑧ 角色 `Flags` 的真实长度是 `Globals.FlagIndexCount = 1999`（工具写死 256，每条角色少读 1743 字节）；
+  > ⑨ 账号/角色之后的收尾段（`NextAuctionID u64` → Auctions → `NextMailID u64` → GameshopLog → SavedSpawns）此前完全没读。
+  >
+  > **密码说明（重要）**：C# `Crypto.HashPassword` 是 `Encoding.UTF8.GetString(pbkdf2_GetBytes(24))`
+  > ——24 字节哈希被当成 UTF-8 字符串存盘，非法序列会被替换成 U+FFFD（实测三个账号该字段是 52/40/42 字节，
+  > 原始哈希已不可还原）。服务端 `verify_password` 现已**复刻这一步损失转换**，所以迁移过来的账号
+  > 仍可用**原密码**登录（首次登录后自动改写为 Argon2）。这一条由单测覆盖并做了阳性对照。
+  >
+  > 排查同类错位用 `MIR2_MIGRATE_TRACE=1`（逐条打印 `i32/str` 的**位置与长度**，并标出段边界），
+  > 比只看最后一句 `failed to fill whole buffer` 有效得多。
 
    > **版本支持与核验（2026-09-25）**：工具原先只实现 **≤84** 的旧布局，拿当前发布数据
    > （`Server.MirDB` **version 112**）实跑会失败——物品段读到第 607/1628 个就 EOF、之后各段全空
