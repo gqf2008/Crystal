@@ -26,6 +26,7 @@ const MODEL_URLS: &[&str] = &[
 ];
 
 fn main() {
+    emit_build_stamp();
     // 逃生口：已有 libpinyin 安装根
     if let Ok(dir) = env::var("LIBPINYIN_DIR") {
         let p = PathBuf::from(&dir);
@@ -49,6 +50,50 @@ fn main() {
 
     emit_links(&install);
     emit_dirs(&install);
+}
+
+/// 构建戳：把「这份二进制到底出自哪个提交」固化进 exe，供
+/// ① 启动日志（`main.rs` 打印）、② `build_stamp` control RPC、③ 夹具断言共用。
+///
+/// 为什么需要它（实测代价）：owner 多次拿**旧构建**的截图/体验当缺陷报（写邮件窗「错位」、
+/// 底部对话框滚动/对齐、地图灯光、魔法特效），每次都要先花一轮去证明"代码早改过了"。
+/// repo 里也已有 `LESSON_运行目标分支e2e前需重建二进制避免陈旧target误报`——
+/// 判据必须能回答"被测 exe 是不是当前提交构建的"，否则夹具与 owner 都可能对着旧二进制下结论。
+///
+/// 必须放在 `main()` **最前面**：下面 `LIBPINYIN_DIR` 逃生口会提前 `return`。
+fn emit_build_stamp() {
+    let manifest = PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"));
+    // 仓库根 = crate 目录的上一级（本仓布局 Client-Bevy/ 在根下）
+    let repo = manifest.parent().map(|p| p.to_path_buf()).unwrap_or(manifest);
+    let git = |args: &[&str]| -> Option<String> {
+        let out = Command::new("git")
+            .args(args)
+            .current_dir(&repo)
+            .output()
+            .ok()?;
+        if !out.status.success() {
+            return None;
+        }
+        let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        if s.is_empty() {
+            None
+        } else {
+            Some(s)
+        }
+    };
+    // `%H` 全量 + `%h` 短哈希都留：短哈希够读，全量够与 master 精确比对
+    let full = git(&["rev-parse", "HEAD"]).unwrap_or_else(|| "unknown".into());
+    let short = git(&["rev-parse", "--short", "HEAD"]).unwrap_or_else(|| "unknown".into());
+    let dirty = match git(&["status", "--porcelain"]) {
+        Some(_) => "1",
+        None => "0",
+    };
+    // **故意不嵌"构建时刻"**：那会让每次 build.rs 重跑都改 env ⇒ 指纹变化 ⇒ 整 crate 重编。
+    // "这份 exe 多新"由 `build_stamp` RPC 运行时读 exe 的 mtime/size 给出，编译期只固化
+    // 「出自哪个提交、工作区是否 dirty」这两个真正稳定的量。
+    println!("cargo:rustc-env=CRYSTAL_BUILD_COMMIT={full}");
+    println!("cargo:rustc-env=CRYSTAL_BUILD_COMMIT_SHORT={short}");
+    println!("cargo:rustc-env=CRYSTAL_BUILD_DIRTY={dirty}");
 }
 
 fn emit_links(install: &Path) {

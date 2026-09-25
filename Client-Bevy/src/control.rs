@@ -1047,6 +1047,35 @@ fn handle_conn(mut stream: std::net::TcpStream, tx: Sender<ControlCommand>) {
                     json!({"error": "control channel closed"})
                 }
             }
+            // 只读：这份 exe 出自哪个提交（`build.rs` 固化）+ 文件有多新（mtime/size）。
+            // 用途：owner/夹具拿到"看着不对"的现象时，先回答"你跑的是不是当前提交构建的"——
+            // 此前没有这个量，写邮件窗「错位」/底部对话框/地图灯光/魔法特效 四类反馈都靠人工
+            // 读日志+比对代码才排除掉"旧构建"。夹具可直接断言 `commit_short == 被测 worktree HEAD`。
+            "build_stamp" => {
+                let (exe, mtime, size) = match std::env::current_exe() {
+                    Ok(p) => {
+                        let md = std::fs::metadata(&p).ok();
+                        let mtime = md
+                            .as_ref()
+                            .and_then(|m| m.modified().ok())
+                            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                            .map(|d| d.as_secs())
+                            .unwrap_or(0);
+                        let size = md.as_ref().map(|m| m.len()).unwrap_or(0);
+                        (p.display().to_string(), mtime, size)
+                    }
+                    Err(_) => (String::new(), 0, 0),
+                };
+                json!({
+                    "commit": env!("CRYSTAL_BUILD_COMMIT"),
+                    "commit_short": env!("CRYSTAL_BUILD_COMMIT_SHORT"),
+                    "dirty": env!("CRYSTAL_BUILD_DIRTY") == "1",
+                    "exe": exe,
+                    "exe_mtime": mtime,
+                    "exe_size": size,
+                    "pid": std::process::id(),
+                })
+            }
             "combat_probe" => {
                 // 只读：锁定目标 / 距离 / 血条百分比 / 近期战斗事件（判据来自服务端事件流）
                 let (reply_tx, reply_rx) = bounded::<String>(1);
@@ -4064,6 +4093,24 @@ mod tests {
         assert_eq!(parse_control_port(&args), 9000);
         let args: Vec<String> = vec!["client_bevy".into(), "--real-net".into()];
         assert_eq!(parse_control_port(&args), 9000);
+    }
+
+    /// 构建戳接线门禁：`build.rs` 必须真的把 commit 固化进 exe（漏接 = `env!` 直接编译失败，
+    /// 这里再断言值本身自洽），否则 `build_stamp` RPC 与启动日志会给出假信息。
+    #[test]
+    fn build_stamp_env_is_wired() {
+        let full = env!("CRYSTAL_BUILD_COMMIT");
+        let short = env!("CRYSTAL_BUILD_COMMIT_SHORT");
+        let dirty = env!("CRYSTAL_BUILD_DIRTY");
+        // 无 git 的环境（源码 tarball 等）允许 unknown，但那时短哈希也得是 unknown
+        if full == "unknown" {
+            assert_eq!(short, "unknown", "full 是 unknown 时 short 也必须 unknown");
+            return;
+        }
+        assert_eq!(full.len(), 40, "CRYSTAL_BUILD_COMMIT 应是 40 位完整哈希：{full}");
+        assert!(short.len() >= 7, "短哈希太短：{short}");
+        assert!(full.starts_with(short), "短哈希应是完整哈希前缀：{short} / {full}");
+        assert!(dirty == "0" || dirty == "1", "dirty 只能是 0/1：{dirty}");
     }
 
     /// --control-port 指定合法 u16：用之（双客户端并行各听一端口的前置）。
