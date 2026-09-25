@@ -246,7 +246,9 @@ function Get-E2eClientScripts {
     # 2026-09-25 实测：新增的 check_process_scope.ps1（按进程名清共享资源的静态门禁，正文里写了
     # `Name='client_bevy.exe'`）被误判成实机入口，T9.2/T9.2b/T9.5 立刻变红。把「提到」与「真的起客户端」
     # 区分开是更彻底的修法（未做），在那之前新加同类工具脚本要一并加进这张表。
-    $selfNames = @('e2e_lock.ps1', 'e2e_lock_selftest.ps1', 'enroll_e2e_lock.ps1', 'check_process_scope.ps1')
+    # `build_stamp.ps1` 同理：它是**判定仪器**（扫 exe 里的构建戳），正文里出现 `client_bevy.exe`
+    # 只是注释/提示语，本身不起客户端、也不该拿实机锁。
+    $selfNames = @('e2e_lock.ps1', 'e2e_lock_selftest.ps1', 'enroll_e2e_lock.ps1', 'check_process_scope.ps1', 'build_stamp.ps1')
     $skipDirs = '\\(\.git|target|node_modules)\\'
     $out = @()
     # 会起客户端的入口不只 *.ps1：.bat/.cmd 一样能 start 客户端（见上面 docstring 的实测）。

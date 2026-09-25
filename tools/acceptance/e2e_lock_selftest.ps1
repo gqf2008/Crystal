@@ -253,7 +253,7 @@ function Get-E2eClientScript {
     # 这三个是"锁自己的脚本"，不算实机入口（接入器正文里就写着 `--e2e-user` 之类的示例，
     # 不排除它就会被自己的判据扫进来）——与 e2e_lock.ps1 里的 Get-E2eClientScripts 保持同一份名单。
     # 同 e2e_lock.ps1 的共享判据（T9.4 要求两份名单一致）：工具/判据脚本只是**提到**这些字样，不是实机入口。
-    $selfNames = @('e2e_lock.ps1', 'e2e_lock_selftest.ps1', 'enroll_e2e_lock.ps1', 'check_process_scope.ps1')
+    $selfNames = @('e2e_lock.ps1', 'e2e_lock_selftest.ps1', 'enroll_e2e_lock.ps1', 'check_process_scope.ps1', 'build_stamp.ps1')
     $out = @()
     # 扫描面与 e2e_lock.ps1 的共享判据一致：**整个仓库**的 *.ps1/.bat/.cmd（排除 .git/target/node_modules）。
     # 写死目录清单会让新目录里的实机入口静默漏网（见 T9.1b/T9.3b）。

@@ -130,12 +130,9 @@ fn main() {
     // 底部对话框滚动/对齐、地图灯光、魔法特效），每次都要先花一轮证明「代码早改过了」。
     // 把这行放进启动日志后，任何一次反馈都能一眼看出「他跑的是哪个提交」。
     // 同源数据也由 control RPC `build_stamp` 暴露，供夹具断言"被测 exe 就是当前提交构建的"。
-    tracing::info!(
-        "🧾 客户端构建：commit={}（{}）dirty={}",
-        env!("CRYSTAL_BUILD_COMMIT_SHORT"),
-        env!("CRYSTAL_BUILD_COMMIT"),
-        env!("CRYSTAL_BUILD_DIRTY")
-    );
+    // 整条定长记录原样打印（同一个字符串也就是 exe 里被 `build_stamp.ps1` 扫描的那条），
+    // 保证"日志里看到的"与"夹具扫到的"永远是同一个值。
+    tracing::info!("🧾 客户端构建：{}", client_bevy::control::BUILD_STAMP_RECORD);
     // 渲染错误策略必须在 DefaultPlugins 之前装：RenderPlugin::build 走的是
     // `init_resource::<RenderErrorHandler>()`，先插入者胜出。覆盖它只为一件事——
     // 「最小化窗口」触发的那次可恢复表面配置失败不再退进程（bevy 默认策略对任何
