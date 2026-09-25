@@ -14,7 +14,7 @@
 //! 默认关闭：`ENABLED=false` 时分配路径只多两次原子读，且整个模块在默认构建里**不编译**。
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::ptr;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 
 static ENABLED: AtomicBool = AtomicBool::new(false);
 static LIVE_BYTES: AtomicUsize = AtomicUsize::new(0);
@@ -240,6 +240,115 @@ pub fn focus_live_total() -> usize {
         .sum()
 }
 
+// ---- 活块登记表：把"此刻真的活着"的块按**轮次**记下来，idle 时做普查 ----
+// 为什么需要它：标签/直方图都是"按分配路径记账"，会被 churn 洗掉（实测：区间残差忽大忽小，
+// 分不出泄漏）；Windows 的 HeapWalk 又看不到 Rust 分配器的块（见 LESSON）。
+// 这里换成本分配器自己登记：只登记 `>= REG_MIN` 的块（数量少、成本可控），每条记录带
+// **登记时的轮次**，于是 idle 时可以直接列出"本轮新分配且现在仍存活"的块，连内容一起打出来。
+// 边界：登记表是定容的开放寻址表（满了就丢计数，不覆盖别人的记录）；内容读取与释放存在竞态
+// （探针专用，只在 idle 点读一次）。
+const REG_SLOTS: usize = 1 << 20;
+const REG_MIN: usize = 256;
+const REG_PROBE: usize = 8;
+static REG_PTR: [AtomicUsize; REG_SLOTS] = [const { AtomicUsize::new(0) }; REG_SLOTS];
+// meta = size(低 32 位) | tag(bit 32..40) | gen(bit 40..64)
+static REG_META: [AtomicU64; REG_SLOTS] = [const { AtomicU64::new(0) }; REG_SLOTS];
+static REG_GEN: AtomicU64 = AtomicU64::new(0);
+static REG_DROPPED: AtomicUsize = AtomicUsize::new(0);
+
+#[inline]
+fn reg_hash(ptr: usize) -> usize {
+    let mut h = ptr as u64;
+    h ^= h >> 33;
+    h = h.wrapping_mul(0xff51_afd7_ed55_8ccd);
+    h ^= h >> 33;
+    (h as usize) & (REG_SLOTS - 1)
+}
+
+#[inline]
+fn reg_insert(ptr: usize, size: usize, tag: usize) {
+    if size < REG_MIN || size > u32::MAX as usize || ptr == 0 {
+        return;
+    }
+    let meta =
+        (size as u64) | ((tag as u64 & 0xff) << 32) | (REG_GEN.load(Ordering::Relaxed) << 40);
+    let base = reg_hash(ptr);
+    for i in 0..REG_PROBE {
+        let slot = (base + i) & (REG_SLOTS - 1);
+        if REG_PTR[slot]
+            .compare_exchange(0, ptr, Ordering::AcqRel, Ordering::Acquire)
+            .is_ok()
+        {
+            REG_META[slot].store(meta, Ordering::Release);
+            return;
+        }
+    }
+    REG_DROPPED.fetch_add(1, Ordering::Relaxed);
+}
+
+#[inline]
+fn reg_remove(ptr: usize) {
+    let base = reg_hash(ptr);
+    for i in 0..REG_PROBE {
+        let slot = (base + i) & (REG_SLOTS - 1);
+        let cur = REG_PTR[slot].load(Ordering::Acquire);
+        if cur == ptr {
+            REG_PTR[slot].store(0, Ordering::Release);
+            return;
+        }
+        if cur == 0 {
+            return; // 空槽 ⇒ 这条记录不存在（或早已被删）
+        }
+    }
+}
+
+/// 枚举「登记于 `min_age` 轮之前、且现在仍在表里」的块：把 `(size, tag, ptr, 前 48 字节)` 交给 `emit`，
+/// 然后轮次 +1。返回 `(登记的活块总数, 活块字节合计, 因表满丢弃的登记次数)`。
+///
+/// `min_age = 1` ⇒ "上上轮之前登记的还在"，`min_age = 2` ⇒ "熬过至少两轮还在"。
+/// **`min_age >= 2` 才是泄漏判据**：它对"分配后很快释放"的 churn 免疫（实测新登记集合里混着大量
+/// 下一轮就消失的块），只剩真正在攒的那些。
+/// ⚠️ 内容的读取与其它线程的释放存在竞态（读已释放块的旧字节）——探针专用，且只读前 48 字节。
+pub fn registry_report(
+    min_age: u64,
+    limit: usize,
+    mut emit: impl FnMut(usize, usize, usize, &[u8]),
+) -> (usize, usize, usize) {
+    let target_gen = REG_GEN.load(Ordering::Relaxed);
+    let mut live_entries = 0usize;
+    let mut live_bytes = 0usize;
+    let mut emitted = 0usize;
+    let mut buf = [0u8; 48];
+    for slot in 0..REG_SLOTS {
+        let ptr = REG_PTR[slot].load(Ordering::Acquire);
+        if ptr == 0 {
+            continue;
+        }
+        let meta = REG_META[slot].load(Ordering::Acquire);
+        let size = (meta & 0xffff_ffff) as usize;
+        let tag = ((meta >> 32) & 0xff) as usize;
+        live_entries += 1;
+        live_bytes += size;
+        let gen = meta >> 40;
+        if target_gen.saturating_sub(gen) < min_age || emitted >= limit || size == 0 {
+            continue;
+        }
+        let n = size.min(buf.len());
+        // 竞态下的"尽力读取"：读到的是这块内存当时的字节
+        unsafe {
+            ptr::copy_nonoverlapping(ptr as *const u8, buf.as_mut_ptr(), n);
+        }
+        emitted += 1;
+        emit(size, tag, ptr, &buf[..n]);
+    }
+    REG_GEN.fetch_add(1, Ordering::Relaxed);
+    (
+        live_entries,
+        live_bytes,
+        REG_DROPPED.load(Ordering::Relaxed),
+    )
+}
+
 /// 某个标签当前挂着多少活跃字节（线程局部标签本身在分配时就记进了对应槽位）。
 /// 用途：在**同步窗口**（无 await）前后各读一次，差值就是"这段时间里本线程按该标签分配的净字节"——
 /// 它不受其它线程/任务的分配干扰，比全局 `live_bytes` 的窗口差干净得多。
@@ -462,6 +571,7 @@ unsafe impl GlobalAlloc for CountingAllocator {
                 track(layout.size(), true);
                 track_tag(tag, layout.size(), true);
                 track_focus(tag, layout.size(), true);
+                reg_insert(base.add(TAG_HEADER) as usize, layout.size(), tag);
             }
             return base.add(TAG_HEADER);
         }
@@ -471,6 +581,8 @@ unsafe impl GlobalAlloc for CountingAllocator {
             ALLOCS.fetch_add(1, Ordering::Relaxed);
             bucket(layout.size()).fetch_add(layout.size(), Ordering::Relaxed);
             track(layout.size(), true);
+            // 无头部的路径（align > 16）没有标签，用 255 当"未打标签"哨兵，别让它从普查里漏掉
+            reg_insert(ptr as usize, layout.size(), 255);
         }
         ptr
     }
@@ -486,6 +598,7 @@ unsafe impl GlobalAlloc for CountingAllocator {
                 track(layout.size(), false);
                 track_tag(tag, layout.size(), false);
                 track_focus(tag, layout.size(), false);
+                reg_remove(ptr as usize);
             }
             // 同样的参数在 alloc 里成功过，这里理论不可达；真到这儿也只能不释放（不能按老布局释放，
             // 那会把 base 而不是 ptr 交给系统分配器）。
@@ -501,6 +614,7 @@ unsafe impl GlobalAlloc for CountingAllocator {
             DEALLOCS.fetch_add(1, Ordering::Relaxed);
             bucket(layout.size()).fetch_sub(layout.size(), Ordering::Relaxed);
             track(layout.size(), false);
+            reg_remove(ptr as usize);
         }
         System.dealloc(ptr, layout)
     }

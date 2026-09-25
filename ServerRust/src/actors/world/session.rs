@@ -2715,6 +2715,12 @@ impl Message<PlayerDisconnected> for WorldActor {
         // 每次登录留一条、session id 每次唯一 ⇒ 永久累积。实测（20 会话连登连退、每轮空闲点读数）：
         // 19→38→57→76→95→114 单调增长，而其它 30+ 容器全为 0；同轮 live_bytes 每轮约 +0.41MB。
         self.player_heroes.remove(&msg.session_id);
+        // 同一类漏清（2026-09-25 二）：**按 session 键**的英雄 AI/寻路状态也在登录时插入、
+        // 由英雄在图上行动时写入，而两条清理路径原先都没删 ⇒ 有英雄的账号每登录一次留一条
+        // （与 `player_heroes` 完全同型，见上一层注释）。这里一并按 session 清掉。
+        self.hero_paths.remove(&msg.session_id);
+        self.hero_path_targets.remove(&msg.session_id);
+        self.hero_ai_states.remove(&msg.session_id);
 
         // 只读内存探针（2026-09-25）：`MIR2_LEAK_PROBE=1` 时，在**每次断线清理之后**打印各个
         // 「按 session 键」的容器尺寸。用途：泄漏门禁（leak_plateau）在 release 构建上实测
@@ -3170,6 +3176,65 @@ pub struct TestInjectMapSpawnConfig {
     pub monster_count: i32,
 }
 
+/// 测试探针：给某个怪物 object_id 塞一条**假的寻路结果**（`monster_paths` 是"按 object_id 键"的
+/// AI 侧缓存，见 `cleanup_map_spawns` 里那段注释）。用途：把"清理必须连这些缓存一起忘掉"
+/// 变成可断言的判据——注入前计数 0、注入后 1（证明读得到）、清理后必须回到 0。
+pub struct TestInjectMonsterPath {
+    pub object_id: u32,
+    pub points: usize,
+}
+
+impl Message<TestInjectMonsterPath> for WorldActor {
+    type Reply = ();
+
+    async fn handle(
+        &mut self,
+        msg: TestInjectMonsterPath,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        let path: Vec<(i32, i32)> = (0..msg.points).map(|i| (100 + i as i32, 200)).collect();
+        self.monster_paths.insert(msg.object_id, path);
+        self.monster_path_targets
+            .insert(msg.object_id, (0, 100, 200));
+    }
+}
+
+/// 测试探针：读「按 object_id 键的 AI 侧缓存」的条目数 `(monster_paths, monster_path_targets)`。
+pub struct TestMonsterAiCacheCounts;
+
+/// 测试探针：**直接**调用 `cleanup_map_spawns`（不经过"登出 → 判定地图是否空"的异步链路）。
+/// 为什么要这个入口：走登出链路时，"清理到底有没有跑"取决于别的会话记录是否已经摘干净，
+/// 断言会随调度抖动（实测同一份代码全量跑出现过一次 (1,1) 假红）。要断言的是
+/// **清理函数自身的契约**，就该直接调它。
+pub struct TestRunCleanup {
+    pub map_index: u16,
+}
+
+impl Message<TestRunCleanup> for WorldActor {
+    type Reply = ();
+
+    async fn handle(
+        &mut self,
+        msg: TestRunCleanup,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        // 直接调"清理体"，绕开"地图上没人"的前置——门禁要断言的是清理体自身的契约。
+        self.cleanup_map_spawns_force(msg.map_index).await;
+    }
+}
+
+impl Message<TestMonsterAiCacheCounts> for WorldActor {
+    type Reply = (usize, usize);
+
+    async fn handle(
+        &mut self,
+        _msg: TestMonsterAiCacheCounts,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        (self.monster_paths.len(), self.monster_path_targets.len())
+    }
+}
+
 impl Message<TestInjectMapSpawnConfig> for WorldActor {
     type Reply = ();
 
@@ -3298,6 +3363,10 @@ impl Message<PlayerLogOut> for WorldActor {
         self.transform_appearance.remove(&msg.session_id);
         // 2026-09-25 修（内存泄漏）：同断线路径——`player_heroes` 必须随会话一起清。
         self.player_heroes.remove(&msg.session_id);
+        // 同型漏清：英雄 AI/寻路状态（按 session 键）也要一起清，理由见断线路径那段注释。
+        self.hero_paths.remove(&msg.session_id);
+        self.hero_path_targets.remove(&msg.session_id);
+        self.hero_ai_states.remove(&msg.session_id);
 
         // 租赁会话清理：会话键 = 物主（存物方），partner = 租客；存入物品始终退回物主
         if let Some(session) = self.rental_sessions.remove(&msg.session_id) {
@@ -3550,8 +3619,6 @@ fn probe_phase(phase: &str, map_index: u16) {
 impl WorldActor {
     /// M61：地图上无其他玩家时，清理该地图的 NPC/怪物（避免多次登录泄漏）
     pub(crate) async fn cleanup_map_spawns(&mut self, map_index: u16) {
-        #[cfg(feature = "mem-probe")]
-        let _tag_cleanup = crate::mem_probe::TagGuard::enter(crate::mem_probe::TAG_CLEANUP);
         let mut others_on_map = 0usize;
         for r in self.players.values() {
             if let Ok(Some(os)) = r.actor_ref.ask(GetPlayerState).await {
@@ -3563,6 +3630,16 @@ impl WorldActor {
         if others_on_map > 0 {
             return;
         }
+        self.cleanup_map_spawns_force(map_index).await;
+    }
+
+    /// 清理体本身（**不含**"地图上没人"这条前置）。
+    ///
+    /// 单独拆出来是为了让门禁能确定性地断言"清理契约"：走 `cleanup_map_spawns` 时，是否真的走到清理体
+    /// 取决于别的玩家记录有没有摘干净，断言会随调度抖动（实测同一份代码全量跑出过假红）。
+    pub(crate) async fn cleanup_map_spawns_force(&mut self, map_index: u16) {
+        #[cfg(feature = "mem-probe")]
+        let _tag_cleanup = crate::mem_probe::TagGuard::enter(crate::mem_probe::TAG_CLEANUP);
         // 相位标记：清理段的起点（终点就是下面那条 MEM_PROBE_IDLE）。
         #[cfg(feature = "mem-probe")]
         probe_phase("cleanup_begin", map_index);
@@ -3593,7 +3670,21 @@ impl WorldActor {
             .collect();
         for id in &mon_ids {
             self.monsters.remove(id);
+            // 按 object_id 键的 AI 侧状态要跟怪物一起消失。object_id 是 `next_object_id` 单调发号、
+            // **永不复用**，所以只要有一条路径忘了删，就会按轮/按击杀线性累积。
+            // 实测（2026-09-25）：`monster_paths` 每轮留下 ~560 个 `Vec<(i32,i32)>`（256–544B，
+            // 合计 ~280KB/轮），而这里原先只删了 monsters/npcs —— 这就是"每轮 +0.45MB"的主因。
+            self.monster_paths.remove(id);
+            self.monster_path_targets.remove(id);
         }
+        // 兜底清扫：怪物除了从"整图清理"消失，还会从死亡/回收等 12 处 `self.monsters.remove(...)` 消失。
+        // 与其逐个改那 12 处（容易再漏），不如在这里按"当前世界里还有没有这个 object_id"扫一遍，
+        // 保证任何消失路径都不会留下残影。
+        let live_monsters: std::collections::HashSet<u32> = self.monsters.keys().copied().collect();
+        self.monster_paths
+            .retain(|id, _| live_monsters.contains(id));
+        self.monster_path_targets
+            .retain(|id, _| live_monsters.contains(id));
         // 生成物已随空地一起释放 → 清掉「已物化」标记，下次进图重新生成一份
         self.map_spawns_ready.remove(&map_index);
         // 内存探针（默认关闭）：清理后把「按 object_id 键」的辅助表尺寸一起打出来。
@@ -3616,11 +3707,15 @@ impl WorldActor {
                 self.map_spawns_ready.capacity()
             );
             info!(
-                "MAP_PROBE map={} monsters={} npcs={} monster_targets={} pet_targets={} cursed_monsters={} hallucinated={} revealed_hp={} pet_enhanced={} pet_levels={} respawn_queue={} world_boss_queue={} ground_items={} map_spawns_ready={} \
+                "MAP_PROBE map={} monsters={} npcs={} monster_paths={} monster_path_targets={} monster_targets={} pet_targets={} cursed_monsters={} hallucinated={} revealed_hp={} pet_enhanced={} pet_levels={} respawn_queue={} world_boss_queue={} ground_items={} map_spawns_ready={} \
                  player_heroes={} players={} last_move={} last_turn={} last_chat={} last_teleport={} last_probe={} gm_protected={}",
                 map_index,
                 self.monsters.len(),
                 self.npcs.len(),
+                // 2026-09-25：这两个是**按 object_id 键**的 AI 侧缓存，漏清会按轮线性累积
+                // （就是本轮找到的每轮 +0.45MB 主因）。放进探针，别再让它们"看不见"。
+                self.monster_paths.len(),
+                self.monster_path_targets.len(),
                 self.monster_targets.len(),
                 self.pet_targets.len(),
                 self.cursed_monsters.len(),
@@ -3722,6 +3817,43 @@ impl WorldActor {
                 crate::mem_probe::focus_live_total(),
                 fpos,
                 fneg
+            );
+            // 活块登记表：列出「自上次 idle 以来登记、且现在仍在表里」的块（size/tag/内容开头）。
+            // 这是唯一不依赖"分配路径记账"的归属信息——它直接回答"谁还活着"，并且能按内容认对象。
+            let mut reg_shown = 0usize;
+            let (reg_live, reg_bytes, reg_dropped) =
+                crate::mem_probe::registry_report(2, 20000, |size, tag, ptr, buf| {
+                    let tag_name = if tag < crate::mem_probe::TAG_N {
+                        crate::mem_probe::TAG_NAMES[tag]
+                    } else {
+                        "untagged"
+                    };
+                    // 内容和 hexdump 只留前几个样本（认对象够用），否则每次 idle 要打上万行、
+                    // 既拖慢清理段又把日志淹掉（实测 8000 行/点会让 bot 的下一轮登录超时）。
+                    if reg_shown < 6 {
+                        reg_shown += 1;
+                        let hex: String = buf.iter().map(|b| format!("{:02x}", b)).collect();
+                        let ascii: String = buf
+                            .iter()
+                            .map(|b| {
+                                if (0x20..0x7f).contains(b) {
+                                    *b as char
+                                } else {
+                                    '.'
+                                }
+                            })
+                            .collect();
+                        info!(
+                            "MEM_PROBE_REG size={} tag={} ptr={} hex={} ascii={}",
+                            size, tag_name, ptr, hex, ascii
+                        );
+                    } else {
+                        info!("MEM_PROBE_REG size={} tag={} ptr={}", size, tag_name, ptr);
+                    }
+                });
+            info!(
+                "MEM_PROBE_REGSUM live_entries={} live_bytes={} dropped={}",
+                reg_live, reg_bytes, reg_dropped
             );
         }
         info!(
@@ -8934,7 +9066,8 @@ mod auth_regression_tests {
     use crate::actors::account::AccountActor;
     use crate::actors::social::{SocialActor, SocialActorArgs, SocialActorConfig};
     use crate::actors::world::session::{
-        PlayerLogOut, TestInjectMapSpawnConfig, TestMapSpawnStats, TestMonsterCount,
+        PlayerLogOut, TestInjectMapSpawnConfig, TestInjectMonsterPath, TestMapSpawnStats,
+        TestMonsterAiCacheCounts, TestMonsterCount, TestRunCleanup,
     };
     use crate::actors::world::{WorldActor, WorldActorArgs};
     use crate::db;
@@ -9996,8 +10129,12 @@ mod auth_regression_tests {
                 3,
                 "物化后世界表里只应有这一份 3 只怪"
             );
+            // 按 object_id 键的 AI 缓存（monster_paths / monster_path_targets）必须随怪物一起清：
+            // object_id 单调发号、永不复用，漏一处就按轮线性累积（实测每轮 +~560 个路径 Vec。
+            // 注入前 0 → 注入后 (1,1)（证明读得到，断言不是空的）→ 清理后必须回到 (0,0)。
+            let monster_ids = collect_object_monster_ids(&mut rx_b).await;
             assert_eq!(
-                collect_object_monster_ids(&mut rx_b).await.len(),
+                monster_ids.len(),
                 3,
                 "物化那次会话必须收到 3 个 ObjectMonster"
             );
@@ -10512,6 +10649,87 @@ mod auth_regression_tests {
                 !texts.iter().any(|t| t.contains("你已成为 GM")),
                 "旧默认口令不得再提权（GM 只认数据库 admin_account），got: {:?}",
                 texts
+            );
+        });
+    }
+    /// 按 object_id 键的 AI 缓存（`monster_paths` / `monster_path_targets`）必须随怪物一起忘掉。
+    ///
+    /// 为什么单独钉一条：`object_id` 是 `next_object_id` 单调发号、**永不复用**，所以按 object_id 键的表
+    /// 只要存在一条"怪物消失了、条目还在"的路径，就会按轮/按击杀线性累积。
+    /// 实测（2026-09-25，20 会话连登连退）：每轮留下 ~560 个 `Vec<(i32,i32)>`（256–544B，合计 ~280KB/轮），
+    /// 而 `cleanup_map_spawns` 原先只删 `monsters`/`npcs` —— 这是"每轮 idle 活跃字节 +0.45MB"的主因；
+    /// 修完后同一夹具每轮净增降到 ±50KB（甚至为负）。
+    ///
+    /// 直接调 `cleanup_map_spawns`（不走"登出 → 判空"的异步链路）：要断言的是**清理函数自身的契约**；
+    /// 走登出链路时"清理到底跑没跑"取决于别的会话记录是否已摘干净，会随调度抖动出假红（实测过一次）。
+    ///
+    /// 注入两条：一条挂在真实怪物 id 上（整图清理必须连它一起忘），一条是**过期 id**
+    /// （模拟"从别的移除路径消失"的残影，靠兜底清扫收拾）。
+    #[test]
+    fn e2e_cleanup_forgets_object_id_keyed_monster_ai_cache() {
+        let rt = big_stack_runtime();
+        rt.block_on(async {
+            let session_a = 80u64;
+            let (gate_ref, mut rx_a) = setup_gate_and_session(session_a).await;
+            let world_ref = login_and_enter_game(&gate_ref, session_a, &mut rx_a).await;
+            let _ = world_ref
+                .ask(TestInjectMapSpawnConfig {
+                    map_index: 0,
+                    monster_count: 3,
+                })
+                .await;
+            let session_b = 81u64;
+            let (tx_b, mut rx_b) = mpsc::channel::<Vec<u8>>(4096);
+            let _ = gate_ref
+                .ask(SessionCreated {
+                    session_id: session_b,
+                    sender: tx_b,
+                    ip: "127.0.0.1".to_string(),
+                })
+                .await;
+            enter_game_as(&gate_ref, session_b, "testuser2", "TestChar2", &mut rx_b).await;
+            let monster_ids = collect_object_monster_ids(&mut rx_b).await;
+            assert_eq!(monster_ids.len(), 3, "物化后应有 3 只怪");
+            // 先让所有玩家离开该图（cleanup 的"地图上没人"前置），再**直接**调 cleanup：
+            // 这样"清理函数自身的契约"是可确定断言的，不受"登出 → 判空"异步链路的调度抖动影响。
+            let _ = world_ref
+                .ask(PlayerLogOut {
+                    session_id: session_a,
+                })
+                .await;
+            let _ = world_ref
+                .ask(PlayerLogOut {
+                    session_id: session_b,
+                })
+                .await;
+            assert_eq!(
+                world_ref.ask(TestMonsterAiCacheCounts).await.unwrap(),
+                (0, 0),
+                "登出路径清理后 AI 缓存应为空（否则下面的注入断言没有意义）"
+            );
+            for id in [monster_ids[0], 0xDEAD_0001u32] {
+                let _ = world_ref
+                    .ask(TestInjectMonsterPath {
+                        object_id: id,
+                        points: 40,
+                    })
+                    .await;
+            }
+            assert_eq!(
+                world_ref.ask(TestMonsterAiCacheCounts).await.unwrap(),
+                (2, 2),
+                "注入两条后应能读到（证明探针有效、断言不是空的）"
+            );
+            let _ = world_ref.ask(TestRunCleanup { map_index: 0 }).await;
+            assert_eq!(
+                world_ref.ask(TestMonsterCount).await.unwrap(),
+                0,
+                "清理后世界表应为空"
+            );
+            assert_eq!(
+                world_ref.ask(TestMonsterAiCacheCounts).await.unwrap(),
+                (0, 0),
+                "整图清理必须把按 object_id 键的 AI 缓存一起忘掉（含已消失怪的残影）"
             );
         });
     }
