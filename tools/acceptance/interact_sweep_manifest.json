@@ -1,5 +1,5 @@
 {
-  "_comment": "40 窗交互巡回的覆盖清单（单一真源）。tools/acceptance/ui_interact_sweep.ps1 按 sweep 逐窗跑交互巡回；excluded 是**有 RPC 映射但走专用段/无独立开关语义**的窗口，必须写明理由。Client-Bevy/src/control.rs 的 sweep_manifest_covers_all_rpc_kinds 测试解析本文件并与 parse_dialog_kind/has_rpc_mapping 对账——新增 RPC 窗口却漏登记，`cargo test --lib` 会红。",
+  "_comment": "41 窗交互巡回的覆盖清单（单一真源）。tools/acceptance/ui_interact_sweep.ps1 按 sweep 逐窗跑交互巡回；excluded 是**有 RPC 映射但走专用段/无独立开关语义**的窗口，必须写明理由。Client-Bevy/src/control.rs 的 sweep_manifest_covers_all_rpc_kinds 测试解析本文件并与 parse_dialog_kind/has_rpc_mapping 对账——新增 RPC 窗口却漏登记，`cargo test --lib` 会红。",
   "_schema": {
     "sweep": "交互巡回逐窗覆盖的 RPC 名（snake_case，同 dialog RPC 的 kind）",
     "no_close_by_design": "sweep 子集：C# 原版即无关闭钮，只验 RPC open/close 往返",
@@ -45,7 +45,8 @@
     "storage",
     "item_rental_browse",
     "quest_detail",
-    "input_box"
+    "input_box",
+    "mail_compose"
   ],
   "no_close_by_design": [
     "menu",

@@ -831,8 +831,10 @@ struct ControlQueries<'w, 's> {
             Option<&'static crate::game::dialogs::guild::GuildPageRoot>,
         ),
     >,
-    /// `mail_probe` RPC：客户端侧邮件列表/详情（ReceiveMail 写入，判据取状态）
-    mail: Res<'w, crate::game::dialogs::mail::MailState>,
+    /// `mail_probe` RPC：客户端侧邮件列表/详情（ReceiveMail 写入，判据取状态）。
+    /// #3209 起为 `ResMut`：`Dialog{MailCompose}` 要切 `compose` / `compose_parcel`
+    /// （只有这两个状态位由 RPC 直接驱动，其余仍只读）。
+    mail: ResMut<'w, crate::game::dialogs::mail::MailState>,
     /// 本地玩家金币（`GoldGained`/`UserInformation` 写入）——邮件收取/交易类闭环的
     /// 判据就是它的 delta，读它比读 HUD 像素或 DB 落后值都可靠
     gold: Query<'w, 's, &'static crate::game::player_state::Gold, With<LocalPlayer>>,
@@ -1825,6 +1827,12 @@ fn parse_dialog_kind(s: &str) -> Option<DialogKind> {
         "npc_goods" => D::NpcGoods,
         "guild" => D::Guild,
         "mail" => D::Mail,
+        // #3209：写邮件窗（C# `MailComposeLetterDialog` `Title[671]` 236x300 @(100,100) /
+        // `MailComposeParcelDialog` `Title[674]` 236x384）——由 `MailState.compose` +
+        // `compose_parcel` 状态驱动，`Dialog` 分支直接切状态（与 hero_manage/storage 同款）。
+        // 加这条是因为「窗口对不对齐」此前**没有实机判据**：owner 拿一张写邮件窗截图问
+        // 「这个错位了还是咋滴了」，而当时没有任何 RPC 能把这张窗打开看一眼。
+        "mail_compose" => D::MailCompose,
         "ranking" => D::Ranking,
         "mentor" => D::Mentor,
         "relationship" => D::Relationship,
@@ -1923,7 +1931,10 @@ fn has_rpc_mapping(kind: DialogKind) -> bool {
         | D::Storage
         | D::HeroManage
         | D::QuestDetail
-        | D::InputBox => true,
+        | D::InputBox
+        // #3209：写邮件窗纳入 RPC 开关（判据仪器）——几何/控件位置要能被夹具实测，
+        // 而不是只能靠读代码相信它对齐。
+        | D::MailCompose => true,
         // #2892 批D 单元①：备注窗由好友窗的「备注」动作打开（C# `MemoDialog.Show()`），
         // 无独立 RPC 开关
         D::Memo => false,
@@ -1931,9 +1942,6 @@ fn has_rpc_mapping(kind: DialogKind) -> bool {
         D::FishingStatus => false,
         // GuestTrade 刻意排除：网络 trade 会话驱动，无独立开关（见 parse_dialog_kind 文档）
         D::GuestTrade => false,
-        // #3103：两张写邮件窗与 `Mail` 成对显隐（由 `MailState.compose` / `compose_parcel` 驱动），
-        // 无独立 RPC 开关——`visible_win`/`close` 这类 RPC 仍作用于 `Mail`（列表窗）
-        D::MailCompose => false,
         // #3103 读侧：两张读邮件窗由 `MailState.detail` 驱动（读邮件 / 双击已选行才开），
         // 同样无独立 RPC 开关；`mail_read` RPC 仍走 `MailState.detail` 的同一条路径。
         D::MailRead => false,
@@ -2408,6 +2416,35 @@ fn apply_control_commands(
                         DialogAction::Toggle => {
                             q.storage.visible = !q.storage.visible;
                             mgr.toggle(kind);
+                        }
+                    }
+                } else if kind == DialogKind::MailCompose {
+                    // #3209：写邮件窗由邮件状态驱动（`MailState.compose` + `compose_parcel`；
+                    // `mail_compose_ui_system` 按它切根 Visibility）。
+                    // **必须连父窗一起开/关**：`mail_compose_follow_system` 有一条孤儿守卫——
+                    // 写信窗在 `Mail` 列表窗没开时每帧被判 `letter_orphaned` 并 `close_compose()`。
+                    // 实测踩到：只切 `compose=true` 时下一帧就被清回 false（根始终 Hidden），
+                    // 门禁报「有 CloseButton，但其 DialogRoot 不是 Visible（窗口没打开）」。
+                    // 这正是真实路径 `mail_compose_request_system` 的写法（先 `mgr.open(Mail)`）。
+                    match action {
+                        DialogAction::Open => {
+                            q.mail.compose = true;
+                            q.mail.compose_parcel = false;
+                            mgr.open(DialogKind::Mail);
+                        }
+                        DialogAction::Close => {
+                            q.mail.compose = false;
+                            q.mail.compose_parcel = false;
+                            mgr.close(DialogKind::Mail);
+                        }
+                        DialogAction::Toggle => {
+                            q.mail.compose = !q.mail.compose;
+                            q.mail.compose_parcel = false;
+                            if q.mail.compose {
+                                mgr.open(DialogKind::Mail);
+                            } else {
+                                mgr.close(DialogKind::Mail);
+                            }
                         }
                     }
                 } else {
