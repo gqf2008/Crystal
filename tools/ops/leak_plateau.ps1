@@ -11,6 +11,10 @@
 #   J2 每个 idle 采样 `tasks.running` 回到基线（无后台任务泄漏；基线=预热前 idle 的值）
 #   J3 测量轮 idle **线程数**与预热后基线一致（±2）；句柄数一致（±8）
 #   J4 测量轮 idle RSS 斜率 ≤ `-MaxRssSlopePerCycleMb`（默认 0.5 MB/轮，20 会话/轮）
+#   J5 测量轮 idle **活跃字节**斜率 ≤ `-MaxLiveSlopePerCycleMb`（默认 0.1 MB/轮）
+#      —— **这条才是"是不是真泄漏"的判据**；J4 的 RSS 会被分配器高水位主导（实测 0.365–0.763
+#      在 0.5 两边横跳）。J5 需要被测二进制带 `--features mem-probe` 且 `MIR2_LEAK_PROBE=1`；
+#      没开探针时 J5 = null（不参与 ok），报告里会明确写"本轮无法判真泄漏"。
 #   J0b 每轮**真的有 N 个会话进图**（服务端日志 `StartGame: session=` 计数 ≥ N 且
 #       `StartGame rejected` == 0）——没有这条，J1–J4 会在**空载荷**上给出绿（实测见下）
 #
@@ -40,6 +44,11 @@ param(
     [int]$HoldSec = 8,
     [int]$IdleSec = 12,
     [double]$MaxRssSlopePerCycleMb = 0.5,
+    # J5：**活跃字节**（计数分配器）每轮斜率上限。判"是不是真泄漏"要看它，不看 RSS——
+    # 2026-09-25 实测：RSS 斜率 0.365–0.763 MB/轮在阈值 0.5 两边横跳（分配器高水位噪声），
+    # 而同一份跑动的 live_bytes 每轮 +0.45MB（真泄漏，monster_paths 那条，已修）。
+    # 修完后 live_bytes 斜率 ≈0（±0.05MB/轮），RSS 仍偶尔 >0.5。
+    [double]$MaxLiveSlopePerCycleMb = 0.1,
     [string]$OutFile = '',
     # 每轮连登连退 bot 的超时（秒）：超时按本轮失败处理并**立刻**返回（2026-09-25 修）
     [int]$BotTimeoutSec = 180,
@@ -192,7 +201,33 @@ $slope = if ($measured.Count -ge 2) {
 } else { 99 }
 $j4 = ($slope -le $MaxRssSlopePerCycleMb)
 $j0b = -not (@($payload | Where-Object { $_.entered -lt $Sessions -or $_.rejected -ne 0 }).Count -gt 0)
-$ok = $j0b -and $j1 -and $j2 -and $j3 -and $j4
+
+# ---------------- J5：**活跃字节**平台判据（mem-probe 构建才可用） ----------------
+# 为什么加它：RSS 会被分配器高水位主导（实测斜率 0.365–0.763 在 0.5 两边横跳），
+# 而"是不是真泄漏"只有活跃字节能回答。2026-09-25 那次 `monster_paths` 泄漏就是
+# 「RSS 时红时绿、live_bytes 每轮 +0.45MB 单调」；修完后 live_bytes 斜率 ≈0。
+# 取数：服务端日志里每轮空闲点的 `MEM_PROBE_IDLE … live_bytes=…`（与 RSS 采样同相位）。
+# 没开探针（默认构建）时 J5 = null（既不算通过也不算失败），但会在报告里明确写"本轮无法判真泄漏"。
+$liveSeries = @()
+if (Test-Path -LiteralPath $log) {
+    foreach ($ln in (Get-Content -LiteralPath $log -EA SilentlyContinue)) {
+        if ($ln -notmatch 'MEM_PROBE_IDLE') { continue }
+        $m = [regex]::Match($ln, 'live_bytes=(\d+)')
+        if ($m.Success) { $liveSeries += [double]$m.Groups[1].Value }
+    }
+}
+$liveSlope = $null
+$liveMeasured = @()
+if ($liveSeries.Count -gt $WarmCycles) {
+    # 与 RSS 一样：丢掉预热轮，只量测量轮
+    $liveMeasured = @($liveSeries[$WarmCycles..($liveSeries.Count - 1)])
+}
+$j5 = $null
+if ($liveMeasured.Count -ge 2) {
+    $liveSlope = ($liveMeasured[-1] - $liveMeasured[0]) / ($liveMeasured.Count - 1)
+    $j5 = ($liveSlope -le ($MaxLiveSlopePerCycleMb * 1MB))
+}
+$ok = $j0b -and $j1 -and $j2 -and $j3 -and $j4 -and ($null -eq $j5 -or $j5)
 
 # 2026-09-25 补：J4 用的是**端点斜率**（首尾两点），在只有 5 个采样点时会被单点离群值主导 ——
 # 实测同一份夹具、同一份设置连跑两次：0.482（ok）与 0.81（ok=false）。所以报告里同时给出
@@ -241,6 +276,18 @@ $report = [ordered]@{
     J3_thread_span            = $j3thr
     J3_handle_span            = $j3hnd
     J4_plateau_not_leak       = $j4
+    # J5：真泄漏判据（只看活跃字节）。$null = 本次没开探针，无法判真泄漏。
+    J5_live_bytes_plateau     = $j5
+    live_bytes_idle_bytes     = @($liveMeasured | ForEach-Object { [long]$_ })
+    live_bytes_slope_per_cycle = if ($null -ne $liveSlope) { [Math]::Round($liveSlope, 1) } else { $null }
+    max_live_slope_allowed    = ($MaxLiveSlopePerCycleMb * 1MB)
+    J5_note                   = if ($null -eq $j5) {
+        '本次没跑出 MEM_PROBE_IDLE（默认构建没带 mem-probe，或没设 MIR2_LEAK_PROBE=1）⇒ **无法判真泄漏**；J1–J4 只能做粗判。要判真泄漏请用 --features mem-probe 的构建 + MIR2_LEAK_PROBE=1。'
+    } elseif ($j5) {
+        "活跃字节每轮净增 $( [Math]::Round($liveSlope,1) ) B ≤ 阈值 $([long]($MaxLiveSlopePerCycleMb * 1MB)) B：没有每轮线性泄漏。"
+    } else {
+        "**活跃字节每轮净增 $( [Math]::Round($liveSlope,1) ) B > 阈值 $([long]($MaxLiveSlopePerCycleMb * 1MB)) B：存在每轮线性泄漏**（RSS 斜率只能做参考）。"
+    }
     J0b_payload_entered       = $j0b
     payload_entered_per_round = $payload
     account_scheme            = ($AccountPrefix + '1..N（1-based，与 seed_load_accounts.py 一致）')
