@@ -52,7 +52,20 @@ macOS 产物未签名：首次打开被 Gatekeeper 拦截时右键 → 打开，
    cargo run --release --bin migrate_mirdb -- <path-to-Server.MirDB> Data/crystal.db
    ```
 
-   旧格式 `.MirADB` 用 `migrate` 子命令（用法见 `ServerRust/src/bin/migrate.rs` 顶部注释）。
+  旧格式 `.MirADB` 用 `migrate` 子命令（用法见 `ServerRust/src/bin/migrate.rs` 顶部注释）。
+
+  > **⚠️ 2026-09-25 实测：`.MirADB` 迁移对当前发布数据（v112）仍不可用，别用它导生产账号。**
+  > 用真实 `Server.MirADB`（v112、3 个账号）实跑：本 PR 已修掉两个独立缺陷——
+  > ① **Windows 下 DB URL 拼错**（原样 `sqlite://C:\...` 直接 `code 14 unable to open database file`，
+  > 且 sqlx 不会替你建目录/文件）；②**三处「格子是否有物品」标志判反**（C# `AccountInfo.Save:242-248`
+  > 与 `CharacterInfo.Save:434-455` 都是 `writer.Write(X != null); if (X == null) continue;`，
+  > 即 **true 才跟一个 UserItem**；工具原本写成「true 就跳过」⇒ 每个空格都去读整件物品，整段错位到 EOF）。
+  > 修完后仍会在**角色段**错位：C# 的角色记录里 `UserMagic`（`Spell u8 + Level u8 + Key u8 + Experience u16 + IsTemp`）、
+  > `PetInfo`、`QuestProgressInfo`（v≥90 起是「index + 两个 i64 + 可变长进度表」）等子结构与工具体现的扁平字段不一致，
+  > 实测断点：账号头解析正常（`account_id=gqf`、`char_count=4`），角色 #0 内约 pos≈1515 起失真、最终 EOF。
+  > 结论：**账号/角色迁移请等角色段按 C# 重写**；当前需要账号时走客户端注册（第 3 步）即可。
+  > 排查这类错位用 `MIR2_MIGRATE_TRACE=1`（本 PR 加的读取轨迹：逐条打印 `i32/str` 的**位置与长度**，
+  > 比只看最后一句 `failed to fill whole buffer` 有效得多）。
 
    > **版本支持与核验（2026-09-25）**：工具原先只实现 **≤84** 的旧布局，拿当前发布数据
    > （`Server.MirDB` **version 112**）实跑会失败——物品段读到第 607/1628 个就 EOF、之后各段全空

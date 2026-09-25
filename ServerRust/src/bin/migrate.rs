@@ -5,7 +5,6 @@
 #![allow(dead_code)]
 
 use byteorder::{LittleEndian, ReadBytesExt};
-use data_encoding;
 use std::io::Read;
 use tracing::{error, info};
 
@@ -15,42 +14,62 @@ use tracing::{error, info};
 
 struct BinaryReader<R: Read> {
     inner: R,
+    /// 已读字节数（诊断用：错位排查要看「读到哪」而不是「读出了什么」）
+    pos: usize,
 }
 
 impl<R: Read> BinaryReader<R> {
     fn new(inner: R) -> Self {
-        Self { inner }
+        Self { inner, pos: 0 }
+    }
+    fn position(&self) -> usize {
+        self.pos
     }
     fn read_raw_i32(&mut self) -> std::io::Result<i32> {
-        self.inner.read_i32::<LittleEndian>()
+        let at = self.pos;
+        self.pos += 4;
+        let v = self.inner.read_i32::<LittleEndian>()?;
+        if trace_on() {
+            eprintln!("[trace] i32  @{at} = {v}");
+        }
+        Ok(v)
     }
     fn read_raw_u32(&mut self) -> std::io::Result<u32> {
+        self.pos += 4;
         self.inner.read_u32::<LittleEndian>()
     }
     fn read_raw_i64(&mut self) -> std::io::Result<i64> {
+        self.pos += 8;
         self.inner.read_i64::<LittleEndian>()
     }
     fn read_raw_u64(&mut self) -> std::io::Result<u64> {
+        self.pos += 8;
         self.inner.read_u64::<LittleEndian>()
     }
     fn read_raw_u16(&mut self) -> std::io::Result<u16> {
+        self.pos += 2;
         self.inner.read_u16::<LittleEndian>()
     }
     fn read_raw_u8(&mut self) -> std::io::Result<u8> {
+        self.pos += 1;
         self.inner.read_u8()
     }
     fn read_raw_i8(&mut self) -> std::io::Result<i8> {
+        self.pos += 1;
         self.inner.read_i8()
     }
     fn read_boolean(&mut self) -> std::io::Result<bool> {
+        self.pos += 1;
         Ok(self.inner.read_u8()? != 0)
     }
 
     fn read_string(&mut self) -> std::io::Result<String> {
+        let at = self.pos;
         let mut len: u32 = 0;
         let mut shift = 0;
         loop {
             let b = self.inner.read_u8()?;
+            self.pos += 1;
             len |= ((b & 0x7F) as u32) << shift;
             shift += 7;
             if b & 0x80 == 0 {
@@ -65,12 +84,18 @@ impl<R: Read> BinaryReader<R> {
         }
         let mut buf = vec![0u8; len as usize];
         self.inner.read_exact(&mut buf)?;
+        self.pos += len as usize;
+        if trace_on() {
+            let head: String = String::from_utf8_lossy(&buf[..buf.len().min(24)]).to_string();
+            eprintln!("[trace] str  @{at} len={len} head={head:?}");
+        }
         Ok(String::from_utf8_lossy(&buf).to_string())
     }
 
     fn read_bytes(&mut self, count: usize) -> std::io::Result<Vec<u8>> {
         let mut buf = vec![0u8; count];
         self.inner.read_exact(&mut buf)?;
+        self.pos += count;
         Ok(buf)
     }
 
@@ -79,6 +104,12 @@ impl<R: Read> BinaryReader<R> {
         const EPOCH_DIFF_TICKS: i64 = 621355968000000000;
         Ok((ticks - EPOCH_DIFF_TICKS) / 10_000_000)
     }
+}
+
+/// `MIR2_MIGRATE_TRACE=1` 时打印读取轨迹（定位二进制格式错位用：看「读到哪、读多长」，
+/// 而不是只看到最后一句 "failed to fill whole buffer"）。
+fn trace_on() -> bool {
+    std::env::var("MIR2_MIGRATE_TRACE").is_ok()
 }
 
 // ============================================================
@@ -228,29 +259,23 @@ fn read_user_item<R: Read>(
     } // refine_success_chance
     let wedding_ring = reader.read_raw_i32()?;
 
-    if version >= 65 {
-        if reader.read_boolean()? {
-            reader.read_raw_i32()?;
-            reader.read_raw_i32()?; // expire_info
-        }
+    if version >= 65 && reader.read_boolean()? {
+        reader.read_raw_i32()?;
+        reader.read_raw_i32()?; // expire_info
     }
-    if version >= 76 {
-        if reader.read_boolean()? {
-            reader.read_raw_i64()?;
-            reader.read_raw_i64()?;
-            reader.read_raw_u64()?; // rental_info
-        }
+    if version >= 76 && reader.read_boolean()? {
+        reader.read_raw_i64()?;
+        reader.read_raw_i64()?;
+        reader.read_raw_u64()?; // rental_info
     }
     let is_shop_item = if version >= 83 {
         reader.read_boolean()?
     } else {
         false
     };
-    if version >= 92 {
-        if reader.read_boolean()? {
-            reader.read_raw_i64()?;
-            reader.read_raw_i32()?; // sealed_info
-        }
+    if version >= 92 && reader.read_boolean()? {
+        reader.read_raw_i64()?;
+        reader.read_raw_i32()?; // sealed_info
     }
     let gm_made = if version > 107 {
         reader.read_boolean()?
@@ -328,7 +353,12 @@ fn read_character_info<R: Read>(
     let inv_count = reader.read_raw_i32()?;
     let mut inventory: Vec<Option<ParsedUserItem>> = Vec::with_capacity(inv_count as usize);
     for _ in 0..inv_count {
-        if reader.read_boolean()? {
+        // C# `CharacterInfo.Save`（Server/MirDatabase/CharacterInfo.cs:434-437）每格先写
+        // `Inventory[i] != null`，**true 才跟一个 UserItem**。原实现三个循环都判反了
+        // （空格反而去读 UserItem）⇒ 角色记录从第一个空格起整段错位直到 EOF
+        // （实测真实 Server.MirADB：三个账号全部 "failed to fill whole buffer"、
+        // 账号 #0 的解析把整个文件读完 pos=20456 > 文件 20455）。
+        if !reader.read_boolean()? {
             inventory.push(None);
         } else {
             inventory.push(Some(read_user_item(reader, version)?));
@@ -339,7 +369,8 @@ fn read_character_info<R: Read>(
     let eq_count = reader.read_raw_i32()?;
     let mut equipment: Vec<Option<ParsedUserItem>> = Vec::with_capacity(eq_count as usize);
     for _ in 0..eq_count {
-        if reader.read_boolean()? {
+        // 同上（C# :443-446）
+        if !reader.read_boolean()? {
             equipment.push(None);
         } else {
             equipment.push(Some(read_user_item(reader, version)?));
@@ -349,9 +380,11 @@ fn read_character_info<R: Read>(
     // QuestInventory (consume but don't store separately)
     let qi_count = reader.read_raw_i32()?;
     for _ in 0..qi_count {
+        // 同上（C# :452-455）
         if !reader.read_boolean()? {
-            read_user_item(reader, version)?;
+            continue;
         }
+        read_user_item(reader, version)?;
     }
 
     // Magics
@@ -668,11 +701,9 @@ fn read_account<R: Read>(
     reader.read_raw_i32()?; // index
     let account_id = reader.read_string()?;
 
-    let _password = if version < 94 {
-        reader.read_string()?
-    } else {
-        reader.read_string()?
-    };
+    // C# `AccountInfo` 在 v94 前后换了字段名（`Password` → `password`），但**线格式都是
+    // 一个 dotnet 字符串**，故这里不需要分支（原先写了同体的 if/else，clippy 判 identical blocks）。
+    let _password = reader.read_string()?;
 
     let salt = if version > 93 {
         let salt_len = reader.read_raw_i32()?;
@@ -723,7 +754,12 @@ fn read_account<R: Read>(
     let storage_count = reader.read_raw_i32()?;
     let mut storage_items: Vec<Option<ParsedUserItem>> = (0..storage_count).map(|_| None).collect();
     for i in 0..storage_count {
-        if reader.read_boolean()? {
+        // C# `AccountInfo.Save`（Server/MirDatabase/AccountInfo.cs:242-248）每格先写
+        // `Storage[i] != null`，**只有 true 后面才跟一个 UserItem**。
+        // 原实现判反了（true 就 continue）⇒ 每个**空**格都被当成有物品去读，
+        // 整个账号记录从此错位直到 EOF（实测真实 Server.MirADB 三个账号全部
+        // "failed to fill whole buffer"、Accounts migrated: 0）。
+        if !reader.read_boolean()? {
             continue;
         }
         let item = read_user_item(reader, version)?;
@@ -891,10 +927,10 @@ async fn migrate_character(
     for (idx, blocked, memo) in &character.friends {
         if *blocked {
             sqlx::query("INSERT INTO blocked_list (character_name, blocked_object_id, blocked_name) VALUES (?,?,?)")
-                .bind(&character.name).bind(idx).bind(&format!("char_{}", idx)).execute(pool).await?;
+                .bind(character.name.as_str()).bind(idx).bind(format!("char_{}", idx)).execute(pool).await?;
         } else {
             sqlx::query("INSERT INTO friends (character_name, friend_object_id, friend_name, memo) VALUES (?,?,?,?)")
-                .bind(&character.name).bind(idx).bind(&format!("char_{}", idx)).bind(memo).execute(pool).await?;
+                .bind(character.name.as_str()).bind(idx).bind(format!("char_{}", idx)).bind(memo).execute(pool).await?;
         }
     }
 
@@ -1117,8 +1153,34 @@ async fn main() -> anyhow::Result<()> {
     info!("Accounts to migrate: {}", account_count);
 
     // Initialize database
-    let db_url = format!("sqlite://{}", sqlite_path);
+    // 与 `migrate_mirdb` 同一套口径：绝对化 → 反斜杠转正斜杠 → 建父目录 → 建文件 → 再连。
+    // 原实现直接 `format!("sqlite://{}", sqlite_path)`：Windows 下会拼出
+    // `sqlite://C:\Users\...\adb.db` 这种 URL，sqlx 解析后打不开（实测报 code 14 unable to open
+    // database file），而且 sqlx 不会替你创建目录/文件 ⇒ 文档里「旧格式 .MirADB 用 migrate 子命令」
+    // 这条路在 Windows 上是死的（2026-09-25 用真实 Server.MirADB 实跑发现）。
+    let abs_path = if std::path::Path::new(sqlite_path).is_absolute() {
+        sqlite_path.to_string()
+    } else {
+        let cwd = std::env::current_dir()
+            .map_err(|e| anyhow::anyhow!("Failed to get current dir: {}", e))?;
+        cwd.join(sqlite_path).to_string_lossy().to_string()
+    };
+    let normalized = abs_path.replace('\\', "/");
+    let db_url = format!("sqlite://{}", normalized);
     info!("DB URL: {}", db_url);
+
+    // Ensure parent directory and file exist (sqlx won't create them)
+    if let Some(parent) = std::path::Path::new(&abs_path).parent() {
+        std::fs::create_dir_all(parent).map_err(|e| {
+            anyhow::anyhow!("Failed to create directory {}: {}", parent.display(), e)
+        })?;
+    }
+    std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(true)
+        .write(true)
+        .open(&abs_path)
+        .map_err(|e| anyhow::anyhow!("Failed to create DB file {}: {}", abs_path, e))?;
     // FK 必须连接选项池级禁用：PRAGMA foreign_keys 是【每连接】设置，sqlx 默认每条新连接
     // FK ON——INSERT OR REPLACE INTO characters 在 FK ON 连接上会触发子表级联删除+重插
     // 导致 FK constraint failed（与 db::init_db_pool 同理；数据完整性由应用层事务保证）。
@@ -1311,7 +1373,12 @@ async fn main() -> anyhow::Result<()> {
                 }
             }
             Err(e) => {
-                error!("Failed to read account #{}: {}", i, e);
+                error!(
+                    "Failed to read account #{}: {}（读到 pos={}）",
+                    i,
+                    e,
+                    reader.position(),
+                );
                 error_count += 1;
             }
         }
