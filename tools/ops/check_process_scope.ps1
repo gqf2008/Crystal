@@ -12,6 +12,12 @@
 # 唯一命名不算违规：`Stop-Process -Name <自己的唯一名>` 正是 LESSON 推荐的做法，本门禁只认
 #   **共享名**（mir2_server / client_bevy）以及 "Get-Process … | Stop-Process" 这种按名管道。
 #   只做存在性探测（`if (-not (Get-Process -Name mir2_server …)) { exit 9 }`）的脚本不受影响。
+# 扫描面与"杀法"都不止 PowerShell（2026-09-25 补，与实机锁覆盖面那轮的扩展名盲区同型）：
+#   · 扫描面 = 整仓的 `*.ps1` / `*.bat` / `*.cmd`（写死 `.ps1` 时，一条
+#     `taskkill /F /IM mir2_server.exe` 的批处理可以整体绕开这道门禁）；
+#   · 批处理里的"按名杀"也纳入判据：`taskkill /IM <共享名>.exe`、`wmic process where name='<共享名>.exe' … delete`；
+#   · 唯一命名照样放过（`taskkill /IM client_bevy_l5t.exe` 不违规），只探测不杀的 `tasklist | findstr …`
+#     也不违规；批处理的注释（`REM` / `::` / `@REM`）与 PowerShell 的 `#` 一样先剔掉，避免门禁自己变噪音。
 #
 # 用法：pwsh tools/ops/check_process_scope.ps1                 # 0 无新增 / 1 有新增未迁移 / 2 前置失败或门禁自检失败
 #       pwsh tools/ops/check_process_scope.ps1 -Strict         # allowlist 里的一起报红（全部迁移完后用）
@@ -54,12 +60,29 @@ function Find-ProcessNameKill {
     param([Parameter(Mandatory)][string]$Path)
     $hits = @()
     $code = @(Get-Content -LiteralPath $Path -ErrorAction SilentlyContinue |
-        Where-Object { $_.Trim() -and -not $_.Trim().StartsWith('#') })
+        Where-Object {
+            $t = $_.Trim()
+            # 注释先剔掉（PowerShell 的 `#` 与批处理的 `REM`/`@REM`/`::`）——注释里常写"原先按进程名杀…"
+            # 这种说明，算进门禁自己就成噪音。只探测不杀的写法（tasklist/findstr、Get-Process 存在性判断）
+            # 也不受影响：下面的判据都要求真的出现"杀"的动作。
+            $t -and -not ($t.StartsWith('#') -or $t -match '^(?i)(@?REM\b|::)')
+        })
     for ($i = 0; $i -lt $code.Count; $i++) {
         $ln = $code[$i]
         # 共享资源名：服务端 / Bevy 客户端 / **原版 C# 客户端 `Client.exe`**（本机多 agent 会用同一份原版
         # 做逐窗 A/B 对照）/ 登录探针用的 mir2_login。唯一命名（如 `mir2_server_ci_unique`）因 \b 不匹配。
         $shared = '\b(mir2_server|client_bevy|Client|mir2_login)\b'
+        # 批处理/命令行里的"按名杀"：taskkill /IM xxx.exe、wmic … where name='xxx.exe' … delete。
+        # 与 PowerShell 那两支并列，共享名/唯一命名的判定口径完全一致（同一份 $shared 正则）。
+        if ($ln -match '(?i)\btaskkill\b' -and $ln -match '(?i)/IM\b' -and $ln -match $shared) {
+            $hits += $ln.Trim()
+            continue
+        }
+        if ($ln -match '(?i)\bwmic\b' -and $ln -match '(?i)\bdelete\b' -and
+            $ln -match "(?i)name\s*=\s*['`"]?[^'`"]*$shared") {
+            $hits += $ln.Trim()
+            continue
+        }
         if ($ln -match 'Stop-Process') {
             # ① 同行按共享名杀；② 同行 Get-Process（无 -Name 的全场清 / 或按共享名）再杀
             $isSharedByName = $ln -match $shared
@@ -93,6 +116,24 @@ function Find-ProcessNameKill {
     $hits
 }
 
+function Get-ScannedScripts {
+    <#
+      扫描面 = 给定目录下所有 `*.ps1` / `*.bat` / `*.cmd`（排除 `.git`/`target`/`node_modules` 与本门禁自己）。
+      抽成函数是为了让自检能对"**扫描面是否真的包含 `.bat`/`.cmd`**"做阳性对照——写死 `*.ps1` 时自检即红。
+    #>
+    param([Parameter(Mandatory)][string[]]$Dirs, [string]$SelfLeaf = '')
+    $exts = @('.ps1', '.bat', '.cmd')
+    $skipDirs = '\\(\.git|target|node_modules)\\'
+    $out = @()
+    foreach ($d in $Dirs) {
+        $out += @(Get-ChildItem -LiteralPath $d -Recurse -File -ErrorAction SilentlyContinue |
+            Where-Object { $exts -contains $_.Extension.ToLowerInvariant() -and $_.FullName -notmatch $skipDirs } |
+            Where-Object { (-not $SelfLeaf) -or ($_.Name -ne $SelfLeaf) } |
+            ForEach-Object { $_.FullName })
+    }
+    $out
+}
+
 $userScanDirs = $ScanDir.Count   # 0 = 用默认扫描面（此时必须覆盖整仓，见下面的盲区回归锁）
 if ($ScanDir.Count -eq 0) {
     # 2026-09-25 晚：扫描面从「三个目录」改成**整仓**（排除 .git/target/node_modules）——
@@ -103,14 +144,8 @@ if ($ScanDir.Count -eq 0) {
     $ScanDir = @($root)
 }
 $selfLeaf = Split-Path -Leaf $PSCommandPath
-$files = @()
-$skipDirs = '\\(\.git|target|node_modules)\\'
-foreach ($d in $ScanDir) {
-    if (-not (Test-Path -LiteralPath $d)) { Fail "扫描目录不存在：$d" }
-    $files += @(Get-ChildItem -LiteralPath $d -Recurse -Filter *.ps1 -File -ErrorAction SilentlyContinue |
-        Where-Object { $_.Name -ne $selfLeaf -and $_.FullName -notmatch $skipDirs } |
-        ForEach-Object { $_.FullName })
-}
+foreach ($d in $ScanDir) { if (-not (Test-Path -LiteralPath $d)) { Fail "扫描目录不存在：$d" } }
+$files = @(Get-ScannedScripts -Dirs $ScanDir -SelfLeaf $selfLeaf)
 if ($files.Count -eq 0) { Fail "扫描面为空（$($ScanDir -join ', ')）——判据没跑起来，不许当绿" }
 
 # ---------------- 沙箱正/负对照：判据不许空转 ----------------
@@ -148,28 +183,59 @@ if (-not $SkipSelfTest) {
             "Get-CimInstance Win32_Process -Filter `"Name='mir2_server.exe'`" |`n" +
             "    Where-Object { `$_.ExecutablePath -eq `$ServerExe } |`n" +
             "    ForEach-Object { Stop-Process -Id `$_.ProcessId -Force }`n", $enc)
+        # 正对照 4/5（2026-09-25 补的**扩展名**盲区）：批处理里的按名杀。
+        # 实测过：只扫 `*.ps1` 的旧实现看不见这两个文件 ⇒ `taskkill /F /IM mir2_server.exe` 能整体绕开门禁。
+        [System.IO.File]::WriteAllText((Join-Path $sb 'bad_taskkill.bat'),
+            "@echo off`r`ntaskkill /F /IM mir2_server.exe`r`n", $enc)
+        [System.IO.File]::WriteAllText((Join-Path $sb 'bad_taskkill.cmd'),
+            "@echo off`r`ntaskkill /IM client_bevy.exe /F`r`n", $enc)
+        # 负对照 6：批处理按**自己的唯一命名**杀——允许（与 PowerShell 侧同口径）
+        [System.IO.File]::WriteAllText((Join-Path $sb 'good_taskkill_unique.bat'),
+            "@echo off`r`ntaskkill /F /IM client_bevy_l5t.exe`r`n", $enc)
+        # 负对照 7：批处理只**探测**不杀（tasklist/findstr）——不许误判
+        [System.IO.File]::WriteAllText((Join-Path $sb 'good_batch_probe.bat'),
+            "@echo off`r`ntasklist /FI `"IMAGENAME eq mir2_server.exe`" | findstr /I mir2_server.exe >nul`r`n", $enc)
+        # 负对照 8：批处理注释里提到"原先按名杀 mir2_server"——注释剔除后不许误判
+        [System.IO.File]::WriteAllText((Join-Path $sb 'good_batch_comment.bat'),
+            "@echo off`r`nREM 原先 taskkill /F /IM mir2_server.exe 会杀别人的开发服，现改成按自己 PID`r`n" +
+            ":: taskkill /IM client_bevy.exe /F`r`n", $enc)
         $bad1 = @(Find-ProcessNameKill -Path (Join-Path $sb 'bad_pipeline.ps1'))
         $bad2 = @(Find-ProcessNameKill -Path (Join-Path $sb 'bad_stopbyname.ps1'))
         $bad3 = @(Find-ProcessNameKill -Path (Join-Path $sb 'bad_crossline.ps1'))
+        $bad4 = @(Find-ProcessNameKill -Path (Join-Path $sb 'bad_taskkill.bat'))
+        $bad5 = @(Find-ProcessNameKill -Path (Join-Path $sb 'bad_taskkill.cmd'))
         $ok1 = @(Find-ProcessNameKill -Path (Join-Path $sb 'good_pid.ps1'))
         $ok2 = @(Find-ProcessNameKill -Path (Join-Path $sb 'good_unique_name.ps1'))
         $ok3 = @(Find-ProcessNameKill -Path (Join-Path $sb 'good_probe.ps1'))
         $ok4 = @(Find-ProcessNameKill -Path (Join-Path $sb 'good_scoped.ps1'))
         $ok5 = @(Find-ProcessNameKill -Path (Join-Path $sb 'good_path_scoped.ps1'))
+        $ok6 = @(Find-ProcessNameKill -Path (Join-Path $sb 'good_taskkill_unique.bat'))
+        $ok7 = @(Find-ProcessNameKill -Path (Join-Path $sb 'good_batch_probe.bat'))
+        $ok8 = @(Find-ProcessNameKill -Path (Join-Path $sb 'good_batch_comment.bat'))
+        # 扫描面自证：`.bat`/`.cmd` 必须在扫描面里（写死 `*.ps1` 时这里就是 0，自检即红）
+        $sbScanned = @(Get-ScannedScripts -Dirs @($sb))
+        $sbBatch = @($sbScanned | Where-Object { $_ -match '\.(bat|cmd)$' })
         $problems = @()
         if ($bad1.Count -eq 0) { $problems += '正对照1（Get-Process 管道杀 mir2_server）没被抓到 —— 判据空了' }
         if ($bad2.Count -eq 0) { $problems += '正对照2（Stop-Process -Name client_bevy）没被抓到 —— 判据空了' }
         if ($bad3.Count -eq 0) { $problems += '正对照3（跨行管道：Get-CimInstance 按名查 → Stop-Process -Id）没被抓到 —— 判据空了' }
+        if ($bad4.Count -eq 0) { $problems += '正对照4（.bat：taskkill /F /IM mir2_server.exe）没被抓到 —— 扩展名盲区回来了' }
+        if ($bad5.Count -eq 0) { $problems += '正对照5（.cmd：taskkill /IM client_bevy.exe /F）没被抓到 —— 扩展名盲区回来了' }
+        if ($sbBatch.Count -lt 5) { $problems += ("扫描面没覆盖 .bat/.cmd（只认出 {0} 个）—— 是不是又写死 *.ps1 了？" -f $sbBatch.Count) }
         if ($ok1.Count -ne 0) { $problems += '负对照1（按自己 PID 杀）被误判为违规' }
         if ($ok2.Count -ne 0) { $problems += '负对照2（按自己唯一命名杀）被误判为违规' }
         if ($ok3.Count -ne 0) { $problems += '负对照3（存在性探测，后面接 exit 9）被误判为违规' }
         if ($ok4.Count -ne 0) { $problems += '负对照4（带 CommandLine 唯一判别的清残留）被误判为违规' }
         if ($ok5.Count -ne 0) { $problems += '负对照5（按自己 exe 路径过滤的清场）被误判为违规' }
+        if ($ok6.Count -ne 0) { $problems += '负对照6（.bat 按自己的唯一命名杀）被误判为违规' }
+        if ($ok7.Count -ne 0) { $problems += '负对照7（.bat 只探测不杀：tasklist/findstr）被误判为违规' }
+        if ($ok8.Count -ne 0) { $problems += '负对照8（.bat 注释里提到按名杀）被误判为违规' }
         if ($problems.Count -gt 0) {
             foreach ($p in $problems) { Write-Host ("  [自检红] " + $p) -ForegroundColor Red }
             Fail ("本门禁自身判据不可信（沙箱 $sb）")
         }
-        Write-Host '自检：沙箱正对照 3/3 乱杀被抓（含跨行管道）、负对照 5/5 合规写法未被误判 ✅'
+        Write-Host ('自检：沙箱正对照 5/5 乱杀被抓（含跨行管道与 .bat/.cmd 的 taskkill）、负对照 8/8 合规写法未被误判；' +
+                    '扫描面含 .bat/.cmd（认出 {0} 个）✅' -f $sbBatch.Count)
     } finally {
         Remove-Item -LiteralPath $sb -Recurse -Force -ErrorAction SilentlyContinue
     }
