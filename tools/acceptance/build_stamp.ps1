@@ -104,10 +104,24 @@ function Assert-ClientBuildStamp {
         return
     }
     if ($stamp.commit -ne $head -and -not $head.StartsWith($stamp.commit)) {
-        Write-Host ("FAIL(2)[{0}]: 被测 exe 出自 {1}，而构建根 HEAD={2} —— **陈旧二进制**，先重建再跑" -f `
-            $ScriptName, $stamp.short, $head.Substring(0, [Math]::Min(9, $head.Length))) -ForegroundColor Red
-        Write-Host ("          （重建：cd {0}\Client-Bevy; cargo build --bin client_bevy）" -f $Worktree) -ForegroundColor Red
-        exit 2
+        # **判"陈旧"要按"客户端代码有没有变"，不是"HEAD 有没有动"**：仅 tools/docs 的合并（如门禁修复）
+        # 不该逼着重建 19 分钟的 GNU release 产物。判据：`<stamp>..HEAD` 里有没有触碰 Client-Bevy。
+        $changed = $null
+        try {
+            $changed = (& git -C $Worktree rev-list --count ("{0}..HEAD" -f $stamp.commit) -- Client-Bevy 2>$null |
+                Select-Object -First 1)
+            if ($changed) { $changed = $changed.Trim() }
+        } catch { $changed = $null }
+        if ($changed -eq '0') {
+            Write-Host ("  [OK][{0}] exe 出自 {1}，HEAD 已前进到 {2}，但**Client-Bevy 无改动**（仅 tools/docs）⇒ 不判陈旧" -f `
+                $ScriptName, $stamp.short, $head.Substring(0, [Math]::Min(9, $head.Length))) -ForegroundColor DarkGray
+        } else {
+            $why = if ($null -eq $changed -or $changed -eq '') { '（无法比对提交区间：可能不是同一历史）' } else { ("（Client-Bevy 有 {0} 个提交）" -f $changed) }
+            Write-Host ("FAIL(2)[{0}]: 被测 exe 出自 {1}，而构建根 HEAD={2} —— **陈旧二进制**{3}，先重建再跑" -f `
+                $ScriptName, $stamp.short, $head.Substring(0, [Math]::Min(9, $head.Length)), $why) -ForegroundColor Red
+            Write-Host ("          （重建：cd {0}\Client-Bevy; cargo build --bin client_bevy）" -f $Worktree) -ForegroundColor Red
+            exit 2
+        }
     }
     $dirtyTag = if ($stamp.dirty -eq '1') { 'dirty=1（构建时工作区有未提交改动：产物≠HEAD 树，仅告警）' } else { 'dirty=0' }
     if ($stamp.dirty -eq '1' -and -not $AllowDirty) {
