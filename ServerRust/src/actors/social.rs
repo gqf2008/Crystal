@@ -3171,6 +3171,22 @@ impl Message<SocialPlayerJoined> for SocialActor {
 
     async fn handle(&mut self, msg: SocialPlayerJoined, _ctx: &mut Context<Self, Self::Reply>) {
         self.players.insert(msg.session_id, msg.actor_ref.clone());
+        // 内存探针（默认关闭）：看在线表与各会话键容器是否回落到 0。配合 world 侧
+        // `SOCIAL_NOTIFY_DROPPED`（通知被 try_send 丢弃）一起读，用来判断"过期在线条目"泄漏。
+        if std::env::var("MIR2_LEAK_PROBE").is_ok() {
+            info!(
+                "SOCIAL_PROBE op=joined sid={} players={} groups={} group_invites={} trades={} trade_invites={} pending_guild={} pending_marriage={} pending_mentor={}",
+                msg.session_id,
+                self.players.len(),
+                self.groups.len(),
+                self.group_invites.len(),
+                self.active_trades.len(),
+                self.trade_invites.len(),
+                self.pending_guild_invites.len(),
+                self.pending_marriage_invites.len(),
+                self.pending_mentor_invites.len(),
+            );
+        }
         // C# MirConnection.cs:701：登录时主动下发好友列表（GetFriends → S.FriendUpdate）
         self.send_friends_list(msg.session_id).await;
         // 同步行会成员在线状态（服务端重启后行会从 DB 加载，成员 session 为 None；
@@ -3372,6 +3388,21 @@ impl Message<SocialPlayerLeft> for SocialActor {
         };
 
         self.players.remove(&msg.session_id);
+        // 内存探针（默认关闭）：断线/登出后在线表应回落；不回落即"过期在线条目"。
+        if std::env::var("MIR2_LEAK_PROBE").is_ok() {
+            info!(
+                "SOCIAL_PROBE op=left sid={} players={} groups={} group_invites={} trades={} trade_invites={} pending_guild={} pending_marriage={} pending_mentor={}",
+                msg.session_id,
+                self.players.len(),
+                self.groups.len(),
+                self.group_invites.len(),
+                self.active_trades.len(),
+                self.trade_invites.len(),
+                self.pending_guild_invites.len(),
+                self.pending_marriage_invites.len(),
+                self.pending_mentor_invites.len(),
+            );
+        }
 
         // 师徒下线通知 + MentorExp 转移（C# LogoutMentor：徒弟下线 → mentor.MentorExp += MenteeEXP）
         if let Some((name, level, Some(partner_name), is_mentor, mentee_exp)) = leaving_mentor {

@@ -356,6 +356,33 @@ live_le16k=… live_gt16k=…`（按尺寸分档的活跃字节）。
 候选方向（下一步）：社交 actor 的在线表（登出通知走 `try_send`，邮箱满即丢 ⇒ 在线条目可能残留）、
 按非 session 键的缓存、以及登录/登出路径上被 `Arc` 延长生命周期的对象。
 
+### 5c-2c. 沿候选逐个排除：**找到一个真泄漏（`player_heroes`）**，并纠正一处无效采样（2026-09-25）
+
+**先纠正我自己的测量**：上一节的 `live_bytes` 取自 `PlayerDisconnected`（罕见路径，一轮 460 次登出里只出现 10 次），
+取样时机随事件漂移（可能取在别的会话仍在线时），所以那条"增长"不可靠。现在把计数分配器读数挪到
+**每轮一次的空闲点**（`cleanup_map_spawns` 之后，与 `leak_plateau` 的 RSS 采样同相位）——
+相位一致后仍然是**单调增长**：`live_bytes 16.79→18.83 MB`（5 轮，+0.41 MB/轮），RSS `48.08→51.46 MB`。
+
+**逐个排除（都带读数）：**
+
+| 假设 | 探针读数 | 结论 |
+|---|---|---|
+| 33 个 session 键容器的清理 | 断线清理后**全为 0** | 排除 |
+| 社交 actor 在线表（`try_send` 丢通知） | `SOCIAL_PROBE joined=95 / left=95`、丢弃 **0** 次、`players` 逐条降到 **0** | 排除 |
+| 按 object_id 的辅助表（`monster_targets`/`cursed`/`revealed_hp`/`pet_*`…） | 每次整图清理后**全为 0** | 排除 |
+| PlayerActor 没被释放 | 新增存活计数器 `live_player_actors`：每轮空闲点**恒为 1**（不增长） | 排除 |
+| **`player_heroes`（session 键）** | 每轮空闲点 **19→38→57→76→95→114**（+19/轮，单调） | **真泄漏，已修** |
+
+`player_heroes: HashMap<session_id, Vec<HeroInfo>>` 在登录时插入（`StartGame` 载入英雄列表），
+而**登出与断线两条清理路径都没有删它**——session id 每次唯一 ⇒ 条目永久累积
+（同时是"过期会话键"的正确性问题）。修法＝两条路径各补一行 `self.player_heroes.remove(&session_id)`；
+修后每轮空闲点 **`player_heroes=0`**。
+
+**仍未归因**：修掉 `player_heroes` 之后 `live_bytes` 依然每轮约 +0.5MB（16.32→18.84 MB / 5 轮），
+而上述所有容器与 actor 计数都平稳、DB/WAL 体积稳定（2.59MB + 4MB WAL 不随轮次增长）。
+下一步候选：依赖层（sqlite/page cache、tokio 缓冲）、`MapCache`、以及尚未逐个列出的结构；
+必要时用按调用点归因的分配分析（当前计数分配器只给总量与尺寸档）。
+
 ## 5d. 写锁下的登录时延：`login_latency_probe.ps1`（带阈值夹具）
 
 判据（缺一不可）：L1 写锁**真注入**（等注入器输出 `LOCK_HELD`，拿不到直接退出码 3、不产出结论）；
