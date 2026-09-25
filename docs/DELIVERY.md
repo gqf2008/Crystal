@@ -176,6 +176,18 @@ cd Client-Bevy && cargo test                     # 794 lib + 7 bin + 2 + 53
 
 三侧 `cargo fmt -- --check` 均须 0 差异。
 
+另有两条**离线的覆盖对账门禁**（秒级，不起客户端）：
+
+```bash
+pwsh tools/acceptance/e2e_lock_selftest.ps1      # 实机资源锁自证（§5.4）
+pwsh tools/acceptance/flag_coverage_check.ps1    # 客户端 auto 开关覆盖清单对账
+```
+
+后者把「哪些 `--xxx-test` 开关进发版门禁、哪些只是历史探针」钉在
+`tools/acceptance/CLIENT_AUTO_FLAGS.md` 上：源码新增/删除开关、或清单把某个开关标成 `gate`
+而门禁脚本里其实没跑它，门禁都会红（两条阳性对照均已实做：注入假开关 → C3 红；桶标记改成
+`gate` 但脚本没跑 → C5 红）。
+
 （数字为 **2026-09-25 晚 master `45e378aa` 实测基线**，随批次增长；以 CI 与本地复跑为准。
 该次复跑逐条实跑：SharedRust `187 lib + 11`（2 ignored）、ServerRust `849 lib + 19 integration`、
 ServerRust `clippy --lib -- -D warnings` 0 warning、Client-Bevy `794 lib + 7 bin + 2 + 53`，

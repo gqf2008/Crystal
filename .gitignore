@@ -450,3 +450,5 @@ Mir2Config.ini
 KeyBinds.ini
 QuestTracking.ini
 Mir2Test.ini
+!tools/acceptance/CLIENT_AUTO_FLAGS.md
+!tools/acceptance/flag_coverage_check.ps1
