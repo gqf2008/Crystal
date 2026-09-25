@@ -295,12 +295,16 @@ pwsh scripts/run_real_e2e.ps1 -IncludeInteractSweep            # 常规用例 + 
   僵尸回收、PID 复用、超龄回收、读不全宽限、继承标记复核、**跨进程串行性**（3 个子进程抢同一把锁、
   临界区不许重叠）；秒级，不起客户端。它把 `TEMP` 指向临时目录后再 dot-source，**不会碰真实锁**
   （跑在真实锁上会与别的 agent 的实机任务互相污染）；退出码 `0` 全过 / `1` 有用例红 / `2` 前置失败。
-- **覆盖**：`tools/acceptance/` 下全部会起客户端的夹具 + `scripts/run_real_e2e.ps1` 都已接入（#3129 铺齐），
+- **覆盖**：**整仓** `*.ps1`（排除 `.git`/`target`/`node_modules`）里全部会起客户端的脚本都已接入
+  （#3129 铺齐 acceptance/scripts，2026-09-25 起扫描面改为整仓——`tools/ops/package_windows_rehearsal.ps1`
+  这类新目录里的实机入口此前扫不到，漏锁也不会红，属假绿盲区），
   且**由门禁钉住**：自证的 `T9.1` 会扫出「会起客户端」的脚本（判据＝正文出现
   `--e2e-user` / `client_bevy.exe` / `--real-net` / `--auto-enter` 任一），`T9.2`/`T9.2b` 要求
   **dot-source + `Enter` + `Exit` 三件齐全**（缺 Exit 的早退路径会把锁留到下一次进入才发现要回收），
-  `T9.3` 是阳性对照（临时造一个没接入的脚本必须被判不合规），`T9.4` 钉「自检自带判据与锁脚本里的
-  `Get-E2eClientScripts` 识别同一批脚本」防两处漂移，`T9.5` 钉「批量接入器与门禁同口径」（dry-run 需为 0）。
+  `T9.3` 是阳性对照（临时造一个没接入的脚本必须被判不合规），`T9.3b` 是**盲区阳性对照**
+  （把没接入的脚本放进旧清单之外的目录也必须被认出），`T9.1b` 是同一盲区的回归锁，
+  `T9.4` 钉「自检自带判据与锁脚本里的 `Get-E2eClientScripts` 识别同一批脚本」防两处漂移，
+  `T9.5` 钉「批量接入器与门禁同口径」（dry-run 需为 0）。
   新增夹具忘了接入时：`pwsh tools/acceptance/enroll_e2e_lock.ps1 -Apply`（幂等，只插不删），
   或照抄已接入夹具的写法。**注意** `.gitignore` 对 `tools/acceptance/` 是白名单式管理——新脚本必须补
   `!tools/acceptance/<名字>` 一行，否则 `git add` 会被静默忽略、门禁也看不到它。

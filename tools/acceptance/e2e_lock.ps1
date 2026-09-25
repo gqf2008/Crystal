@@ -220,27 +220,30 @@ function Get-E2eClientScripts {
         `--e2e-user`（自动化登录账号）/ `client_bevy.exe` / `--real-net` / `--auto-enter`。
       不只看 `--e2e-user`：`l5r_ranged_projectile`、`l5t_minimize_survives` 这类不传 e2e 账号
       但照样起客户端的脚本，也必须接入锁（#3129 的覆盖口径就是「会起客户端」）。
-      扫描面：<RepoRoot>\tools\acceptance\*.ps1 与 <RepoRoot>\scripts\*.ps1。
+      扫描面：**整个仓库**的 *.ps1（排除 .git / target / node_modules 与锁自身的三个脚本）。
+      不要退回「写死目录清单」——原先只扫 `tools\acceptance` 与 `scripts`，结果
+      `tools\ops\package_windows_rehearsal.ps1` 明明起客户端（`client_bevy.exe --e2e-user`）
+      却扫不进来；它一旦被改掉那把锁，门禁照样绿（假绿盲区）。整仓扫描让任何新目录里的
+      实机入口自动纳入判据，不必再维护目录清单。
       临时取数脚本不在此列——那种脚本归「谁写谁拿锁」，见本文件头部的约定。
     #>
     param([string]$RepoRoot = (Resolve-Path "$PSScriptRoot\..\..").Path)
     $selfNames = @('e2e_lock.ps1', 'e2e_lock_selftest.ps1', 'enroll_e2e_lock.ps1')
-    $dirs = @((Join-Path $RepoRoot 'tools\acceptance'), (Join-Path $RepoRoot 'scripts'))
+    $skipDirs = '\\(\.git|target|node_modules)\\'
     $out = @()
-    foreach ($d in $dirs) {
-        if (-not (Test-Path -LiteralPath $d)) { continue }
-        foreach ($f in (Get-ChildItem -LiteralPath $d -File -Filter *.ps1 -EA SilentlyContinue)) {
-            if ($selfNames -contains $f.Name) { continue }
-            $text = Get-Content -LiteralPath $f.FullName -Raw -EA SilentlyContinue
-            if ($null -eq $text) { continue }
-            if ($text -notmatch '--e2e-user|client_bevy\.exe|--real-net|--auto-enter') { continue }
-            $out += [pscustomobject]@{
-                Name       = $f.Name
-                Path       = $f.FullName
-                Dir        = $f.DirectoryName
-                EnterCount = ([regex]::Matches($text, 'Enter-E2eLock')).Count
-                ExitCount  = ([regex]::Matches($text, 'Exit-E2eLock')).Count
-            }
+    $files = @(Get-ChildItem -LiteralPath $RepoRoot -Recurse -File -Filter *.ps1 -EA SilentlyContinue |
+        Where-Object { $_.FullName -notmatch $skipDirs })
+    foreach ($f in $files) {
+        if ($selfNames -contains $f.Name) { continue }
+        $text = Get-Content -LiteralPath $f.FullName -Raw -EA SilentlyContinue
+        if ($null -eq $text) { continue }
+        if ($text -notmatch '--e2e-user|client_bevy\.exe|--real-net|--auto-enter') { continue }
+        $out += [pscustomobject]@{
+            Name       = $f.Name
+            Path       = $f.FullName
+            Dir        = $f.DirectoryName
+            EnterCount = ([regex]::Matches($text, 'Enter-E2eLock')).Count
+            ExitCount  = ([regex]::Matches($text, 'Exit-E2eLock')).Count
         }
     }
     $out
