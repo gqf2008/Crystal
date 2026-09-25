@@ -460,3 +460,4 @@ Mir2Test.ini
 !tools/ops/mem_probe_report.py
 !tools/ops/mem_leak_gate.ps1
 !tools/ops/make_deploy_dir.ps1
+!tools/ops/restart_e2e_server.ps1

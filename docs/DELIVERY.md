@@ -376,6 +376,34 @@ pwsh scripts/run_real_e2e.ps1 -IncludeInteractSweep            # 常规用例 + 
 
 ### 5.5 服务端重启 / 断线重连（`l5y_reconnect.ps1`）
 
+#### 5.5.1 **共享 e2e 开发服**（本机 7000）的安全重启
+
+本机多个 agent / 夹具都连同一个 7000 开发服，它的重启**必须用受版本管理的工具**，
+不许再跑 `%TEMP%` 里那种临时脚本——那些脚本有两个会让证据失真的坑（2026-09-25 实名踩到）：
+
+```powershell
+# 默认从"本脚本所在检出"取产物；也可以显式指源（例：指向主检出）
+pwsh tools/ops/restart_e2e_server.ps1 -SourceRoot <含 origin/master 的检出>
+
+pwsh tools/ops/restart_e2e_server.ps1 -SelfTest     # 判据自检（不起服，秒级）
+```
+
+它把两条硬前置做进脚本：
+
+1. **来源必须"含 origin/master"**：先 `git fetch`，再要求源检出 `HEAD` 不落后 `origin/master`
+   （`merge-base --is-ancestor origin/master HEAD`）；不满足直接 `exit 2` 并打印补救命令。
+   起因：`%TEMP%` 那个临时脚本从某个 detached 在旧提交的 worktree 拷 exe，
+   **每重启一次就把已合并的修复整体回滚**（11:47 UTC 顶掉修复版、20:27 UTC 才恢复），
+   而那之后所有连 7000 的实机结论都在测旧代码。真想放行落后版本要写 `-AllowBehindMaster`（会告警并留痕）。
+2. **只接管"端口持有者，且它就是我们这份"**：按**端口**找进程（绝不按进程名清场），
+   且要求它的 exe 路径就是本部署目录里那份；否则 `exit 2` 并打印占用者。
+   起因：旧临时脚本 `Get-CimInstance … Name='mir2_server.exe' | Stop-Process` 会连带杀掉
+   别人的演练/验收（对方拿到 `result=4 密码错误` 这类假红）。
+
+重启成功会写 `<DeployDir>\server_build_record.json`（源检出 / 源 HEAD / origin/master HEAD /
+profile / exe sha256 / pid / port / 时间）——"运行中的服务端是哪一份代码"从此有据可查。
+**验收判据**：重启后该记录里的 `source_head` 必须**包含 `origin/master`**（`source_contains_master=true`）。
+
 ```powershell
 pwsh tools/acceptance/l5y_reconnect.ps1 -ServerWorkDir %TEMP%\e2e_workdir
 ```
