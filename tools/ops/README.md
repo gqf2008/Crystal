@@ -756,6 +756,18 @@ pwsh tools/ops/check_process_scope.ps1 -Strict      # allowlist 里的一起报�
 门禁随之扩展：**按 `ExecutablePath`/`CommandLine` 收窄**的清场算合规（沙箱负对照加到 5 条），
 `Allowlist` 清空、`-Strict` 也绿。
 
+**扫描面也扩到整仓（2026-09-25 晚，同一批）**：原先只扫 `tools/ops` + `tools/acceptance` + `scripts`
+且**不递归**——扩成"整仓递归（排除 `.git`/`target`/`node_modules`）"后立刻抓到两个盲区：
+① `tools/acceptance/csharp_golden/` 这个**子目录**从没被扫过；② `MapEditor/…/build.ps1`
+在旧目录清单之外。子目录里那个 `csharp_kbd_login.ps1` 正好在按公共名清场：
+`Get-Process Client | Stop-Process`（**原版 C# 客户端**是本机共享资源：owner 与别的 agent 会用同一份
+做逐窗 A/B 对照 ⇒ 按名清场会把他们的会话一起带走）。已改成按**本沙盒自己的 exe 路径**过滤；
+同文件里另一处 `Get-CsHwnd` 的"按名取第一个"也一并改成按路径选（否则会拿到别人的原版窗口来测）。
+
+盲区回归锁：默认扫描面必须覆盖到 `MapEditor\…\build.ps1`，否则 `exit 2`
+（阳性对照实做：把默认扫描面改回三目录 → `[失效锁] … 是不是又退回写死目录清单了？` exit 2）。
+现在整仓扫描 **60 个脚本、0 违规**，耗时约 0.8s。
+
 **批次收尾（2026-09-25 晚，批次 issue #3181）**：另外 20 个实机夹具（`l5a`…`l5s`、`l5g*`）原先在起客户端前
 `Get-CimInstance -Filter "Name='client_bevy.exe'" | Stop-Process`（跨行管道形态，会把**别的 agent 的验收**和
 **人工 GUI 会话**一起带走）。现全部改成**唯一命名副本**：`New-Item -ItemType HardLink` 把

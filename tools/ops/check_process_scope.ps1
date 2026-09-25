@@ -35,9 +35,11 @@ function Find-ProcessNameKill {
     <#
       单文件判据：只看**代码行**（注释里常写"原先按进程名杀…"这种说明，算进来门禁自己就成噪音）。
       命中条件（二者其一）：
-        ① 该行有 Stop-Process，且引用了共享名 mir2_server / client_bevy（\b 边界，故
+        ① 该行有 Stop-Process，且引用了**共享名** mir2_server / client_bevy / Client（原版 C# 客户端，
+           本机多 agent 会用同一份原版做 A/B 对照，属共享资源）/ mir2_login（\b 边界，故
            `Stop-Process -Name mir2_server_ci_unique` 这种唯一命名不会被误判）；
-        ② 该行同时有 Get-Process 与 Stop-Process（`Get-Process -Name x | … | Stop-Process` 管道）。
+        ② 该行同时有 Get-Process 与 Stop-Process**且**引用了共享名或没写 `-Name`
+           （`Get-Process | Stop-Process` 等于清全场）。
         ③ **跨行管道**（2026-09-25 补的盲区）：按名字查到进程对象、再由**同一条管道**下游的
            Stop-Process 杀掉——典型形态是 `Get-CimInstance Win32_Process -Filter "Name='mir2_server.exe'" |`
            换行后 `ForEach-Object { Stop-Process -Id $_.ProcessId }`。这里 Stop-Process 用的是 `-Id`，
@@ -55,14 +57,20 @@ function Find-ProcessNameKill {
         Where-Object { $_.Trim() -and -not $_.Trim().StartsWith('#') })
     for ($i = 0; $i -lt $code.Count; $i++) {
         $ln = $code[$i]
+        # 共享资源名：服务端 / Bevy 客户端 / **原版 C# 客户端 `Client.exe`**（本机多 agent 会用同一份原版
+        # 做逐窗 A/B 对照）/ 登录探针用的 mir2_login。唯一命名（如 `mir2_server_ci_unique`）因 \b 不匹配。
+        $shared = '\b(mir2_server|client_bevy|Client|mir2_login)\b'
         if ($ln -match 'Stop-Process') {
-            if (($ln -match '\b(mir2_server|client_bevy)\b') -or ($ln -match 'Get-Process')) {
+            # ① 同行按共享名杀；② 同行 Get-Process（无 -Name 的全场清 / 或按共享名）再杀
+            $isSharedByName = $ln -match $shared
+            $isGetProcessKill = ($ln -match 'Get-Process') -and (($ln -match $shared) -or ($ln -notmatch 'Get-Process\s+-Name'))
+            if ($isSharedByName -or $isGetProcessKill) {
                 $hits += $ln.Trim()
             }
             continue
         }
-        $byName = ($ln -match 'Get-Process\s+-Name\s+.*\b(mir2_server|client_bevy)\b') -or
-        ($ln -match 'Get-CimInstance' -and $ln -match "Name\s*=\s*['\`"](mir2_server|client_bevy)\b")
+        $byName = ($ln -match "Get-Process\s+-Name\s+.*$shared") -or
+        ($ln -match 'Get-CimInstance' -and $ln -match "Name\s*=\s*['\`"](mir2_server|client_bevy|Client|mir2_login)\b")
         if (-not $byName) { continue }
         if ($ln.TrimEnd() -notmatch '\|$') { continue }   # 不是管道 → 只是查询/探测
         $j = $i + 1
@@ -85,16 +93,23 @@ function Find-ProcessNameKill {
     $hits
 }
 
+$userScanDirs = $ScanDir.Count   # 0 = 用默认扫描面（此时必须覆盖整仓，见下面的盲区回归锁）
 if ($ScanDir.Count -eq 0) {
+    # 2026-09-25 晚：扫描面从「三个目录」改成**整仓**（排除 .git/target/node_modules）——
+    # 与实机锁覆盖面门禁（Get-E2eClientScripts）同口径。理由同那份的经验：
+    # **写死目录清单本身就是缺口的第一候选**（新目录里的实机/清理脚本不会被看到）。
+    # 实测：MapEditor\rust-map-editor\build.ps1 就在旧清单之外（现在被扫进来了）。
     $root = (Resolve-Path "$PSScriptRoot\..\..").Path
-    $ScanDir = @((Join-Path $root 'tools/ops'), (Join-Path $root 'tools/acceptance'), (Join-Path $root 'scripts'))
+    $ScanDir = @($root)
 }
 $selfLeaf = Split-Path -Leaf $PSCommandPath
 $files = @()
+$skipDirs = '\\(\.git|target|node_modules)\\'
 foreach ($d in $ScanDir) {
     if (-not (Test-Path -LiteralPath $d)) { Fail "扫描目录不存在：$d" }
-    $files += @(Get-ChildItem -LiteralPath $d -Filter *.ps1 -File -ErrorAction SilentlyContinue |
-        Where-Object { $_.Name -ne $selfLeaf } | ForEach-Object { $_.FullName })
+    $files += @(Get-ChildItem -LiteralPath $d -Recurse -Filter *.ps1 -File -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -ne $selfLeaf -and $_.FullName -notmatch $skipDirs } |
+        ForEach-Object { $_.FullName })
 }
 if ($files.Count -eq 0) { Fail "扫描面为空（$($ScanDir -join ', ')）——判据没跑起来，不许当绿" }
 
@@ -179,6 +194,13 @@ foreach ($f in $files) {
 
 $new = @($offenders | Where-Object { -not $_.allowlist })
 $known = @($offenders | Where-Object { $_.allowlist })
+# 盲区回归锁：默认扫描面必须是**整仓**，不能退回「写死的那三个目录」。
+# 探针＝`MapEditor\rust-map-editor\build.ps1`（真实存在于旧清单之外的目录）。
+$probe = @($files | Where-Object { $_ -match '\\MapEditor\\' -and $_.EndsWith('build.ps1') })
+if ($userScanDirs -eq 0 -and $probe.Count -eq 0) {
+    Write-Host '  [失效锁] 默认扫描面没覆盖到 MapEditor\ 下的脚本 —— 是不是又退回写死目录清单了？' -ForegroundColor Red
+    exit 2
+}
 Write-Host ("扫描 {0} 个脚本（{1}）：按进程名杀共享资源的 {2} 个（待迁移 allowlist {3} 个、新增 {4} 个）" -f `
         $files.Count, ($ScanDir -join ' / '), $offenders.Count, $known.Count, $new.Count)
 foreach ($o in $known) { Write-Host ("  [待迁移] {0} —— {1}" -f $o.file, $o.reason) -ForegroundColor DarkYellow }

@@ -55,9 +55,14 @@ function Get-LoginBoxes {
 }
 
 Write-Host '=== start original client ==='
-Get-Process Client -ErrorAction SilentlyContinue | Stop-Process -Force
+# 只清**本沙盒自己那份**原版客户端（按 exe 路径过滤）——原版 `Client.exe` 是本机的**共享资源**：
+# owner 与别的 agent 可能正在用它做逐窗 A/B 对照，按进程名清场会把他们的会话一起带走。
+$csExe = Join-Path $script:CS 'Client\Client.exe'
+Get-CimInstance Win32_Process -Filter "Name='Client.exe'" -ErrorAction SilentlyContinue |
+    Where-Object { $_.ExecutablePath -eq $csExe } |
+    ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
 Start-Sleep -Seconds 2
-Start-Process -FilePath "$script:CS\Client\Client.exe" -WorkingDirectory "$script:CS\Client"
+Start-Process -FilePath $csExe -WorkingDirectory "$script:CS\Client"
 Start-Sleep -Seconds 22
 Init-CsClient
 
