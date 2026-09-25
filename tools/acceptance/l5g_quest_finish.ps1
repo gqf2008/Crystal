@@ -66,6 +66,10 @@ $wt = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 # 默认取本夹具所在仓库（而不是写死某个 worktree——写死会在换 worktree 时拿旧构建出假红）。
 if (-not $ClientHome) { $ClientHome = $wt }
 $exe = "$ClientHome\Client-Bevy\target\debug\client_bevy.exe"
+# 唯一进程名（见 LESSON_多agent并行时按进程名清进程会污染他人GUI实验）：只用自己改名的副本，
+# 清场也只清这个唯一名——公共名 client_bevy.exe 可能是别的 agent 的验收或人工 GUI 会话。
+$exeSrc = $exe
+$exe = Join-Path (Split-Path -Parent $exe) 'l5g_client.exe'
 
 function Rpc([string]$m, [hashtable]$q = @{}) {
     $c = New-Object Net.Sockets.TcpClient; $c.Connect('127.0.0.1', 9000); $s = $c.GetStream()
@@ -135,9 +139,13 @@ if ($FinishMap -eq '') {
     $FinishMap = $fin.map; $FinishX = $fin.x; $FinishY = $fin.y
     Write-Host ("[0] 交付点推导: quest {0} → NPC {1}(idx {2}) @ {3} ({4},{5})" -f $QuestId, $fin.name, $fin.npc_index, $fin.map, $fin.x, $fin.y)
 }
-Get-CimInstance Win32_Process -Filter "Name='client_bevy.exe'" -EA SilentlyContinue |
+Get-CimInstance Win32_Process -Filter "Name='l5g_client.exe'" -EA SilentlyContinue |
     ForEach-Object { Stop-Process -Id $_.ProcessId -Force -EA SilentlyContinue }
 Start-Sleep -Milliseconds 900
+# 硬链接起唯一命名副本：不占额外磁盘（同一个文件、多一个目录项），
+# 且源文件正被别的进程执行时也能建链（Copy-Item 会因文件占用失败）。失败则退回拷贝。
+try { New-Item -ItemType HardLink -Path $exe -Target $exeSrc -Force -ErrorAction Stop | Out-Null }
+catch { Copy-Item -LiteralPath $exeSrc -Destination $exe -Force }
 Start-Process -FilePath $exe -ArgumentList '--real-net','--auto-enter','--e2e-user',$User,'--e2e-pass',$Pass `
     -WorkingDirectory "$ClientHome\Client-Bevy" `
     -RedirectStandardOut "$acc\l5g_client.log" -RedirectStandardError "$acc\l5g_client.err.log" | Out-Null
@@ -211,5 +219,8 @@ Write-Host ("VERDICT accept={0} state_flip={1} reward_gold={2}" -f `
 if (-not ($okA -and $okC -and $okD)) { exit 5 }
 
 } finally {
+    # 收尾：只清自己那份唯一命名的客户端（不再依赖"下一次运行按公共名清场"——那会误杀别人）。
+    Get-CimInstance Win32_Process -Filter "Name='l5g_client.exe'" -EA SilentlyContinue |
+        ForEach-Object { Stop-Process -Id $_.ProcessId -Force -EA SilentlyContinue }
     Exit-E2eLock   # 幂等：没持锁时直接返回
 }

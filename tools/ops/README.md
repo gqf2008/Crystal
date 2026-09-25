@@ -746,6 +746,19 @@ pwsh tools/ops/check_process_scope.ps1 -Strict      # allowlist 里的一起报�
 2026-09-25 已改齐：`capacity_ramp.ps1`（清场 + RSS 取数都改成只认自己的 PID）、`login_latency_probe.ps1`
 （原先按 `$ExePath` 过滤后仍按进程名杀，现改为**前置失败**让操作者处置残留，不再静默清理）。
 
+**批次收尾（2026-09-25 晚，批次 issue #3181）**：另外 20 个实机夹具（`l5a`…`l5s`、`l5g*`）原先在起客户端前
+`Get-CimInstance -Filter "Name='client_bevy.exe'" | Stop-Process`（跨行管道形态，会把**别的 agent 的验收**和
+**人工 GUI 会话**一起带走）。现全部改成**唯一命名副本**：`New-Item -ItemType HardLink` 把
+`client_bevy.exe` 链接成 `<夹具>_client.exe`（不占额外磁盘、源文件被执行时也能建链，失败退回 `Copy-Item`），
+**启动与清场都只用这个唯一名**；并在 `finally` 里补了"**自己收尾**"（只清自己的唯一名）——
+否则会从"依赖下一次按公共名清场"变成"各自留残留"。
+`check_process_scope.ps1` 的 allowlist 随之删掉那 20 条（现在只剩上面 3 条）。
+
+证据：① 门禁 `check_process_scope.ps1` exit 0（待迁移 3、新增 0）、`e2e_lock_selftest.ps1` **32 passed / 0 failed**
+（这些夹具仍算实机入口、仍都走锁）；② 实机复跑 `l5h_buy_item.ps1` **VERDICT 四项全 PASS**、锁正常释放；
+③ **替身 A/B**：把一个改名成 `client_bevy.exe` 的进程当"别人的客户端"放那儿——跑**迁移后**的清场片段
+它**存活**，跑**迁移前**的片段它**被杀**。
+
 ### 端口契约（同 5c）
 
 服务端读的是部署目录 `config/server.toml` 的 `[network].listen_addr`，而 `-Port` 只作用于 bot。
