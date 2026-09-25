@@ -69,6 +69,15 @@ $item = $bag0.occupied | Where-Object { $_.name -eq 'Saddle' } | Select-Object -
 if (-not $item) { Write-Host 'FAIL: @MAKE 后背包里没有 Saddle'; exit 1 }
 $srcCell = [int]$item.cell
 
+# 物品**件数**（occupied 里 count 之和）——存取判据用件数，不用"占用格数"：
+# 可堆叠物品（Saddle 6 个占一格）存 1 个进仓库时源格**仍然占用**，`used` 不会减 1。
+# 2026-09-26 实测踩到：`storage+1=True bag-1=False`（那一次源格是 1 个、这次是 6 个里的 1 个）。
+function ItemCount($probe) {
+    $n = 0
+    foreach ($o in $probe.occupied) { $n += [int]$o.count }
+    return $n
+}
+
 # 开仓库：走到仓库 NPC（Storage_Jake，map 40 / 文件名 D002 @ 174,216）
 #   → npc_call [@MAIN] → 点 <Access/@Storage> 链接
 #
@@ -85,6 +94,24 @@ $srcCell = [int]$item.cell
 #   表现成「点了没反应」。判据必须是 storage_probe.total != 0（窗真开），而不是中间态字段；
 #   未成立就重新按名字定位 NPC 并重发 npc_call（object_id 可能随地图重建变化）。
 Rpc 'chat' @{ message = '@mapmove D002 174 217' } | Out-Null
+# 硬前置：**等换图真的完成**（`state.map` 变成 D002）再扫 nearby。
+# 2026-09-26 实测踩到过假 FAIL：`@mapmove` 发出后立刻轮询 `nearby`，拿到的是**上一张图**的
+# NPC 列表（20s 都没变），于是报"本图没有仓库 NPC"——其实人已经在 D002 上（同轮手动
+# `@mapmove D002 174 217` 单发验证：`map=D002 tile=(174,217)`）。
+# 判据取 `state.map`（不是 nearby 的名字表），超时才失败，并把服务端系统消息尾打出来
+# （便于区分"没权限/地图不存在"这类真因）。
+$switched = $false
+foreach ($i in 1..20) {
+    Start-Sleep 1
+    $sm = Rpc 'state'
+    if ($sm.map -eq 'D002') { $switched = $true; Write-Host ("[切换] D002 @ ({0},{1})，用时 {2}s" -f $sm.tile_x, $sm.tile_y, $i); break }
+}
+if (-not $switched) {
+    $cp = Rpc 'chat_probe'
+    $sys = @($cp.lines | Where-Object { $_.channel -eq 'System' } | Select-Object -Last 3 | ForEach-Object { $_.text })
+    Write-Host ("FAIL: 20s 内没换到 D002（state.map={0}）；系统消息尾：{1}" -f (Rpc 'state').map, ($sys -join ' / '))
+    exit 3
+}
 $st0 = $null
 $npc = $null
 $opened = $false
@@ -160,14 +187,17 @@ foreach ($i in 1..10) {
     $b = Rpc 'bag_probe'; $s = Rpc 'storage_probe'
     if ($null -ne $b -and $null -ne $s) {
         $bag1 = $b; $st1 = $s
-        if ($s.used -eq ($st0.used + 1) -and $b.used -eq ($bag0.used - 1)) { break }
+        if ((ItemCount $s) -eq ((ItemCount $st0) + 1) -and (ItemCount $b) -eq ((ItemCount $bag0) - 1)) { break }
     }
 }
-Write-Host ("after store: bag.used={0} storage.used={1} storage.occupied={2}" -f $bag1.used, $st1.used, (($st1.occupied | ForEach-Object { "$($_.cell):$($_.name)" }) -join ','))
-$c1 = ($st1.used -eq ($st0.used + 1))
-$c2 = ($bag1.used -eq ($bag0.used - 1))
+$bagItems0 = ItemCount $bag0; $stItems0 = ItemCount $st0
+Write-Host ("after store: bag.used={0} storage.used={1}（件数 {2}→{3} / {4}→{5}）storage.occupied={6}" -f `
+        $bag1.used, $st1.used, $bagItems0, (ItemCount $bag1), $stItems0, (ItemCount $st1),
+        (($st1.occupied | ForEach-Object { "$($_.cell):$($_.name)x$($_.count)" }) -join ','))
+$c1 = ((ItemCount $st1) -eq ($stItems0 + 1))
+$c2 = ((ItemCount $bag1) -eq ($bagItems0 - 1))
 $c3 = (@($st1.occupied | Where-Object { $_.cell -eq $dstCell }).Count -eq 1)
-Write-Host ("  store sub-checks: storage+1={0} bag-1={1} item-at-{2}={3}" -f $c1, $c2, $dstCell, $c3)
+Write-Host ("  store sub-checks（按件数）: storage+1={0} bag-1={1} item-at-{2}={3}" -f $c1, $c2, $dstCell, $c3)
 $stored = $c1 -and $c2 -and $c3
 Shot '2_stored'
 
@@ -179,12 +209,12 @@ foreach ($i in 1..10) {
     $b = Rpc 'bag_probe'; $s = Rpc 'storage_probe'
     if ($null -ne $b -and $null -ne $s) {
         $bag2 = $b; $st2 = $s
-        if ($s.used -eq $st0.used -and $b.used -eq $bag0.used) { break }
+        if ((ItemCount $s) -eq $stItems0 -and (ItemCount $b) -eq $bagItems0) { break }
     }
 }
-Write-Host ("after take: bag.used={0} storage.used={1}" -f $bag2.used, $st2.used)
-$t1 = ($st2.used -eq $st0.used)
-$t2 = ($bag2.used -eq $bag0.used)
+Write-Host ("after take: bag.used={0} storage.used={1}（件数 {2}/{3}）" -f $bag2.used, $st2.used, (ItemCount $bag2), (ItemCount $st2))
+$t1 = ((ItemCount $st2) -eq $stItems0)
+$t2 = ((ItemCount $bag2) -eq $bagItems0)
 Write-Host ("  take sub-checks: storage回0={0} bag回满={1}" -f $t1, $t2)
 $taken = $t1 -and $t2
 Shot '3_taken'

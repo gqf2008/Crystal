@@ -171,6 +171,23 @@ pub fn occupied_cells_with_uid(
         .collect()
 }
 
+/// `(格号, 名称, unique_id, 数量)`——**存取闭环判据要的是"物品件数"而不是"占用格数"**：
+/// 可堆叠物品（如 Saddle 6 个占一格）从背包存 1 个进仓库时，源格**仍然占用**，
+/// `used` 不变 ⇒ 拿 `used` 当判据会给出假 FAIL（2026-09-26 实测踩到：
+/// `store: bag[1] -> storage[0]` 后 `storage+1=True bag-1=False`）。
+pub fn occupied_cells_with_uid_count(
+    items: &[Option<crate::game::dialogs::inventory::InvItem>],
+) -> Vec<(usize, String, u64, u32)> {
+    items
+        .iter()
+        .enumerate()
+        .filter_map(|(i, s)| {
+            s.as_ref()
+                .map(|it| (i, it.name.clone(), it.unique_id, it.count as u32))
+        })
+        .collect()
+}
+
 /// 任务格已占用列表 `(格号, 名称, 数量)`——ItemTasks 任务的判据要落在**任务格**上：
 /// 服务端 `Q`（任务物品掉落）直接把物品放进任务格并推进进度
 /// （`world/mod.rs try_give_quest_item`），所以「任务物品到手」= 任务格里出现该物品。
@@ -2925,9 +2942,13 @@ fn apply_control_commands(
                         "exp": q.progression.single().map(|p| p.exp).unwrap_or(0),
                         "max_exp": q.progression.single().map(|p| p.max_exp).unwrap_or(0),
                         // 格号 → 名称：夹具据此挑存取源格（不用猜）
-                        "occupied": occupied_cells_with_uid(&inv.items)
+                        // 2026-09-26：带上 `count`——可堆叠物品存 1 个时源格仍占用，
+                        // 判据必须看"件数"而不是"占用格数"（见 occupied_cells_with_uid_count 注释）。
+                        "occupied": occupied_cells_with_uid_count(&inv.items)
                             .into_iter()
-                            .map(|(c, n, uid)| json!({"cell": c, "name": n, "unique_id": uid}))
+                            .map(|(c, n, uid, cnt)| {
+                                json!({"cell": c, "name": n, "unique_id": uid, "count": cnt})
+                            })
                             .collect::<Vec<_>>(),
                     }),
                     Err(_) => json!({"ok": false, "error": "no local player inventory"}),
@@ -3172,9 +3193,10 @@ fn apply_control_commands(
                     "total": q.storage.items.len(),
                     "visible": q.storage.visible,
                     "page": format!("{:?}", q.storage.page),
-                    "occupied": occupied_cells(&q.storage.items)
+                    // 同 bag_probe：带上 count，判据看件数（可堆叠物品存取时占用格数可能不变）。
+                    "occupied": occupied_cells_with_uid_count(&q.storage.items)
                         .into_iter()
-                        .map(|(c, n)| json!({"cell": c, "name": n}))
+                        .map(|(c, n, _uid, cnt)| json!({"cell": c, "name": n, "count": cnt}))
                         .collect::<Vec<_>>(),
                 });
                 tracing::info!("🎮 control storage_probe: {payload}");

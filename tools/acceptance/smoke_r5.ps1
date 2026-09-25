@@ -1,6 +1,21 @@
 # smoke_r5.ps1 — 上线前真机冒烟：登录→进图→移动→攻击→过门/传送→断线→重登（顶号路径）
 # 前提：mir2_server 已在 7000 监听；火绒已加信任/暂停主动防御。
+
 param([string]$User = 'test', [string]$Pass = '123456')
+
+# --- 实机资源串行：客户端 + e2e 账号 + 本地服务端一次只能跑一组（跨进程锁）---
+# 不拿锁就会撞上「别的 agent 已登录同一账号」→ 日志里的 result=4 密码错误
+# （服务端实为 Account already online），那是资源互斥假红、不是产品缺陷，重试再多也修不了它；
+# 详见 tools\acceptance\e2e_lock.ps1 与 e2e_lock_selftest.ps1（门禁会查漏接入）。
+. "$PSScriptRoot\e2e_lock.ps1"
+if (-not (Enter-E2eLock -ScriptName 'smoke_r5' -TimeoutSec 1800)) { Write-Host 'FAIL(2): 等 e2e 锁超时'; exit 2 }
+
+# 整段包 try/finally：任何 exit/return/异常路径都会释放锁
+# （PowerShell 的 finally 在 exit 下也会执行——实测 -File 与会话内 & script.ps1 两种调用都成立），
+# 所以早退分支（例如中段的 if (...) { exit 5 }）不会把锁漏给别人：漏了要等 StaleSec=1800s 才回收。
+# 注意：`param(...)` 必须是脚本的第一条语句，所以上面的锁序言只能放在它**之后**
+# （接入器在「param 前面」插 try{ 会直接变成语法错误 → 门禁 T10.1 抓出来）。
+try {
 $ErrorActionPreference = 'Stop'
 # 运行时需要 msys64 ucrt64 DLL（libdb/libglib/libstdc++），否则 0xC0000142 静默退出
 # 客户端依赖 msys64/ucrt64 与 libpinyin 的 DLL：缺任一目录会以 0xC0000135 静默退出
@@ -37,7 +52,11 @@ function Wait-Game([int]$sec = 40) {
     throw '未进入游戏（state 无玩家坐标）'
 }
 
-Get-Process client_bevy -EA SilentlyContinue | Stop-Process -Force
+# 只清**自己这份构建**的残留（按 exe 路径过滤）：绝不按公共名 `client_bevy` 清场——
+# 那会连带杀掉别的 agent 的验收/人工 GUI 会话（BATCH #3181；`check_process_scope` 门禁会红）。
+Get-CimInstance Win32_Process -Filter "Name='client_bevy.exe'" -EA SilentlyContinue |
+    Where-Object { $_.ExecutablePath -eq $exe } |
+    ForEach-Object { Stop-Process -Id $_.ProcessId -Force -EA SilentlyContinue }
 Start-Sleep -Milliseconds 800
 
 # ── 阶段 1：登录 + 进图 ─────────────────────────────
@@ -102,3 +121,7 @@ try {
     Stop-Process -Id $proc2.Id -Force -EA SilentlyContinue
 }
 Write-Host '== 冒烟完成 =='
+
+} finally {
+    Exit-E2eLock   # 幂等：没持锁时直接返回
+}
