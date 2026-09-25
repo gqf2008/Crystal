@@ -14,10 +14,13 @@ param(
     [string]$Account = 'test',
     [string]$Password = '123456',
     [int]$ReadyTimeoutSec = 90,
-    [string]$OutFile = ''
+    [string]$OutFile = '',
+    # 冒烟 bot 超时（秒）：超时即按该次冒烟失败处理并**立刻**返回（2026-09-25 修，原先同步调用无超时）
+    [int]$BotTimeoutSec = 120
 )
 $ErrorActionPreference = 'Continue'
 $ops = Split-Path -Parent $MyInvocation.MyCommand.Path
+. (Join-Path $ops '_run_bot.ps1')
 $dbPath = Join-Path $DeployDir 'Data/crystal.db'
 $cur = Join-Path $DeployDir 'mir2_server.exe'
 if (-not (Test-Path $cur)) { Write-Host "FAIL: 部署目录没有二进制：$cur"; exit 2 }
@@ -34,20 +37,51 @@ function Snapshot {
     $json = & python (Join-Path $ops 'db_snapshot.py') $dbPath ($Characters -join ',') 2>&1 | Select-Object -Last 1
     try { return ($json | ConvertFrom-Json) } catch { return $null }
 }
+# 监听口契约（与 storage_degrade_drill 同）：服务端读的是 <DeployDir>/config/server.toml 的
+# `[network].listen_addr`，而 `-Port` 只作用于 bot；两者不一致时（例如部署配置 7000、-Port 7100）
+# 会「服务端没绑上、bot 一直等」⇒ 整轮静默挂死。这里不一致就生成临时配置并按 `mir2_server <config>` 启动。
+$cfgIn = Join-Path $DeployDir 'config/server.toml'
+$script:TempConfig = ''
+if (Test-Path -LiteralPath $cfgIn) {
+    $m = Select-String -Path $cfgIn -Pattern 'listen_addr\s*=\s*"([^"]+)"' | Select-Object -First 1
+    $cfgPort = $null
+    if ($m -and $m.Matches[0].Groups[1].Value -match ':(\d+)$') { $cfgPort = [int]$Matches[1] }
+    if ($cfgPort -ne $Port) {
+        New-Item -ItemType Directory -Force -Path (Join-Path $ops 'out') | Out-Null
+        $cfgOut = Join-Path $ops ("out/rollback_server_{0}.toml" -f $Port)
+        $t = [regex]::Replace((Get-Content $cfgIn -Raw), 'listen_addr\s*=\s*"[^"]+"', "listen_addr = `"0.0.0.0:$Port`"", 1)
+        Set-Content -LiteralPath $cfgOut -Value $t -Encoding utf8
+        $script:TempConfig = $cfgOut
+        Write-Host ("[环境] 部署配置监听口 {0} != -Port {1} → 用临时配置 {2}" -f $cfgPort, $Port, $cfgOut)
+    }
+}
+
 function Start-And-Smoke([string]$exe, [string]$tag) {
     $log = Join-Path $DeployDir "server.$tag.log"
-    $proc = Start-Process -FilePath $exe -WorkingDirectory $DeployDir `
-        -RedirectStandardOutput $log -RedirectStandardError (Join-Path $DeployDir "server.$tag.err.log") -PassThru
+    $srvParams = @{
+        FilePath               = $exe
+        WorkingDirectory       = $DeployDir
+        RedirectStandardOutput = $log
+        RedirectStandardError  = (Join-Path $DeployDir "server.$tag.err.log")
+        PassThru               = $true
+    }
+    if ($script:TempConfig) { $srvParams.ArgumentList = @($script:TempConfig) }
+    $proc = Start-Process @srvParams
     $ready = $false
     for ($i = 0; $i -lt $ReadyTimeoutSec; $i++) {
         Start-Sleep 1
-        if ((Get-Content $log -ErrorAction SilentlyContinue) -match 'Gate listening') { $ready = $true; break }
+        if (Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue) { $ready = $true; break }
     }
     $smoke = $null
     if ($ready) {
-        $out = & python (Join-Path $ops 'bot.py') --host 127.0.0.1 --port $Port --login-only `
-            --accounts $Account --sessions 1 --password $Password 2>&1 | Select-Object -Last 1
-        try { $smoke = $out | ConvertFrom-Json } catch { $smoke = $null }
+        $r = Invoke-BotJson -OpsDir $ops -BotArgs @('--host', '127.0.0.1', '--port', "$Port", '--login-only',
+            '--accounts', $Account, '--sessions', '1', '--password', $Password) `
+            -TimeoutSec $BotTimeoutSec -Tag "rollback_$tag"
+        if ($r.timedOut) {
+            Write-Host ("WARN: 冒烟 bot 超过 {0}s 未退出（port={1}）——按冒烟失败处理，见 {2}" -f `
+                    $BotTimeoutSec, $Port, $r.errFile)
+        }
+        $smoke = $r.json
     }
     if ($proc -and -not $proc.HasExited) { Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue }
     Start-Sleep 3

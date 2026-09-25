@@ -15,10 +15,13 @@ param(
     [string]$Account = 'test',
     [string]$Password = '123456',
     [int]$ReadyTimeoutSec = 90,
-    [string]$OutFile = ''
+    [string]$OutFile = '',
+    # 登录冒烟的 bot 超时（秒）：超时即按冒烟失败处理并**立刻**返回（2026-09-25 修，原先同步调用无超时）
+    [int]$BotTimeoutSec = 120
 )
 $ErrorActionPreference = 'Continue'
 $ops = Split-Path -Parent $MyInvocation.MyCommand.Path
+. (Join-Path $ops '_run_bot.ps1')
 if (-not $DeployDir) { $DeployDir = Join-Path (Join-Path $ops 'out') 'deploy' }
 $exeSrc = Join-Path $ReleaseDir 'mir2_server.exe'
 if (-not (Test-Path $exeSrc)) { Write-Host "FAIL: 找不到 $exeSrc"; exit 2 }
@@ -60,9 +63,14 @@ $readySec = [Math]::Round(((Get-Date) - $t0).TotalSeconds, 1)
 # ④ 登录冒烟
 $smoke = $null
 if ($ready) {
-    $out = & python (Join-Path $ops 'bot.py') --host 127.0.0.1 --port $Port --login-only `
-        --accounts $Account --sessions 1 --password $Password 2>&1 | Select-Object -Last 1
-    try { $smoke = $out | ConvertFrom-Json } catch { $smoke = $null }
+    $r = Invoke-BotJson -OpsDir $ops -BotArgs @('--host', '127.0.0.1', '--port', "$Port", '--login-only',
+        '--accounts', $Account, '--sessions', '1', '--password', $Password) `
+        -TimeoutSec $BotTimeoutSec -Tag 'deploy_smoke'
+    if ($r.timedOut) {
+        Write-Host ("WARN: 登录冒烟 bot 超过 {0}s 未退出（port={1}）——按冒烟失败处理，见 {2}" -f `
+                $BotTimeoutSec, $Port, $r.errFile)
+    }
+    $smoke = $r.json
 }
 if ($proc -and -not $proc.HasExited) { Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue }
 Start-Sleep 2
