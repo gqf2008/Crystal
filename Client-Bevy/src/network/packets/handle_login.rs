@@ -183,17 +183,25 @@ pub(crate) fn handle_login(
             }
         }
         x if x == ServerPacketIds::NewCharacterSuccess as i16 => {
-            if let Ok(p) = account::NewCharacterSuccess::read_body(&mut cur) {
-                tracing::info!("✅ 新建角色成功: {}", p.character.name);
-                session.characters.push(SelectInfo {
-                    index: p.character.index,
-                    name: p.character.name.clone(),
-                    level: p.character.level,
-                    class: p.character.class,
-                    gender: p.character.gender,
-                    last_access: p.character.last_access,
-                });
-                session.select_reload = true;
+            // 解析失败**必须留痕**：2026-09-26 实测过一次"服务端字段序与共享包不一致"，
+            // 这里 `if let Ok(...)` 静默吞掉 ⇒ 角色在服务端建出来了、客户端界面毫无反应，
+            // 玩家体感＝"无法创建角色"。这类"看着成功、实际没生效"必须能在日志里看见。
+            match account::NewCharacterSuccess::read_body(&mut cur) {
+                Ok(p) => {
+                    tracing::info!("✅ 新建角色成功: {}", p.character.name);
+                    session.characters.push(SelectInfo {
+                        index: p.character.index,
+                        name: p.character.name.clone(),
+                        level: p.character.level,
+                        class: p.character.class,
+                        gender: p.character.gender,
+                        last_access: p.character.last_access,
+                    });
+                    session.select_reload = true;
+                }
+                Err(e) => {
+                    tracing::warn!("⚠️ NewCharacterSuccess 解析失败（字段序与共享包不一致？）: {e}");
+                }
             }
         }
         x if x == ServerPacketIds::DeleteCharacter as i16 => {

@@ -34,6 +34,7 @@ use std::net::TcpListener;
 use bevy::ecs::system::SystemParam;
 use bevy::input::mouse::MouseButtonInput;
 use bevy::input::mouse::{MouseScrollUnit, MouseWheel};
+use bevy::input::keyboard::{Key, KeyboardInput};
 use bevy::input::touch::TouchPhase;
 use bevy::input::ButtonState;
 use bevy::picking::hover::HoverMap;
@@ -476,11 +477,23 @@ enum ControlCommand {
     /// 合成鼠标点击（全 UI 交互验证）：Move→Press→(可选 drag_to Move)→Release
     /// 四帧注入，PointerInput（bevy_ui Interaction 按钮链路）+ MouseButtonInput
     /// （ButtonInput<MouseButton> 拖动链路）+ 窗口光标位置三通道同步注入
+    ///
+    /// `button`：2026-09-26 补 —— 原版是**右键空地寻路、左键交互**，只注入左键的探针
+    /// 根本测不了"鼠标能不能控制人物移动"（owner 反馈之一）。
     Click {
         pos: Vec2,
         drag_to: Option<Vec2>,
+        button: MouseButton,
         reply: Sender<String>,
     },
+    /// 合成键盘**文本**输入（2026-09-26）：把字符按 `KeyboardInput{text: Some(ch)}` 投递，
+    /// 等效于"输入法已提交这些字符"。用来驱动真实文本框路径（如建角名字框），
+    /// 而不是绕过去直接改状态——否则"能不能打字"这条永远不会被测到。
+    TypeText { text: String, reply: Sender<String> },
+    /// 只读探针：建角对话框状态（可见性/名字/焦点/职业/性别/名字是否合法）。
+    /// 为什么需要：建角发生在 **Select 态**（"非 Game"），`state` RPC 只回 `not in game`，
+    /// 夹具此前无法知道"名字到底打进去了没有、窗口到底开没开"——判据只能靠猜。
+    NewCharProbe { reply: Sender<String> },
     /// 返回指定对话框根面板的屏幕矩形（逻辑坐标），供 click 计算点击点
     DialogRect {
         kind: DialogKind,
@@ -517,6 +530,8 @@ pub struct CursorProbe {
 struct PendingClick {
     pos: Vec2,
     drag_to: Option<Vec2>,
+    /// 注入哪个键（原版：左键交互 / 右键空地寻路）
+    button: MouseButton,
     phase: u8,
     /// 完成/失败路径 take() 发送；Option 配合 Drop 兜底（见 impl Drop）
     reply: Option<Sender<String>>,
@@ -548,7 +563,8 @@ pub fn resolve_cursor(probe: Option<Vec2>, window: Option<Vec2>) -> Option<Vec2>
 /// 命中判定自己读光标，所以 `Interaction`/`HoverMap` 那套注入**到不了它**。
 #[derive(SystemParam)]
 pub struct CursorSource<'w, 's> {
-    probe: Res<'w, CursorProbe>,
+    /// 探针资源可缺（无头/最小测试 App 里常没有）——缺了就当"无探针"，退回真实窗口光标。
+    probe: Option<Res<'w, CursorProbe>>,
     windows: Query<'w, 's, &'static Window>,
 }
 
@@ -556,7 +572,7 @@ impl CursorSource<'_, '_> {
     /// 注入的光标优先；无探针时退回真实窗口光标（无窗口/鼠标在窗外 → None）。
     pub fn pos(&self) -> Option<Vec2> {
         let real = self.windows.single().ok().and_then(|w| w.cursor_position());
-        resolve_cursor(self.probe.pos, real)
+        resolve_cursor(self.probe.as_ref().and_then(|p| p.pos), real)
     }
 }
 
@@ -580,6 +596,10 @@ struct ControlQueries<'w, 's> {
     /// 截图落盘的是**物理像素**（窗口逻辑尺寸 × scale_factor），而 UI 命中/绘制用的是逻辑坐标——
     /// 像素判据（l5t 的"面板展开后是否不透明"）必须按这个比例换算，否则采样区根本不是面板。
     window: Query<'w, 's, &'static bevy::window::Window, With<bevy::window::PrimaryWindow>>,
+    /// `type_text`（2026-09-26）：把"输入法已提交的字符"投进键盘消息流，驱动真实文本框路径。
+    /// 与 `chat_filter`/`window` 同理挂在 `ControlQueries`——`apply_control_commands` 的参数表
+    /// 已到 16 个 SystemParam 上限。
+    keys: MessageWriter<'w, KeyboardInput>,
     /// ⑤ 探针用：本地玩家背包组件（占用/总格数、重量）
     bag: Query<'w, 's, &'static crate::game::player_state::Inventory, With<LocalPlayer>>,
     /// `combat_probe` 用：本地玩家状态标志——`auto_attack_system` 的 run_if 是
@@ -811,6 +831,9 @@ impl Plugin for ControlPlugin {
     fn build(&self, app: &mut App) {
         let (tx, rx) = bounded::<ControlCommand>(64);
         app.insert_resource(ControlRx(rx));
+        // `type_text` 需要往键盘消息流里投字符；生产环境由 bevy InputPlugin 注册，
+        // 但无头测试/最小 App 里可能没有 → 这里显式注册一次（`add_message` 幂等）。
+        app.add_message::<KeyboardInput>();
         // #2767：光标探针（悬停类系统的自动化入口）
         app.init_resource::<CursorProbe>();
         let port = parse_control_port(&std::env::args().collect::<Vec<_>>());
@@ -819,8 +842,9 @@ impl Plugin for ControlPlugin {
             Update,
             apply_control_commands.run_if(in_state(AppState::Game)),
         );
-        // #2956：非 Game 态到达的命令立即回错排空——否则滞留 channel，
-        // 进 Game 后对已完全不同的场景按旧坐标补点
+        // #2956：非 Game 态到达的命令**当帧处理完**——探查类回错并排空（否则滞留 channel，
+        // 进 Game 后对已完全不同的场景按旧坐标补点）；`click`/`type_text` 同帧转投，
+        // 因为登录/选角/建角界面（owner 反馈的"无法创建角色"就在这里）也要能被夹具驱动。
         app.add_systems(
             First,
             drain_control_outside_game.run_if(bevy::prelude::not(in_state(AppState::Game))),
@@ -1559,11 +1583,18 @@ fn handle_conn(mut stream: std::net::TcpStream, tx: Sender<ControlCommand>) {
                             },
                             None => None,
                         };
+                        // 原版语义：左键交互 / 右键空地寻路。缺省仍是左键（既有夹具不受影响）。
+                        let button = match params.get("button").and_then(|v| v.as_str()) {
+                            Some("right") => MouseButton::Right,
+                            Some("middle") => MouseButton::Middle,
+                            _ => MouseButton::Left,
+                        };
                         let (reply_tx, reply_rx) = bounded::<String>(1);
                         if tx
                             .send(ControlCommand::Click {
                                 pos,
                                 drag_to,
+                                button,
                                 reply: reply_tx,
                             })
                             .is_ok()
@@ -1577,6 +1608,47 @@ fn handle_conn(mut stream: std::net::TcpStream, tx: Sender<ControlCommand>) {
                         }
                     }
                     None => json!({"error": "missing x/y"}),
+                }
+            }
+            "type_text" => {
+                // 见 ControlCommand::TypeText：把文本按"输入法已提交"投递给键盘消息流。
+                let text = params
+                    .get("text")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                if text.is_empty() {
+                    json!({"error": "missing text"})
+                } else {
+                    let (reply_tx, reply_rx) = bounded::<String>(1);
+                    if tx
+                        .send(ControlCommand::TypeText {
+                            text: text.clone(),
+                            reply: reply_tx,
+                        })
+                        .is_ok()
+                    {
+                        let s = reply_rx
+                            .recv_timeout(std::time::Duration::from_secs(3))
+                            .unwrap_or_else(|_| "{}".to_string());
+                        serde_json::from_str::<Value>(&s).unwrap_or_else(|_| json!({}))
+                    } else {
+                        json!({"error": "control channel closed"})
+                    }
+                }
+            }
+            "new_char_probe" => {
+                let (reply_tx, reply_rx) = bounded::<String>(1);
+                if tx
+                    .send(ControlCommand::NewCharProbe { reply: reply_tx })
+                    .is_ok()
+                {
+                    let s = reply_rx
+                        .recv_timeout(std::time::Duration::from_secs(2))
+                        .unwrap_or_else(|_| "{}".to_string());
+                    serde_json::from_str::<Value>(&s).unwrap_or_else(|_| json!({}))
+                } else {
+                    json!({"error": "control channel closed"})
                 }
             }
             "diag_closebtn" => {
@@ -1887,10 +1959,79 @@ pub fn vis_batch_watch_post(
 /// #2956：非 Game 态排空控制队列——带回执的命令立即回 `not in game`，
 /// 无回执的静默丢弃。否则命令滞留 channel，进 Game 后对已完全不同的场景补执行
 /// （典型：登录态发的 click 进图后按旧坐标点到别的窗口上）。
-fn drain_control_outside_game(control: Res<ControlRx>) {
+fn drain_control_outside_game(
+    control: Res<ControlRx>,
+    mut commands: Commands,
+    mut keys: MessageWriter<KeyboardInput>,
+    mut cursor_probe: ResMut<CursorProbe>,
+    // 可为空：最小测试 App 里可能没装 NewCharacterPlugin —— 那时 probe 回明确错误，而不是整体校验失败。
+    new_char: Option<Res<crate::ui::new_character::NewCharState>>,
+) {
     while let Ok(cmd) = control.0.try_recv() {
-        if let Some(reply) = control_reply(&cmd) {
-            let _ = reply.try_send(json!({"ok": false, "error": "not in game"}).to_string());
+        match cmd {
+            // 2026-09-26：登录/选角/**建角**这些"非 Game 场景"里也有按钮与文本框
+            // （owner 反馈的"无法创建角色"就发生在这里，此前 click/键盘在非 Game 态一律
+            // 回 "not in game"，夹具根本驱动不了它）。
+            //
+            // #2956 的原意是"**别把过期命令留到进图后再执行**"；这里**同帧**就把它转成
+            // PendingClick / 键盘消息（不留队列、不跨场景补执行），因此既保留原意，
+            // 又让非 Game 场景可被夹具驱动。
+            ControlCommand::Click {
+                pos,
+                drag_to,
+                button,
+                reply,
+            } => {
+                cursor_probe.pos = Some(pos);
+                commands.insert_resource(PendingClick {
+                    pos,
+                    drag_to,
+                    button,
+                    phase: 0,
+                    reply: Some(reply),
+                    reply_hits: Vec::new(),
+                });
+            }
+            ControlCommand::TypeText { text, reply } => {
+                // 等效"输入法已提交该字符"：文本走 `text`，逻辑键给 Character；
+                // window 用 PLACEHOLDER（消费方只看 text/logical_key，与既有测试一致）。
+                let mut n = 0usize;
+                for ch in text.chars() {
+                    keys.write(KeyboardInput {
+                        key_code: bevy::input::keyboard::KeyCode::Unidentified(
+                            bevy::input::keyboard::NativeKeyCode::Unidentified,
+                        ),
+                        logical_key: Key::Character(ch.to_string().into()),
+                        state: ButtonState::Pressed,
+                        text: Some(ch.to_string().into()),
+                        repeat: false,
+                        window: Entity::PLACEHOLDER,
+                    });
+                    n += 1;
+                }
+                let _ = reply.try_send(json!({"ok": true, "chars": n}).to_string());
+            }
+            ControlCommand::NewCharProbe { reply } => {
+                let s = match new_char.as_ref() {
+                    Some(nc) => json!({
+                        "ok": true,
+                        "visible": nc.visible,
+                        "name": nc.name,
+                        "name_focused": nc.name_focused,
+                        "name_valid": mir2_shared::validation::character_name_valid(&nc.name),
+                        "class": format!("{:?}", nc.class),
+                        "gender": format!("{:?}", nc.gender),
+                        "hero_mode": nc.hero_mode,
+                    }),
+                    None => json!({"ok": false, "error": "no NewCharState (NewCharacterPlugin 未安装)"}),
+                };
+                let _ = reply.try_send(s.to_string());
+            }
+            other => {
+                if let Some(reply) = control_reply(&other) {
+                    let _ = reply.try_send(json!({"ok": false, "error": "not in game"}).to_string());
+                }
+            }
         }
     }
 }
@@ -1908,6 +2049,8 @@ fn control_reply(cmd: &ControlCommand) -> Option<&Sender<String>> {
         | ControlCommand::CharPage { reply, .. }
         | ControlCommand::ChatSize { reply, .. }
         | ControlCommand::Click { reply, .. }
+        | ControlCommand::TypeText { reply, .. }
+        | ControlCommand::NewCharProbe { reply }
         | ControlCommand::DialogRect { reply, .. }
         | ControlCommand::GetScroll { reply }
         | ControlCommand::ShopProbe { reply } => Some(reply),
@@ -1994,14 +2137,18 @@ fn drive_pending_click(world: &mut World) {
                 }
             }
             world.write_message(MouseButtonInput {
-                button: MouseButton::Left,
+                button: pending.button,
                 state: ButtonState::Pressed,
                 window: window_ent,
             });
             world.write_message(PointerInput::new(
                 PointerId::Mouse,
                 loc(pending.pos),
-                PointerAction::Press(PointerButton::Primary),
+                PointerAction::Press(if pending.button == MouseButton::Right {
+                    PointerButton::Secondary
+                } else {
+                    PointerButton::Primary
+                }),
             ));
             pending.reply_hits = hits;
             pending.phase = 2;
@@ -2025,7 +2172,7 @@ fn drive_pending_click(world: &mut World) {
                     .and_then(|w| w.physical_cursor_position());
                 let pressed = world
                     .get_resource::<ButtonInput<MouseButton>>()
-                    .map(|b| b.pressed(MouseButton::Left))
+                    .map(|b| b.pressed(pending.button))
                     .unwrap_or(false);
                 let mut q = world.query::<(Entity, &Interaction)>();
                 let states: Vec<String> = q
@@ -2038,14 +2185,18 @@ fn drive_pending_click(world: &mut World) {
                 );
             }
             world.write_message(MouseButtonInput {
-                button: MouseButton::Left,
+                button: pending.button,
                 state: ButtonState::Released,
                 window: window_ent,
             });
             world.write_message(PointerInput::new(
                 PointerId::Mouse,
                 loc(pending.drag_to.unwrap_or(pending.pos)),
-                PointerAction::Release(PointerButton::Primary),
+                PointerAction::Release(if pending.button == MouseButton::Right {
+                    PointerButton::Secondary
+                } else {
+                    PointerButton::Primary
+                }),
             ));
             // Drop 类型不能移出字段——hits 先 take 出来再组回执
             let hits = std::mem::take(&mut pending.reply_hits);
@@ -2293,6 +2444,7 @@ fn apply_control_commands(
             ControlCommand::Click {
                 pos,
                 drag_to,
+                button,
                 reply,
             } => {
                 // 悬停系统同步看到探针光标；逐帧注入交给 First 调度的 drive_pending_click。
@@ -2302,10 +2454,40 @@ fn apply_control_commands(
                 commands.insert_resource(PendingClick {
                     pos,
                     drag_to,
+                    button,
                     phase: 0,
                     reply: Some(reply),
                     reply_hits: Vec::new(),
                 });
+            }
+            ControlCommand::TypeText { text, reply } => {
+                // 与"非 Game 态"同一套语义：把字符按"输入法已提交"投进键盘消息流，
+                // 由文本框各自的系统消费（游戏内也有文本框，如邮件正文/聊天输入）。
+                // `window` 用 PLACEHOLDER：消费方（文本框）只看 `logical_key`/`text`，
+                // 与既有测试里构造 KeyboardInput 的做法一致。
+                let mut n = 0usize;
+                for ch in text.chars() {
+                    q.keys.write(KeyboardInput {
+                        key_code: bevy::input::keyboard::KeyCode::Unidentified(
+                            bevy::input::keyboard::NativeKeyCode::Unidentified,
+                        ),
+                        logical_key: Key::Character(ch.to_string().into()),
+                        state: ButtonState::Pressed,
+                        text: Some(ch.to_string().into()),
+                        repeat: false,
+                        window: Entity::PLACEHOLDER,
+                    });
+                    n += 1;
+                }
+                let _ = reply.try_send(json!({"ok": true, "chars": n}).to_string());
+            }
+            ControlCommand::NewCharProbe { reply } => {
+                // 建角（玩家）发生在 Select 态；Game 内只有"英雄创建"会用它。
+                // 这条探针目前只在非 Game 态实现（见 drain_control_outside_game）。
+                let _ = reply.try_send(
+                    json!({"ok": false, "error": "only available outside game (select screen)"})
+                        .to_string(),
+                );
             }
             ControlCommand::DiagCloseBtn => {
                 commands.insert_resource(DiagCloseBtnReq);
@@ -3417,6 +3599,7 @@ mod tests {
         let mk = |tx: Sender<String>| PendingClick {
             pos: Vec2::ZERO,
             drag_to: None,
+            button: MouseButton::Left,
             phase: 0,
             reply: Some(tx),
             reply_hits: Vec::new(),
@@ -3444,6 +3627,7 @@ mod tests {
         app.world_mut().insert_resource(PendingClick {
             pos: Vec2::new(10.0, 20.0),
             drag_to: None,
+            button: MouseButton::Left,
             phase: 3, // 直接进完成帧：释放 + 回执 + 探针清理
             reply: Some(tx),
             reply_hits: vec!["btn".to_string()],
@@ -3464,22 +3648,34 @@ mod tests {
         );
     }
 
-    /// #2956：非 Game 态命令立即回 not in game 并排空——不得滞留到进 Game 后补执行。
+    /// #2956 + 2026-09-26：非 Game 态的命令必须**当帧处理完、不许滞留**——但"处理"不等于
+    /// "一律拒绝"：
+    /// - `click` / `type_text` 在非 Game 态是**同帧转投**（登录/选角/**建角**界面也要能驱动，
+    ///   否则 owner 报的"无法创建角色"这类界面缺陷没法用夹具复现）；
+    /// - 探查类（如 `state`）仍回 `not in game`（跨场景补执行才是 #2956 要防的）。
     #[test]
-    fn drain_outside_game_replies_not_in_game_and_empties_queue() {
+    fn drain_outside_game_handles_click_and_text_without_deferring() {
         use bevy::ecs::system::RunSystemOnce;
         let (cmd_tx, cmd_rx) = bounded::<ControlCommand>(64);
-        let (rtx1, rrx1) = bounded::<String>(1);
-        let (rtx2, rrx2) = bounded::<String>(1);
+        let (rtx_click, rrx_click) = bounded::<String>(1);
+        let (rtx_text, rrx_text) = bounded::<String>(1);
+        let (rtx_state, rrx_state) = bounded::<String>(1);
         cmd_tx
             .send(ControlCommand::Click {
-                pos: Vec2::ZERO,
+                pos: Vec2::new(3.0, 4.0),
                 drag_to: None,
-                reply: rtx1,
+                button: MouseButton::Right,
+                reply: rtx_click,
             })
             .unwrap();
         cmd_tx
-            .send(ControlCommand::GetState { reply: rtx2 })
+            .send(ControlCommand::TypeText {
+                text: "小明明".to_string(),
+                reply: rtx_text,
+            })
+            .unwrap();
+        cmd_tx
+            .send(ControlCommand::GetState { reply: rtx_state })
             .unwrap();
         // 无回执变体：静默丢弃，不 panic
         cmd_tx
@@ -3489,19 +3685,46 @@ mod tests {
                 run: false,
             })
             .unwrap();
-        let mut world = World::new();
-        world.insert_resource(ControlRx(cmd_rx));
-        world
+
+        let mut app = App::new();
+        app.init_resource::<Messages<KeyboardInput>>();
+        app.world_mut().spawn((Window::default(), PrimaryWindow));
+        app.world_mut().insert_resource(ControlRx(cmd_rx));
+        app.world_mut().insert_resource(CursorProbe::default());
+        app.world_mut()
             .run_system_once(drain_control_outside_game)
             .expect("drain 应成功");
-        for (name, rx) in [("click", &rrx1), ("state", &rrx2)] {
-            let s = rx
-                .recv_timeout(std::time::Duration::from_millis(200))
-                .unwrap_or_else(|_| panic!("{name} 应收到 not in game 回执"));
-            assert!(s.contains("not in game"), "{name} 回执: {s}");
-        }
+        app.world_mut().flush();
+
+        // click：当帧落成 PendingClick（右键语义保留），回执要等注入完成帧，不能是 not in game
+        let pc = app
+            .world()
+            .get_resource::<PendingClick>()
+            .expect("非 Game 态的 click 应同帧转成 PendingClick");
+        assert_eq!(pc.button, MouseButton::Right, "右键语义必须保留");
         assert!(
-            world.resource::<ControlRx>().0.try_recv().is_err(),
+            rrx_click.try_recv().is_err(),
+            "click 的回执应由 drive_pending_click 在完成帧给出，不该在 drain 里就回 not in game"
+        );
+        // type_text：3 个字符都要进键盘消息流（文本框才收得到）
+        let s = rrx_text
+            .recv_timeout(std::time::Duration::from_millis(200))
+            .expect("type_text 应回执");
+        assert!(s.contains("\"chars\":3"), "回执应报 3 个字符: {s}");
+        let texts: Vec<String> = app
+            .world()
+            .resource::<Messages<KeyboardInput>>()
+            .iter_current_update_messages()
+            .filter_map(|k| k.text.as_ref().map(|t| t.to_string()))
+            .collect();
+        assert_eq!(texts, vec!["小", "明", "明"], "字符应按顺序进键盘消息流");
+        // 探查类：仍回 not in game（不得跨场景补执行）
+        let s3 = rrx_state
+            .recv_timeout(std::time::Duration::from_millis(200))
+            .expect("state 应收到 not in game 回执");
+        assert!(s3.contains("not in game"), "state 回执: {s3}");
+        assert!(
+            app.world().resource::<ControlRx>().0.try_recv().is_err(),
             "队列应已排空"
         );
     }

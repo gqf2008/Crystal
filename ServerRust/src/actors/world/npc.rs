@@ -1443,14 +1443,32 @@ impl Message<NewCharacterRequest> for WorldActor {
             Err(e) => warn!("Failed to save new character '{}': {}", msg.name, e),
         }
 
-        // 发送 NewCharacterSuccess（SelectInfo：name + index + level + class + gender + last_access）
+        // 发送 NewCharacterSuccess —— **必须用共享包的 write_body**，不要手写字段序。
+        // 2026-09-26 修：这里原本手写 `name + index + ...`（照 C# SelectInfo 的字段序），
+        // 而 `SharedRust` 的 `NewCharacterSuccess::read_body`/`write_body` 是
+        // `index + name + ...`（Rust 客户端与 mock 都按它解析）⇒ 客户端 `read_body` 解析失败、
+        // `if let Ok(p)` 静默跳过：**角色在服务端建出来了，客户端却毫无反应**，
+        // 玩家的体感就是"点了确定没反应 / 无法创建角色"（owner 反馈）。
         let mut body = Vec::new();
-        mir2_shared::binary::write_dotnet_string(&mut body, &msg.name).ok();
-        body.extend_from_slice(&0i32.to_le_bytes()); // index = 0（新角色列表首位）
-        body.extend_from_slice(&1u16.to_le_bytes()); // level = 1
-        body.push(msg.class);
-        body.push(msg.gender);
-        body.extend_from_slice(&0i64.to_le_bytes()); // last_access ticks
+        {
+            use mir2_shared::packets::Packet;
+            let success = mir2_shared::packets::server::account::NewCharacterSuccess {
+                character: mir2_shared::packets::CharacterSummary {
+                    index: 0, // 新角色列表首位
+                    name: msg.name.clone(),
+                    level: 1,
+                    class: mir2_shared::MirClass::try_from(msg.class)
+                        .unwrap_or(mir2_shared::MirClass::Warrior),
+                    gender: mir2_shared::MirGender::try_from(msg.gender)
+                        .unwrap_or(mir2_shared::MirGender::Male),
+                    last_access: chrono::Utc::now(),
+                },
+            };
+            if let Err(e) = success.write_body(&mut body) {
+                warn!("NewCharacterSuccess 序列化失败: {}", e);
+                return;
+            }
+        }
         let data = build_packet_bytes(
             mir2_shared::enums::ServerPacketIds::NewCharacterSuccess as i16,
             &body,
