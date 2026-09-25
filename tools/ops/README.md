@@ -284,6 +284,50 @@ pwsh tools/ops/leak_plateau.ps1 -DeployDir <deploy> -ExePath <mir2_server.exe> `
 线程 span 0、句柄 span 0、`online_players` 每轮回 0、`tasks.running` 每轮回基线 3。
 注意 admin 端口 = gate 端口 **+1**（脚本按 `-Port + 1` 取；硬编码 7001 会拿到 -1）。
 
+**2026-09-25 复跑 + 时长前置守卫**（20 会话、默认时长 Hold 8s / Idle 12s）：`ok=true`，
+测量段 RSS 116.51/117.76/119.05/118.29/118.44 MB，斜率 **0.482 MB/轮**（阈值 0.5），
+`J1/J2/J3` 全绿（线程 span 0、句柄 span 0、每轮回 0 在线、任务回基线）。
+
+> **为什么加了 `-HoldSec ≥ 8 / -IdleSec ≥ 12` 的前置守卫**：我先把时长压到 Hold 6 / Idle 6 想快一点，
+> 结果斜率 0.857、`J4` 假红——那测到的是**高水位预热尾巴**，不是泄漏（增量 1.14→1.19→0.90→0.20 递减）。
+> 用文档默认时长同一份数据就回到 0.482 通过。所以脚本现在直接拒绝出结论（`exit 2`）并说明：
+> 要缩短总时长请减 `-MeasureCycles`，别压 `-HoldSec/-IdleSec`。
+>
+> **余量提示（如实记）**：默认时长下 0.482 vs 阈值 0.5 只剩约 4% 余量，属**会抖的门禁**——
+> 发布判定建议用更长窗口（更多 `-MeasureCycles` 或更长 Hold/Idle）复跑；单机窗口再长也替代不了
+> `CAPACITY.md` §7 的 ≥24h 老化（那是外部项）。
+
+### 5c-2a. 本轮把这条门禁查到底：release 上 J4 红、且不是 session 键容器泄漏（2026-09-25）
+
+三条证据把它从"偶发假红"推进到"有实测结论的缺口"：
+
+1. **同设置会抖**（debug 构建，20 会话、默认时长，连跑 3 次）：端点斜率
+   **0.482（ok）/ 0.81（红）/ 0.375（ok）** ⇒ 1/3 假红。逐轮增量呈 `+2.05, +0.44, -1.48, +0.49`
+   这类**混合符号**，说明 5 点端点斜率被单点离群值主导。报告现在同时给出
+   `rss_increments_mb`（逐轮增量）与 `rss_slope_regression_mb_per_cycle`（最小二乘斜率）与
+   `build_kind`，便于一眼区分"持续增长"与"某点抖动"（判定语义未改）。
+2. **release 构建（当前 master）上判据红，且不收敛**：
+   - 默认 5 轮测量：`ok=false`，端点 **0.742**、回归 **0.728**，RSS 49.68→52.65（增量 1.51/0.52/0.82/0.12）；
+   - 12 轮测量：`ok=false`，端点 **0.611**、回归 **0.66**，RSS 50.07→56.79（**+6.7MB**，
+     增量 `+1.07,-0.07,+0.21,+1.07,+0.88,+0.89,-0.20,+1.56,+1.27,-0.22,+0.26`）。
+   而本夹具 2026-09-24 在 release 上的基线是 **0.1 MB/轮**（43.0→43.4 已平台）。
+3. **排除"按 session 键的容器没清"**：加了只读探针（`MIR2_LEAK_PROBE=1` 时在每次断线清理后打印
+   33 个 session 键容器的尺寸，见 `session.rs` 的 `LEAK_PROBE`），release 连登连退多轮实测
+   **每一个容器都是 0**（`players/buyback/chat_items/npc_timers/last_move/delayed_actions/
+   flaming/double_hit/mp_eater/hemorrhage/mental/counter_attack/targets/pet_modes/last_mail/
+   death_queue/fishing/fishing_counters/session_npc/session_npc_page/market_*/poison/stacking/
+   logout_block/observe_links/rental/invisible/hidden/gm_observer/sneaking/slaying` 全 0）。
+
+**因此当前状态（如实记）**：release 上 20 会话连登连退的空闲 RSS **每轮约 +0.6MB 且 12 轮内不收敛**，
+但**不是** per-session 容器泄漏（那批全清）；`J3`（线程 span 0 / 句柄 span 0）也证明没有 OS 资源泄漏。
+嫌疑剩下：分配器高水位/arena 增长、按**非 session 键**（地图/全局/社交/DB 层）的缓存、或某条登录/登出
+路径持有的长生命周期对象。**下一步**：① 用更长的窗口（≥30 轮）看是否最终平台（高水位 vs 缓慢泄漏）；
+② 给分配器/关键非 session 容器加同样的只读探针；③ 跨版本对比需要**与旧二进制 schema 匹配的库**
+（本轮用当前库跑 2026-09-23 的 release，第 8 轮整批登录失败 → `FAIL(J0)` exit 3，夹具正确地拒绝出结论）。
+
+**两条前置守卫（本轮加）**：`-HoldSec < 8 / -IdleSec < 12` 直接 `exit 2`（否则测到的是高水位预热尾巴，
+实测 0.857 假红）；**debug 构建**未显式加 `-AllowDebugThreshold` 也 `exit 2`（阈值与基线都是 release 标定的）。
+
 ## 5d. 写锁下的登录时延：`login_latency_probe.ps1`（带阈值夹具）
 
 判据（缺一不可）：L1 写锁**真注入**（等注入器输出 `LOCK_HELD`，拿不到直接退出码 3、不产出结论）；

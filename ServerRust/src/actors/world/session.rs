@@ -2674,6 +2674,55 @@ impl Message<PlayerDisconnected> for WorldActor {
         self.in_trap_rock.remove(&msg.session_id);
         self.transform_appearance.remove(&msg.session_id);
 
+        // 只读内存探针（2026-09-25）：`MIR2_LEAK_PROBE=1` 时，在**每次断线清理之后**打印各个
+        // 「按 session 键」的容器尺寸。用途：泄漏门禁（leak_plateau）在 release 构建上实测
+        // 「20 会话连登连退，空闲 RSS 每轮 +0.6MB、12 轮不收敛」（夹具基线是 0.1MB/轮），
+        // 而线程/句柄 span 均为 0 —— 需要判断是**分配器高水位**还是**某个 session 键容器没清**。
+        // 判据：连续多轮里尺寸**单调不减**的容器就是嫌疑人；全部回落到基线即说明是高水位。
+        // 默认关闭（不改变正常日志）。
+        if std::env::var("MIR2_LEAK_PROBE").is_ok() {
+            info!(
+                "LEAK_PROBE sid={} players={} buyback={} chat_items={} npc_timers={} last_move={} delayed_actions={} \
+                 flaming={} double_hit={} mp_eater={} hemorrhage={} mental={} counter_attack={} targets={} \
+                 pet_modes={} last_mail={} death_queue={} fishing={} fishing_counters={} session_npc={} \
+                 session_npc_page={} market_next={} market_cache={} poison={} stacking={} logout_block={} \
+                 observe_links={} rental={} invisible={} hidden={} gm_observer={} sneaking={} slaying={}",
+                msg.session_id,
+                self.players.len(),
+                self.buyback_items.len(),
+                self.chat_items_sent.len(),
+                self.npc_timers.len(),
+                self.session_last_movement.len(),
+                self.npc_delayed_actions.len(),
+                self.flaming_sword.len(),
+                self.double_hit_melee.len(),
+                self.mp_eater_count.len(),
+                self.hemorrhage_count.len(),
+                self.mental_state.len(),
+                self.counter_attack.len(),
+                self.player_targets.len(),
+                self.player_pet_modes.len(),
+                self.last_mail_time.len(),
+                self.player_death_queue.len(),
+                self.fishing_sessions.len(),
+                self.fishing_success_counters.len(),
+                self.session_npc.len(),
+                self.session_npc_page.len(),
+                self.market_search_next_ms.len(),
+                self.market_search_cache.len(),
+                self.player_poison_flags.len(),
+                self.player_stacking.len(),
+                self.player_logout_block_ms.len(),
+                self.observe_links.len(),
+                self.rental_sessions.len(),
+                self.invisible_sessions.len(),
+                self.hidden_sessions.len(),
+                self.gm_observer_sessions.len(),
+                self.sneaking_sessions.len(),
+                self.slaying_armed.len(),
+            );
+        }
+
         info!("Player removed from world (session={})", msg.session_id);
 
         // 租赁会话清理（与 PlayerLogOut 对齐；C# StopGame → CancelItemRental）：
