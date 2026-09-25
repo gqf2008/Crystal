@@ -49,6 +49,13 @@ async fn async_main() -> anyhow::Result<()> {
             .add_directive("kameo=warn".parse()?)
     };
     tracing_subscriber::fmt().with_env_filter(env_filter).init();
+    // 内存探针（需 `--features mem-probe` 构建）：`MIR2_LEAK_PROBE=1` 才会打开计数分配器，
+    // 否则分配路径只多一次原子读；默认构建里这段与整个模块都不编译。
+    #[cfg(feature = "mem-probe")]
+    if std::env::var("MIR2_LEAK_PROBE").is_ok() {
+        crystal_server::mem_probe::set_enabled(true);
+        info!("mem-probe: counting allocator enabled (MIR2_LEAK_PROBE=1)");
+    }
 
     info!("Crystal Server starting...");
 

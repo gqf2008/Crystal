@@ -80,6 +80,12 @@ dead_code = "allow"
 unused_assignments = "allow"
 private_interfaces = "allow"
 
+[features]
+# 只读内存探针（计数分配器）：`cargo build --release --features mem-probe`。
+# 默认构建**不含**该特性 ⇒ 生产/常规门禁零开销；打开后每轮可读「活跃字节数」，
+# 用来区分「真泄漏（活跃字节持续增长）」与「分配器高水位/arena（活跃字节平稳但 RSS 涨）」。
+mem-probe = []
+
 [lints.clippy]
 too_many_arguments = "allow"
 type_complexity = "allow"
