@@ -52,7 +52,16 @@ New-Item -ItemType Directory -Force -Path $outDir | Out-Null
 $log = Join-Path $outDir "login_latency_$stamp.log"
 $env:RUST_LOG = 'crystal_server=info,crystal_server::actors::account=debug,crystal_server::gate=debug'
 
-Get-Process mir2_login,mir2_server -EA SilentlyContinue | Where-Object { $_.Path -eq $ExePath } | Stop-Process -Force -EA SilentlyContinue
+# 前置：本机多 agent 并行，**绝不**按进程名清场（见 LESSON_多agent并行时按进程名清进程会污染他人GUI实验）。
+# 同一个 $ExePath 上若还挂着上一轮的实例，那是上一轮没清干净——明确前置失败（exit 2）让操作者处置，
+# 而不是静默杀掉：同一部署目录被别的 agent 共用时，静默清理会把对方的演练一起带走（假红）。
+$staleIds = @(Get-Process mir2_login, mir2_server -ErrorAction SilentlyContinue |
+    Where-Object { $_.Path -eq $ExePath } | Select-Object -ExpandProperty Id)
+if ($staleIds.Count -gt 0) {
+    Write-Host ("FAIL(前置)：{0} 上仍有上一轮残留实例 pid={1} —— 处置后再重跑（本脚本不按进程名清场）" -f `
+            $ExePath, ($staleIds -join ','))
+    exit 2
+}
 $srv = Start-Process -FilePath $ExePath -WorkingDirectory $DeployDir `
     -RedirectStandardOutput $log -RedirectStandardError (Join-Path $outDir "login_latency_$stamp.err.log") -PassThru
 $ready = $false
