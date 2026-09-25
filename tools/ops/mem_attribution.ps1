@@ -81,6 +81,13 @@ foreach ($t in $tiers) {
     }
     $rssIdle = Get-OwnRssMb $proc
     $json = Join-Path $ops ("out/memattr_{0}.json" -f $t.name)
+    # 进图档的前置：账号必须先**有角色**，否则 bot 的 ok:true 只表示"流程没抛异常"，
+    # 实际可能停在登录后保持 —— 那会把"没进图"的档产出 per-session 数字（假绿）。
+    # 只登录档不需要角色（`--login-only` 不建角也不进图）。
+    if ($t.name -ne 'login_only') {
+        # 不引入 SQL 依赖（各处 DB 工具/VenV 不一）：这里只提示前置，**真判据在采样后**看 bot JSON 的进图证据。
+        Write-Host ("  [{0}] 进图档前置：请确认账号已有角色（先跑一次 --self-provision 播种）" -f $t.name) -ForegroundColor DarkGray
+    }
     $job = Start-Job -ScriptBlock {
         param($ops, $acc, $Port, $HoldSec, $json, $extra)
         . (Join-Path $ops '_run_bot.ps1')
@@ -93,6 +100,22 @@ foreach ($t in $tiers) {
     $rssLoaded = Get-OwnRssMb $proc
     $done = Wait-Job $job -Timeout ($HoldSec + 120)
     $jsonExists = Test-Path $json
+    # **进图证据**：进图档要求 bot JSON 里出现角色/进图相关字段（`new_character_result` 非 null，
+    # 或 `frames`/`opcodes` 明显多于登录往返），否则记 ok=$false 并注明"没有进图证据"，
+    # 避免给"登录后保持"产出 per-session 数字。
+    $entryEvidence = $true
+    if ($jsonExists -and $t.name -ne 'login_only') {
+        try {
+            $bj = Get-Content $json -Raw | ConvertFrom-Json
+            $s0 = @($bj.sessions)[0]
+            $frames = [int]$s0.frames
+            $charRes = $s0.new_character_result
+            $entryEvidence = ($null -ne $charRes) -or ($frames -ge 8)
+            if (-not $entryEvidence) {
+                Write-Host ("WARN: {0} 档没有进图证据（char_result={1} frames={2}）——本档读数不可用" -f $t.name, $charRes, $frames) -ForegroundColor Yellow
+            }
+        } catch { $entryEvidence = $false }
+    }
     if (-not $done) { Write-Host ("WARN: {0} 档 bot 超时" -f $t.name) }
     Receive-Job $job -EA SilentlyContinue | Out-Null
     Remove-Job $job -Force -EA SilentlyContinue
@@ -102,7 +125,8 @@ foreach ($t in $tiers) {
     } else { $null }
     $rows += [pscustomobject]@{
         tier          = $t.name
-        ok            = ($null -ne $delta)
+        ok            = (($null -ne $delta) -and $entryEvidence)
+        entry_evidence = $entryEvidence
         sessions      = $Sessions
         rss_idle_mb   = $rssIdle
         rss_loaded_mb = $rssLoaded
