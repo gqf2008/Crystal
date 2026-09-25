@@ -21,10 +21,13 @@ param(
     [Parameter(Mandatory = $true)][string]$DataRoot,     # 含 Daneo1989/ 与 config/server.toml 的目录
     [string]$WorkDir = '',
     [int]$Port = 7500,
-    [string]$OutFile = ''
+    [string]$OutFile = '',
+    # J4 冒烟 bot 超时（秒）：超时按失败处理并**立刻**返回（2026-09-25 修）
+    [int]$BotTimeoutSec = 120
 )
 $ErrorActionPreference = 'Continue'
 $ops = Split-Path -Parent $MyInvocation.MyCommand.Path
+. (Join-Path $ops '_run_bot.ps1')
 if (-not $WorkDir) { $WorkDir = Join-Path $ops ('out/fresh_mirdb_' + (Get-Date -Format 'HHmmss')) }
 New-Item -ItemType Directory -Force -Path $WorkDir, (Join-Path $WorkDir 'config'), (Join-Path $WorkDir 'Data') | Out-Null
 
@@ -91,10 +94,12 @@ if (-not $ready -or $imports.Count -lt 4) {
 
 # ---------------- J4：新玩家全路径冒烟 ----------------
 $acc = 'fresh' + (Get-Date -Format 'HHmmss')
-$botOut = (& python (Join-Path $ops 'bot.py') --host 127.0.0.1 --port $Port --sessions 1 `
-        --self-provision --account-prefix $acc --password 123456 --hold 6 | Out-String)
-$bot = $null
-try { $bot = ($botOut.Trim() | ConvertFrom-Json) } catch {}
+# 2026-09-25：改走带超时的共用 helper（原先 `& python bot.py …` 同步无超时 ⇒ 可能整轮静默挂死）
+$r = Invoke-BotJson -OpsDir $ops -BotArgs @('--host', '127.0.0.1', '--port', "$Port", '--sessions', '1',
+    '--self-provision', '--account-prefix', $acc, '--password', '123456', '--hold', '6') `
+    -TimeoutSec $BotTimeoutSec -Tag 'fresh_mirdb_j4'
+if ($r.timedOut) { Write-Host ("WARN: J4 冒烟 bot 超过 {0}s 未退出（port={1}）——按失败处理" -f $BotTimeoutSec, $Port) }
+$bot = $r.json
 $s0 = if ($bot) { $bot.sessions[0] } else { $null }
 $smokeOk = ($null -ne $s0) -and ([int]$s0.frames -gt 0) -and ([int]$s0.new_account_result -eq 8)
 $report.steps.smoke = [ordered]@{

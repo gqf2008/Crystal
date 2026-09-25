@@ -272,6 +272,14 @@ pwsh tools/ops/login_latency_probe.ps1 -DeployDir <deploy> -ExePath <mir2_server
 （读连接永不被写占用）或把簿记写做成真正的异步队列（现在只是"不挡 actor + 快速失败"）。
 另：`LOGIN_TIMING` 分段日志保留在代码里（正常 debug、慢于 500ms 才 warn），下次出现登录抖动可直接看分段。
 
+**2026-09-25 复跑（master `e22d11c84` 构建，12 样本/阶段，写锁 20s）**：exit 0、L2/L3/L4 全绿 ——
+`control p50=0.244 / p95=0.252`、`locked p50=0.236 / p95=0.257 / max=0.257`、
+`login_timing_warn_ge_500ms=0`（阈值 1.0s；仍在"一次写尝试等待"的量级内）。
+
+> 注意 `-Samples` **必须 ≥ 10**：判定里是 `n >= Max(10, Samples-2)`（p95 至少要 10 个样本才成立），
+> 样本更少时报出来的是 `L2/L3=false`，读起来像"时延超标"——2026-09-25 已加前置守卫：`-Samples < 10`
+> 直接 `exit 2` 并说明原因（本轮用 8 样本实测踩到过这个误导）。
+
 ## 5e. 高负载 tick 滞后长窗口：`tick_lag_probe.ps1`
 
 CAPACITY.md §5 那条「20–50 会话下 tick 滞后待测」的收口工具：`capacity_ramp.ps1` 的 `-HoldSec` 默认
@@ -342,10 +350,15 @@ pwsh tools/ops/tick_lag_probe.ps1 -DeployDir <deploy> -StepsCsv '50' -HoldSec 15
 ### 静态门禁：`check_bot_timeouts.ps1`
 
 扫 `tools/ops/*.ps1`，凡出现同步直调 `& python … bot.py` 就报出来；历史遗留的 8 个脚本列在
-`-Allowlist` 里（**那就是待迁移清单**：`fault_injection` / `leak_plateau` / `fresh_mirdb_deploy` /
-`migration_drill` / `capacity_ramp` / `memory_cycle` / `memory_ramp` / `login_latency_probe`）。
+`-Allowlist` 里。**2026-09-25 更新：那 8 个已全部迁移完成，allowlist 已清空**（现在是
+`fault_injection` / `leak_plateau` / `fresh_mirdb_deploy` / `migration_drill` / `capacity_ramp` /
+`memory_cycle` / `memory_ramp` / `login_latency_probe` 全部走 `_run_bot.ps1`；其中三个 job 型脚本
+在 **job 内部**也 dot-source 了 helper，父线程的 `Wait-Job -Timeout` 作第二层）。
 新增脚本再这么写即红（阳性对照：往扫描目录放一个同步直调的假脚本 → `[违规]` + exit 1）；
-迁移完成后用 `-Strict` 让 allowlist 也必须清空。
+`-Strict` 下也应为 0。
+
+> 门禁只扫**代码行**、跳过注释行——注释里常写"原先 `& python bot.py …`"这种说明，
+> 把它们算成违规会让门禁自己变噪音（第一版就踩到，实测 4 个脚本被自己的注释误伤）。
 
 ### 端口契约（同 5c）
 

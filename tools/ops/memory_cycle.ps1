@@ -65,8 +65,12 @@ foreach ($n in $Steps) {
     $json = Join-Path $ops "out/memcycle_${Tag}_r${round}_$n.json"
     $job = Start-Job -ScriptBlock {
         param($ops, $acc, $n, $Port, $HoldSec, $json)
-        & python (Join-Path $ops 'bot.py') --host 127.0.0.1 --port $Port --accounts $acc `
-            --sessions $n --hold $HoldSec --password 123456 > $json 2>&1
+        # job 的 runspace 不继承父作用域函数 ⇒ 内部自己 dot-source helper（父线程 Wait-Job -Timeout 是第二层）
+        . (Join-Path $ops '_run_bot.ps1')
+        $r = Invoke-BotJson -OpsDir $ops -BotArgs @('--host', '127.0.0.1', '--port', "$Port", '--accounts', $acc,
+            '--sessions', "$n", '--hold', "$HoldSec", '--password', '123456') `
+            -TimeoutSec ($HoldSec + 90) -Tag 'memory_cycle'
+        if ($r.json) { $r.json | ConvertTo-Json -Depth 8 | Set-Content -Encoding utf8 $json }
     } -ArgumentList $ops, $acc, $n, $Port, $HoldSec, $json
     $samples = @()
     $deadline = (Get-Date).AddSeconds($HoldSec + 15)
@@ -76,8 +80,12 @@ foreach ($n in $Steps) {
         if (-not $proc.HasExited) { $samples += [Math]::Round($proc.WorkingSet64 / 1MB, 1) }
         if ((Get-Job -Id $job.Id).State -eq 'Completed' -and $samples.Count -ge 3) { break }
     }
-    Wait-Job $job | Out-Null
-    Remove-Job $job -Force
+    # 2026-09-25：Wait-Job 原先没有超时——bot 卡住就整轮永久等下去（同类"静默挂死"）
+    if (-not (Wait-Job $job -Timeout ($HoldSec + 120))) {
+        Write-Host ("WARN: 连登连退 bot 超过 {0}s 未结束（port={1}）——终止该轮采样" -f ($HoldSec + 120), $Port)
+        Stop-Job $job -ErrorAction SilentlyContinue
+    }
+    Remove-Job $job -Force -ErrorAction SilentlyContinue
     $peak = if ($samples.Count) { ($samples | Measure-Object -Maximum).Maximum } else { 0 }
     $bot = $null
     try { $bot = (Get-Content $json -Raw | ConvertFrom-Json) } catch {}

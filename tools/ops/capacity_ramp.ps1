@@ -42,13 +42,23 @@ foreach ($n in $Steps) {
     # 后台跑压测，主线程在保持期采样 RSS（会话全在线时的真实占用）
     $job = Start-Job -ScriptBlock {
         param($ops, $acc, $n, $Port, $HoldSec, $json)
-        & python (Join-Path $ops 'bot.py') --host 127.0.0.1 --port $Port --accounts $acc `
-            --sessions $n --hold $HoldSec --password 123456 > $json 2>&1
+        # job 里的 runspace 不继承父作用域的函数 ⇒ 这里自己 dot-source 同一个 helper，
+        # 让"有界等待"在 job 内部也成立（父线程的 Wait-Job -Timeout 是第二层）。
+        . (Join-Path $ops '_run_bot.ps1')
+        $r = Invoke-BotJson -OpsDir $ops -BotArgs @('--host', '127.0.0.1', '--port', "$Port", '--accounts', $acc,
+            '--sessions', "$n", '--hold', "$HoldSec", '--password', '123456') `
+            -TimeoutSec ($HoldSec + 60) -Tag 'capacity_ramp'
+        if ($r.json) { $r.json | ConvertTo-Json -Depth 8 | Set-Content -Encoding utf8 $json }
     } -ArgumentList $ops, $acc, $n, $Port, $HoldSec, $json
     Start-Sleep ([Math]::Max(8, $HoldSec / 2))
     $rssLoaded = [Math]::Round((Get-Process -Name mir2_server | Select-Object -First 1).WorkingSet64 / 1MB, 1)
-    Wait-Job $job | Out-Null
-    Remove-Job $job -Force
+    # 2026-09-25：Wait-Job 原先**没有超时**——bot 卡住就整轮永久等下去（同类"静默挂死"）。
+    # 现在有界等待：超时则终止该轮采样并明确告警（采样数不足后面自会判失败）。
+    if (-not (Wait-Job $job -Timeout ($HoldSec + 90))) {
+        Write-Host ("WARN: 压测 bot 超过 {0}s 未结束（port={1}）——终止该轮采样" -f ($HoldSec + 90), $Port)
+        Stop-Job $job -ErrorAction SilentlyContinue
+    }
+    Remove-Job $job -Force -ErrorAction SilentlyContinue
     Start-Sleep 2
     $bot = $null
     try { $bot = (Get-Content $json -Raw | ConvertFrom-Json) } catch {}

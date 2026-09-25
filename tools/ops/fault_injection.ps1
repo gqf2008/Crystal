@@ -15,10 +15,13 @@ param(
     [int]$RecoverSec = 60,
     [double]$JitterDelayMs = 200,
     [double]$JitterDropPct = 5,
-    [string]$OutFile = ''
+    [string]$OutFile = '',
+    # 单次 bot 会话超时（秒）：超时按该次采样失败处理并**立刻**返回（2026-09-25 修）
+    [int]$BotTimeoutSec = 90
 )
 $ErrorActionPreference = 'Continue'
 $ops = Split-Path -Parent $MyInvocation.MyCommand.Path
+. (Join-Path $ops '_run_bot.ps1')
 $exe = Join-Path $DeployDir 'mir2_server.exe'
 $results = [ordered]@{}
 
@@ -35,10 +38,16 @@ function Start-Srv([string]$tag, [int]$port) {
 }
 function Stop-All { Get-Process -Name mir2_server -ErrorAction SilentlyContinue | Stop-Process -Force; Start-Sleep 3 }
 function Bot([int]$port, [int]$hold, [string[]]$extra = @()) {
-    $json = Join-Path $ops ("out/fault_bot_{0}.json" -f (Get-Random))
-    & python (Join-Path $ops 'bot.py') --host 127.0.0.1 --port $port --accounts $Account `
-        --password $Password --sessions 1 --hold $hold @extra > $json 2>&1
-    try { return (Get-Content $json -Raw | ConvertFrom-Json) } catch { return $null }
+    # 2026-09-25：改走带超时的共用 helper（原先 `& python bot.py …` 同步无超时 ⇒ 可能整轮静默挂死）
+    $r = Invoke-BotJson -OpsDir $ops -BotArgs (@('--host', '127.0.0.1', '--port', "$port", '--accounts', $Account,
+            '--password', $Password, '--sessions', '1', '--hold', "$hold") + @($extra)) `
+        -TimeoutSec $BotTimeoutSec -Tag 'fault_injection'
+    if ($r.timedOut) {
+        Write-Host ("WARN: 故障注入 bot 超过 {0}s 未退出（port={1}）——该次采样按失败处理，见 {2}" -f `
+                $BotTimeoutSec, $port, $r.errFile)
+        return $null
+    }
+    return $r.json
 }
 
 # ---------- ① 杀进程 + 重启恢复 ----------
@@ -48,8 +57,13 @@ $killOk = $false; $detectSec = $null; $recoverOk = $false; $recoverSec = $null
 if ($srv.ready) {
     $job = Start-Job -ScriptBlock {
         param($ops, $Port, $Account, $Password)
-        & python (Join-Path $ops 'bot.py') --host 127.0.0.1 --port $Port --accounts $Account `
-            --password $Password --sessions 1 --hold 30 > (Join-Path $ops 'out/fault_kill_session.json') 2>&1
+        # job 的 runspace 不继承父作用域函数 ⇒ 内部自己 dot-source helper（父线程 Wait-Job -Timeout 是第二层）
+        . (Join-Path $ops '_run_bot.ps1')
+        $r = Invoke-BotJson -OpsDir $ops -BotArgs @('--host', '127.0.0.1', '--port', "$Port", '--accounts', $Account,
+            '--password', $Password, '--sessions', '1', '--hold', '30') -TimeoutSec 90 -Tag 'fault_kill'
+        if ($r.json) {
+            $r.json | ConvertTo-Json -Depth 8 | Set-Content -Encoding utf8 (Join-Path $ops 'out/fault_kill_session.json')
+        }
     } -ArgumentList $ops, $Port, $Account, $Password
     Start-Sleep 8                       # 等它进图
     $tKill = Get-Date
