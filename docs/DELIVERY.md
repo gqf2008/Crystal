@@ -32,6 +32,11 @@ Windows 客户端 zip 内已自动带上 MSYS2 UCRT64 运行库 DLL（`glib`/`li
 > # 先构建 GNU release 产物（CI 同款目标）
 > $env:CARGO_BUILD_TARGET='x86_64-pc-windows-gnu'; cargo build --release --bin client_bevy
 > pwsh tools/ops/package_windows_rehearsal.ps1 -SmokeServer 127.0.0.1:7000
+>
+> # 内存泄漏门禁（发版前必跑；判据 = 测量窗口内活跃字节"一次都没回落"即判泄漏）
+> pwsh tools/ops/mem_leak_gate.ps1 -DeployDir %TEMP%\ramp_deploy -MeasureCycles 6
+> #   没跑出 J5（被测二进制没带 --features mem-probe）会 exit 3「没判成」，不许当通过；
+> #   只想验判据本身、不起服：pwsh tools/ops/mem_leak_gate.ps1 -SelfTest
 > ```
 > 判据 J1 产物 / J2 staging（8 DLL + assets + libpinyin 数据）/ **J2b 依赖闭包**（stage 内每个 PE 的导入
 > 要么在 stage、要么 System32 或 `api-ms-win-*` 虚拟 api-set）/ J3 zip 结构断言 / **J4 解压到干净目录真启动**。

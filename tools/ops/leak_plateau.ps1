@@ -227,6 +227,16 @@ if ($liveMeasured.Count -ge 2) {
     $liveSlope = ($liveMeasured[-1] - $liveMeasured[0]) / ($liveMeasured.Count - 1)
     $j5 = ($liveSlope -le ($MaxLiveSlopePerCycleMb * 1MB))
 }
+# 诊断（不参与判定）：测量轮里活跃字节**回落**的次数。
+# 为什么记它：泄漏的签名是"**单调**往上"（每轮都留一点），而分配器/arena 噪声会来回跳。
+# 实测（2026-09-25）：修复版 8 轮里出现 1 次明显回落（12.47M→12.08M），而泄漏版那几次采样全是单调上升。
+# 阈值（0.1MB/轮）在 3 轮的窗口里被噪声盖住（同一份泄漏版两次跑出 +462K 与 +93.6K，后者在阈值内被
+# 旧判据放过）⇒ 定标完成后**这条读数成了发版门禁的主判据**（dips==0 即判泄漏），实现见
+# tools/ops/mem_leak_gate.ps1 与 README §5c-2i；本夹具仍把它作为报告字段输出。
+$liveDips = 0
+for ($i = 1; $i -lt $liveMeasured.Count; $i++) {
+    if ($liveMeasured[$i] -lt $liveMeasured[$i - 1]) { $liveDips++ }
+}
 $ok = $j0b -and $j1 -and $j2 -and $j3 -and $j4 -and ($null -eq $j5 -or $j5)
 
 # 2026-09-25 补：J4 用的是**端点斜率**（首尾两点），在只有 5 个采样点时会被单点离群值主导 ——
@@ -280,6 +290,7 @@ $report = [ordered]@{
     J5_live_bytes_plateau     = $j5
     live_bytes_idle_bytes     = @($liveMeasured | ForEach-Object { [long]$_ })
     live_bytes_slope_per_cycle = if ($null -ne $liveSlope) { [Math]::Round($liveSlope, 1) } else { $null }
+    live_bytes_dips           = $liveDips
     max_live_slope_allowed    = ($MaxLiveSlopePerCycleMb * 1MB)
     J5_note                   = if ($null -eq $j5) {
         '本次没跑出 MEM_PROBE_IDLE（默认构建没带 mem-probe，或没设 MIR2_LEAK_PROBE=1）⇒ **无法判真泄漏**；J1–J4 只能做粗判。要判真泄漏请用 --features mem-probe 的构建 + MIR2_LEAK_PROBE=1。'

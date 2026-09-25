@@ -458,4 +458,5 @@ Mir2Test.ini
 !tools/ops/check_bot_timeouts.ps1
 !tools/ops/check_process_scope.ps1
 !tools/ops/mem_probe_report.py
+!tools/ops/mem_leak_gate.ps1
 !tools/ops/make_deploy_dir.ps1
