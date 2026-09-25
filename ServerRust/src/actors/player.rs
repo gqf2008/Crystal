@@ -726,6 +726,10 @@ pub struct PlayerActor {
     /// 当前地图数据（用于边界+障碍物校验）
     /// 当前地图数据（**共享句柄**：N 个同图会话共用 1 份，见 `MapCache`）
     map_data: Option<Arc<MapData>>,
+    /// 内存探针：随本 actor 的构造/析构增减全局存活计数（仅 `--features mem-probe`）。
+    #[cfg(feature = "mem-probe")]
+    #[allow(dead_code)]
+    live_guard: LiveActorGuard,
 }
 
 /// M44：Buff 类型 → 客户端 tag（与 Client-Bevy buff.rs 名称表对应）
@@ -912,6 +916,8 @@ impl PlayerActor {
         mentor_skill_boost: bool,
     ) -> Self {
         Self {
+            #[cfg(feature = "mem-probe")]
+            live_guard: LiveActorGuard::new(),
             state: PlayerState {
                 object_id,
                 name,
@@ -1334,6 +1340,37 @@ impl Actor for PlayerActor {
 // ============================================================
 // 消息定义
 // ============================================================
+
+/// 内存探针用：当前存活的 `PlayerActor` 实例数（仅 `--features mem-probe` 时维护）。
+/// 动机（2026-09-25）：生产路径里**没有**显式 `kill()` PlayerActor（唯一的 kill 在测试消息里），
+/// 所以"actor 到底有没有随登出释放"只能靠引用计数；这个计数器把它变成可测量的事实。
+#[cfg(feature = "mem-probe")]
+pub static LIVE_PLAYER_ACTORS: std::sync::atomic::AtomicUsize =
+    std::sync::atomic::AtomicUsize::new(0);
+
+#[cfg(feature = "mem-probe")]
+pub fn live_player_actors() -> usize {
+    LIVE_PLAYER_ACTORS.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// 构造时 +1、Drop 时 −1（`Drop` 覆盖"被 kill / 被引用计数释放 / 被 drop"所有路径）。
+#[cfg(feature = "mem-probe")]
+struct LiveActorGuard;
+
+#[cfg(feature = "mem-probe")]
+impl LiveActorGuard {
+    fn new() -> Self {
+        LIVE_PLAYER_ACTORS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        Self
+    }
+}
+
+#[cfg(feature = "mem-probe")]
+impl Drop for LiveActorGuard {
+    fn drop(&mut self) {
+        LIVE_PLAYER_ACTORS.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+    }
+}
 
 /// 移动类型
 #[derive(Debug, Clone, Copy)]

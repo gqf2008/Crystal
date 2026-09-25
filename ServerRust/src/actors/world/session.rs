@@ -1012,14 +1012,24 @@ impl Message<StartGameRequest> for WorldActor {
         }
 
         // 通知 SocialActor 玩家上线（组队/好友/行会查询依赖在线表）
-        let _ = self
+        // 2026-09-25 探针：这条通知用 `try_send` 丢弃错误——邮箱满即丢，社交侧在线表就会**缺条目**。
+        // 打开 MIR2_LEAK_PROBE 时把丢弃打出来（配合社交侧 SOCIAL_PROBE 的尺寸读数一起看）。
+        if let Err(e) = self
             .social_ref
             .tell(crate::actors::social::SocialPlayerJoined {
                 session_id: msg.session_id,
                 actor_ref: player_ref.clone(),
                 name: player_name.clone(),
             })
-            .try_send();
+            .try_send()
+        {
+            if std::env::var("MIR2_LEAK_PROBE").is_ok() {
+                warn!(
+                    "SOCIAL_NOTIFY_DROPPED kind=joined session={} err={}",
+                    msg.session_id, e
+                );
+            }
+        }
 
         // C# ApplyMapEntryRules：登录进入世界后应用地图规则（NoGroup/NoPets/NoIntelligentCreatures/NoHero）
         super::npc_script::apply_map_entry_rules(self, msg.session_id).await;
@@ -2673,6 +2683,11 @@ impl Message<PlayerDisconnected> for WorldActor {
         self.slaying_armed.remove(&msg.session_id);
         self.in_trap_rock.remove(&msg.session_id);
         self.transform_appearance.remove(&msg.session_id);
+        // 2026-09-25 修（内存泄漏）：`player_heroes` 是**按 session 键**的容器，登录时插入
+        // （见 StartGame 里的 `player_heroes.insert(session_id, …)`），但两条清理路径都漏了它 ⇒
+        // 每次登录留一条、session id 每次唯一 ⇒ 永久累积。实测（20 会话连登连退、每轮空闲点读数）：
+        // 19→38→57→76→95→114 单调增长，而其它 30+ 容器全为 0；同轮 live_bytes 每轮约 +0.41MB。
+        self.player_heroes.remove(&msg.session_id);
 
         // 只读内存探针（2026-09-25）：`MIR2_LEAK_PROBE=1` 时，在**每次断线清理之后**打印各个
         // 「按 session 键」的容器尺寸。用途：泄漏门禁（leak_plateau）在 release 构建上实测
@@ -3254,6 +3269,8 @@ impl Message<PlayerLogOut> for WorldActor {
         self.slaying_armed.remove(&msg.session_id);
         self.in_trap_rock.remove(&msg.session_id);
         self.transform_appearance.remove(&msg.session_id);
+        // 2026-09-25 修（内存泄漏）：同断线路径——`player_heroes` 必须随会话一起清。
+        self.player_heroes.remove(&msg.session_id);
 
         // 租赁会话清理：会话键 = 物主（存物方），partner = 租客；存入物品始终退回物主
         if let Some(session) = self.rental_sessions.remove(&msg.session_id) {
@@ -3320,12 +3337,22 @@ impl Message<PlayerLogOut> for WorldActor {
             // M61：该地图无其他玩家时清理 NPC/怪物
             self.cleanup_map_spawns(state.map_index).await;
             // 通知 SocialActor 玩家下线（组队/好友在线表清理）
-            let _ = self
+            // 2026-09-25 探针：同上线那条——丢弃会让社交在线表**留下过期条目**
+            // （条目里存着 `ActorRef<PlayerActor>`，可能把玩家 actor 一并吊住）。
+            if let Err(e) = self
                 .social_ref
                 .tell(crate::actors::social::SocialPlayerLeft {
                     session_id: msg.session_id,
                 })
-                .try_send();
+                .try_send()
+            {
+                if std::env::var("MIR2_LEAK_PROBE").is_ok() {
+                    warn!(
+                        "SOCIAL_NOTIFY_DROPPED kind=left session={} err={}",
+                        msg.session_id, e
+                    );
+                }
+            }
 
             // #835：断线即离队——先清 group_id 再保存，避免陈旧组队引用被持久化
             let _ = record
@@ -3518,6 +3545,59 @@ impl WorldActor {
         }
         // 生成物已随空地一起释放 → 清掉「已物化」标记，下次进图重新生成一份
         self.map_spawns_ready.remove(&map_index);
+        // 内存探针（默认关闭）：清理后把「按 object_id 键」的辅助表尺寸一起打出来。
+        // 动机：每轮物化都会分配**新的** object_id，若辅助表只在怪物死亡时删条目，
+        // 那么"整图清理"就只删掉 monsters/npcs、把这些条目永久留下（每轮 ~1912 怪的量级）。
+        if std::env::var("MIR2_LEAK_PROBE").is_ok() {
+            info!(
+                "MAP_PROBE map={} monsters={} npcs={} monster_targets={} pet_targets={} cursed_monsters={} hallucinated={} revealed_hp={} pet_enhanced={} pet_levels={} respawn_queue={} world_boss_queue={} ground_items={} map_spawns_ready={} \
+                 player_heroes={} players={} last_move={} last_turn={} last_chat={} last_teleport={} last_probe={} gm_protected={}",
+                map_index,
+                self.monsters.len(),
+                self.npcs.len(),
+                self.monster_targets.len(),
+                self.pet_targets.len(),
+                self.cursed_monsters.len(),
+                self.hallucinated.len(),
+                self.revealed_hp.len(),
+                self.pet_enhanced.len(),
+                self.pet_levels.len(),
+                self.respawn_queue.len(),
+                self.world_boss_queue.len(),
+                self.ground_items.len(),
+                self.map_spawns_ready.len(),
+                // 2026-09-25：这几个是**上一版探针清单漏掉**的 session 键容器。其中
+                // `player_heroes` 恰好是「每次登录插入、两条清理路径都没删」的嫌疑对象。
+                self.player_heroes.len(),
+                self.players.len(),
+                self.last_move_time.len(),
+                self.last_turn_ms.len(),
+                self.last_chat_ms.len(),
+                self.last_teleport_time.len(),
+                self.last_probe_time.len(),
+                self.gm_protected.len(),
+            );
+        }
+        // 计数分配器读数**必须在这个「每轮一次的空闲点」取**（2026-09-25 修正）：
+        // 之前把 MEM_PROBE 放在 PlayerDisconnected（罕见路径）里，取样时机随事件漂移
+        // （样本可能取在别的会话仍在线时），于是"live_bytes 在涨"可能只是取样相位不同造成的假象。
+        // 放在整图清理之后 = 与 leak_plateau 的 RSS 采样同相位（都取"全部登出后的空闲态"），才可比。
+        #[cfg(feature = "mem-probe")]
+        if std::env::var("MIR2_LEAK_PROBE").is_ok() {
+            let (live, allocs, deallocs) = crate::mem_probe::stats();
+            let (small, mid, big) = crate::mem_probe::stats_by_size();
+            info!(
+                "MEM_PROBE_IDLE map={} live_bytes={} allocs={} deallocs={} live_le256b={} live_le16k={} live_gt16k={} live_player_actors={}",
+                map_index,
+                live,
+                allocs,
+                deallocs,
+                small,
+                mid,
+                big,
+                crate::actors::player::live_player_actors()
+            );
+        }
         info!(
             "Map {} spawns cleaned (npcs={} monsters={})",
             map_index, npc_count, mon_count
