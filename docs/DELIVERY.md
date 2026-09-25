@@ -49,6 +49,18 @@ Windows 客户端 zip 内已自动带上 MSYS2 UCRT64 运行库 DLL（`glib`/`li
 > 判据 J1 产物 / J2 staging（8 DLL + assets + libpinyin 数据）/ **J2b 依赖闭包**（stage 内每个 PE 的导入
 > 要么在 stage、要么 System32 或 `api-ms-win-*` 虚拟 api-set）/ J3 zip 结构断言 / **J4 解压到干净目录真启动**。
 > **2026-09-25 按上面三条从零复跑（同一台机器，master `8ec2b58d5`）**：
+> **2026-09-26 再复跑一次（master `bf7c24b6e`，三条全绿）**：客户端 GNU release 构建 **18m42s** exit 0；
+> 打包预演 **PASS J1–J4**（产物/staging/依赖闭包/zip 结构/**解压即跑**——解压出的发布客户端真登录进图，
+> 日志里技能/昼夜/攻击模式都到齐）；服务端 release `deploy_smoke` **exit 0**（`failed: 0`、产物哈希记录、
+> `Gate listening`）；内存门禁 `mem_leak_gate -MeasureCycles 6` **exit 0**（活跃字节每轮净增 **−53,995 B**、
+> **dips=2** ⇒ 无每轮线性泄漏）；其判据自检 `-SelfTest` 也过（泄漏/通过/超阈值但有回落/没跑出J5/老报告偏严 五象限）。
+> 本次复跑顺带抓到并修掉两处**工具链自身**的缺陷（都不是产品缺陷，但都会挡发版）：
+> ① #3213 批量插构建戳时把替换文本写成字面 `$&`，导致 19 个脚本的 `$exe = …` 赋值被整行吃掉 —— 打包预演 J1
+> 直接失败（**即发版路径被打坏**）；已按 #3213 之前的版本重建并补门禁 **T11.4/T11.5**（#3220）。
+> ② 修完后构建戳又把"仅 tools/ 前进"判成陈旧、逼着重建 18 分钟产物；已改成按
+> 「`<stamp>..HEAD` 有没有触碰 `Client-Bevy`」判（#3221）。
+>
+> **2026-09-25 按上面三条从零复跑（同一台机器，master `8ec2b58d5`）**：
 > 客户端 GNU release 构建 **21m12s** exit 0；打包预演 exit 0 —— zip **66.1 MiB / 38 条目** / 依赖闭包 0 缺失 /
 > 解压后 `alive=true, control_rpc=true, **entered_game=true**`（发布产物不仅能起来，还能连上服务器登录并进图）；
 > 服务端 release 构建 **1m38s**、`deploy_smoke` exit 0 —— 部署目录里 exe 的 sha256 与刚构建的产物一致
