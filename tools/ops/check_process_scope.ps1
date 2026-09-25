@@ -18,6 +18,10 @@
 #   · 批处理里的"按名杀"也纳入判据：`taskkill /IM <共享名>.exe`、`wmic process where name='<共享名>.exe' … delete`；
 #   · 唯一命名照样放过（`taskkill /IM client_bevy_l5t.exe` 不违规），只探测不杀的 `tasklist | findstr …`
 #     也不违规；批处理的注释（`REM` / `::` / `@REM`）与 PowerShell 的 `#` 一样先剔掉，避免门禁自己变噪音。
+#   · **注释剔除要连 `<# … #>` 块注释一起剔**（2026-09-25 补）：只剥 `#` 行注释时，
+#     「在 comment-based help 里解释"原先按名清场长什么样"」的脚本会被误报成违规
+#     （实测：新增的 tools/ops/restart_e2e_server.ps1 的帮助块里写了那句反面教材，立刻见红）。
+#     注释不是代码，判据只该看代码行。
 #
 # 用法：pwsh tools/ops/check_process_scope.ps1                 # 0 无新增 / 1 有新增未迁移 / 2 前置失败或门禁自检失败
 #       pwsh tools/ops/check_process_scope.ps1 -Strict         # allowlist 里的一起报红（全部迁移完后用）
@@ -59,14 +63,29 @@ function Find-ProcessNameKill {
     #>
     param([Parameter(Mandatory)][string]$Path)
     $hits = @()
-    $code = @(Get-Content -LiteralPath $Path -ErrorAction SilentlyContinue |
-        Where-Object {
-            $t = $_.Trim()
-            # 注释先剔掉（PowerShell 的 `#` 与批处理的 `REM`/`@REM`/`::`）——注释里常写"原先按进程名杀…"
-            # 这种说明，算进门禁自己就成噪音。只探测不杀的写法（tasklist/findstr、Get-Process 存在性判断）
-            # 也不受影响：下面的判据都要求真的出现"杀"的动作。
-            $t -and -not ($t.StartsWith('#') -or $t -match '^(?i)(@?REM\b|::)')
-        })
+    # 注释先剔掉：PowerShell 的 `#` 行注释与 `<# … #>` 块注释、批处理的 `REM`/`@REM`/`::`。
+    # 注释里常写"原先按进程名杀…"这种反面教材，算进门禁自己就成噪音；判据只该看**代码行**。
+    # 只探测不杀的写法（tasklist/findstr、Get-Process 存在性判断）不受影响：下面的判据都要求
+    # 真的出现"杀"的动作。
+    $code = @()
+    $inBlock = $false
+    foreach ($raw in (Get-Content -LiteralPath $Path -ErrorAction SilentlyContinue)) {
+        $t = $raw.Trim()
+        if ($inBlock) {
+            $end = $t.IndexOf('#>')
+            if ($end -lt 0) { continue }
+            $inBlock = $false
+            $t = $t.Substring($end + 2).Trim()
+        }
+        if ($t.StartsWith('<#')) {
+            $end = $t.IndexOf('#>')
+            if ($end -lt 2) { $inBlock = $true; continue }
+            $t = $t.Substring($end + 2).Trim()
+        }
+        if (-not $t) { continue }
+        if ($t.StartsWith('#') -or $t -match '^(?i)(@?REM\b|::)') { continue }
+        $code += $t
+    }
     for ($i = 0; $i -lt $code.Count; $i++) {
         $ln = $code[$i]
         # 共享资源名：服务端 / Bevy 客户端 / **原版 C# 客户端 `Client.exe`**（本机多 agent 会用同一份原版
@@ -199,6 +218,15 @@ if (-not $SkipSelfTest) {
         [System.IO.File]::WriteAllText((Join-Path $sb 'good_batch_comment.bat'),
             "@echo off`r`nREM 原先 taskkill /F /IM mir2_server.exe 会杀别人的开发服，现改成按自己 PID`r`n" +
             ":: taskkill /IM client_bevy.exe /F`r`n", $enc)
+        # 负对照 9（2026-09-25 补的注释盲区）：**PowerShell 块注释**里写反面教材——不许误判。
+        # 实测：只剥 `#` 行注释时，新脚本 comment-based help 里那句"原先 Get-CimInstance … | Stop-Process"
+        # 会被判成违规（门禁对着**文档**开火）。注释不是代码。
+        [System.IO.File]::WriteAllText((Join-Path $sb 'good_block_comment.ps1'),
+            "<#`n  反面教材（**不要照抄**）：Get-CimInstance Win32_Process -Filter `"Name='mir2_server.exe'`" |`n" +
+            "      ForEach-Object { Stop-Process -Id `$_.ProcessId -Force }`n#>`nWrite-Host 'ok'`n", $enc)
+        # 正对照 6：块注释结束后**同一行**还有真代码时，那行代码仍要判（别把整行都当注释吃掉）
+        [System.IO.File]::WriteAllText((Join-Path $sb 'bad_block_tail.ps1'),
+            "<# 说明 #> Stop-Process -Name mir2_server -Force -EA SilentlyContinue`n", $enc)
         $bad1 = @(Find-ProcessNameKill -Path (Join-Path $sb 'bad_pipeline.ps1'))
         $bad2 = @(Find-ProcessNameKill -Path (Join-Path $sb 'bad_stopbyname.ps1'))
         $bad3 = @(Find-ProcessNameKill -Path (Join-Path $sb 'bad_crossline.ps1'))
@@ -212,6 +240,8 @@ if (-not $SkipSelfTest) {
         $ok6 = @(Find-ProcessNameKill -Path (Join-Path $sb 'good_taskkill_unique.bat'))
         $ok7 = @(Find-ProcessNameKill -Path (Join-Path $sb 'good_batch_probe.bat'))
         $ok8 = @(Find-ProcessNameKill -Path (Join-Path $sb 'good_batch_comment.bat'))
+        $ok9 = @(Find-ProcessNameKill -Path (Join-Path $sb 'good_block_comment.ps1'))
+        $bad6 = @(Find-ProcessNameKill -Path (Join-Path $sb 'bad_block_tail.ps1'))
         # 扫描面自证：`.bat`/`.cmd` 必须在扫描面里（写死 `*.ps1` 时这里就是 0，自检即红）
         $sbScanned = @(Get-ScannedScripts -Dirs @($sb))
         $sbBatch = @($sbScanned | Where-Object { $_ -match '\.(bat|cmd)$' })
@@ -221,6 +251,7 @@ if (-not $SkipSelfTest) {
         if ($bad3.Count -eq 0) { $problems += '正对照3（跨行管道：Get-CimInstance 按名查 → Stop-Process -Id）没被抓到 —— 判据空了' }
         if ($bad4.Count -eq 0) { $problems += '正对照4（.bat：taskkill /F /IM mir2_server.exe）没被抓到 —— 扩展名盲区回来了' }
         if ($bad5.Count -eq 0) { $problems += '正对照5（.cmd：taskkill /IM client_bevy.exe /F）没被抓到 —— 扩展名盲区回来了' }
+        if ($bad6.Count -eq 0) { $problems += '正对照6（块注释结束后同一行的真代码 Stop-Process -Name mir2_server）没被抓到 —— 剥注释剥过头了' }
         if ($sbBatch.Count -lt 5) { $problems += ("扫描面没覆盖 .bat/.cmd（只认出 {0} 个）—— 是不是又写死 *.ps1 了？" -f $sbBatch.Count) }
         if ($ok1.Count -ne 0) { $problems += '负对照1（按自己 PID 杀）被误判为违规' }
         if ($ok2.Count -ne 0) { $problems += '负对照2（按自己唯一命名杀）被误判为违规' }
@@ -230,11 +261,12 @@ if (-not $SkipSelfTest) {
         if ($ok6.Count -ne 0) { $problems += '负对照6（.bat 按自己的唯一命名杀）被误判为违规' }
         if ($ok7.Count -ne 0) { $problems += '负对照7（.bat 只探测不杀：tasklist/findstr）被误判为违规' }
         if ($ok8.Count -ne 0) { $problems += '负对照8（.bat 注释里提到按名杀）被误判为违规' }
+        if ($ok9.Count -ne 0) { $problems += '负对照9（PowerShell 块注释里写反面教材）被误判为违规' }
         if ($problems.Count -gt 0) {
             foreach ($p in $problems) { Write-Host ("  [自检红] " + $p) -ForegroundColor Red }
             Fail ("本门禁自身判据不可信（沙箱 $sb）")
         }
-        Write-Host ('自检：沙箱正对照 5/5 乱杀被抓（含跨行管道与 .bat/.cmd 的 taskkill）、负对照 8/8 合规写法未被误判；' +
+        Write-Host ('自检：沙箱正对照 6/6 乱杀被抓（含跨行管道、.bat/.cmd 的 taskkill、块注释后的真代码）、负对照 9/9 合规写法未被误判；' +
                     '扫描面含 .bat/.cmd（认出 {0} 个）✅' -f $sbBatch.Count)
     } finally {
         Remove-Item -LiteralPath $sb -Recurse -Force -ErrorAction SilentlyContinue
