@@ -3,7 +3,11 @@
 # 判据（任一不过即 exit 5）：
 #   ① 新版本起服 + 登录冒烟通过
 #   ② 换回上一版二进制后**仍**起服 + 登录冒烟通过（回滚可用）
-#   ③ 角色数据快照逐字段不变（gold / level / map_index / x / y）——回滚不能把玩家档弄丢或弄坏
+#   ③ 角色数据快照逐字段不变——回滚不能把玩家档弄丢或弄坏。
+#      2026-09-25 扩展：除 gold / level / map_index / x / y 外，还比对 11 张关联表的
+#      「行数 + 规范化哈希」（背包 / 装备 / 仓库 / 英雄背包 / 英雄装备 / 英雄法术 / 英雄 /
+#      宠物 / 已完成任务 / 好友 / 邮件；易变列已在 db_snapshot.py 里排除并写明理由）。
+#      此前只看 5 个标量 ⇒ 回滚把背包/宠物/任务弄坏也看不出来。
 #   ④ 报告写 JSON
 # 说明：快照取自部署目录里的 Data/crystal.db（**副本**，不动开发库），只读打开。
 param(
@@ -23,7 +27,19 @@ $ops = Split-Path -Parent $MyInvocation.MyCommand.Path
 . (Join-Path $ops '_run_bot.ps1')
 $dbPath = Join-Path $DeployDir 'Data/crystal.db'
 $cur = Join-Path $DeployDir 'mir2_server.exe'
-if (-not (Test-Path $cur)) { Write-Host "FAIL: 部署目录没有二进制：$cur"; exit 2 }
+# 前置自检（2026-09-25 补）：回滚演练要的是"一个能起服的最小部署目录"。缺 config/ 或 Data/ 时，
+# 服务端会退化成「Config not found → 用默认配置（listen 7000 + 内存库）」，于是两阶段都不就绪，
+# 报告里只体现成 ready=false —— 看起来像产品起不来，实际是夹具环境残缺（本轮实测踩到）。
+$missing = @()
+foreach ($need in @('mir2_server.exe', 'config/server.toml', 'Data/crystal.db')) {
+    if (-not (Test-Path (Join-Path $DeployDir $need))) { $missing += $need }
+}
+if ($missing.Count -gt 0) {
+    Write-Host ("FAIL(前置)：部署目录缺 {0} —— {1}" -f ($missing -join '、'), (Resolve-Path $DeployDir -EA SilentlyContinue))
+    Write-Host '          回滚演练需要一个能起服的最小部署目录：mir2_server.exe + config/server.toml + Data/crystal.db'
+    Write-Host '          （deploy_smoke.ps1 会替你造一个；也可手工复制，Daneo1989 建议用目录联接而不拷贝）'
+    exit 2
+}
 if (-not $PrevBinary -or -not (Test-Path $PrevBinary)) {
     Write-Host "FAIL: 需要 -PrevBinary 指向上一个版本二进制（回滚对象）"; exit 2
 }
@@ -117,7 +133,7 @@ $report = [ordered]@{
         characters = $Characters; present = [bool]$snapPresent; unchanged = [bool]$dataOk
         diff = $diff; before = $snapNew; after = $snapOld
     }
-    criteria = '① 新版起服+登录 ② 回滚后起服+登录 ③ 角色数据逐字段不变'
+    criteria = '① 新版起服+登录 ② 回滚后起服+登录 ③ 角色数据逐字段不变（5 个标量 + 11 张关联表的行数与哈希）'
 }
 $json = $report | ConvertTo-Json -Depth 6
 if ($OutFile) { $json | Set-Content -Encoding utf8 $OutFile }

@@ -46,8 +46,26 @@ pwsh tools/ops/rollback_drill.ps1 -DeployDir <部署目录（含 Data/crystal.db
 `ok=true`、退出码 0 —— ① 新版起服 + 登录冒烟通过；② **回滚到 2026-09-23 的二进制后仍能起服 + 登录**；
 ③ 角色档逐字段不变（`present=true, unchanged=true, diff=[]`）。
 
+**2026-09-25 晚复跑（扩判据之后，同一对二进制）**：同样 `ok=true`、退出码 0、`diff=[]` ——
+这次比对的**关联表 11 张**都在：bevychar 背包 11 / 装备 2 / 仓库 12 / 英雄法术 1 / 宠物 1 /
+已完成任务 4 / 好友 2 / 邮件 22（另有 3 张空表 n=0），并已验证这套哈希的**敏感性与稳定性**：
+同一库连续两次快照完全一致；删一封邮件 → `mail n 22→21` 且哈希变化；给一条背包 item_json 追加一个字符
+→ `inventory_backpack` 哈希变化而**未动表（宠物）哈希不变**。
+
 **回滚要验的不是"能起来"，而是"起来之后玩家的档还在"**：二进制回退 + DB 结构兼容（本仓表创建走
-`IF NOT EXISTS`，但字段语义变化不在守卫内）。抽到的快照字段是 `characters.gold/level/map_index`。
+`IF NOT EXISTS`，但字段语义变化不在守卫内）。
+
+**数据判据（2026-09-25 扩展）**：原来只比 `characters.gold/level/map_index/x/y` 五个标量——
+回滚把背包/宠物/任务弄坏也看不出来。现在 `db_snapshot.py` 还比对 **11 张关联表**的「行数 + 规范化哈希」：
+`inventory_backpack / inventory_equipment / inventory_storage / hero_inventory_backpack /
+hero_inventory_equipment / hero_magics / heroes / creatures / completed_quests / friends / mail`。
+易变列已在脚本头写明并排除（宠物饥饿/到期时间、邮件时间戳与正文、friends 的会话内 object_id、
+角色的 hp/mp 之类），避免"合法漂移"造成假红。
+
+**前置自检（2026-09-25 补）**：`-DeployDir` 必须是**能起服的最小部署目录**（`mir2_server.exe` +
+`config/server.toml` + `Data/crystal.db`）。缺任何一个，服务端会退化成
+`Config not found → 默认配置（listen 7000 + 内存库）`，报告里只体现成 `ready=false`
+——看起来像产品起不来、实际是夹具残缺（本轮实测踩到，现已前置 `exit 2` 并列出缺项）。
 
 ## 3. 压测基线：`load_baseline.ps1`（驱动 `bot.py`）
 
