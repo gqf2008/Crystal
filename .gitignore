@@ -455,3 +455,4 @@ Mir2Test.ini
 !tools/acceptance/l5y_reconnect.ps1
 !tools/ops/_run_bot.ps1
 !tools/ops/check_bot_timeouts.ps1
+!tools/ops/make_deploy_dir.ps1
