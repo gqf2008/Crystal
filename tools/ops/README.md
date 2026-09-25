@@ -355,6 +355,18 @@ pwsh tools/ops/tick_lag_probe.ps1 -DeployDir <deploy> -StepsCsv '50' -HoldSec 15
 
 ## 6. 故障注入：`fault_injection.ps1`（+ `latency_proxy.py`）
 
+> **2026-09-25 修（会误报的那条判据）**：抖动场景的判据是「会话可用 **且服务端零真错误**」，
+> 而"真错误"由 `health_report.ps1` 的 `$benignPattern` 过滤良性断连。原模式只匹配 `read error`，
+> **漏了 `write error`**——客户端被抖动代理掐断时服务端打的正是
+> `Session 1 write error: … (os error 10054)`，于是被算成真错误、抖动项假红（exit 5）。
+> 同一条还会让 `alert_probe.ps1` 把"玩家正常退出"报成告警（值班噪音）。
+> 现在模式为 `(read|write) error.*(forced|强迫关闭|os error 10054|os error 10053)|Connection reset|Broken pipe`。
+> 证据：① 分类器对照——合成日志里放 2 条 10054 断连 + 1 条 Broken pipe + 3 条真错误（`PERSIST_LOST`、
+> `os error 10057`、`Failed to save player pets`）→ `errors=3`（良性被排除、真错误仍计数）；
+> ② 告警噪音对照——只有断连的日志跑 `alert_probe` → `alert=false` exit 0（修复前会 exit 3）；
+> ③ 重跑故障注入 → **exit 0，三个场景全 ok**（kill 感知 2.9s / 恢复 2s、抖动 `server_real_errors=0`、
+> 只读库 `panicked=0`）。
+
 | 场景 | 做法 | 判据 | 实测 |
 |---|---|---|---|
 | 杀进程 | 压测会话中途 kill -9 服务端 | 会话能感知断开 + 重启后可再登录 | 感知 2.3s、恢复 1s ✅ |
