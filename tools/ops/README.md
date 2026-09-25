@@ -328,6 +328,34 @@ pwsh tools/ops/leak_plateau.ps1 -DeployDir <deploy> -ExePath <mir2_server.exe> `
 **两条前置守卫（本轮加）**：`-HoldSec < 8 / -IdleSec < 12` 直接 `exit 2`（否则测到的是高水位预热尾巴，
 实测 0.857 假红）；**debug 构建**未显式加 `-AllowDebugThreshold` 也 `exit 2`（阈值与基线都是 release 标定的）。
 
+### 5c-2b. 计数分配器：把"RSS 在涨"拆成"活跃字节在涨"（2026-09-25）
+
+RSS 涨可能是**真泄漏**（活跃分配持续增长）也可能是**分配器高水位/arena**（活跃字节平稳、RSS 留高位）——
+两者修法完全不同（前者改代码，后者不影响可用性）。为此加了**只在特性开关下编译**的计数分配器：
+
+```powershell
+cargo build --release --features mem-probe --bin mir2_server     # 默认构建不含该特性 ⇒ 零开销
+$env:MIR2_LEAK_PROBE=1
+pwsh tools/ops/leak_plateau.ps1 -DeployDir <deploy> -ExePath ServerRust/target/release/mir2_server.exe -Port 7400 -Sessions 20 -MeasureCycles 20
+```
+
+打开后，每次断线清理会多打一行 `MEM_PROBE sid=… live_bytes=… allocs=… deallocs=… live_le256b=…
+live_le16k=… live_gt16k=…`（按尺寸分档的活跃字节）。
+
+**实测（release + mem-probe，20 会话）：**
+
+| 量 | 起点 | 终点 | 说明 |
+|---|---|---|---|
+| RSS | 49.04 MB | 60.57 MB | 20 轮仍爬升（端点斜率 0.607、回归 0.531，J4 红） |
+| **live_bytes** | 19.63 MB | 25.77 MB | **活跃字节同向增长** ⇒ 不是单纯的 arena 高水位 |
+| live ≤256B | 2.168 MB | 2.302 MB | 小对象档只涨 0.13 MB |
+| live ≤16KB | 9.884 MB | 10.747 MB | **中档（257B–16KB）贡献 +0.73 MB，最大** |
+| live >16KB | 4.637 MB | 5.022 MB | 大档 +0.38 MB |
+
+即：20 会话每轮约 **10–15 KB/次登出**的**活对象**被保留下来，集中在 257B–16KB 档。
+候选方向（下一步）：社交 actor 的在线表（登出通知走 `try_send`，邮箱满即丢 ⇒ 在线条目可能残留）、
+按非 session 键的缓存、以及登录/登出路径上被 `Arc` 延长生命周期的对象。
+
 ## 5d. 写锁下的登录时延：`login_latency_probe.ps1`（带阈值夹具）
 
 判据（缺一不可）：L1 写锁**真注入**（等注入器输出 `LOCK_HELD`，拿不到直接退出码 3、不产出结论）；

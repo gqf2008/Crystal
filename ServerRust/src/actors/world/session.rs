@@ -2722,6 +2722,17 @@ impl Message<PlayerDisconnected> for WorldActor {
                 self.slaying_armed.len(),
             );
         }
+        // 计数分配器的「活跃字节」曲线（需 `--features mem-probe` 构建 + `MIR2_LEAK_PROBE=1`）：
+        // live_bytes **持续增长** = 真泄漏；live_bytes 平稳而 RSS 涨 = 分配器高水位/arena。
+        #[cfg(feature = "mem-probe")]
+        if std::env::var("MIR2_LEAK_PROBE").is_ok() {
+            let (live, allocs, deallocs) = crate::mem_probe::stats();
+            let (small, mid, big) = crate::mem_probe::stats_by_size();
+            info!(
+                "MEM_PROBE sid={} live_bytes={} allocs={} deallocs={} live_le256b={} live_le16k={} live_gt16k={}",
+                msg.session_id, live, allocs, deallocs, small, mid, big
+            );
+        }
 
         info!("Player removed from world (session={})", msg.session_id);
 
