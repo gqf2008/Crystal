@@ -62,6 +62,8 @@ try {
 $repo = Split-Path -Parent $PSScriptRoot
 if (-not $ServerExe) { $ServerExe = Join-Path $repo "ServerRust\target\debug\mir2_server.exe" }
 if (-not $ClientExe) { $ClientExe = Join-Path $repo "Client-Bevy\target\debug\client_bevy.exe" }
+. "$repo\tools\acceptance\build_stamp.ps1"   # 构建戳前置：本 harness 自己起客户端，别对着旧产物下结论
+Assert-ClientBuildStamp -Exe $ClientExe -ScriptName 'run_real_e2e'
 if (-not $ServerWorkDir) { $ServerWorkDir = Join-Path $repo "ServerRust" }
 $tmp = Join-Path $env:TEMP "crystal_e2e"
 New-Item -ItemType Directory -Path $tmp -Force | Out-Null

@@ -50,7 +50,9 @@ try {
         exit 2
     }
     # 唯一进程名（同批次 #3181 的 20 个夹具）：只启动/清理自己这份改名的客户端副本（硬链接，不占额外磁盘）。
-    $clientSrc = $clientExe
+$clientSrc = $clientExe
+. "$PSScriptRoot\build_stamp.ps1"   # 构建戳前置（在改名/复制之前验源产物）
+Assert-ClientBuildStamp -Exe $clientSrc -ScriptName 'l5y_reconnect'
     $clientExe = Join-Path (Split-Path -Parent $clientExe) 'l5y_client.exe'
 
     # 受测服务端工作目录：优先参数，其次仓库 ServerRust，再次 %TEMP%\e2e_workdir（真机 E2E 用的那个库）

@@ -192,6 +192,14 @@ if (-not $ClientExe) {
 if (-not (Test-Path $ClientExe)) { Stop-Gate "-ClientExe 指向的文件不存在：$ClientExe" }
 $ClientExe = (Resolve-Path $ClientExe).Path
 
+# 构建戳前置（#3213）：下面那段 `$AllowStaleBinary` 只比**文件时间**（源码比 exe 新就拦），
+# 它答不出"这份 exe 出自哪个提交"——切分支/切 worktree 后时间序可能恰好成立却是别的提交。
+# 所以再叠一层提交级判据（扫 exe 内固化记录，不启动进程）。`-AllowStaleBinary` 时一并跳过。
+if (-not $AllowStaleBinary) {
+    . "$PSScriptRoot\build_stamp.ps1"
+    Assert-ClientBuildStamp -Exe $ClientExe -ScriptName 'ui_interact_sweep'
+}
+
 if (-not $AllowStaleBinary) {
     $crate = Join-Path $RepoRoot 'Client-Bevy'
     $srcFiles = @(Get-ChildItem (Join-Path $crate 'src') -Recurse -File -Filter *.rs -ErrorAction SilentlyContinue)

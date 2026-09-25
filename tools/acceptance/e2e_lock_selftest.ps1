@@ -283,6 +283,9 @@ function Get-E2eClientScript {
             # 有 Enter 还不够：早退路径（if (...) { exit 5 }）会把锁留到下一个调用者才发现要回收，
             # 所以接入必须**成对**——有 Enter 就要有 Exit（缺它即红，见 T9.2）。
             HasExit = $(if ($kind -eq 'ps1') { $text -match 'Exit-E2eLock' } else { $false })
+            # 构建戳前置（#3213）：只对 *.ps1 要求——`.bat/.cmd` 起客户端时无法内联调用 PS 函数，
+            # 只能靠它调用的那个 .ps1 入口去验（判据见 T11）。
+            HasStamp = $(if ($kind -eq 'ps1') { $text -match 'Assert-ClientBuildStamp' } else { $false })
             Locked  = (($text -match 'e2e_lock\.ps1') -and ($text -match 'Enter-E2eLock') -and
                        ($text -match 'Exit-E2eLock'))
         }
@@ -369,6 +372,7 @@ Check 'T9.2 每个实机入口都 dot-source 了 e2e_lock.ps1 且有 Enter-E2eLo
 $noExit = @($clientScripts | Where-Object { -not $_.HasExit })
 Check 'T9.2b 每个实机入口都有 Exit-E2eLock（早退路径也要释放，不能只靠「持有者已死」兜底）' `
     ($noExit.Count -eq 0) ("缺 Exit：" + (($noExit | ForEach-Object { $_.Name }) -join ','))
+
 $fakeRoot = Join-Path $sandbox 'fake_repo'
 New-Item -ItemType Directory -Path (Join-Path $fakeRoot 'tools\acceptance') -Force | Out-Null
 [System.IO.File]::WriteAllText((Join-Path $fakeRoot 'tools\acceptance\fake_no_lock.ps1'),
@@ -529,6 +533,26 @@ if (Test-Path -LiteralPath $enroller) {
 } else {
     Write-Host "  [SKIP] T9.7 —— 没有 $enroller" -ForegroundColor DarkGray
 }
+
+# T11 构建戳前置（#3213）：每个会起客户端的 *.ps1 必须在**启动前**验"这份 exe 出自哪个提交"。
+# 为什么单列一条：owner 的四条 UI 反馈（写邮件窗错位/底部对话框/地图灯光/魔法特效）实测**全部**是
+# 旧构建；夹具侧同型坑见 `LESSON_运行目标分支e2e前需重建二进制避免陈旧target误报`。
+# 判据只查「有没有调用」——真值比对由 `build_stamp.ps1` 在运行时做（扫 exe 内固化记录，不启动进程）。
+# 放在这里（而不是 T9.2b 之后）：`$fakeRoot` 是下面 T9.3 才建的；阳性对照要用它。
+$noStamp = @($clientScripts | Where-Object { $_.Kind -eq 'ps1' -and -not $_.HasStamp })
+Check 'T11.1 每个会起客户端的 *.ps1 都接了构建戳前置 Assert-ClientBuildStamp（旧产物跑不出结论）' `
+    ($noStamp.Count -eq 0) ("缺构建戳：" + (($noStamp | ForEach-Object { $_.Name }) -join ','))
+$stampOk = @($clientScripts | Where-Object { $_.Kind -eq 'ps1' -and $_.HasStamp })
+Check 'T11.2 判据没写空（真源至少认出 24 个已接构建戳的实机入口）' `
+    ($stampOk.Count -ge 24) ("count=" + $stampOk.Count)
+# T11.3 阳性对照：临时造一个「起客户端但没验构建戳」的脚本，必须被判不合规。
+[System.IO.File]::WriteAllText((Join-Path $fakeRoot 'tools\acceptance\fake_no_stamp.ps1'),
+    ". `"`$PSScriptRoot\e2e_lock.ps1`"`nEnter-E2eLock`nStart-Process -FilePath client_bevy.exe -ArgumentList '--e2e-user','test'`nExit-E2eLock`n",
+    (New-Object System.Text.UTF8Encoding($false)))
+$fakeStamp = @(Get-E2eClientScript -Root $fakeRoot | Where-Object { $_.Name -eq 'fake_no_stamp.ps1' })
+Check 'T11.3 阳性对照：起客户端但没验构建戳的脚本必须被判不合规（漏接即红）' `
+    ($fakeStamp.Count -eq 1 -and -not $fakeStamp[0].HasStamp) `
+    ("认出=" + $fakeStamp.Count + "；HasStamp=" + (($fakeStamp | ForEach-Object { [bool]$_.HasStamp }) -join ','))
 
 # ---------------- T10 语法解析（接入是插入式改动，最容易插出语法错） ----------------
 Write-Host 'T10 语法解析：所有实机入口 + 锁本体 + 本自检都必须能被 PowerShell 解析'

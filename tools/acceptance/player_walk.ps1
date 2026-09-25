@@ -17,7 +17,9 @@ $ErrorActionPreference = 'Continue'
 $env:PATH = 'D:\toolchains\msys64\ucrt64\bin;D:\toolchains\libpinyin-install\bin;' + $env:PATH
 $env:LIBPINYIN_DIR = 'D:/toolchains/libpinyin-install'
 $acc = 'E:\Users\gxh\Documents\GitHub\Crystal\tools\acceptance'
-$exe = 'E:\Users\gxh\Documents\GitHub\Crystal\Client-Bevy\target\debug\client_bevy.exe'
+$&
+. "$PSScriptRoot\build_stamp.ps1"   # 构建戳前置：不许对着旧产物下结论（见 LESSON_运行目标分支e2e前需重建二进制）
+Assert-ClientBuildStamp -Exe $exe -ScriptName 'player_walk'
 $wd  = 'E:\Users\gxh\Documents\GitHub\Crystal\Client-Bevy'
 $shotDir = "$acc\player_shots"
 New-Item -ItemType Directory -Force -Path $shotDir | Out-Null

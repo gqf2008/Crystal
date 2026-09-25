@@ -51,7 +51,9 @@ $env:LIBPINYIN_DIR = 'D:/toolchains/libpinyin-install'
 if (-not $Worktree) { $Worktree = (Resolve-Path "$PSScriptRoot\..\..").Path }
 if (-not $ExeSrc) { $ExeSrc = "$Worktree\Client-Bevy\target\debug\client_bevy.exe" }
 $root = 'C:\Users\gxh\AppData\Local\Temp\orig-csharp-ab'
-$exe = "$root\sf_client.exe"
+$&
+. "$PSScriptRoot\build_stamp.ps1"   # 构建戳前置：不许对着旧产物下结论（见 LESSON_运行目标分支e2e前需重建二进制）
+Assert-ClientBuildStamp -Exe $exe -ScriptName 'l5v_spell_fx'
 $err = "$root\l5v_$Tag.err"
 $json = "$PSScriptRoot\l5v_spell_fx_results.json"
 

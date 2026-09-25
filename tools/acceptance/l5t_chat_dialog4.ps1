@@ -46,7 +46,9 @@ $env:PATH = 'D:\toolchains\msys64\ucrt64\bin;D:\toolchains\libpinyin-install\bin
 $env:LIBPINYIN_DIR = 'D:/toolchains/libpinyin-install'
 if (-not $ClientHome) { $ClientHome = (Resolve-Path "$PSScriptRoot\..\..").Path }
 $srcExe = "$ClientHome\Client-Bevy\target\debug\client_bevy.exe"
-$exe = "$ClientHome\Client-Bevy\target\debug\client_bevy_l5t.exe"
+$&
+. "$PSScriptRoot\build_stamp.ps1"   # 构建戳前置：不许对着旧产物下结论（见 LESSON_运行目标分支e2e前需重建二进制）
+Assert-ClientBuildStamp -Exe $exe -ScriptName 'l5t_chat_dialog4'
 $err = "$PSScriptRoot\l5t_client.err.log"
 $shotA = "$PSScriptRoot\l5t_shot_a.png"
 $shotB = "$PSScriptRoot\l5t_shot_b.png"

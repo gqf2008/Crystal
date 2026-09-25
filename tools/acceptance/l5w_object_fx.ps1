@@ -55,7 +55,9 @@ if (-not $ExeSrc) { $ExeSrc = "$Worktree\Client-Bevy\target\debug\client_bevy.ex
 $root = 'C:\Users\gxh\AppData\Local\Temp\orig-csharp-ab'
 if (-not (Test-Path $root)) { New-Item -ItemType Directory -Path $root | Out-Null }
 # 唯一进程名：多 agent 并行时禁止按名字批量杀公共名（见 LESSON_多agent并行时按进程名清进程...）
-$exe = "$root\ofx_client.exe"
+$&
+. "$PSScriptRoot\build_stamp.ps1"   # 构建戳前置：不许对着旧产物下结论（见 LESSON_运行目标分支e2e前需重建二进制）
+Assert-ClientBuildStamp -Exe $exe -ScriptName 'l5w_object_fx'
 $err = "$root\l5w_$Tag.err"
 $json = "$PSScriptRoot\l5w_object_fx_results.json"
 

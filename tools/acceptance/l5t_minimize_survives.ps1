@@ -71,6 +71,8 @@ $env:LIBPINYIN_DIR = 'D:/toolchains/libpinyin-install'
 
 if (-not $ClientHome) { $ClientHome = (Resolve-Path "$PSScriptRoot\..\..").Path }
 if (-not $ExePath) { $ExePath = "$ClientHome\Client-Bevy\target\debug\client_bevy.exe" }
+. "$PSScriptRoot\build_stamp.ps1"   # 构建戳前置：不许对着旧产物下结论（见 LESSON_运行目标分支e2e前需重建二进制）
+Assert-ClientBuildStamp -Exe $ExePath -ScriptName 'l5t_minimize_survives'
 New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
 
 Add-Type -TypeDefinition @'
