@@ -469,3 +469,12 @@ Mir2Test.ini
 !tools/acceptance/font_audit.py
 !tools/acceptance/rpc.py
 !tools/acceptance/capture.ps1
+!tools/acceptance/smoke_r5.ps1
+!tools/acceptance/ime_rpc_verify.ps1
+!tools/acceptance/seed_db.py
+!tools/acceptance/player_walk2.ps1
+!tools/acceptance/ui_sweep.ps1
+!tools/acceptance/ui_bugfix_verify.ps1
+!tools/acceptance/player_walk.ps1
+!tools/acceptance/npc_text_verify.ps1
+!tools/ops/check_doc_tool_refs.ps1
