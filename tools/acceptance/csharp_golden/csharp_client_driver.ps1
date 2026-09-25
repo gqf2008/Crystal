@@ -43,8 +43,14 @@ public class CsUi {
 "@
 
 function Get-CsHwnd {
-  $p = Get-Process Client -ErrorAction SilentlyContinue | Select-Object -First 1
-  if (-not $p) { throw 'original client not running' }
+  # 认**本沙盒自己那份**原版客户端：按 exe 路径过滤，不要"按名取第一个"——
+  # 同机可能有别人/owner 的原版客户端在做 A/B 对照，取错了会把别人的窗口当成我们的测。
+  $csExe = Join-Path $script:CS 'Client\Client.exe'
+  $p = Get-CimInstance Win32_Process -Filter "Name='Client.exe'" -ErrorAction SilentlyContinue |
+    Where-Object { $_.ExecutablePath -eq $csExe } | Select-Object -First 1
+  if (-not $p) { throw "original client not running (expected $csExe)" }
+  $p = Get-Process -Id $p.ProcessId -ErrorAction SilentlyContinue
+  if (-not $p) { throw "original client not running (expected $csExe)" }
   if (-not ('CsUiNs.FindW' -as [type])) {
     [void](Add-Type -MemberDefinition '[DllImport("user32.dll")] public static extern bool EnumWindows(EnumWindowsProc f, IntPtr l); public delegate bool EnumWindowsProc(IntPtr h, IntPtr l); [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid); [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);' -Name 'FindW' -Namespace 'CsUiNs' -PassThru)
   }
