@@ -43,12 +43,27 @@ if (-not $RepoRoot) { $RepoRoot = (Resolve-Path "$PSScriptRoot\..\..").Path }
 . "$PSScriptRoot\e2e_lock.ps1"
 
 function Get-InsertAnchor {
-    <# 插入点：param 块收尾之后；没有 param 块就是第一句可执行语句之前。#>
+    <# 插入点：param 块收尾之后；没有 param 块就是第一句可执行语句之前。
+
+       2026-09-26 修：旧实现只认**多行** param 块（靠「一行仅 `)`」定位块尾）。单行
+       `param([string]$User = 'test')` 找不到那个括号行 ⇒ break 落到下面的「第一句非注释行」，
+       而那句正是 param 自己 —— 锁序言 + `try {` 被插到了 param **之前**。PowerShell 要求
+       `param` 是脚本第一条语句（否则 `param(...)` 被当成一条命令）：
+         - 两个以上参数 → 直接语法错（`T10.1` 抓得到；双参数形态实测 1 个解析错）；
+         - 单个参数   → **0 解析错但参数静默不绑定**（实测 `-User X` 被忽略、脚本拿默认值跑完）。
+       后者是**假绿通道**：夹具会用默认账号/端口跑出「绿得不明所以」，而 T10.1 是语法解析，
+       对这类完全无感。现在按**括号配平**找 param 块尾，单行/多行/默认值里含括号都能认。#>
     param([string[]]$Lines)
     for ($i = 0; $i -lt $Lines.Count; $i++) {
         if ($Lines[$i] -match '^\s*param\s*\(') {
+            $depth = 0
             for ($j = $i; $j -lt $Lines.Count; $j++) {
-                if ($Lines[$j] -match '^\s*\)\s*$') { return ($j + 1) }
+                # 先剥掉字符串字面量再数括号：默认值里可能自带括号（`= 'a(b'`），否则会数错。
+                $scrub = [regex]::Replace($Lines[$j], "'[^']*'", "''")
+                $scrub = [regex]::Replace($scrub, '"[^"]*"', '""')
+                $depth += ([regex]::Matches($scrub, '\(')).Count
+                $depth -= ([regex]::Matches($scrub, '\)')).Count
+                if ($depth -le 0) { return ($j + 1) }
             }
             break
         }

@@ -474,6 +474,62 @@ if (Test-Path -LiteralPath $enroller) {
     Write-Host "  [SKIP] T9.6 —— 没有 $enroller" -ForegroundColor DarkGray
 }
 
+# T9.7（2026-09-26 补）：接入器必须认**单行** param 块，且参数真的绑得上。
+# 旧锚点只认多行 param（"一行仅 `)`"）：单行 param 时回退到"第一句非注释行"，而那句正是 param
+# 自己 ⇒ 锁序言 + try{ 被插到 param **之前**。PowerShell 要求 param 是脚本第一条语句：
+#   双参数形态 → 语法错（T10.1 抓得到）；**单参数形态 → 0 解析错但参数静默不绑定**
+#   ⇒ 夹具拿默认账号/端口跑出"绿得不明所以"，而 T10.1 是语法解析，对这类完全无感（假绿通道）。
+# 所以这里既断言**结构**（锁序言在 param 之后、无语法错），也断言**行为**（显式传值必须被读到）。
+if (Test-Path -LiteralPath $enroller) {
+    $anchorRoot = Join-Path $sandbox 'anchor_repo'
+    New-Item -ItemType Directory -Path (Join-Path $anchorRoot 'tools\acceptance') -Force | Out-Null
+    # 桩：让被测脚本能 dot-source 到 Enter/Exit-E2eLock，但**不碰真锁**
+    # （真锁是 %TEMP% 下的全局路径，跑真锁会与并行的实机夹具互相阻塞，不适合放进自检）。
+    [System.IO.File]::WriteAllText((Join-Path $anchorRoot 'tools\acceptance\e2e_lock.ps1'),
+        "function Enter-E2eLock { param([string]`$ScriptName = '', [int]`$TimeoutSec = 0) return `$true }`n" +
+        "function Exit-E2eLock { }`n",
+        (New-Object System.Text.UTF8Encoding($false)))
+    $single = Join-Path $anchorRoot 'tools\acceptance\fake_single_param.ps1'
+    [System.IO.File]::WriteAllText($single,
+        "param([string]`$User = 'DEFAULT_USER')`n" +
+        "Write-Output (`"BOUND=`" + `$User)`n" +
+        "if (`$false) { Start-Process -FilePath client_bevy.exe -ArgumentList '--e2e-user',`$User }`n",
+        (New-Object System.Text.UTF8Encoding($false)))
+    (& (Get-Process -Id $PID).Path -NoProfile -NoLogo -File $enroller -RepoRoot $anchorRoot -Apply 2>&1) -join "`n" | Out-Null
+    $aLines = [IO.File]::ReadAllLines($single)
+    $paramIdx = -1; $lockIdx = -1
+    for ($i = 0; $i -lt $aLines.Count; $i++) {
+        if ($paramIdx -lt 0 -and $aLines[$i] -match '^\s*param\s*\(') { $paramIdx = $i }
+        if ($lockIdx -lt 0 -and $aLines[$i] -match 'Enter-E2eLock') { $lockIdx = $i }
+    }
+    $aErrs = $null
+    [System.Management.Automation.Language.Parser]::ParseFile($single, [ref]$null, [ref]$aErrs) | Out-Null
+    $bound = ((& (Get-Process -Id $PID).Path -NoProfile -NoLogo -File $single -User 'SENTINEL' 2>&1) -join '|')
+    Check 'T9.7 接入器认单行 param：锁序言必须在 param 之后、无语法错、且显式传值真的绑得上（旧锚点下参数静默失效）' `
+        ($paramIdx -ge 0 -and $lockIdx -gt $paramIdx -and @($aErrs).Count -eq 0 -and $bound -match 'BOUND=SENTINEL') `
+        ("param行=$paramIdx 锁行=$lockIdx 解析错=" + @($aErrs).Count + " 运行输出=" + $bound)
+    # 阳性对照：把**旧锚点逻辑**原样复制一份跑同一份输入，它必须锚到 param 之前
+    # ⇒ 没有本次修复时上面那条必红（这条对照证明用例真的能红，而不是恒绿）。
+    $oldAnchor = {
+        param([string[]]$Lines)
+        for ($i = 0; $i -lt $Lines.Count; $i++) {
+            if ($Lines[$i] -match '^\s*param\s*\(') {
+                for ($j = $i; $j -lt $Lines.Count; $j++) {
+                    if ($Lines[$j] -match '^\s*\)\s*$') { return ($j + 1) }
+                }
+                break
+            }
+        }
+        for ($i = 0; $i -lt $Lines.Count; $i++) { if ($Lines[$i] -match '^\s*[^#\s]') { return $i } }
+        return 0
+    }
+    $oldIdx = & $oldAnchor @("param([string]`$User = 'DEFAULT_USER')", "Write-Output `$User")
+    Check 'T9.7b 阳性对照：旧锚点（只认多行 param）对同一输入必须锚到 param 之前 ⇒ 该用例在无修复时必红' `
+        ($oldIdx -le 0) ("旧锚点插入点=$oldIdx（param 在第 0 行；插入点 <= 0 即插到了 param 之前）")
+} else {
+    Write-Host "  [SKIP] T9.7 —— 没有 $enroller" -ForegroundColor DarkGray
+}
+
 # ---------------- T10 语法解析（接入是插入式改动，最容易插出语法错） ----------------
 Write-Host 'T10 语法解析：所有实机入口 + 锁本体 + 本自检都必须能被 PowerShell 解析'
 $parseTargets = @($clientScripts | Where-Object { $_.Path -match '\.ps1$' } | ForEach-Object { $_.Path }) + @(
