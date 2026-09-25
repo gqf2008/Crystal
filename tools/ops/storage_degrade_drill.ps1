@@ -29,7 +29,9 @@ param(
     [int]$LockSeconds = 22,
     [string]$OutFile = '',
     # 客户端可见报错的文案判据（正则可调，便于做「断言本身会红」的阳性对照）
-    [string]$NoticePattern = '存档失败'
+    [string]$NoticePattern = '存档失败',
+    # 单次 bot 会话的超时（秒）。超时视为该次采样失败并**立刻**返回，不阻塞整轮（2026-09-25 修）
+    [int]$BotTimeoutSec = 120
 )
 $ErrorActionPreference = 'Continue'
 $ops = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -40,17 +42,73 @@ New-Item -ItemType Directory -Force -Path (Join-Path $ops 'out') | Out-Null
 
 function BotJson([int]$hold, [string[]]$extra = @()) {
     $json = Join-Path $ops ("out/storage_degrade_bot_{0}.json" -f (Get-Random))
-    & python (Join-Path $ops 'bot.py') --host 127.0.0.1 --port $Port --accounts $Account `
-        --password $Password --sessions 1 --hold $hold @extra > $json 2>&1
+    # 2026-09-25：bot 调用必须**有超时**。此前直接 `& python … ` 同步调用：一旦服务端没绑到 -Port
+    # （例如 DeployDir 的 config/server.toml 写的是 7000、而 -Port 传的是 7100），bot 会一直等下去，
+    # 整个演练**静默挂死**（实测挂了 6 分钟以上、无任何输出，调用方无法分辨"在跑"还是"卡住"）。
+    $botArgs = @(
+        (Join-Path $ops 'bot.py'), '--host', '127.0.0.1', '--port', "$Port", '--accounts', $Account,
+        '--password', $Password, '--sessions', '1', '--hold', "$hold"
+    ) + @($extra)
+    $p = Start-Process -FilePath 'python' -ArgumentList $botArgs `
+        -RedirectStandardOutput $json -RedirectStandardError "$json.err" -PassThru -WindowStyle Hidden
+    $deadline = (Get-Date).AddSeconds($BotTimeoutSec)
+    while (-not $p.HasExited -and (Get-Date) -lt $deadline) { Start-Sleep 1 }
+    if (-not $p.HasExited) {
+        Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+        Write-Host ("WARN: bot.py 超过 {0}s 未退出（port={1}）——本轮判据按失败处理，见 {2}.err" -f `
+                $BotTimeoutSec, $Port, $json)
+        return $null
+    }
     try { return (Get-Content $json -Raw | ConvertFrom-Json) } catch { return $null }
 }
 
 $env:RUST_LOG = 'crystal_server=info'
-$proc = Start-Process -FilePath $ExePath -WorkingDirectory $DeployDir `
-    -RedirectStandardOutput $log -RedirectStandardError (Join-Path $ops 'out/storage_degrade.err.log') -PassThru
+# 2026-09-25：**监听口必须与 -Port 一致**。服务端读的是 <DeployDir>/config/server.toml 的
+# `[network].listen_addr`；`-Port` 只作用于 bot。两者不一致时以前会静默挂死（见 BotJson 注释）。
+# 这里：若配置里的端口 != -Port，就生成一份临时配置（只改 listen_addr）并按仓库既有约定
+# `mir2_server <config>` 启动，同时在输出里写明用的是哪份配置。
+$cfgIn = Join-Path $DeployDir 'config/server.toml'
+$cfgPort = $null
+if (Test-Path -LiteralPath $cfgIn) {
+    $m = Select-String -Path $cfgIn -Pattern 'listen_addr\s*=\s*"([^"]+)"' | Select-Object -First 1
+    if ($m -and $m.Matches[0].Groups[1].Value -match ':(\d+)$') { $cfgPort = [int]$Matches[1] }
+}
+$srvArgs = @()
+if ($cfgPort -ne $Port) {
+    $cfgOut = Join-Path $ops 'out/storage_degrade_server.toml'
+    $cfgText = if (Test-Path -LiteralPath $cfgIn) { Get-Content $cfgIn -Raw } else { "[network]`nlisten_addr = `"0.0.0.0:7000`"`n" }
+    if ($cfgText -match 'listen_addr\s*=\s*"[^"]+"') {
+        $cfgText = [regex]::Replace($cfgText, 'listen_addr\s*=\s*"[^"]+"', "listen_addr = `"0.0.0.0:$Port`"", 1)
+    } else {
+        $cfgText = "[network]`nlisten_addr = `"0.0.0.0:$Port`"`n" + $cfgText
+    }
+    Set-Content -LiteralPath $cfgOut -Value $cfgText -Encoding utf8
+    $srvArgs = @($cfgOut)
+    Write-Host ("[环境] 部署配置的 listen_addr 是端口 {0}，与本轮 -Port {1} 不一致 → 用临时配置 {2}" -f `
+            $cfgPort, $Port, $cfgOut)
+} else {
+    Write-Host ("[环境] 服务端监听口={0}（与 -Port 一致，直接用部署配置）" -f $Port)
+}
+$srvParams = @{
+    FilePath               = $ExePath
+    WorkingDirectory       = $DeployDir
+    RedirectStandardOutput = $log
+    RedirectStandardError  = (Join-Path $ops 'out/storage_degrade.err.log')
+    PassThru               = $true
+}
+if ($srvArgs.Count -gt 0) { $srvParams.ArgumentList = $srvArgs }
+$proc = Start-Process @srvParams
 $ready = $false
-for ($i = 0; $i -lt 90; $i++) { Start-Sleep 1; if ((Get-Content $log -EA SilentlyContinue) -match 'Gate listening') { $ready = $true; break } }
-if (-not $ready) { Write-Host 'server not ready'; exit 9 }
+for ($i = 0; $i -lt 90; $i++) {
+    Start-Sleep 1
+    if (Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue) { $ready = $true; break }
+}
+if (-not $ready) {
+    Write-Host ("server not ready on port {0}（gate 未监听；日志尾巴：{1}）" -f `
+            $Port, ((Get-Content $log -EA SilentlyContinue | Select-Object -Last 3) -join ' / '))
+    Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+    exit 9
+}
 
 # 0) 基线：正常登录一次（进图后 4s 下线 → 正常落库）
 $base = BotJson 4

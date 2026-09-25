@@ -107,10 +107,28 @@ pwsh tools/ops/memory_ramp.ps1 -DeployDir <deploy> -ExePath <exe> -StepsCsv 10,2
 pwsh tools/ops/storage_degrade_drill.ps1 -DeployDir <deploy> -OutFile tools/ops/out/storage_degrade.json
 ```
 
+**端口与超时契约（2026-09-25 修，两条都是"静默挂死"类缺陷）**：
+
+- `-Port`（默认 7100）**现在同时决定服务端监听口**。服务端读的是 `<DeployDir>/config/server.toml` 的
+  `[network].listen_addr`；两者不一致时（例如部署配置写 7000、而 `-Port` 传 7100），本脚本会生成一份
+  临时配置（只改 `listen_addr`）并按仓库既有约定 `mir2_server <config>` 启动，同时在输出里写明用的是哪份。
+  修复前该场景会**静默挂死**：服务端绑不上 7100、bot 却往 7100 连，整轮无任何输出（实测挂了 6 分钟以上）。
+- 单次 bot 会话有 `-BotTimeoutSec`（默认 120s）超时；超时按该次采样失败处理并**立刻**返回。
+  阳性对照：`-BotTimeoutSec 1` → 3 秒内输出 `WARN: bot.py 超过 1s 未退出…` + `FAIL(J0)…`，退出码 3
+  （不是挂死）。
+- 就绪判据从「日志里出现 `Gate listening`」改为「`-Port` 真的在监听」——日志字符串可能来自别的实例。
+
 判据（J1–J4，缺一不可）：写失败后**进程仍在** / 失败被**明确记录** / 故障期间**读路径不受影响**
 （新会话仍能登录）/ 释放锁后**恢复**（新会话下线重新出现 `saved to database on logout`）。
 
 **2026-09-23 实测结果：J1–J4 全绿**（`ok=true`，`save_failure_lines=2`）。同一份日志里的时间线：
+
+**2026-09-25 复跑（master `343e6f70e`，独立部署副本 + 当前构建）：J1–J5 全绿**（`ok=true`，退出码 0）——
+写锁 22s（`LOCK_HELD … LOCK_RELEASED after=22.0s`）、`save_failure_lines=8`、
+故障窗口内 `PERSIST_LOST account_save phase=login` / `player_pets` / `player_character phase=logout` 三类都被明确记录、
+读路径不受影响、释放锁后 `saved to database on logout` 由 1 行增至 2 行、
+且客户端**真的看到**提示：`存档失败：账号信息未能写入数据库（phase=login）。请联系管理员；本次改动可能不会被保存。`
+（与 owner 2026-09-24 拍板一致：失败一律直接反馈到客户端，服务器侧不做保护/补偿）。
 
 | 时刻 | 事件 |
 |---|---|
