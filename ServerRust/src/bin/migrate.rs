@@ -50,6 +50,10 @@ impl<R: Read> BinaryReader<R> {
         self.pos += 2;
         self.inner.read_u16::<LittleEndian>()
     }
+    fn read_raw_i16(&mut self) -> std::io::Result<i16> {
+        self.pos += 2;
+        self.inner.read_i16::<LittleEndian>()
+    }
     fn read_raw_u8(&mut self) -> std::io::Result<u8> {
         self.pos += 1;
         self.inner.read_u8()
@@ -64,6 +68,14 @@ impl<R: Read> BinaryReader<R> {
     }
 
     fn read_string(&mut self) -> std::io::Result<String> {
+        Ok(String::from_utf8_lossy(&self.read_dotnet_bytes()?).to_string())
+    }
+
+    /// 读 dotnet 字符串的**原始字节**（不经过 UTF-8 损失转换）。
+    /// 密码字段必须是这条路径：C# `Crypto.HashPassword` 是
+    /// `Encoding.UTF8.GetString(pbkdf2.GetBytes(24))`——24 字节哈希被**当成 UTF-8 字符串**存盘，
+    /// 用 `read_string()` 读会经过 lossy 转换而改变字节，导致迁移后的账号永远验不过密码。
+    fn read_dotnet_bytes(&mut self) -> std::io::Result<Vec<u8>> {
         let at = self.pos;
         let mut len: u32 = 0;
         let mut shift = 0;
@@ -89,7 +101,7 @@ impl<R: Read> BinaryReader<R> {
             let head: String = String::from_utf8_lossy(&buf[..buf.len().min(24)]).to_string();
             eprintln!("[trace] str  @{at} len={len} head={head:?}");
         }
-        Ok(String::from_utf8_lossy(&buf).to_string())
+        Ok(buf)
     }
 
     fn read_bytes(&mut self, count: usize) -> std::io::Result<Vec<u8>> {
@@ -110,6 +122,27 @@ impl<R: Read> BinaryReader<R> {
 /// 而不是只看到最后一句 "failed to fill whole buffer"）。
 fn trace_on() -> bool {
     std::env::var("MIR2_MIGRATE_TRACE").is_ok()
+}
+
+/// 轨迹里的**段标记**：读错位时先看「最后一条段标记」就知道是哪一段开始的
+/// （只看 i32/str 的裸轨迹要在几十条里对齐字段，慢且容易看错）。
+fn trace_mark<R: Read>(reader: &BinaryReader<R>, section: &str) {
+    if trace_on() {
+        eprintln!("[trace] ==== {section} @{}", reader.position());
+    }
+}
+
+/// 读「某段的条目数」并做上限检查：错位后 count 会读成垃圾（实测 NPC/生物段曾读出 16 亿），
+/// 不设上限就会空转十亿次（刷屏 + CPU 跑满）。超过 1_000_000 一律视为已错位，立刻失败。
+fn read_bounded_count<R: Read>(reader: &mut BinaryReader<R>, what: &str) -> std::io::Result<i32> {
+    let count = reader.read_raw_i32()?;
+    if !(0..=1_000_000).contains(&count) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("{what} 段条目数不合理（疑似前面已错位）: {count}"),
+        ));
+    }
+    Ok(count)
 }
 
 // ============================================================
@@ -231,9 +264,15 @@ fn read_user_item<R: Read>(
 
     let slot_count = reader.read_raw_i32()?;
     for _i in 0..slot_count {
-        if !reader.read_boolean()? {
-            read_user_item(reader, version)?; // consume nested
+        // ⚠️ 极性陷阱：`UserItem.Slots` 与「背包/仓库格」**相反**。
+        // C# `UserItem.Save:479` 写的是 `writer.Write(Slots[i] == null)`，
+        // 读侧对应 `UserItem.cs:397-402` 的 `if (reader.ReadBoolean()) continue;`
+        // —— **true 表示该槽为空**。原实现按「true 就有物品」读，于是每件带孔装备都会
+        // 多读/漏读一整件嵌套物品，误差按孔数累积（实测角色记录因此短 22 字节）。
+        if reader.read_boolean()? {
+            continue;
         }
+        read_user_item(reader, version)?; // consume nested
     }
 
     let gem_count = if version <= 84 {
@@ -250,8 +289,21 @@ fn read_user_item<R: Read>(
         }
     }
 
-    let awake_type = reader.read_raw_i32()?;
-    let awake_level = reader.read_raw_i32()?;
+    // C# `Awake(BinaryReader)`（Shared/Data/ItemData.cs:893-901）：
+    // `Type u8 → count i32 → count × u8`。原实现读成 `i32 + i32`（每件物品多 3 字节）。
+    // 这里 count 也做上限检查（错位时 count 会是垃圾）。
+    let awake_type = reader.read_raw_u8()? as i32;
+    let awake_count = reader.read_raw_i32()?;
+    if !(0..=1024).contains(&awake_count) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("UserItem.Awake count 不合理（疑似已错位）: {awake_count}"),
+        ));
+    }
+    for _ in 0..awake_count {
+        reader.read_raw_u8()?;
+    }
+    let awake_level = awake_count;
     let refined_value = reader.read_raw_u8()?;
     let refine_added = reader.read_raw_u8()?;
     if version > 85 {
@@ -260,13 +312,16 @@ fn read_user_item<R: Read>(
     let wedding_ring = reader.read_raw_i32()?;
 
     if version >= 65 && reader.read_boolean()? {
-        reader.read_raw_i32()?;
-        reader.read_raw_i32()?; // expire_info
+        // C# `ExpireInfo(BinaryReader)`：只有一个 i64（原实现读成两个 i32）
+        reader.read_raw_i64()?; // expire_info.expiry_date
     }
     if version >= 76 && reader.read_boolean()? {
-        reader.read_raw_i64()?;
-        reader.read_raw_i64()?;
-        reader.read_raw_u64()?; // rental_info
+        // C# `RentalInformation(BinaryReader)`（ItemData.cs:761-767）：
+        // `OwnerName string → BindingFlags i16 → ExpiryDate i64 → RentalLocked bool`
+        reader.read_string()?; // owner_name
+        reader.read_raw_i16()?; // binding_flags
+        reader.read_datetime()?; // expiry_date
+        reader.read_boolean()?; // rental_locked
     }
     let is_shop_item = if version >= 83 {
         reader.read_boolean()?
@@ -274,8 +329,12 @@ fn read_user_item<R: Read>(
         false
     };
     if version >= 92 && reader.read_boolean()? {
-        reader.read_raw_i64()?;
-        reader.read_raw_i32()?; // sealed_info
+        // C# `SealedInfo(BinaryReader)`（ItemData.cs:735-742）：`ExpiryDate i64`，
+        // 且 **v>92 再加一个** `NextSealDate i64`（原实现只读 i64 + i32）
+        reader.read_raw_i64()?; // expiry_date
+        if version > 92 {
+            reader.read_datetime()?; // next_seal_date
+        }
     }
     let gm_made = if version > 107 {
         reader.read_boolean()?
@@ -349,6 +408,7 @@ fn read_character_info<R: Read>(
         reader.read_raw_i32()?;
     } // pk_points
 
+    trace_mark(reader, "inventory");
     // Inventory
     let inv_count = reader.read_raw_i32()?;
     let mut inventory: Vec<Option<ParsedUserItem>> = Vec::with_capacity(inv_count as usize);
@@ -365,6 +425,7 @@ fn read_character_info<R: Read>(
         }
     }
 
+    trace_mark(reader, "equipment");
     // Equipment
     let eq_count = reader.read_raw_i32()?;
     let mut equipment: Vec<Option<ParsedUserItem>> = Vec::with_capacity(eq_count as usize);
@@ -377,6 +438,7 @@ fn read_character_info<R: Read>(
         }
     }
 
+    trace_mark(reader, "quest_inventory");
     // QuestInventory (consume but don't store separately)
     let qi_count = reader.read_raw_i32()?;
     for _ in 0..qi_count {
@@ -387,18 +449,24 @@ fn read_character_info<R: Read>(
         read_user_item(reader, version)?;
     }
 
+    trace_mark(reader, "magics");
     // Magics
     let magic_count = reader.read_raw_i32()?;
     for _ in 0..magic_count {
-        reader.read_raw_u32()?; // magic_id
+        // C# `UserMagic`（Server/MirDatabase/MagicInfo.cs:120-133）：
+        // `Spell u8 → Level u8 → Key u8 → Experience u16 → [v>=15] IsTempSpell bool
+        //  → [v>=65] CastTime i64`。
+        // 原实现读的是 `magic_id u32 + level u8 + u64 + is_temp + cast_time i32` ⇒ 结构性不符。
+        reader.read_raw_u8()?; // spell（C# 用 byte，不是 u32）
         reader.read_raw_u8()?; // level
-        if version < 62 {
-            reader.read_raw_u32()?;
-        } else {
-            reader.read_raw_u64()?;
+        reader.read_raw_u8()?; // key
+        reader.read_raw_u16()?; // experience
+        if version >= 15 {
+            reader.read_boolean()?; // is_temp_spell
         }
-        reader.read_boolean()?; // is_temp
-        reader.read_raw_i32()?; // cast_time
+        if version >= 65 {
+            reader.read_raw_i64()?; // cast_time
+        }
     }
 
     reader.read_boolean()?; // thrusting
@@ -422,7 +490,12 @@ fn read_character_info<R: Read>(
     }
 
     reader.read_boolean()?; // allow_group
-    const FLAG_COUNT: usize = 256;
+                            // C# `CharacterInfo.Load`（Server/MirDatabase/CharacterInfo.cs:251）用的是
+                            // `for (int i = 0; i < Globals.FlagIndexCount; i++) Flags[i] = reader.ReadBoolean();`，
+                            // 而 `Shared/Globals.cs:31` 写着 **FlagIndexCount = 1999**。
+                            // 原实现写死 256 ⇒ 每条角色少读 1743 字节，之后整段错位（这是最要命的一处）。
+    trace_mark(reader, "flags(1999)");
+    const FLAG_COUNT: usize = 1999; // Globals.FlagIndexCount
     for _ in 0..FLAG_COUNT {
         reader.read_boolean()?;
     }
@@ -432,6 +505,7 @@ fn read_character_info<R: Read>(
         reader.read_boolean()?;
     } // allow_observe
 
+    trace_mark(reader, "quests");
     // CurrentQuests (store indices)
     let quest_count = reader.read_raw_i32()?;
     let mut quests = Vec::new();
@@ -439,13 +513,21 @@ fn read_character_info<R: Read>(
         quests.push(reader.read_raw_i32()?); // index
         reader.read_datetime()?; // start
         reader.read_datetime()?; // end
-                                 // Consume task details
+                                 // 任务进度表（C# `QuestProgressInfo.cs:85-190`）。
+                                 //
+                                 // **分支依赖 `Info != null`**：原版按「该 quest 定义是否在库里」选 orphan / 非 orphan
+                                 // 两套长度不同的布局。本工具只有 .MirADB（没有 quest 定义表），无法判定，因此按
+                                 // **非 orphan（正常）** 布局读——这也是实际数据里的绝大多数；若真遇到 orphan 记录，
+                                 // 解析会错位（可用 `MIR2_MIGRATE_TRACE=1` 看出），届时需要先 import quest_infos 再回填。
+                                 //
+                                 // v>=90 非 orphan：每个 kill task 只写 **一个** i32（当前计数），item task 同样只写一个 i32，
+                                 // flag task 只写一个 bool；v<90 的老布局才是 (id,count) 成对。
         let kill_count = reader.read_raw_i32()?;
         for _ in 0..kill_count {
             if version < 90 {
                 reader.read_raw_i32()?;
-            } else {
                 reader.read_raw_i32()?;
+            } else {
                 reader.read_raw_i32()?;
             }
         }
@@ -453,23 +535,20 @@ fn read_character_info<R: Read>(
         for _ in 0..item_count {
             if version < 90 {
                 reader.read_raw_i32()?;
-            } else {
                 reader.read_raw_i32()?;
+            } else {
                 reader.read_raw_i32()?;
             }
         }
         let flag_count = reader.read_raw_i32()?;
         for _ in 0..flag_count {
-            if version < 90 {
-                reader.read_boolean()?;
-            } else {
-                reader.read_raw_i32()?;
-                reader.read_boolean()?;
-            }
+            // 两种布局下 flag 状态都是一个 bool（v<90 的老布局亦然）
+            reader.read_boolean()?;
         }
     }
 
     // Buffs
+    trace_mark(reader, "buffs");
     let buff_count = reader.read_raw_i32()?;
     for _ in 0..buff_count {
         reader.read_raw_u8()?; // type
@@ -511,6 +590,7 @@ fn read_character_info<R: Read>(
     }
 
     // Mail
+    trace_mark(reader, "mail");
     let mail_count = reader.read_raw_i32()?;
     let mut mail = Vec::new();
     for _ in 0..mail_count {
@@ -542,6 +622,7 @@ fn read_character_info<R: Read>(
         });
     }
 
+    trace_mark(reader, "creatures");
     // IntelligentCreatures
     let creature_count = reader.read_raw_i32()?;
     let mut creatures = Vec::new();
@@ -582,6 +663,7 @@ fn read_character_info<R: Read>(
         reader.read_raw_u8()?;
         reader.read_boolean()?;
     }
+    trace_mark(reader, "pearl_completed_refine_friends");
     reader.read_raw_i32()?; // pearl_count
 
     // CompletedQuests
@@ -607,13 +689,17 @@ fn read_character_info<R: Read>(
         friends.push((idx, blocked, memo));
     }
 
+    trace_mark(reader, "rented_gs_heroes");
     // RentedItems
     if version > 75 {
         let ri_count = reader.read_raw_i32()?;
         for _ in 0..ri_count {
-            reader.read_raw_i32()?;
-            reader.read_raw_i32()?;
-            reader.read_raw_u64()?;
+            // C# `ItemRentalInformation`（Shared/Data/ItemData.cs:1099-1105）：
+            // `ItemId u64 → ItemName string → RentingPlayerName string → ItemReturnDate i64`。
+            reader.read_raw_u64()?; // item_id
+            reader.read_string()?; // item_name
+            reader.read_string()?; // renting_player_name
+            reader.read_datetime()?; // item_return_date
         }
         reader.read_boolean()?; // has_rented_item
     }
@@ -703,7 +789,11 @@ fn read_account<R: Read>(
 
     // C# `AccountInfo` 在 v94 前后换了字段名（`Password` → `password`），但**线格式都是
     // 一个 dotnet 字符串**，故这里不需要分支（原先写了同体的 if/else，clippy 判 identical blocks）。
-    let _password = reader.read_string()?;
+    //
+    // 这里必须取**原始字节**（见 `read_dotnet_bytes`）：C# 把 24 字节 PBKDF2 哈希用
+    // `Encoding.UTF8.GetString` 变成字符串再落盘。用 `read_string()` 会经过 lossy 转换，
+    // 迁移后的账号在 Rust 服务端永远验不过密码（服务端是按字节比对 pbkdf2 结果的）。
+    let password_field = reader.read_dotnet_bytes()?;
 
     let salt = if version > 93 {
         let salt_len = reader.read_raw_i32()?;
@@ -712,7 +802,10 @@ fn read_account<R: Read>(
         vec![0u8; 24]
     };
 
-    let password_hash = salt.clone(); // For now, same as salt (will re-hash on first login)
+    // 服务端 `verify_password` 认的是 `pbkdf2_sha1$<b64 salt>$<b64 hash>`：
+    // 第二段必须是 C# 落盘的那个 24 字节 PBKDF2-SHA1 结果（这里取原始字节，见上）。
+    // 原实现写 `salt.clone()` 当哈希 ⇒ 迁移后的账号**必然验不过**密码（这是个静默的功能缺口）。
+    let password_hash = password_field;
     if version > 97 {
         reader.read_boolean()?;
     } // require_password_change
@@ -733,7 +826,17 @@ fn read_account<R: Read>(
     let char_count = reader.read_raw_i32()?;
     let mut characters = Vec::new();
     for _ in 0..char_count {
+        let cstart = reader.position();
         let info = read_character_info(reader, version)?;
+        if trace_on() {
+            eprintln!(
+                "[trace] ==== char_end name={:?} {} -> {}（{} 字节）",
+                info.name,
+                cstart,
+                reader.position(),
+                reader.position() - cstart
+            );
+        }
         characters.push(info);
     }
 
@@ -818,6 +921,16 @@ async fn migrate_account(pool: &sqlx::SqlitePool, account: &ParsedAccount) -> an
         base64_encode(&account.salt),
         base64_encode(&account.password_hash)
     );
+    // C# 落盘时把 24 字节哈希经 `Encoding.UTF8.GetString` 变字符串：**若那 24 字节不是合法
+    // UTF-8，就会丢成 U+FFFD**，原始哈希不可还原（C# 自己两侧都走同一损失转换所以还能比对，
+    // Rust 服务端是按字节比对，认不出来）。如实告警，别让用户以为"迁移完就能用原密码登"。
+    if account.password_hash.len() != 24 {
+        tracing::warn!(
+            "账号 {} 的密码哈希长度={}（≠24）⇒ C# 落盘的 UTF-8 损失转换已不可还原，迁移后无法用原密码登录（需 GM 重置密码）",
+            account.account_id,
+            account.password_hash.len()
+        );
+    }
 
     sqlx::query(
         r#"INSERT OR REPLACE INTO accounts (username, password_hash, is_online) VALUES (?, ?, 0)"#,
@@ -1106,6 +1219,7 @@ async fn main() -> anyhow::Result<()> {
     let data = std::fs::read(adb_path)
         .map_err(|e| anyhow::anyhow!("Failed to read {}: {}", adb_path, e))?;
     info!("File size: {} bytes", data.len());
+    let adb_size = data.len();
 
     let mut reader = BinaryReader::new(std::io::Cursor::new(data));
 
@@ -1384,11 +1498,60 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
+    // 账号之后的收尾段（C# `Envir.SaveAccounts`，Server/MirEnvir/Envir.cs:2591-2610）：
+    //   NextAuctionID i32 → Auctions(count + AuctionInfo*) → NextMailID i32
+    //   → GameshopLog(count + (i32,i32)*) → SavedSpawns(count + RespawnSave*)
+    // 工具此前完全不读这段 ⇒ 收尾字节没被消费（实测差 28 字节）。
+    // AuctionInfo：Server/MirDatabase/AuctionInfo.cs:47-69；
+    // RespawnSave：Server/MirEnvir/RespawnTimer.cs:11-16。
+    trace_mark(&reader, "post_accounts(auctions/mail/gameshoplog/spawns)");
+    // 注意：`Envir.NextAuctionID` / `NextMailID` 是 **ulong**（Envir.cs:127），不是 i32
+    let _next_auction_id = reader.read_raw_u64()?;
+    let auction_count = read_bounded_count(&mut reader, "auctions")?;
+    for _ in 0..auction_count {
+        reader.read_raw_u64()?; // auction_id
+        read_user_item(&mut reader, version)?; // item
+        reader.read_datetime()?; // consignment_date
+        reader.read_raw_u32()?; // price
+        reader.read_raw_i32()?; // seller_index
+        reader.read_boolean()?; // expired
+        reader.read_boolean()?; // sold
+        if version > 79 {
+            reader.read_raw_u8()?; // item_type
+            reader.read_raw_u32()?; // current_bid
+            reader.read_raw_i32()?; // current_buyer_index
+        }
+    }
+    let _next_mail_id = reader.read_raw_u64()?;
+    let gs_log_count = read_bounded_count(&mut reader, "gameshop_log")?;
+    for _ in 0..gs_log_count {
+        reader.read_raw_i32()?;
+        reader.read_raw_i32()?;
+    }
+    let spawn_count = read_bounded_count(&mut reader, "saved_spawns")?;
+    for _ in 0..spawn_count {
+        reader.read_boolean()?; // spawned
+        reader.read_raw_u64()?; // next_spawn_tick
+        reader.read_raw_i32()?; // respawn_index
+    }
+
     info!("=== Migration Complete ===");
     info!("Accounts migrated: {}", account_count_success);
     info!("Characters migrated: {}", character_count_success);
     info!("Errors: {}", error_count);
     info!("Database: {}", sqlite_path);
+    // 结构自证：读到的位置应当**恰好等于文件大小**（没有错位多读/少读）。
+    // 这条判据比"行数看着对"硬得多——2026-09-25 就是靠它确认 v112 布局已对齐。
+    info!(
+        "File consumed: {} / {} bytes{}",
+        reader.position(),
+        adb_size,
+        if reader.position() == adb_size {
+            "（完全对齐）"
+        } else {
+            "（⚠️ 有错位）"
+        }
+    );
 
     // Verify
     let row_count: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM accounts")
