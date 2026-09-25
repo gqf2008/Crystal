@@ -1217,6 +1217,10 @@ impl Message<StartGameRequest> for WorldActor {
         // 会各自看到 1912 只"自己的"怪（打不到同一只），且会话数×整图条目常驻内存。
         let spawn_map_index = loaded_state.map_index;
         let reused_map_spawns = self.map_spawns_ready.contains(&spawn_map_index);
+        // 归因标签：把「物化 / 复用发送 + 入库 + 精英广播」这一段单独打标（每轮发生一次的区域），
+        // RAII 退出即还原，与本文件其它标签嵌套安全。见 mem_probe.rs 的 TAG_*。
+        #[cfg(feature = "mem-probe")]
+        let _tag_spawn = crate::mem_probe::TagGuard::enter(crate::mem_probe::TAG_MATERIALIZE);
         let (new_npcs, new_monsters) = if reused_map_spawns {
             send_map_spawns_to_session(
                 &self.gate_ref,
@@ -1237,6 +1241,9 @@ impl Message<StartGameRequest> for WorldActor {
             );
             (Vec::new(), Vec::new())
         } else {
+            // 相位标记：一轮里「涨在哪一段」直接从日志差出来（物化 / 游玩+登出 / 清理）。
+            #[cfg(feature = "mem-probe")]
+            probe_phase("materialize_begin", spawn_map_index);
             spawn_npcs_and_monsters(
                 self.gate_ref.clone(),
                 &spawn_dir,
@@ -1249,6 +1256,8 @@ impl Message<StartGameRequest> for WorldActor {
             )
             .await
         };
+        #[cfg(feature = "mem-probe")]
+        probe_phase("materialize_end", spawn_map_index);
         // 空配置（测试 harness 无刷怪配置 / 该图真的没有刷怪点）不置「已物化」标记，
         // 否则该图的后续会话会以为生成物已存在而永远不发。
         let materialized = !(new_npcs.is_empty() && new_monsters.is_empty());
@@ -1381,6 +1390,8 @@ impl Message<StartGameRequest> for WorldActor {
                 &format!("一只 {} 出现在 {}！勇士们，前往讨伐！", name, map_name),
             );
         }
+        #[cfg(feature = "mem-probe")]
+        drop(_tag_spawn);
 
         // 同步当前地图上的地面物品给新玩家
         let map_index_val = loaded_state.map_index;
@@ -3501,9 +3512,29 @@ impl Message<PlayerLogOut> for WorldActor {
     }
 }
 
+/// 相位标记（仅 `--features mem-probe` + `MIR2_LEAK_PROBE=1`）：在一轮的**阶段边界**打印活跃字节。
+/// 有了它，「每轮涨的那 ~0.4MB 是在物化、在游玩+登出、还是在清理段涨的」可以直接从日志差出来，
+/// 不必先猜结构（`MEM_PROBE_IDLE` 是清理段的终点，两处合起来把一轮切成四段）。
+#[cfg(feature = "mem-probe")]
+fn probe_phase(phase: &str, map_index: u16) {
+    if std::env::var("MIR2_LEAK_PROBE").is_ok() {
+        let (live, allocs, deallocs) = crate::mem_probe::stats();
+        tracing::info!(
+            "MEM_PROBE_PHASE phase={} map={} live_bytes={} allocs={} deallocs={}",
+            phase,
+            map_index,
+            live,
+            allocs,
+            deallocs
+        );
+    }
+}
+
 impl WorldActor {
     /// M61：地图上无其他玩家时，清理该地图的 NPC/怪物（避免多次登录泄漏）
     pub(crate) async fn cleanup_map_spawns(&mut self, map_index: u16) {
+        #[cfg(feature = "mem-probe")]
+        let _tag_cleanup = crate::mem_probe::TagGuard::enter(crate::mem_probe::TAG_CLEANUP);
         let mut others_on_map = 0usize;
         for r in self.players.values() {
             if let Ok(Some(os)) = r.actor_ref.ask(GetPlayerState).await {
@@ -3515,6 +3546,9 @@ impl WorldActor {
         if others_on_map > 0 {
             return;
         }
+        // 相位标记：清理段的起点（终点就是下面那条 MEM_PROBE_IDLE）。
+        #[cfg(feature = "mem-probe")]
+        probe_phase("cleanup_begin", map_index);
         let npc_count = self
             .npcs
             .values()
@@ -3627,6 +3661,20 @@ impl WorldActor {
                 cpos,
                 cneg,
                 cpos + cneg
+            );
+            // 按调用点归因：各标签的活跃字节与本轮增量；TAGSUM 的 gap = 未打标签的字节
+            // （目前只有 align>16 的分配走不带头部的老路径，所以 gap 应该很小；gap 大说明标签没铺到）。
+            let (tagsum, live_total) = crate::mem_probe::report_tags(|tag, live, dbytes| {
+                info!(
+                    "MEM_PROBE_TAG tag={} live_bytes={} dbytes={}",
+                    tag, live, dbytes
+                );
+            });
+            info!(
+                "MEM_PROBE_TAGSUM sum={} live_bytes={} gap={}",
+                tagsum,
+                live_total,
+                live_total as i64 - tagsum as i64
             );
         }
         info!(
