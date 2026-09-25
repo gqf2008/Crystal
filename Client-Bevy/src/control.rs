@@ -28,6 +28,25 @@
 //                 quest_id<=0 = 关闭）
 // ============================================================================
 
+/// 构建戳**定长记录**（编译期由 `build.rs` 固化，格式故意做成一行连续 ASCII）。
+///
+/// 为什么不是"日志里打出来"就够：日志要**启动进程**才看得到，而夹具最该在**启动之前**就知道
+/// "这份 exe 是不是当前提交构建的"——旧产物会让判据对着错对象下结论（假红/假绿都污染覆盖可信度，
+/// 见 `LESSON_运行目标分支e2e前需重建二进制避免陈旧target误报`）。
+/// 做成连续 ASCII 后，`tools/acceptance/build_stamp.ps1` 直接**扫 exe 字节**即可拿到 commit，
+/// 不启动客户端、不占 e2e 锁、不需要 control 端口。
+///
+/// 格式固定：`CRYSTAL_BUILD_STAMP_V1 commit=<40hex> short=<hex> dirty=<0|1>`
+/// （`build_stamp.ps1` 的正则与这里的顺序必须一致；改格式要同时改两处）
+pub const BUILD_STAMP_RECORD: &str = concat!(
+    "CRYSTAL_BUILD_STAMP_V1 commit=",
+    env!("CRYSTAL_BUILD_COMMIT"),
+    " short=",
+    env!("CRYSTAL_BUILD_COMMIT_SHORT"),
+    " dirty=",
+    env!("CRYSTAL_BUILD_DIRTY")
+);
+
 use std::io::{BufRead, BufReader, Write};
 use std::net::TcpListener;
 
