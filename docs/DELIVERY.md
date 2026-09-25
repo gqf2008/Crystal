@@ -29,19 +29,31 @@ Windows 客户端 zip 内已自动带上 MSYS2 UCRT64 运行库 DLL（`glib`/`li
 >
 > **本机可复跑的打包预演**（发版日关键路径，防止"等到打 tag 才发现配方漂移"）：
 > ```powershell
-> # 先构建 GNU release 产物（CI 同款目标）
+> # ① 客户端：先构建 GNU release 产物（CI 同款目标）
 > $env:CARGO_BUILD_TARGET='x86_64-pc-windows-gnu'; cargo build --release --bin client_bevy
 > pwsh tools/ops/package_windows_rehearsal.ps1 -SmokeServer 127.0.0.1:7000
 >
-> # 内存泄漏门禁（发版前必跑；判据 = 测量窗口内活跃字节"一次都没回落"即判泄漏）
+> # ② 服务端：release 产物 + 全新目录部署 + 协议级登录冒烟（判据 J1 产物哈希 / J2 起服就绪 / J3 登录）
+> cargo build --release --bin mir2_server        # 在 ServerRust/ 下跑
+> pwsh tools/ops/deploy_smoke.ps1 -ReleaseDir ServerRust/target/release -SourceRoot ServerRust -Port 7100
+> #   -SourceRoot 必须是"含 config/ + Data/(DB) + Daneo1989/"的目录：worktree 检出里 Data/crystal.db
+> #   是 gitignore 的（不存在），这种情况指向手边**有可用数据**的那份检出；-Port 别用 7000（会撞开发服）。
+>
+> # ③ 内存泄漏门禁（发版前必跑；判据 = 测量窗口内活跃字节"一次都没回落"即判泄漏）
 > pwsh tools/ops/mem_leak_gate.ps1 -DeployDir %TEMP%\ramp_deploy -MeasureCycles 6
 > #   没跑出 J5（被测二进制没带 --features mem-probe）会 exit 3「没判成」，不许当通过；
+> #   部署目录不存在会 exit 2；其 config/server.toml 里的端口必须与 -Port 一致
+> #   （不一致 = 登录全失败、J0 标定无效 + exit 3，不静默给绿）；
 > #   只想验判据本身、不起服：pwsh tools/ops/mem_leak_gate.ps1 -SelfTest
 > ```
 > 判据 J1 产物 / J2 staging（8 DLL + assets + libpinyin 数据）/ **J2b 依赖闭包**（stage 内每个 PE 的导入
 > 要么在 stage、要么 System32 或 `api-ms-win-*` 虚拟 api-set）/ J3 zip 结构断言 / **J4 解压到干净目录真启动**。
-> 实测：zip 69.3MB / 38 条目 / 依赖闭包 0 缺失 / 解压后 `alive=true, control_rpc=true, **entered_game=true**`
-> —— 即发布产物不仅能起来，还能连上服务器**登录并进图**。
+> **2026-09-25 按上面三条从零复跑（同一台机器，master `8ec2b58d5`）**：
+> 客户端 GNU release 构建 **21m12s** exit 0；打包预演 exit 0 —— zip **66.1 MiB / 38 条目** / 依赖闭包 0 缺失 /
+> 解压后 `alive=true, control_rpc=true, **entered_game=true**`（发布产物不仅能起来，还能连上服务器登录并进图）；
+> 服务端 release 构建 **1m38s**、`deploy_smoke` exit 0 —— 部署目录里 exe 的 sha256 与刚构建的产物一致
+> （`F0597E9D…`，证明跑的是本次产物而不是旧物）、日志 `Gate listening on 0.0.0.0:7480`、协议级登录
+> **ok=1 / failed=0**；内存门禁 exit 0 —— 20 会话 × 6 测量轮、活跃字节每轮净增 **+30,050 B**、`dips=1`（无泄漏）。
 macOS 产物未签名：首次打开被 Gatekeeper 拦截时右键 → 打开，或
 `xattr -dr com.apple.quarantine client_bevy`。
 
