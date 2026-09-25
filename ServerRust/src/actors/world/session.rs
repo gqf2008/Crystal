@@ -3708,6 +3708,21 @@ impl WorldActor {
                 live_total,
                 live_total as i64 - tagsum as i64
             );
+            // 「materialize 这段每轮留下的是哪些尺寸」——全球直方图混着所有调用点，这里单独记一个标签。
+            let (fpos, fneg) =
+                crate::mem_probe::report_focus_sizes(10, |size, count, dbytes, dcount| {
+                    info!(
+                        "MEM_PROBE_FOCUS size={} count={} dbytes={} dcount={}",
+                        size, count, dbytes, dcount
+                    );
+                });
+            info!(
+                "MEM_PROBE_FOCUSSUM focus={} live={} dpos={} dneg={}",
+                crate::mem_probe::TAG_NAMES[crate::mem_probe::TAG_FOCUS_SIZE],
+                crate::mem_probe::focus_live_total(),
+                fpos,
+                fneg
+            );
         }
         info!(
             "Map {} spawns cleaned (npcs={} monsters={})",

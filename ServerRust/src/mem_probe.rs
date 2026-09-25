@@ -155,6 +155,91 @@ fn track_tag(tag: usize, size: usize, add: bool) {
     }
 }
 
+// ---- 按标签的精确尺寸直方图：只跟**一个**标签走（默认 `materialize`）----
+// 全局直方图能说"这一轮各尺寸涨了多少"，但里面混着所有调用点；问"**materialize 这段**每轮留下的
+// 是哪些尺寸"必须单独记。这里只留一个标签的两份快照（活字节 + 计数器），避免 9 个标签 × 65537 的数组。
+// 想换标签就改 `TAG_FOCUS_SIZE` 常量重新构建（探针构建，不对外）。
+pub const TAG_FOCUS_SIZE: usize = TAG_MATERIALIZE;
+static FOCUS_LIVE: [AtomicUsize; EXACT_MAX + 1] = [const { AtomicUsize::new(0) }; EXACT_MAX + 1];
+static FOCUS_PREV: [AtomicUsize; EXACT_MAX + 1] = [const { AtomicUsize::new(0) }; EXACT_MAX + 1];
+static FOCUS_COUNT: [AtomicUsize; EXACT_MAX + 1] = [const { AtomicUsize::new(0) }; EXACT_MAX + 1];
+static FOCUS_PREV_COUNT: [AtomicUsize; EXACT_MAX + 1] =
+    [const { AtomicUsize::new(0) }; EXACT_MAX + 1];
+
+#[inline]
+fn track_focus(tag: usize, size: usize, add: bool) {
+    if tag != TAG_FOCUS_SIZE || size == 0 || size > EXACT_MAX {
+        return;
+    }
+    if add {
+        FOCUS_LIVE[size].fetch_add(size, Ordering::Relaxed);
+        FOCUS_COUNT[size].fetch_add(1, Ordering::Relaxed);
+    } else {
+        FOCUS_LIVE[size].fetch_sub(size, Ordering::Relaxed);
+        FOCUS_COUNT[size].fetch_sub(1, Ordering::Relaxed);
+    }
+}
+
+/// 输出 `TAG_FOCUS_SIZE` 这个标签上「本轮变化最大的前 `top` 个尺寸」并刷新快照。
+/// 全程不分配（emit 直接打印），返回 `(本轮该标签的正增量之和, 负增量之和)`。
+pub fn report_focus_sizes(top: usize, mut emit: impl FnMut(usize, usize, i64, i64)) -> (i64, i64) {
+    let mut picked = [usize::MAX; 16];
+    let top = top.min(picked.len());
+    let (mut pos_sum, mut neg_sum) = (0i64, 0i64);
+    for size in 1..=EXACT_MAX {
+        let d = FOCUS_LIVE[size].load(Ordering::Relaxed) as i64
+            - FOCUS_PREV[size].load(Ordering::Relaxed) as i64;
+        if d > 0 {
+            pos_sum += d;
+        } else {
+            neg_sum += d;
+        }
+    }
+    for _ in 0..top {
+        let mut best: Option<(usize, u64, i64, i64, usize)> = None;
+        for size in 1..=EXACT_MAX {
+            if picked.contains(&size) {
+                continue;
+            }
+            let live = FOCUS_LIVE[size].load(Ordering::Relaxed);
+            let prev = FOCUS_PREV[size].load(Ordering::Relaxed);
+            if live == 0 && prev == 0 {
+                continue;
+            }
+            let dbytes = live as i64 - prev as i64;
+            let score = dbytes.unsigned_abs();
+            if best.is_none_or(|(_, s, _, _, _)| score > s) {
+                let count = FOCUS_COUNT[size].load(Ordering::Relaxed);
+                let dcount = count as i64 - FOCUS_PREV_COUNT[size].load(Ordering::Relaxed) as i64;
+                best = Some((size, score, dbytes, dcount, count));
+            }
+        }
+        match best {
+            Some((size, _, dbytes, dcount, count)) => {
+                if let Some(slot) = picked.iter_mut().find(|c| **c == usize::MAX) {
+                    *slot = size;
+                }
+                emit(size, count, dbytes, dcount);
+            }
+            None => break,
+        }
+    }
+    for size in 1..=EXACT_MAX {
+        FOCUS_PREV[size].store(FOCUS_LIVE[size].load(Ordering::Relaxed), Ordering::Relaxed);
+        FOCUS_PREV_COUNT[size].store(FOCUS_COUNT[size].load(Ordering::Relaxed), Ordering::Relaxed);
+    }
+    (pos_sum, neg_sum)
+}
+
+/// `TAG_FOCUS_SIZE` 当前挂着的活跃字节合计（用于确认"这个标签确实在涨"）。
+pub fn focus_live_total() -> usize {
+    FOCUS_LIVE
+        .iter()
+        .skip(1)
+        .map(|slot| slot.load(Ordering::Relaxed))
+        .sum()
+}
+
 /// 某个标签当前挂着多少活跃字节（线程局部标签本身在分配时就记进了对应槽位）。
 /// 用途：在**同步窗口**（无 await）前后各读一次，差值就是"这段时间里本线程按该标签分配的净字节"——
 /// 它不受其它线程/任务的分配干扰，比全局 `live_bytes` 的窗口差干净得多。
@@ -376,6 +461,7 @@ unsafe impl GlobalAlloc for CountingAllocator {
                 bucket(layout.size()).fetch_add(layout.size(), Ordering::Relaxed);
                 track(layout.size(), true);
                 track_tag(tag, layout.size(), true);
+                track_focus(tag, layout.size(), true);
             }
             return base.add(TAG_HEADER);
         }
@@ -399,6 +485,7 @@ unsafe impl GlobalAlloc for CountingAllocator {
                 bucket(layout.size()).fetch_sub(layout.size(), Ordering::Relaxed);
                 track(layout.size(), false);
                 track_tag(tag, layout.size(), false);
+                track_focus(tag, layout.size(), false);
             }
             // 同样的参数在 alloc 里成功过，这里理论不可达；真到这儿也只能不释放（不能按老布局释放，
             // 那会把 base 而不是 ptr 交给系统分配器）。
