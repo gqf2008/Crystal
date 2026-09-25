@@ -290,8 +290,24 @@ async fn async_main() -> anyhow::Result<()> {
     });
     info!("SocialActor spawned");
 
-    let quest_dir = PathBuf::from("Daneo1989/Envir/Quests");
-    let npc_script_dir = PathBuf::from("Daneo1989/Envir/NPCs");
+    // 2026-09-25：任务/NPC 脚本目录跟随 `[server].map_data_dir`（与同文件的 `Configs/` 同一口径）。
+    // 此前写死相对 cwd 的 `Daneo1989/Envir/Quests`：工作目录不是仓库根时任务文件读不到，
+    // 任务奖励**静默**变 0（实测 e2e 工作目录下启动日志 "Resolved 0 kill tasks…"、交付 0 奖励）。
+    let quest_dir = config::data_subdir(&cfg.server.map_data_dir, "Envir/Quests");
+    let npc_script_dir = config::data_subdir(&cfg.server.map_data_dir, "Envir/NPCs");
+    for (label, dir) in [
+        ("quest_dir", &quest_dir),
+        ("npc_script_dir", &npc_script_dir),
+    ] {
+        if !dir.exists() {
+            warn!(
+                "{} 不存在：{}（任务/对话数据会为空——检查 [server].map_data_dir，当前值 {:?}）",
+                label,
+                dir.display(),
+                cfg.server.map_data_dir
+            );
+        }
+    }
     let world_ref = WorldActor::spawn(WorldActorArgs {
         tick_interval_ms: cfg.server.tick_ms,
         gate_ref: gate_ref.clone(),
