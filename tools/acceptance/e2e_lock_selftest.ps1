@@ -250,21 +250,23 @@ function Get-E2eClientScript {
     # 不排除它就会被自己的判据扫进来）——与 e2e_lock.ps1 里的 Get-E2eClientScripts 保持同一份名单。
     $selfNames = @('e2e_lock.ps1', 'e2e_lock_selftest.ps1', 'enroll_e2e_lock.ps1')
     $out = @()
-    foreach ($d in @((Join-Path $Root 'tools\acceptance'), (Join-Path $Root 'scripts'))) {
-        if (-not (Test-Path -LiteralPath $d)) { continue }
-        foreach ($f in (Get-ChildItem -LiteralPath $d -File -Filter *.ps1 -EA SilentlyContinue)) {
-            if ($selfNames -contains $f.Name) { continue }
-            $text = Get-Content -LiteralPath $f.FullName -Raw -EA SilentlyContinue
-            if ($null -eq $text) { continue }
-            if ($text -notmatch '--e2e-user|client_bevy\.exe|--real-net|--auto-enter') { continue }
-            $out += [pscustomobject]@{
-                Name    = $f.Name
-                Path    = $f.FullName
-                Armed   = (($text -match 'e2e_lock\.ps1') -and ($text -match 'Enter-E2eLock'))
-                # 有 Enter 还不够：早退路径（if (...) { exit 5 }）会把锁留到下一个调用者才发现要回收，
-                # 所以接入必须**成对**——有 Enter 就要有 Exit（缺它即红，见 T9.2）。
-                HasExit = ($text -match 'Exit-E2eLock')
-            }
+    # 扫描面与 e2e_lock.ps1 的共享判据一致：**整个仓库**的 *.ps1（排除 .git/target/node_modules）。
+    # 写死目录清单会让新目录里的实机入口静默漏网（见 T9.1b/T9.3b）。
+    $skipDirs = '\\(\.git|target|node_modules)\\'
+    $files = @(Get-ChildItem -LiteralPath $Root -Recurse -File -Filter *.ps1 -EA SilentlyContinue |
+        Where-Object { $_.FullName -notmatch $skipDirs })
+    foreach ($f in $files) {
+        if ($selfNames -contains $f.Name) { continue }
+        $text = Get-Content -LiteralPath $f.FullName -Raw -EA SilentlyContinue
+        if ($null -eq $text) { continue }
+        if ($text -notmatch '--e2e-user|client_bevy\.exe|--real-net|--auto-enter') { continue }
+        $out += [pscustomobject]@{
+            Name    = $f.Name
+            Path    = $f.FullName
+            Armed   = (($text -match 'e2e_lock\.ps1') -and ($text -match 'Enter-E2eLock'))
+            # 有 Enter 还不够：早退路径（if (...) { exit 5 }）会把锁留到下一个调用者才发现要回收，
+            # 所以接入必须**成对**——有 Enter 就要有 Exit（缺它即红，见 T9.2）。
+            HasExit = ($text -match 'Exit-E2eLock')
         }
     }
     $out
@@ -272,6 +274,25 @@ function Get-E2eClientScript {
 # 本自检没有 -RepoRoot 参数（它只认 -LockScriptPath），这里自己定位仓库根
 $scanRoot = (Resolve-Path "$PSScriptRoot\..\..").Path
 $clientScripts = @(Get-E2eClientScript -Root $scanRoot)
+
+# 扫描面自证用的探针：优先用**被测锁脚本里的共享判据**（A/B 对照旧版锁脚本时它会缺失，回退本自检副本）。
+# 这样用 `-LockScriptPath <旧版>` 跑，就能把「扫描面退回写死两目录」这种回归直接打成红。
+function Get-E2eScriptSurfaceProbe {
+    param([string]$Root)
+    if (Get-Command Get-E2eClientScripts -EA SilentlyContinue) {
+        return @(Get-E2eClientScripts -RepoRoot $Root | ForEach-Object {
+            [pscustomobject]@{ Name = $_.Name; HasLock = ($_.EnterCount -gt 0 -and $_.ExitCount -gt 0) }
+        })
+    }
+    @(Get-E2eClientScript -Root $Root | ForEach-Object {
+        [pscustomobject]@{ Name = $_.Name; HasLock = ($_.Armed -and $_.HasExit) }
+    })
+}
+$surfaceNow = @(Get-E2eScriptSurfaceProbe -Root $scanRoot)
+$opsEntry = @($surfaceNow | Where-Object { $_.Name -eq 'package_windows_rehearsal.ps1' })
+Check 'T9.1b 回归锁：旧清单之外的目录（tools\ops）里的实机入口也必须在扫描面内（退回写死两目录即红）' `
+    ($opsEntry.Count -eq 1)
+
 $notArmed = @($clientScripts | Where-Object { -not $_.Armed })
 Check 'T9.1 判据没写空（真源至少认出 24 个会起客户端的脚本）' `
     ($clientScripts.Count -ge 24) ("count=" + $clientScripts.Count)
@@ -287,6 +308,17 @@ New-Item -ItemType Directory -Path (Join-Path $fakeRoot 'tools\acceptance') -For
 $fakeFound = @(Get-E2eClientScript -Root $fakeRoot)
 Check 'T9.3 阳性对照：临时造一个「起客户端但没走锁」的脚本必须被判为不合规' `
     ($fakeFound.Count -eq 1 -and -not $fakeFound[0].Armed)
+
+# T9.3b 盲区阳性对照：把「起客户端但没走锁」的脚本放进**旧清单之外**的目录（tools\ops），
+# 扫描面必须照样认出它 —— 写死两目录的旧实现会漏掉它，该用例即红。
+New-Item -ItemType Directory -Path (Join-Path $fakeRoot 'tools\ops') -Force | Out-Null
+[System.IO.File]::WriteAllText((Join-Path $fakeRoot 'tools\ops\fake_ops_no_lock.ps1'),
+    "Start-Process -FilePath client_bevy.exe -ArgumentList '--e2e-user','test'`n", (New-Object System.Text.UTF8Encoding($false)))
+$fakeSurface = @(Get-E2eScriptSurfaceProbe -Root $fakeRoot)
+$fakeUnlocked = @($fakeSurface | Where-Object { -not $_.HasLock })
+Check 'T9.3b 盲区阳性对照：旧清单外目录（tools\ops）里「起客户端但没走锁」的脚本必须被认出且判不合规' `
+    ($fakeSurface.Count -eq 2 -and $fakeUnlocked.Count -eq 2) `
+    ("认出：" + (($fakeSurface | ForEach-Object { $_.Name }) -join ',') + "；判不合规：" + $fakeUnlocked.Count)
 
 # T9.4/T9.5：两处判据不许漂移 + 接入器与门禁必须同口径
 # （本自检里的 Get-E2eClientScript 是为了 A/B 对照旧版锁脚本才自带的副本；锁脚本里另有一份

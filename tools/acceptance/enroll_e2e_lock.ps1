@@ -87,7 +87,7 @@ function Get-LockBlock {
 }
 
 $targets = @(Get-E2eClientScripts -RepoRoot $RepoRoot)
-Write-Host ("实机入口扫描：{0} 个脚本会起客户端（判据 --e2e-user）" -f $targets.Count)
+Write-Host ("实机入口扫描：{0} 个脚本会起客户端（判据：--e2e-user / client_bevy.exe / --real-net / --auto-enter，扫描面＝整仓 *.ps1）" -f $targets.Count)
 
 $changed = 0
 $skipped = 0
