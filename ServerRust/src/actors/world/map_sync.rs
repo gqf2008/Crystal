@@ -484,6 +484,25 @@ pub(crate) async fn teleport_core(
     let Some(record) = world.players.get(&session_id) else {
         return false;
     };
+    // 目标地图的**可走校验数据**必须跟着人走——单一来源就在这里。
+    //
+    // `PlayerActor::try_move` 逐格 ValidPoint 校验用的是玩家自己那份 `map_data`
+    // （由 `SetMapData` 注入）。漏注入 ⇒ 换图后仍按**旧图**格子判可走：旧图是墙、
+    // 新图是路的格子会被**静默拒绝**（只回 UserLocation 校正，无任何 warn），
+    // 实机表现就是「传送落地后走位被吞、随后被拉回」（#3193）。
+    //
+    // 收敛到本入口前只有过门（session.rs）/@GOTO（mod.rs）/#935（tick.rs）三条路径
+    // 各自单独注入，脚本传送（NPC MOVE / GM @MAPMOVE / RECALL / 任务传送）与
+    // social 召回都漏了 —— 这正是「本来该一致的两处逻辑分开维护、漂移不报错」。
+    match world.maps.get_arc(&map_index) {
+        Some(map_data) => {
+            let _ = record.actor_ref.ask(SetMapData { map: map_data }).await;
+        }
+        None => warn!(
+            "teleport_core: 目标地图 {} ({}) 未加载 —— 玩家 {} 将沿用旧图可走性",
+            map_index, dest_file, session_id
+        ),
+    }
     // 换图前记录旧图（跨图传送后需全量重同步新图对象）
     let old_map = record
         .actor_ref
@@ -736,6 +755,18 @@ mod tests {
     }
 
     async fn spawn_world(gate_ref: &ActorRef<GateActor>, db_pool: &DbPool) -> ActorRef<WorldActor> {
+        spawn_world_with_map_dir(gate_ref, db_pool, std::path::PathBuf::from(".")).await
+    }
+
+    /// 同 [`spawn_world`]，但显式指定地图目录。跨图**走位**的回归用例必须真实加载地图：
+    /// `PlayerActor::try_move` 的每格可走校验用的是它自己那份 `map_data`（由 `SetMapData`
+    /// 注入），map_dir 里没有地图文件时 `map_data` 恒为 None、校验整段被跳过，用例就成了
+    /// 「永远走得过」的假绿。
+    async fn spawn_world_with_map_dir(
+        gate_ref: &ActorRef<GateActor>,
+        db_pool: &DbPool,
+        map_dir: std::path::PathBuf,
+    ) -> ActorRef<WorldActor> {
         let social_ref = SocialActor::spawn(SocialActorArgs {
             gate_ref: gate_ref.clone(),
             db_pool: db_pool.clone(),
@@ -744,7 +775,7 @@ mod tests {
         let world_ref = WorldActor::spawn(WorldActorArgs {
             tick_interval_ms: 1000,
             gate_ref: gate_ref.clone(),
-            map_dir: std::path::PathBuf::from("."),
+            map_dir,
             spawn_dir: None,
             quest_dir: std::path::PathBuf::from("."),
             npc_script_dir: std::path::PathBuf::from("."),
@@ -836,6 +867,206 @@ mod tests {
         .execute(db_pool)
         .await
         .expect("insert map_respawns");
+    }
+
+    /// 合成一张 Type 100 地图字节（与 `loader::load_type_100` 同格式：8 字节头 +
+    /// 26 字节/格，`back_image` 带 `OBSTACLE_BIT` 即不可走）。
+    fn synth_type100_map(w: i16, h: i16, blocked: impl Fn(i32, i32) -> bool) -> Vec<u8> {
+        const OBSTACLE_BIT: i32 = 0x2000_0000;
+        let mut bytes = vec![0u8, 0u8, b'C', b'#'];
+        bytes.extend_from_slice(&w.to_le_bytes());
+        bytes.extend_from_slice(&h.to_le_bytes());
+        for y in 0..h as i32 {
+            for x in 0..w as i32 {
+                let mut cell = [0u8; 26];
+                let back_image = if blocked(x, y) { OBSTACLE_BIT } else { 0 };
+                cell[2..6].copy_from_slice(&back_image.to_le_bytes());
+                bytes.extend_from_slice(&cell);
+            }
+        }
+        bytes
+    }
+
+    /// 跨图走位用例的地图目录：`0.map`（起点图）**全墙**、`1.map`（目标图）除
+    /// `(22,20)` 一格外全可走。两图的可走性刻意做成相反，才能区分服务端到底按哪张图判。
+    fn write_synth_move_maps(tag: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("mir2_mapmove_{}_{}", tag, std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("create synth map dir");
+        std::fs::write(dir.join("0.map"), synth_type100_map(40, 40, |_, _| true))
+            .expect("write 0.map");
+        std::fs::write(
+            dir.join("1.map"),
+            synth_type100_map(40, 40, |x, y| (x, y) == (22, 20)),
+        )
+        .expect("write 1.map");
+        dir
+    }
+
+    /// #3193：`@mapmove` 跨图落地后走位必须按**目标图**的格子判可走。
+    ///
+    /// 判据用「目标图上的第二会话收到的 `S.ObjectWalk` 坐标」：服务端采纳移动时**不回发**
+    /// 给本人（只广播给他人），所以只盯自己的下行包会把「服务端采纳了」误判成「没动」——
+    /// #3193 用的 `state.server_tile_x/y` 探针读的是客户端 `last_server_position`（只由
+    /// `UserLocation`/`UserInformation` 更新），正好有这个盲区。
+    ///
+    /// 红检（实测）：去掉 `teleport_core` 里的目标地图注入 → `PlayerActor::try_move` 仍按
+    /// **旧图**（全墙）判可走 → 走位被静默拒绝（只回 UserLocation，无 warn）→ 第二会话
+    /// 等不到 ObjectWalk → FAILED。
+    #[test]
+    fn e2e_mapmove_cross_map_walk_uses_destination_map_collision() {
+        let rt = tokio::runtime::Builder::new_multi_thread()
+            .thread_stack_size(8 * 1024 * 1024)
+            .enable_time()
+            .build()
+            .unwrap();
+        rt.block_on(async {
+            let gate_ref = GateActor::spawn(());
+            let mover_session = 87u64;
+            let watcher_session = 88u64;
+            let (tx_a, mut rx_a) = mpsc::channel::<Vec<u8>>(1024);
+            let (tx_b, mut rx_b) = mpsc::channel::<Vec<u8>>(1024);
+            let _ = gate_ref
+                .ask(SessionCreated {
+                    session_id: mover_session,
+                    sender: tx_a.clone(),
+                    ip: "127.0.0.1".to_string(),
+                })
+                .await;
+            let _ = gate_ref
+                .ask(SessionCreated {
+                    session_id: watcher_session,
+                    sender: tx_b.clone(),
+                    ip: "127.0.0.1".to_string(),
+                })
+                .await;
+            let _tx_a = tx_a;
+            let _tx_b = tx_b;
+            let db_pool = db::init_db_pool("sqlite::memory:").await.expect("init_db");
+            let account_ref = AccountActor::spawn((gate_ref.clone(), db_pool.clone()));
+            let _ = gate_ref.ask(SetAccountRef { account_ref }).await;
+            login(&gate_ref, mover_session, &mut rx_a, "movedropmover").await;
+            login(&gate_ref, watcher_session, &mut rx_b, "movedropwatch").await;
+            seed_two_maps(&db_pool).await;
+            let map_dir = write_synth_move_maps("collision");
+            let _world_ref = spawn_world_with_map_dir(&gate_ref, &db_pool, map_dir).await;
+
+            new_character(&gate_ref, mover_session, &mut rx_a, "MoveDropA").await;
+            new_character(&gate_ref, watcher_session, &mut rx_b, "MoveDropB").await;
+            // @mapmove 是 GM 指令；GM 权限在 accounts.admin_account
+            sqlx::query("UPDATE accounts SET admin_account = 1 WHERE username = 'movedropmover'")
+                .execute(&db_pool)
+                .await
+                .expect("grant gm");
+            // mover 站起点图（全墙，只用于验证换图后可走性判据确实换了图）
+            sqlx::query(
+                "UPDATE characters SET map_index = 0, x = 11, y = 10 WHERE name = 'MoveDropA'",
+            )
+            .execute(&db_pool)
+            .await
+            .expect("place mover");
+            // watcher 提前站到目标图，接收 mover 的走位广播
+            sqlx::query(
+                "UPDATE characters SET map_index = 1, x = 20, y = 21 WHERE name = 'MoveDropB'",
+            )
+            .execute(&db_pool)
+            .await
+            .expect("place watcher");
+            start_game(&gate_ref, mover_session, &mut rx_a).await;
+            start_game(&gate_ref, watcher_session, &mut rx_b).await;
+
+            let drain = async |rx: &mut RxChannel| {
+                let deadline = tokio::time::Instant::now() + Duration::from_millis(600);
+                while tokio::time::Instant::now() < deadline {
+                    let left = deadline - tokio::time::Instant::now();
+                    let _ = tokio::time::timeout(left, rx.recv()).await;
+                }
+            };
+            drain(&mut rx_a).await;
+            drain(&mut rx_b).await;
+
+            // @mapmove 跨图：0（全墙）→ 1（(20,20) 一带可走）
+            let mut chat = Vec::new();
+            let _ = mir2_shared::binary::write_dotnet_string(&mut chat, "@mapmove 1 20 20");
+            chat.extend_from_slice(&0i32.to_le_bytes());
+            let _ = gate_ref
+                .ask(ClientData {
+                    session_id: mover_session,
+                    data: build_packet_bytes(
+                        mir2_shared::enums::ClientPacketIds::Chat as i16,
+                        &chat,
+                    ),
+                })
+                .await;
+            // 落地后 watcher 会先收到 mover 的 ObjectPlayer（进视野）；先排空，
+            // 免得把"进场"当成"走位"
+            drain(&mut rx_b).await;
+
+            // 立刻走一格（Right：+1,0）
+            let _ = gate_ref
+                .ask(ClientData {
+                    session_id: mover_session,
+                    data: build_packet_bytes(
+                        mir2_shared::enums::ClientPacketIds::Walk as i16,
+                        &[2u8],
+                    ),
+                })
+                .await;
+
+            let walk_body = wait_opcode_body(
+                &mut rx_b,
+                mir2_shared::enums::ServerPacketIds::ObjectWalk as i16,
+                3,
+            )
+            .await
+            .expect(
+                "跨图落地后走位未被采纳（服务端仍按旧图判可走 → 静默拒绝）；\
+                 watcher 收不到 ObjectWalk",
+            );
+            // ObjectWalk body: [object_id u32][x i32][y i32][direction u8]
+            assert!(
+                walk_body.len() >= 13,
+                "ObjectWalk 包体过短: {}",
+                walk_body.len()
+            );
+            let wx = i32::from_le_bytes([walk_body[4], walk_body[5], walk_body[6], walk_body[7]]);
+            let wy = i32::from_le_bytes([walk_body[8], walk_body[9], walk_body[10], walk_body[11]]);
+            assert_eq!(
+                (wx, wy),
+                (21, 20),
+                "走位落点必须是目标图 (21,20)（按目标图判可走）"
+            );
+
+            // 反向钉住：目标图的墙仍必须挡住（否则"注入成功"可能只是 map_data=None、
+            // 逐格校验整段被跳过——那种写法本条也过，等于把碰撞静默关掉）。
+            // (22,20) 在目标图是墙：这一格必须被拒，服务端回 UserLocation 校正。
+            drain(&mut rx_a).await;
+            tokio::time::sleep(Duration::from_millis(120)).await; // 越过 50ms 走位节流
+            let _ = gate_ref
+                .ask(ClientData {
+                    session_id: mover_session,
+                    data: build_packet_bytes(
+                        mir2_shared::enums::ClientPacketIds::Walk as i16,
+                        &[2u8],
+                    ),
+                })
+                .await;
+            let reject = wait_opcode_body(
+                &mut rx_a,
+                mir2_shared::enums::ServerPacketIds::UserLocation as i16,
+                2,
+            )
+            .await
+            .expect("目标图 (22,20) 是墙，走位必须被拒（回 UserLocation 校正）");
+            assert!(reject.len() >= 8, "UserLocation 包体过短: {}", reject.len());
+            let rx_x = i32::from_le_bytes([reject[0], reject[1], reject[2], reject[3]]);
+            let rx_y = i32::from_le_bytes([reject[4], reject[5], reject[6], reject[7]]);
+            assert_eq!(
+                (rx_x, rx_y),
+                (21, 20),
+                "被拒后校正坐标必须是未移动前的 (21,20)"
+            );
+        });
     }
 
     /// 脚本传送（NPC 脚本 MOVE → npc_script::teleport_player）跨图后，
