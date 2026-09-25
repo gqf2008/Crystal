@@ -462,3 +462,4 @@ Mir2Test.ini
 !tools/ops/make_deploy_dir.ps1
 !tools/ops/restart_e2e_server.ps1
 !tools/acceptance/l5ac_newchar_create.ps1
+!tools/acceptance/l5ad_rightclick_move.ps1
