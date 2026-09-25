@@ -64,6 +64,8 @@ function Assert-ClientBuildStamp {
         被测客户端 exe（通常是 `$ClientHome\Client-Bevy\target\debug\client_bevy.exe`）。
       .PARAMETER Worktree
         该 exe 的构建根（= 夹具的 `$ClientHome`）。**不是**当前脚本所在 worktree。
+        省略时由 `-Exe` 路径里 `\Client-Bevy\` 那一段**反推**（统一走 `<worktree>\Client-Bevy\target\<profile>\<name>.exe` 的约定），
+        这样接入只需要一行、不必每个夹具都自己算构建根。
       .PARAMETER ScriptName
         夹具名，仅用于输出。
       .PARAMETER AllowDirty
@@ -71,10 +73,20 @@ function Assert-ClientBuildStamp {
     #>
     param(
         [Parameter(Mandatory = $true)][string]$Exe,
-        [Parameter(Mandatory = $true)][string]$Worktree,
+        [string]$Worktree = '',
         [string]$ScriptName = '(unknown)',
         [switch]$AllowDirty
     )
+    if (-not $Worktree) {
+        # 由 exe 反推构建根：取包含 `\Client-Bevy\` 的那一层，其父目录即 worktree
+        $m = [regex]::Match($Exe, '^(.*)\\Client-Bevy\\', 'IgnoreCase')
+        if ($m.Success) {
+            $Worktree = $m.Groups[1].Value
+        } else {
+            Write-Host ("  [WARN][{0}] 无法从 exe 路径反推构建根（{1}）——跳过构建戳比对" -f $ScriptName, $Exe) -ForegroundColor Yellow
+            return
+        }
+    }
     $stamp = Get-ClientBuildStamp -Exe $Exe
     if ($null -eq $stamp) {
         Write-Host ("FAIL(2)[{0}]: 被测 exe 里没有构建戳 —— 多半是**旧产物**，请重建客户端：{1}" -f $ScriptName, $Exe) -ForegroundColor Red

@@ -42,7 +42,9 @@ if (-not $ExeSrc) { $ExeSrc = "$Worktree\Client-Bevy\target\debug\client_bevy.ex
 $root = Join-Path $env:TEMP 'orig-csharp-ab'
 if (-not (Test-Path $root)) { New-Item -ItemType Directory -Path $root | Out-Null }
 # 唯一进程名：多 agent 并行时禁止按公共进程名批量杀
-$exe = Join-Path $root 'mailc_client.exe'
+$&
+. "$PSScriptRoot\build_stamp.ps1"   # 构建戳前置：不许对着旧产物下结论（见 LESSON_运行目标分支e2e前需重建二进制）
+Assert-ClientBuildStamp -Exe $exe -ScriptName 'l5ab_mail_compose_layout'
 $err = Join-Path $root "l5ab_$Tag.err"
 
 function Rpc([string]$m, [hashtable]$q = @{}) {
