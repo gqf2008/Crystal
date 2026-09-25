@@ -8692,23 +8692,8 @@ mod auth_regression_tests {
         (gate_ref, rx)
     }
 
-    /// 等待指定 opcode 的包并返回 body；超时返回 None
-    async fn wait_opcode_body(rx: &mut RxChannel, opcode: i16, secs: u64) -> Option<Vec<u8>> {
-        let deadline = tokio::time::Instant::now() + Duration::from_secs(secs);
-        while tokio::time::Instant::now() < deadline {
-            let remaining = deadline - tokio::time::Instant::now();
-            match tokio::time::timeout(remaining, rx.recv()).await {
-                Ok(Some(data)) if data.len() >= 4 => {
-                    if i16::from_le_bytes([data[2], data[3]]) == opcode {
-                        return Some(data[4..].to_vec());
-                    }
-                }
-                Ok(Some(_)) => continue,
-                _ => return None,
-            }
-        }
-        None
-    }
+    // 等待原语统一走 `test_wait`（静默窗口 + 进度续期；固定死线在满载机器上会假红）
+    use crate::actors::world::test_wait::wait_opcode_body;
 
     /// 把通道排空到安静（连续 quiet_ms 无新包）
     async fn drain_until_quiet(rx: &mut RxChannel, quiet_ms: u64) {
@@ -9037,29 +9022,20 @@ mod auth_regression_tests {
             let _ = gate_ref.ask(SetAccountRef { account_ref }).await;
             let _world_ref = spawn_test_social_and_world(&gate_ref, &db_pool).await;
             let mut seen: Vec<i16> = Vec::new();
-            // 边收边录，直到目标 opcode 出现或超时
+            // 边收边录，直到目标 opcode 出现或超时（窗口统一走 test_wait：静默窗口 + 进度续期）
             async fn recv_until(
                 rx: &mut RxChannel,
                 target: i16,
                 secs: u64,
                 seen: &mut Vec<i16>,
             ) -> bool {
-                let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(secs);
-                while tokio::time::Instant::now() < deadline {
-                    let remaining = deadline - tokio::time::Instant::now();
-                    match tokio::time::timeout(remaining, rx.recv()).await {
-                        Ok(Some(data)) if data.len() >= 4 => {
-                            let op = i16::from_le_bytes([data[2], data[3]]);
-                            seen.push(op);
-                            if op == target {
-                                return true;
-                            }
-                        }
-                        Ok(Some(_)) => continue,
-                        _ => return false,
+                match crate::actors::world::test_wait::recv_until(rx, target, secs).await {
+                    Some((_, all)) => {
+                        seen.extend(all.iter().map(|(op, _)| *op));
+                        true
                     }
+                    None => false,
                 }
-                false
             }
 
             // ClientVersion → Login（自动注册）→ NewCharacter → StartGame
@@ -9141,8 +9117,15 @@ mod auth_regression_tests {
                 .await,
                 "StartGame"
             );
-            // 进图序列余量：再录 2s
-            let _ = recv_until(&mut rx, -1, 2, &mut seen).await;
+            // 进图序列余量：排空到**安静**（连续 2s 没有新包才停）——比固定 2s 死线更稳：
+            // 忙机器上固定窗口会截断，反而让「不得出现 ManageHeroes」这条负控变弱。
+            while let Ok(Some(data)) =
+                tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv()).await
+            {
+                if data.len() >= 4 {
+                    seen.push(i16::from_le_bytes([data[2], data[3]]));
+                }
+            }
 
             let manage = mir2_shared::enums::ServerPacketIds::ManageHeroes as i16;
             assert!(

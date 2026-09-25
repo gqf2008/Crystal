@@ -16032,6 +16032,9 @@ mod tests {
 mod e2e;
 
 #[cfg(test)]
+pub(crate) mod test_wait;
+
+#[cfg(test)]
 mod hero_tests {
     use super::*;
 

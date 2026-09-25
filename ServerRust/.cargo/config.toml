@@ -11,3 +11,15 @@
 # 线程（如 sqlx-sqlite 的 worker）。
 [env]
 RUST_MIN_STACK = "8388608"
+# libtest 默认按**逻辑核数**开测试线程（本机 12 核 ⇒ 12 个并行测试）。ServerRust 的 e2e 用例
+# 每个都会起自己的多线程 runtime + gate/world/social/account 全体 actor，十几个并行时会**互相饿死**：
+# 一次 actor 往返可以拖过 `wait_opcode_body`/`recv_until` 写死的 3–5s 窗口 ⇒ 整套跑出**假红**，
+# 而且每次红的用例都不同（实测 2026-09-25：12 路并行 + 8 路外部 CPU 负载下 4/4 次红，
+# 红的分别是 awakening / map_sync teleport / send_mail_stamp_removal / collect_parcel /
+# sell_gold_cap / dup_kick_rental… 失败点全是「等包超时」）。
+# 把测试线程压到 2：同一条件下 2/2 绿（耗时 57s，慢但可信）；不加载时约 35s。
+#
+# 为什么不是只放大窗口：窗口放大治标（本机实测 ×4 仍会红），饿死的根因是**自身并行度**；
+# 两者都做——窗口侧见 `src/actors/world/test_wait.rs`（静默窗口 + 进度续期）。
+# 需要在快机上跑满并行时，命令行显式覆盖即可：`cargo test --lib -- --test-threads=8`。
+RUST_TEST_THREADS = "2"

@@ -83,14 +83,23 @@ cargo run --bin client_bevy                  # 或用发布包 client_bevy.exe
 ### 5.1 门禁（离线，全绿为交付前提）
 
 ```bash
-cd SharedRust  && cargo test       # 187 lib + 11（另有 2 个 ignored）
-cd ServerRust  && cargo test       # 737 lib + 6 integration（另有 3 个 ignored）
-cd Client-Bevy && cargo test       # 542 lib + 2 + 1 + 24
+cd SharedRust  && cargo test                     # 187 lib + 11（另有 2 个 ignored）
+cd ServerRust  && cargo test                     # 845 lib + 19 integration（gate_hardening 11 / no_blocking 2 / protocol_conformance 6；另有 3 个 ignored）
+cd ServerRust  && cargo clippy --lib -- -D warnings   # 0 warning（CI 同口径）
+cd Client-Bevy && cargo test                     # 794 lib + 7 bin + 2 + 53
 ```
 
 三侧 `cargo fmt -- --check` 均须 0 差异。
 
-（数字为 2026-09-14 master 实测基线，随批次增长；以 CI 与本地复跑为准。）
+（数字为 **2026-09-25 master `7cf7f770` 实测基线**，随批次增长；以 CI 与本地复跑为准。）
+
+**ServerRust 测试并行度被刻意压到 2**（`ServerRust/.cargo/config.toml` 的 `[env] RUST_TEST_THREADS = "2"`）：
+该 crate 的 e2e 用例每个都自带多线程 runtime + gate/world/social/account 全体 actor，
+按默认「逻辑核数」并行（本机 12）会互相饿死，让「等某个包」的窗口超时 ⇒ **整套假红且每次红的用例都不同**
+（实测：12 路并行 + 8 路外部 CPU 负载下 4/4 次红；压到 2 后同一条件 3/3 绿）。
+代价是本地 `cargo test --lib` 由约 10s 变约 43s（不加载时）。快机上想跑满并行可显式覆盖：
+`cargo test --lib -- --test-threads=8`（此时等待窗口也会按 `MIR2_TEST_WAIT_SCALE` 放宽，见
+`ServerRust/src/actors/world/test_wait.rs`）。
 
 ### 5.2 真机 E2E（真实 ServerRust）
 
