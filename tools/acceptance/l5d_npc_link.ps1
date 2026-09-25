@@ -22,15 +22,14 @@ $ErrorActionPreference = 'Continue'
 $env:PATH = 'D:\toolchains\msys64\ucrt64\bin;D:\toolchains\libpinyin-install\bin;' + $env:PATH
 $env:LIBPINYIN_DIR = 'D:/toolchains/libpinyin-install'
 $acc = 'E:\Users\gxh\Documents\GitHub\Crystal\tools\acceptance'
-$&
+$exe = 'E:\Users\gxh\Documents\GitHub\Crystal\Client-Bevy\target\debug\client_bevy.exe'
 . "$PSScriptRoot\build_stamp.ps1"   # 构建戳前置：不许对着旧产物下结论（见 LESSON_运行目标分支e2e前需重建二进制）
 Assert-ClientBuildStamp -Exe $exe -ScriptName 'l5d_npc_link'
+
 # 唯一进程名（见 LESSON_多agent并行时按进程名清进程会污染他人GUI实验）：只用自己改名的副本，
 # 清场也只清这个唯一名——公共名 client_bevy.exe 可能是别的 agent 的验收或人工 GUI 会话。
 $exeSrc = $exe
-$&
-. "$PSScriptRoot\build_stamp.ps1"   # 构建戳前置：不许对着旧产物下结论（见 LESSON_运行目标分支e2e前需重建二进制）
-Assert-ClientBuildStamp -Exe $exe -ScriptName 'l5d_npc_link'
+$exe = Join-Path (Split-Path -Parent $exe) 'l5d_client.exe'
 function Rpc([string]$m, [hashtable]$q = @{}) {
     $c = New-Object Net.Sockets.TcpClient; $c.Connect('127.0.0.1', 9000); $s = $c.GetStream()
     $b = [Text.Encoding]::UTF8.GetBytes((@{ jsonrpc='2.0'; id=1; method=$m; params=$q } | ConvertTo-Json -Compress) + "`n")

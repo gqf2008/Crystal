@@ -554,6 +554,45 @@ Check 'T11.3 阳性对照：起客户端但没验构建戳的脚本必须被判�
     ($fakeStamp.Count -eq 1 -and -not $fakeStamp[0].HasStamp) `
     ("认出=" + $fakeStamp.Count + "；HasStamp=" + (($fakeStamp | ForEach-Object { [bool]$_.HasStamp }) -join ','))
 
+# T11.4/T11.5（2026-09-26 补）：T11.1 只查「有没有调用」，**查不出"插坏了"**——实测事故：批量插入时
+# 把替换文本写成字面 `$&` ⇒ `$exe = …` 赋值整行被吃掉，调用还在、门禁照绿，但运行时 `$exe` 为 null
+# （`package_windows_rehearsal.ps1` J1 因此直接失败）。补两条结构判据把这类"静默插坏"挡住。
+$callersMissingSource = @()
+foreach ($s in $clientScripts) {
+    if ($s.Kind -ne 'ps1') { continue }
+    $text = Get-Content -LiteralPath $s.Path -Raw -EA SilentlyContinue
+    if ($text -notmatch 'Assert-ClientBuildStamp') { continue }
+    if ($text -notmatch 'build_stamp\.ps1') { $callersMissingSource += $s.Name; continue }
+    # dot-source 的路径必须真能解析到文件：把 `$PSScriptRoot` / `$repo` / `$RepoRoot` 三种写法都代进去试
+    # （`scripts/run_real_e2e.ps1` 用的是 `$repo`；只认 `$PSScriptRoot` 会把正确写法误判为坏——实测踩到）。
+    $okPath = $false
+    $subs = @(
+        @('$PSScriptRoot', (Split-Path -Parent $s.Path)),
+        @('$repo', $scanRoot),
+        @('$RepoRoot', $scanRoot)
+    )
+    foreach ($m in [regex]::Matches($text, '\.\s+"([^"]*build_stamp\.ps1)"')) {
+        foreach ($sub in $subs) {
+            $cand = ($m.Groups[1].Value.Replace($sub[0], $sub[1])) -replace '/', '\'
+            if (Test-Path -LiteralPath $cand) { $okPath = $true; break }
+        }
+        if ($okPath) { break }
+    }
+    if (-not $okPath) { $callersMissingSource += $s.Name }
+}
+Check 'T11.4 调用构建戳的脚本必须 dot-source 到**存在**的 build_stamp.ps1（只查"调用了"会漏掉插坏）' `
+    ($callersMissingSource.Count -eq 0) ("缺/错 dot-source：" + ($callersMissingSource -join ','))
+$ampFiles = @()
+Get-ChildItem -LiteralPath $scanRoot -Recurse -File -Include *.ps1 -EA SilentlyContinue |
+    Where-Object { $_.FullName -notmatch '\\target\\|\\node_modules\\' } |
+    ForEach-Object {
+        foreach ($l in [IO.File]::ReadAllLines($_.FullName)) {
+            if ($l.Trim() -eq '$&') { $ampFiles += $_.Name; break }
+        }
+    }
+Check 'T11.5 全仓不许有「整行 `$&`」残骸（批量插入把替换文本写成字面量的事故特征）' `
+    ($ampFiles.Count -eq 0) ("命中：" + ($ampFiles -join ','))
+
 # ---------------- T10 语法解析（接入是插入式改动，最容易插出语法错） ----------------
 Write-Host 'T10 语法解析：所有实机入口 + 锁本体 + 本自检都必须能被 PowerShell 解析'
 $parseTargets = @($clientScripts | Where-Object { $_.Path -match '\.ps1$' } | ForEach-Object { $_.Path }) + @(
