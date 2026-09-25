@@ -8,8 +8,8 @@
 ## 为什么需要它
 
 `Client-Bevy/src/auto/` 里累积了 **82** 个 `--xxx-test` 开关，但发版门禁
-（`scripts/run_real_e2e.ps1`）只跑 **12** 个、另有 **1** 个被别的实机夹具引用、
-其余 **69** 个**没有任何 runner**（当年为复现/定位某个缺陷写的一次性探针）。
+（`scripts/run_real_e2e.ps1`）只跑 **12** 个、另有 **2** 个被别的实机夹具引用、
+其余 **68** 个**没有任何 runner**（当年为复现/定位某个缺陷写的一次性探针）。
 探针写完就该退休，比例本身不是问题——**问题是此前没有任何地方写着「哪些是门禁、哪些是探针」**：
 「覆盖了什么」不可对账，新人容易把探针当门禁、或把门禁当探针。
 
@@ -91,7 +91,7 @@
 | `--ranking-test` | gate | `scripts/run_real_e2e.ps1`（发版门禁） | `auto_ranking_test` |
 | `--real-worldmap-test` | probe | —（历史探针，无 runner） | `auto_real_worldmap_test` |
 | `--recipe-test` | probe | —（历史探针，无 runner） | `auto_recipe_test` |
-| `--reconnect-test` | probe | —（历史探针，无 runner） | `auto_reconnect_test` |
+| `--reconnect-test` | fixture | `tools/acceptance/l5y_reconnect.ps1` | `auto_reconnect_test` |
 | `--refine-test` | gate | `scripts/run_real_e2e.ps1`（发版门禁） | `auto_refine_test` |
 | `--reincarnation-test` | probe | —（历史探针，无 runner） | `auto_reincarnation_test` |
 | `--rental-test` | probe | —（历史探针，无 runner） | `auto_rental_test` |
@@ -118,7 +118,7 @@
 ## 计数（本表生成时的读数）
 
 - 开关总数 **82**
-- `gate` **12** / `fixture` **1** / `probe` **69**
+- `gate` **12** / `fixture` **2** / `probe` **68**
 
 ## 已知边界
 
