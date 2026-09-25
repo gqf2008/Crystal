@@ -5,6 +5,7 @@ pub mod globals;
 pub mod map; // Basic map types (Point)
 pub mod packets; // Packet infrastructure and definitions (base, ids, client, server)
 pub mod utils; // Utility functions (direction, geometry)
+pub mod validation; // 跨端共享的输入校验规则（客户端与服务端同一真源）
 
 // Re-export commonly used items directly
 // Note: We don't glob re-export data::* and packets::* to avoid naming conflicts

@@ -203,15 +203,32 @@ fn submit_new_char(net: &NetConnection, state: &NewCharState) {
     }
 }
 
-/// 名字合法性（对齐原版 NewCharacterDialog 正则意图：仅允许字母数字与中文，长度 1..=15）。
-/// 原版正则 `^[A-Za-z0-9]|[一-龥]{3,15}$` 因 `|` 拼接存在缺陷，此处取其语义。
+/// 名字合法性：**与服务端同一真源**（`SharedRust::validation`，= C# `Envir.CharacterReg`
+/// `[\u4e00-\u9fa5_A-Za-z0-9]{3,15}`）。
+///
+/// 此前这里自己写了一份 `1..=15`、服务端是 `3..=15` ⇒ **2 字中文名在客户端显示合法**
+/// （确定键可用、名字边框不报警），提交后被服务端 `NewCharacter rejected: invalid name` 静默拒绝
+/// （该分支不回包）——玩家看到的就是"点了确定没反应 / 无法创建角色"（owner 2026-09-25 反馈）。
 fn name_valid(name: &str) -> bool {
-    let count = name.chars().count();
-    if count == 0 || count > 15 {
-        return false;
+    mir2_shared::validation::character_name_valid(name)
+}
+
+#[cfg(test)]
+mod name_rule_tests {
+    use super::name_valid;
+
+    /// 界面判据必须与**服务端**同一份规则：这里钉住 owner 反馈的那条输入形态（2 字中文名）。
+    /// 旧客户端规则 `1..=15` 会把 "小明" 判合法 ⇒ 确定键可用、边框不报警，提交后被服务端
+    /// `NewCharacter rejected: invalid name` 静默拒绝（不回包）——"点了没反应 / 无法创建角色"。
+    #[test]
+    fn ui_name_rule_matches_server_rule() {
+        assert!(!name_valid("小明"), "2 字中文名必须判非法（服务端 3..=15）");
+        assert!(!name_valid("ab"), "2 个 ASCII 也必须判非法");
+        assert!(name_valid("小明明"), "3 字中文名合法");
+        assert!(name_valid("abc"));
+        assert!(!name_valid(&"x".repeat(16)), "超过 15 字非法");
+        assert!(!name_valid("小明 明"), "含空格非法");
     }
-    name.chars()
-        .all(|c| c.is_ascii_alphanumeric() || ('\u{4e00}'..='\u{9fa5}').contains(&c))
 }
 
 /// 对话框常量（相对 1024x768 画布，背景居中）
