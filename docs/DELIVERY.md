@@ -81,6 +81,20 @@ macOS 产物未签名：首次打开被 Gatekeeper 拦截时右键 → 打开，
   >
   > 排查同类错位用 `MIR2_MIGRATE_TRACE=1`（逐条打印 `i32/str` 的**位置与长度**，并标出段边界），
   > 比只看最后一句 `failed to fill whole buffer` 有效得多。
+  >
+  > **一条命令跑完整迁移演练**（对应第 7 张外部项「脱敏生产数据迁移演练」的本机版；判据 J1–J5 =
+  > 备份含哈希 / 两条迁移 / 起服+首启导入 / 抽样比对+真登录进图 / 回滚）：
+  >
+  > ```powershell
+  > pwsh tools/ops/migration_drill.ps1 -MirDb <Server.MirDB> -MirAdb <Server.MirADB> `
+  >      -ServerDir ServerRust/target/release -DataRoot <含 Daneo1989 与 config/ 的目录> -Port 7600
+  > ```
+  >
+  > 实测（原版 v112 数据）：**PASS J1–J5** —— 3 账号/8 角色/13 背包物品迁入 → 起服就绪 + 首启导入
+  > → 用迁移账号**真登录并进图**（20 帧）且首登后哈希自动升级为 `$argon2id$` → 回滚后库哈希与备份一致、再登录成功。
+  > 演练还顺带暴露并修掉一个 schema 缺陷：迁移工具原先自建一套 `characters` 表（缺 `class/gender/hair` 等列），
+  > `IF NOT EXISTS` 让服务端建表变空操作 ⇒ 「登录能过、角色列表查不出（`no such column: class`）、进不了图」。
+  > 现在迁移工具先调用**服务端自己的** `db::init_db_pool` 建表（单一真源），再写入。
 
    > **版本支持与核验（2026-09-25）**：工具原先只实现 **≤84** 的旧布局，拿当前发布数据
    > （`Server.MirDB` **version 112**）实跑会失败——物品段读到第 607/1628 个就 EOF、之后各段全空

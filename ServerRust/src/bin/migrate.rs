@@ -968,17 +968,21 @@ async fn migrate_character(
 
     sqlx::query(
         r#"INSERT OR REPLACE INTO characters (
-            name, account_username, schema_version, map_index, x, y, direction,
+            name, account_username, schema_version, class, gender, hair, map_index, x, y, direction,
             attack_mode, pet_mode, level, experience, max_experience,
             hp, max_hp, mp, max_mp, min_attack, max_attack, defence,
             gold, group_id, guild_name, guild_rank,
             spouse_name, allow_mentor, allow_marriage, mentor_name, hero_index,
             is_fishing, fishing_autocast
-        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"#,
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"#,
     )
     .bind(&character.name)
     .bind(&account.account_id)
     .bind(1i32)
+    // class/gender/hair 是服务端角色列表要用的列（C# 里也随角色一起存）
+    .bind(character.class_byte as i32)
+    .bind(character._gender_byte as i32)
+    .bind(character._hair as i32)
     .bind(character.current_map_index)
     .bind(character.current_x)
     .bind(character.current_y)
@@ -1307,7 +1311,15 @@ async fn main() -> anyhow::Result<()> {
         .await
         .map_err(|e| anyhow::anyhow!("Failed to connect to {}: {}", sqlite_path, e))?;
 
-    // Create tables
+    // 先让**服务端自己的** schema 初始化器建表（单一真源），再建工具自己的表。
+    //
+    // 为什么必须这样：工具原来用自己的一套 `CREATE TABLE IF NOT EXISTS characters (...)`，
+    // 而那份 DDL 缺少服务端列（`class`/`gender`/`hair`/`is_dead`/`pk_points`/`banned`…），
+    // `IF NOT EXISTS` 让服务端启动时的建表变成空操作 ⇒ 迁移出来的库**登录能过、角色列表查不出来**
+    // （实测 `Failed to list characters for '333': no such column: class`，进图因此卡住）。
+    // 交给 `db::init_db_pool` 建表后，下面这些 `IF NOT EXISTS` 自然变成空操作，不会再各建一套。
+    let _ = crystal_server::db::init_db_pool(&db_url).await?;
+    info!("Server schema ensured via db::init_db_pool（单一真源）");
     info!("Creating tables...");
     sqlx::query(
         r#"

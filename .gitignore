@@ -439,6 +439,9 @@ FodyWeavers.xsd
 !tools/ops/memory_cycle.ps1
 !tools/ops/fresh_mirdb_deploy.ps1
 !tools/ops/mirdb_counts.py
+!tools/ops/migration_drill.ps1
+!tools/ops/db_exec.py
+!tools/ops/csharp_pbkdf2_hash.py
 
 # 客户端运行时本地设置（游戏自写自读，不入库；两个客户端都按进程 CWD 相对路径写，
 # 故用不带前导斜杠的模式覆盖任意启动目录）
