@@ -37,7 +37,12 @@ param(
     [int]$MinGold = 1,
     [int]$MinExp = 1,
     # 客户端构建根（其 Client-Bevy\target\debug\client_bevy.exe）；默认 wt-p3 保持原约定。
-    [string]$ClientHome = ''
+    [string]$ClientHome = '',
+    # **受测服务端**的工作目录（其 Data\crystal.db 即判据来源）。非空时夹具的 DB 判据
+    # 走 `dbq.py --db <ServerWorkDir>\Data\crystal.db`，不再默认读仓库 dev 库——
+    # 实测：服务端起在 %TEMP%\e2e_workdir 时，默认 dev 库里的「已完成任务」集合与受测库不一致，
+    # 夹具会选中一个已交付的任务（受测服务端正确拒绝接取），报成假 FAIL。
+    [string]$ServerWorkDir = ''
 )
 
 # ---- 实机资源互斥 ----------------------------------------------------------
@@ -55,9 +60,10 @@ $ErrorActionPreference = 'Continue'
 $env:PATH = 'D:\toolchains\msys64\ucrt64\bin;D:\toolchains\libpinyin-install\bin;' + $env:PATH
 $env:LIBPINYIN_DIR = 'D:/toolchains/libpinyin-install'
 $acc = 'E:\Users\gxh\Documents\GitHub\Crystal\tools\acceptance'
-$wt = 'E:\Users\gxh\Documents\GitHub\Crystal-wt-p3'
+$wt = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 # 客户端可用 -ClientHome 换到别的构建根：wt-p3 的构建不含 #3044（换图重建时对已
-# despawn 实体排队 insert/remove → apply_net_motions panic），跑含 @mapmove 的用例会崩。
+# despawn 实体排队 insert/remove → apply_net_motions panic），跑含 @mapmove 的用例会崩；
+# 默认取本夹具所在仓库（而不是写死某个 worktree——写死会在换 worktree 时拿旧构建出假红）。
 if (-not $ClientHome) { $ClientHome = $wt }
 $exe = "$ClientHome\Client-Bevy\target\debug\client_bevy.exe"
 
@@ -69,7 +75,20 @@ function Rpc([string]$m, [hashtable]$q = @{}) {
 }
 function Taken { @((Rpc 'quest_probe').taken | ForEach-Object { [int]$_.id }) }
 function Gold { [int](Rpc 'bag_probe').gold }
-function Db([string]$sql) { (& python "$wt\tools\acceptance\dbq.py" $sql) }
+# DB 判据来源：指定了 -ServerWorkDir 就用它的库（受测服务端实际在写的那个），否则用 dbq.py 默认库。
+$script:dbArgs = @()
+if ($ServerWorkDir) {
+    $dbPath = Join-Path $ServerWorkDir 'Data\crystal.db'
+    if (-not (Test-Path -LiteralPath $dbPath)) {
+        Write-Host ("FAIL: -ServerWorkDir {0} 下没有 Data\crystal.db（判据来源缺失，拒绝用别的库代替）" -f $ServerWorkDir)
+        exit 2
+    }
+    $script:dbArgs = @('--db', $dbPath)
+    Write-Host ("[db] 判据来源={0}" -f $dbPath)
+} else {
+    Write-Host "[db] 判据来源=dbq.py 默认库（未指定 -ServerWorkDir）"
+}
+function Db([string]$sql) { (& python (Join-Path $wt 'tools\acceptance\dbq.py') @script:dbArgs $sql) }
 # [QUESTS] 段语义（C# NPCScript.ParseQuests）：正数=该 NPC 可接，负数=可交。
 # 按符号精确匹配（"143" 不能误中 "-143"，反之亦然），返回 NPC 的地图/坐标。
 function NpcLinkFor([int]$qid, [bool]$wantFinish) {

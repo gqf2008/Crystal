@@ -30,7 +30,9 @@ param(
     # 客户端构建根（其 Client-Bevy\target\debug\client_bevy.exe）。
     # 2026-09-24 补：本夹具原先**硬编码 wt-p3**，与其它 l5* 夹具不一致——
     # 换 worktree 时不传参就会拿旧客户端跑，出假红/假绿（同批 l5a 就因此假红过一次）。
-    [string]$ClientHome = ''
+    [string]$ClientHome = '',
+    # **受测服务端**的工作目录（其 Data\crystal.db 即判据来源）；见 l5g 同名参数的说明。
+    [string]$ServerWorkDir = ''
 )
 
 # ---- 实机资源互斥 ----------------------------------------------------------
@@ -48,7 +50,7 @@ $ErrorActionPreference = 'Continue'
 $env:PATH = 'D:\toolchains\msys64\ucrt64\bin;D:\toolchains\libpinyin-install\bin;' + $env:PATH
 $env:LIBPINYIN_DIR = 'D:/toolchains/libpinyin-install'
 $acc = 'E:\Users\gxh\Documents\GitHub\Crystal\tools\acceptance'
-$wt = 'E:\Users\gxh\Documents\GitHub\Crystal-wt-p3'
+$wt = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 if (-not $ClientHome) { $ClientHome = $wt }
 $exe = "$ClientHome\Client-Bevy\target\debug\client_bevy.exe"
 $wd = "$ClientHome\Client-Bevy"
@@ -59,7 +61,17 @@ function Rpc([string]$m, [hashtable]$q = @{}) {
     $s.Write($b, 0, $b.Length); $s.Flush()
     $r = New-Object IO.StreamReader($s); $l = $r.ReadLine(); $c.Close(); ($l | ConvertFrom-Json).result
 }
-function Db([string]$sql) { (& python "$wt\tools\acceptance\dbq.py" $sql) -join "`n" }
+$script:dbArgs = @()
+if ($ServerWorkDir) {
+    $dbPath = Join-Path $ServerWorkDir 'Data\crystal.db'
+    if (-not (Test-Path -LiteralPath $dbPath)) {
+        Write-Host ("FAIL: -ServerWorkDir {0} 下没有 Data\crystal.db（判据来源缺失，拒绝用别的库代替）" -f $ServerWorkDir)
+        exit 2
+    }
+    $script:dbArgs = @('--db', $dbPath)
+    Write-Host ("[db] 判据来源={0}" -f $dbPath)
+}
+function Db([string]$sql) { (& python (Join-Path $wt 'tools\acceptance\dbq.py') @script:dbArgs $sql) -join "`n" }
 function Start-Client([string]$user, [string]$pass, [string]$tag) {
     Get-CimInstance Win32_Process -Filter "Name='client_bevy.exe'" -EA SilentlyContinue |
         ForEach-Object { Stop-Process -Id $_.ProcessId -Force -EA SilentlyContinue }
