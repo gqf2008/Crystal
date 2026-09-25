@@ -413,6 +413,7 @@ FodyWeavers.xsd
 # 否则 `git add` 会被静默忽略（只提示 "paths are ignored"），而门禁 T9.1 又会因文件不在仓库里而看不到它。
 !tools/acceptance/e2e_lock_selftest.ps1
 !tools/acceptance/enroll_e2e_lock.ps1
+!tools/acceptance/walgit_entry.py
 !tools/acceptance/l5u_ui_batch_2961.ps1
 # #3120 ③：邮件列表分页键/页号夹具——判据取只读 RPC `mail_probe` 的分页状态真值，
 # 点击走真实 picking（`click` 注入），数据用 mock `--mail-many` 预置 21 封（不起服务端、不写 DB）
