@@ -16,10 +16,17 @@ use crate::resources::libraries::{ArrayLibType, LibraryName};
 pub struct UiFont(pub Handle<Font>);
 
 // ---------------------------------------------------------------------------
-// UI 字体链（对齐 C# GDI：Settings.cs:72 FontName = "Arial"；中文经 GDI 字体链接
-// 落到宋体）。主字体 = 系统 Arial（Latin/数字），Han 字形回退 = 系统宋体（setup_han_fallback_system）。
-// 两者都从用户机器字体目录**运行时读取**（与 C# 走系统 GDI 同源，不打包进二进制，规避
-// Arial/宋体的再分发许可）；系统字体缺失（非 Windows / 精简系统）回退内置 PuHuiTi 保底。
+// UI 字体（2026-09-25 owner 拍板：**全局统一使用中文字体**）：
+//   UI 主字体 = 自带 CJK 的字体本身（Windows 优先系统宋体 simsun.ttc，缺失回退内置 PuHuiTi），
+//   **不再**用 "Arial 主字体 + Han 字形回退" 那套。原因：#2599 实测 parley 的脚本回退只在实体
+//   **首次排版**生效，动态文本（换页/改字）重排版时 CJK 退化成 .notdef 豆腐 ⇒ 界面上残留乱码。
+//   主字体自带 CJK 就不需要任何回退，路径上少一个"只在首次排版成立"的隐含前提。
+//   字体仍从用户机器字体目录**运行时读取**（与 C# 走系统 GDI 同源，不打包系统字体，规避再分发许可）；
+//   系统字体缺失（非 Windows / 精简系统）回退内置 PuHuiTi（自带 CJK，许可证随仓库）。
+//
+// 加载策略：**全局只加载一次**（`ensure_ui_font`）。此前每个对话框打开时都调 `load_ui_font`，
+// 每次都从磁盘读一遍系统字体并 `assets.add` 一份新副本（宋体资产 ~10MB 级）——同一份字体在
+// 打开过 N 个界面后就驻留 N 份，是"打开越多越占内存"的一个真实来源。
 // ---------------------------------------------------------------------------
 /// Windows 字体目录（%SystemRoot% 重定位的机器也正确；环境变量缺失回退 C:\Windows）
 #[cfg(windows)]
@@ -30,15 +37,16 @@ fn system_fonts_dir() -> std::path::PathBuf {
         .join("Fonts")
 }
 
-/// 选 UI 主字体字节：Windows 有系统 Arial 用之；否则回退内置 PuHuiTi。
-/// 返回 (字节, 来源标签)。TTF magic 校验防字体目录里混入坏文件后整屏 tofu。
+/// 选 UI 主字体字节：**自带 CJK 的字体**（Windows 优先系统宋体，缺失回退内置 PuHuiTi）。
+/// 返回 (字节, 来源标签)。magic 校验防字体目录里混入坏文件后整屏 tofu。
 fn pick_ui_font_bytes() -> (Vec<u8>, &'static str) {
     #[cfg(windows)]
     {
-        let path = system_fonts_dir().join("arial.ttf");
+        let path = system_fonts_dir().join("simsun.ttc");
         if let Ok(bytes) = std::fs::read(&path) {
-            if bytes.len() >= 4 && bytes[..4] == [0x00, 0x01, 0x00, 0x00] {
-                return (bytes, "system-arial");
+            // TTC magic 'ttcf'（simsun.ttc 是多面集合：SimSun / NSimSun）
+            if bytes.len() >= 4 && &bytes[..4] == b"ttcf" {
+                return (bytes, "system-simsun");
             }
         }
     }
@@ -48,10 +56,21 @@ fn pick_ui_font_bytes() -> (Vec<u8>, &'static str) {
     )
 }
 
+/// 加载 UI 主字体（**只在没有强句柄时**读盘 + `assets.add`）。
+/// 调用方一律用 [ensure_ui_font]，不要直接调本函数——否则每开一个界面就多驻留一份字体资产。
 pub fn load_ui_font(assets: &mut Assets<Font>) -> Handle<Font> {
     let (bytes, kind) = pick_ui_font_bytes();
-    tracing::info!("UI 主字体 = {kind}（C# Settings.FontName=Arial + GDI 链中文→宋体）");
+    tracing::info!("UI 主字体 = {kind}（全局统一中文字体：自带 CJK，不依赖 Han 回退）");
     assets.add(Font::from_bytes(bytes))
+}
+
+/// 全局唯一 UI 字体句柄：首次调用加载，之后所有界面复用同一份（见本文件顶部"加载策略"）。
+/// 已由外部注入强句柄（例如实机/黄金对照里注入空字体占位）时不覆盖。
+pub fn ensure_ui_font(assets: &mut Assets<Font>, res: &mut UiFont) -> Handle<Font> {
+    if !res.0.is_strong() {
+        res.0 = load_ui_font(assets);
+    }
+    res.0.clone()
 }
 
 /// 选 CJK 主字体字节（宋体资产，TTC）：动态改写文本的 UI 用——
@@ -150,36 +169,73 @@ pub fn setup_han_fallback_system(mut font_cx: ResMut<bevy::text::FontCx>) {
 mod font_tests {
     use super::*;
 
-    /// 主字体选取：Windows 有系统 Arial 时必须选中它。
-    /// C# Settings.cs:72 FontName="Arial" —— 本测试锚定「用系统 Arial」这一行为本身：
-    /// 镜像 fs 读取 + magic 判定，文件有效时**强制**断言 kind=="system-arial"（若实现
-    /// 回归为永不选系统字体，本测试必须失败，而非静默走回退分支）。
-    #[test]
-    fn ui_font_prefers_system_arial() {
-        let (bytes, kind) = pick_ui_font_bytes();
-        #[cfg(windows)]
-        {
-            // 镜像实现的前置条件：字体目录里有合法 arial.ttf（TTF magic 头）
-            let file_valid = std::fs::read(system_fonts_dir().join("arial.ttf"))
-                .map(|b| b.len() >= 4 && b[..4] == [0x00, 0x01, 0x00, 0x00])
-                .unwrap_or(false);
-            if file_valid {
-                assert_eq!(kind, "system-arial", "有合法系统 Arial 却未选中");
-                assert!(bytes.len() > 4, "Arial 字节非空");
-                assert_eq!(&bytes[..4], &[0x00, 0x01, 0x00, 0x00], "TTF magic");
-                let builtin: &[u8] =
-                    include_bytes!("../../assets/fonts/AlibabaPuHuiTi-3-55-Regular.ttf");
-                assert_ne!(
-                    bytes.as_slice(),
-                    builtin,
-                    "选中的应是系统 Arial 而非内置字体"
-                );
-                return;
-            }
+    /// 判据（owner 2026-09-25：全局统一使用中文字体）：**主字体自己必须能覆盖中文**。
+    ///
+    /// 直接查字体字节的 cmap（fontique charmap），不依赖"某个回退链在某种时序下生效"——
+    /// 这正是 #2599 的坑：Arial 主字体 + Han 回退只在实体首次排版成立，重排版就退化成 .notdef。
+    /// 实现回归成选 Arial（或任何无 CJK 的字体）时，本测试必须失败。
+    fn font_covers(bytes: &[u8], sample: &str) -> Result<(), String> {
+        let mut collection =
+            parley::fontique::Collection::new(parley::fontique::CollectionOptions::default());
+        let registered =
+            collection.register_fonts(parley::fontique::Blob::from(bytes.to_vec()), None);
+        if registered.is_empty() {
+            return Err("字体注册失败（解析为空）".to_string());
         }
-        // 无系统 Arial 的环境（非 Windows / 字体目录被清）：回退内置 PuHuiTi保底
-        assert_eq!(kind, "builtin-puhuiti");
-        assert!(!bytes.is_empty());
+        // TTC 是多面集合：任一 face 能覆盖整个样本即算过
+        let ok = registered
+            .iter()
+            .flat_map(|(_, fonts)| fonts.iter())
+            .any(|info| {
+                let Some(cmap) = info.charmap_index().charmap(bytes) else {
+                    return false;
+                };
+                sample.chars().all(|ch| cmap.map(ch as u32).is_some())
+            });
+        if ok {
+            Ok(())
+        } else {
+            let missing: String = sample
+                .chars()
+                .filter(|ch| {
+                    !registered
+                        .iter()
+                        .flat_map(|(_, fonts)| fonts.iter())
+                        .any(|info| {
+                            info.charmap_index()
+                                .charmap(bytes)
+                                .and_then(|cm| cm.map(*ch as u32))
+                                .is_some()
+                        })
+                })
+                .collect();
+            Err(format!("缺字形：{missing}"))
+        }
+    }
+
+    #[test]
+    fn ui_font_bytes_cover_cjk() {
+        let (bytes, kind) = pick_ui_font_bytes();
+        assert!(bytes.len() > 4, "字体字节非空（{kind}）");
+        // 样本 = 界面/日志里高频出现的中文（含数字与拉丁，一并覆盖）
+        let sample = "中文测试界面乱码角色移动攻击防御魔法物品等级经验金币仓库邮件行会任务怪物地图"
+            .to_string()
+            + "0123456789ABCabc";
+        if let Err(e) = font_covers(&bytes, &sample) {
+            panic!("UI 主字体 {kind} 不能覆盖中文（界面会出乱码/豆腐）：{e}");
+        }
+    }
+
+    /// UI 主字体与动态文本 CJK 字体必须**同源**：仓库里不再有"一半 Arial、一半宋体"的字体分裂。
+    #[test]
+    fn ui_font_and_cjk_font_share_one_source() {
+        let ui = pick_ui_font_bytes();
+        let cjk = pick_cjk_font_bytes();
+        assert_eq!(
+            ui.1, cjk.1,
+            "UI 主字体与 CJK 主字体来源不一致（{} vs {}）—— 界面会分裂成两套字体",
+            ui.1, cjk.1
+        );
     }
 
     /// Han 回退注册行为：setup 后 fontique 集合存在 SimSun 家族，且 Script(Hani)

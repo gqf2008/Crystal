@@ -380,7 +380,7 @@ fn spawn_ground_item(
 ) {
     libs.0.ensure_initialized();
     if !ui_font.0.is_strong() {
-        ui_font.0 = crate::ui::sprite_ui::load_ui_font(fonts);
+        crate::ui::sprite_ui::ensure_ui_font(fonts, ui_font);
     }
     let font = ui_font.0.clone();
     let wx = tx as f32 * TILE_WIDTH + TILE_WIDTH / 2.0;
@@ -488,7 +488,7 @@ fn spawn_ground_gold(
     object_id: u32,
 ) {
     if !ui_font.0.is_strong() {
-        ui_font.0 = crate::ui::sprite_ui::load_ui_font(fonts);
+        crate::ui::sprite_ui::ensure_ui_font(fonts, ui_font);
     }
     libs.0.ensure_initialized();
     let font = ui_font.0.clone();

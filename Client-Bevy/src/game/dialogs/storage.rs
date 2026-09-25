@@ -325,7 +325,7 @@ fn spawn_storage_dialog(
 ) {
     libs.0.ensure_initialized();
     if !ui_font.0.is_strong() {
-        ui_font.0 = crate::ui::sprite_ui::load_ui_font(&mut fonts);
+        crate::ui::sprite_ui::ensure_ui_font(&mut fonts, &mut ui_font);
     }
     let font = ui_font.0.clone();
     let cjk = shared_cjk_font(&mut fonts, &mut cjk_font);
@@ -1665,7 +1665,7 @@ fn storage_grid_sync_system(
     }
     // 补当前页缺失的格子
     if !ui_font.0.is_strong() {
-        ui_font.0 = crate::ui::sprite_ui::load_ui_font(&mut fonts);
+        crate::ui::sprite_ui::ensure_ui_font(&mut fonts, &mut ui_font);
     }
     let font = ui_font.0.clone();
     let mut next = 0usize;

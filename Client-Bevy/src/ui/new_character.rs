@@ -52,10 +52,12 @@ fn spawn_hero_create_dialog(
     mut images: ResMut<Assets<Image>>,
     mut cache: ResMut<UiImageCache>,
     mut fonts: ResMut<Assets<Font>>,
+    mut ui_font: ResMut<crate::ui::sprite_ui::UiFont>,
     mut state: ResMut<NewCharState>,
 ) {
     libs.0.ensure_initialized();
-    let font = crate::ui::sprite_ui::load_ui_font(&mut fonts);
+    // 全局唯一 UI 字体（自带 CJK）：不再每次建号界面都从磁盘读一遍字体、多驻留一份资产
+    let font = crate::ui::sprite_ui::ensure_ui_font(&mut fonts, &mut ui_font);
     state.hero_mode = false;
     state.visible = false;
     spawn_new_character_dialog(

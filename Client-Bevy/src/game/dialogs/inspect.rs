@@ -152,7 +152,7 @@ fn spawn_inspect(
 ) {
     libs.0.ensure_initialized();
     if !ui_font.0.is_strong() {
-        ui_font.0 = crate::ui::sprite_ui::load_ui_font(&mut fonts);
+        crate::ui::sprite_ui::ensure_ui_font(&mut fonts, &mut ui_font);
     }
     let font = ui_font.0.clone();
     // #2786：名字/行会/伴侣名都是动态中文文本 → 用共享宋体主字体（Arial 的 Hani 回退

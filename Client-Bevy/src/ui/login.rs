@@ -269,7 +269,7 @@ fn setup_login_ui(
     mut login: ResMut<LoginState>,
 ) {
     libs.0.ensure_initialized();
-    ui_font.0 = crate::ui::sprite_ui::load_ui_font(&mut fonts);
+    crate::ui::sprite_ui::ensure_ui_font(&mut fonts, &mut ui_font);
     let font = ui_font.0.clone();
 
     // ChrSel 动画帧
