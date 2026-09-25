@@ -126,6 +126,16 @@ fn main() {
             .unwrap_or(default_title)
     };
     let mut app = App::new();
+    // 构建戳（build.rs 固化）：owner 多次拿旧构建的截图/体验当缺陷报（写邮件窗「错位」、
+    // 底部对话框滚动/对齐、地图灯光、魔法特效），每次都要先花一轮证明「代码早改过了」。
+    // 把这行放进启动日志后，任何一次反馈都能一眼看出「他跑的是哪个提交」。
+    // 同源数据也由 control RPC `build_stamp` 暴露，供夹具断言"被测 exe 就是当前提交构建的"。
+    tracing::info!(
+        "🧾 客户端构建：commit={}（{}）dirty={}",
+        env!("CRYSTAL_BUILD_COMMIT_SHORT"),
+        env!("CRYSTAL_BUILD_COMMIT"),
+        env!("CRYSTAL_BUILD_DIRTY")
+    );
     // 渲染错误策略必须在 DefaultPlugins 之前装：RenderPlugin::build 走的是
     // `init_resource::<RenderErrorHandler>()`，先插入者胜出。覆盖它只为一件事——
     // 「最小化窗口」触发的那次可恢复表面配置失败不再退进程（bevy 默认策略对任何

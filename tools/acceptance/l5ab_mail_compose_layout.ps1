@@ -102,6 +102,26 @@ if ($null -eq $st -or $null -eq $st.tile_x) {
 }
 Write-Host ("进场 map={0} tile=({1},{2})" -f $st.map, $st.tile_x, $st.tile_y)
 
+# ★ 反「陈旧二进制」前置（#3211）：被测 exe 必须确实是 `-Worktree` 当前 HEAD 构建的。
+# 此前没有这个量，夹具可能对着旧 exe 下结论（repo 里已有
+# `LESSON_运行目标分支e2e前需重建二进制避免陈旧target误报`）——这类假红/假绿会污染覆盖可信度，
+# 所以这里做成**前置失败（exit 2）**：宁可不产出结论，也不产出对错对象的结论。
+$stamp = Rpc 'build_stamp'
+$headShort = ''
+try { $headShort = (& git -C $Worktree rev-parse --short HEAD 2>$null | Select-Object -First 1).Trim() } catch { $headShort = '' }
+if ($null -eq $stamp -or -not $stamp.commit_short) {
+    Write-Host 'FAIL(2): build_stamp RPC 不可用（exe 太旧，没有构建戳）——请重建客户端'
+    Stop-Client
+    exit 2
+}
+Write-Host ("构建戳：commit={0} dirty={1} exe_mtime={2}" -f $stamp.commit_short, $stamp.dirty, $stamp.exe_mtime)
+if ($headShort -and $stamp.commit_short -ne $headShort) {
+    Write-Host ("FAIL(2): 被测 exe 是 {0} 构建的，而被测 worktree HEAD={1} —— 陈旧二进制，先重建再跑" -f `
+        $stamp.commit_short, $headShort)
+    Stop-Client
+    exit 2
+}
+
 # 0) 判据自检：错的矩形必须被判错（防止判据恒绿）
 $badRect = [pscustomobject]@{ ok = $true; rx = 30.0; ry = 80.0; rw = 236.0; rh = 300.0 }
 Check '0 判据自检：错位矩形（30,80 而非 100,100）必须被判错' (-not (Test-ComposeRect $badRect))
@@ -166,6 +186,12 @@ foreach ($i in 1..20) {
 }
 Check '④ 关闭后可再次打开（状态位往返干净）' ($null -ne $rect2 -and $rect2.ok)
 if ($null -ne $rect2 -and $rect2.ok) {
+    # 先点自己的标题栏把它**置顶**（真实用户也是先点到那张窗上）：
+    # 实测踩到——同屏还有读邮件窗（mock 预置邮件时会开），纯按坐标点 X 可能命中**别的窗**
+    # （命中栈实测 `5387v0 36x31 [root=MailRead]`），于是「点 X 关窗」假红。
+    # 置顶后 X 才是该点的那个钮；命中栈里必须出现本窗（MailCompose）才算命中。
+    Rpc 'click' @{ x = ([double]$rect2.rx + 118.0); y = ([double]$rect2.ry + 12.0) } | Out-Null
+    Start-Sleep -Milliseconds 350
     $clickX = Rpc 'click' @{ x = [double]$rect2.cx; y = [double]$rect2.cy; button = 'left' }
     $closedByX = $false
     foreach ($i in 1..20) {
@@ -173,7 +199,8 @@ if ($null -ne $rect2 -and $rect2.ok) {
         $r3 = Rpc 'dialog_rect' @{ kind = 'mail_compose' }
         if ($null -eq $r3 -or -not $r3.ok) { $closedByX = $true; break }
     }
-    Check '⑤ 点标准关闭钮能关窗（hits 含该钮）' $closedByX `
+    $hitOwn = (($clickX.hits | Select-Object -First 3) -join '|') -match 'MailCompose'
+    Check '⑤ 点标准关闭钮能关窗（先置顶；命中栈须含本窗）' ($closedByX -and $hitOwn) `
         ("hits=" + (($clickX.hits | Select-Object -First 3) -join '|'))
 }
 
