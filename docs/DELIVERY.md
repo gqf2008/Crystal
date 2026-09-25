@@ -338,6 +338,28 @@ pwsh scripts/run_real_e2e.ps1 -IncludeInteractSweep            # 常规用例 + 
   或照抄已接入夹具的写法。**注意** `.gitignore` 对 `tools/acceptance/` 是白名单式管理——新脚本必须补
   `!tools/acceptance/<名字>` 一行，否则 `git add` 会被静默忽略、门禁也看不到它。
 
+### 5.5 服务端重启 / 断线重连（`l5y_reconnect.ps1`）
+
+```powershell
+pwsh tools/acceptance/l5y_reconnect.ps1 -ServerWorkDir %TEMP%\e2e_workdir
+```
+
+场景是上线运营真实会发生的事：玩家在游戏中 → 服务端重启（发布/回滚/崩溃恢复）或链路闪断 →
+客户端应**自动重连并重新进入游戏**，不需要玩家手点。夹具把这条链路做成可复跑判据：
+① 起服务端与客户端（客户端带 `--reconnect-test`）并等它进图；② **杀掉**服务端、
+`-OutageSec`（默认 2）秒后把同一份服务端起回来；③ 断言客户端日志依次出现「检测到断线」与
+「✅ 自动重连成功并重新进入游戏」。判据只取客户端 `[RECON]` 行，**不断言重连耗时**（客户端是指数退避
+2s→4s→…→30s 无限重试，耗时与负载/关机速度有关）。
+
+**当前基线（2026-09-25 晚 master `8ac314e88`）：PASS**——停机 2s，客户端在服务端回来后约 2.3s 内
+完成「重连 → 重新登录 → 自动进入角色 → 回到游戏」（实测时间线：`04:35:46` 进图、
+`04:35:48` 检测到断线、`04:35:49.8` 重连成功并重发登录、`04:35:50.3` 回到游戏），
+`VERDICT enter_game=PASS saw_disconnect=PASS auto_reconnect=PASS`，退出码 0。
+
+覆盖口径：这条场景此前只有客户端里的 `--reconnect-test` 探针（没有 runner、不算覆盖证据）；
+现在它由本夹具承接，并在 `tools/acceptance/CLIENT_AUTO_FLAGS.md` 里从 `probe` 桶升到 `fixture` 桶
+（覆盖清单门禁会校验「夹具文件存在且真的引用了该开关」）。
+
 ---
 
 ## 6. 已知差异与限制（相对原版 C#）
