@@ -30,10 +30,21 @@ param(
     [double]$P50LockedMaxSec = 0.3,
     [string]$AccountPrefix = 'opsload',
     [string]$Password = '123456',
-    [string]$OutFile = ''
+    [string]$OutFile = '',
+    # 单次登录采样 bot 的超时（秒）：超时按该样本失败（-1）处理，不阻塞整轮（2026-09-25 修）
+    [int]$BotTimeoutSec = 60
 )
 $ErrorActionPreference = 'Continue'
 $ops = Split-Path -Parent $MyInvocation.MyCommand.Path
+. (Join-Path $ops '_run_bot.ps1')
+# 2026-09-25：样本数前置守卫。判定里要求 `n >= Max(10, Samples-2)`（p95 至少 10 样本才有意义），
+# 但报告里只体现成 `L2_locked_p95_ok=false` —— 实际原因是"样本不够"而不是"时延超标"，
+# 会被读成产品退化（本轮用 -Samples 8 实测踩到）。这里直接前置失败并说清。
+if ($Samples -lt 10) {
+    Write-Host ("前置失败：-Samples={0} < 10 —— 本夹具的 p95 判据要求至少 10 个样本（判定里是 n >= Max(10, Samples-2)），" -f $Samples)
+    Write-Host '          样本不够时报出来的会是 L2/L3=false，读起来像"时延超标"，属误导。请用 -Samples >= 10。'
+    exit 2
+}
 $db = Join-Path $DeployDir 'data/crystal.db'
 $stamp = [DateTime]::Now.ToString('HHmmss')
 $outDir = Join-Path $ops 'out'
@@ -49,14 +60,17 @@ for ($i = 0; $i -lt 60; $i++) { Start-Sleep 1; if ((Get-Content $log -EA Silentl
 if (-not $ready) { Write-Host 'FAIL: 服务端未就绪'; exit 9 }
 
 function Sample([string]$acct, [string]$tag, [int]$idx) {
-    $json = Join-Path $outDir "ll_${tag}_$idx.json"
-    & python (Join-Path $ops 'bot.py') --host 127.0.0.1 --port $Port --accounts $acct --password $Password `
-        --sessions 1 --hold 1 --login-only > $json 2>&1
-    try {
-        $j = Get-Content $json -Raw | ConvertFrom-Json
-        if ($j.summary.failed -ne 0) { return -1 }
-        return [double]$j.sessions[0].login_reply_sec
-    } catch { return -1 }
+    # 2026-09-25：改走带超时的共用 helper（原先 `& python bot.py …` 同步无超时；
+    # 服务端没绑到 -Port 时整轮静默挂死——同类缺陷见 storage_degrade_drill）
+    $r = Invoke-BotJson -OpsDir $ops -BotArgs @('--host', '127.0.0.1', '--port', "$Port", '--accounts', $acct,
+        '--password', $Password, '--sessions', '1', '--hold', '1', '--login-only') `
+        -TimeoutSec $BotTimeoutSec -Tag "login_latency_$tag$idx"
+    if ($r.timedOut) {
+        Write-Host ("WARN: 登录时延采样 bot 超过 {0}s 未退出（port={1}）——该样本记失败（-1）" -f $BotTimeoutSec, $Port)
+        return -1
+    }
+    if ($null -eq $r.json -or $r.json.summary.failed -ne 0) { return -1 }
+    return [double]$r.json.sessions[0].login_reply_sec
 }
 function Stat($vals) {
     $v = @($vals | Where-Object { $_ -ge 0 } | Sort-Object)

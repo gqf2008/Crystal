@@ -16,10 +16,13 @@ param(
     [int]$Port = 7600,
     [string]$ResetAccount = '333',        # 用哪个迁移账号做真登录（其角色所在图必须存在）
     [string]$ResetPassword = 'drill123456',
-    [string]$OutFile = ''
+    [string]$OutFile = '',
+    # 单次冒烟 bot 超时（秒）：超时按失败处理并**立刻**返回（2026-09-25 修）
+    [int]$BotTimeoutSec = 120
 )
 $ErrorActionPreference = 'Continue'
 $ops = Split-Path -Parent $MyInvocation.MyCommand.Path
+. (Join-Path $ops '_run_bot.ps1')
 if (-not $WorkDir) { $WorkDir = Join-Path $ops ('out/migration_drill_' + (Get-Date -Format 'HHmmss')) }
 New-Item -ItemType Directory -Force -Path $WorkDir, (Join-Path $WorkDir 'config'), (Join-Path $WorkDir 'Data') | Out-Null
 
@@ -120,9 +123,11 @@ $report.steps.boot = [ordered]@{
 if (-not $ready -or $imports -lt 4 -or $defLoaded -lt 2) { if (-not $proc.HasExited) { Stop-Process -Id $proc.Id -Force }; Fail "J3 起服/首启导入不达标" }
 
 # ---------------- J4 真登录（用 C# 口径重置后的密码）+ 进图 ----------------
-$botOut = (& python (Join-Path $ops 'bot.py') --host 127.0.0.1 --port $Port --accounts $ResetAccount `
-        --sessions 1 --password $ResetPassword --hold 5 | Out-String).Trim()
-$bot = $null; try { $bot = $botOut | ConvertFrom-Json } catch {}
+# 2026-09-25：改走带超时的共用 helper（原先 `& python bot.py …` 同步无超时 ⇒ 可能整轮静默挂死）
+$r = Invoke-BotJson -OpsDir $ops -BotArgs @('--host', '127.0.0.1', '--port', "$Port", '--accounts', $ResetAccount,
+    '--sessions', '1', '--password', $ResetPassword, '--hold', '5') -TimeoutSec $BotTimeoutSec -Tag 'migration_j4'
+if ($r.timedOut) { Write-Host ("WARN: J4 登录冒烟 bot 超过 {0}s 未退出（port={1}）——按失败处理" -f $BotTimeoutSec, $Port) }
+$bot = $r.json
 $loginOk = ($null -ne $bot) -and ($bot.summary.ok -eq 1) -and ($bot.sessions[0].frames -gt 0)
 Start-Sleep 2
 $after = (& python (Join-Path $ops 'db_exec.py') $db "select substr(password_hash,1,10) from accounts where username='$ResetAccount'" --read) -join ''
@@ -141,9 +146,11 @@ $restoredHash = (Get-FileHash $db -Algorithm SHA256).Hash
 $r = StartDrillServer 'run2.log'; $proc2 = $r[0]; $log2 = $r[1]; $ready2 = $r[2]
 $smoke2 = $null
 if ($ready2) {
-    $out2 = (& python (Join-Path $ops 'bot.py') --host 127.0.0.1 --port $Port --login-only `
-            --accounts $ResetAccount --sessions 1 --password $ResetPassword 2>&1 | Select-Object -Last 1)
-    try { $smoke2 = $out2 | ConvertFrom-Json } catch {}
+    $r2 = Invoke-BotJson -OpsDir $ops -BotArgs @('--host', '127.0.0.1', '--port', "$Port", '--login-only',
+        '--accounts', $ResetAccount, '--sessions', '1', '--password', $ResetPassword) `
+        -TimeoutSec $BotTimeoutSec -Tag 'migration_j5'
+    if ($r2.timedOut) { Write-Host ("WARN: J5 回滚冒烟 bot 超过 {0}s 未退出（port={1}）——按失败处理" -f $BotTimeoutSec, $Port) }
+    $smoke2 = $r2.json
 }
 if (-not $proc2.HasExited) { Stop-Process -Id $proc2.Id -Force }
 $report.steps.rollback = [ordered]@{

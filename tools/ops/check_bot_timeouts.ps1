@@ -13,17 +13,9 @@
 param(
     [string]$OpsDir = '',
     [switch]$Strict,
-    # 待迁移清单（2026-09-25 审计结果）：这些脚本仍在同步直调 bot.py，逐个迁移到 _run_bot.ps1
-    [string[]]$Allowlist = @(
-        'fault_injection.ps1',
-        'leak_plateau.ps1',
-        'fresh_mirdb_deploy.ps1',
-        'migration_drill.ps1',
-        'capacity_ramp.ps1',
-        'memory_cycle.ps1',
-        'memory_ramp.ps1',
-        'login_latency_probe.ps1'
-    ),
+    # 待迁移清单：2026-09-25 首轮审计出的 8 个同步直调脚本**已全部迁移**（见 PR #3172），
+    # 因此这里清空；若将来又出现"暂时不能立刻迁移"的脚本，再把文件名加回来并写清原因。
+    [string[]]$Allowlist = @(),
     [string[]]$Scan = @()
 )
 $ErrorActionPreference = 'Continue'
@@ -38,13 +30,17 @@ if ($Scan.Count -eq 0) {
 
 $offenders = @()
 foreach ($f in $Scan) {
-    $text = Get-Content -LiteralPath $f -Raw -ErrorAction SilentlyContinue
-    if ($null -eq $text) { continue }
+    # 只看**代码行**：注释里常会写"原先 `& python bot.py …`"这种说明，把它们算成违规会让门禁自己变噪音
+    $codeLines = @(Get-Content -LiteralPath $f -ErrorAction SilentlyContinue |
+        Where-Object { $_.Trim() -and -not $_.Trim().StartsWith('#') })
+    if ($codeLines.Count -eq 0) { continue }
     # 同步直调：`& python … bot.py`（helper 里的调用是 Start-Process，不会命中）
-    if ($text -match '&\s+python[^\r\n]*bot\.py') {
+    $hit = @($codeLines | Where-Object { $_ -match '&\s+python.*bot\.py' })
+    if ($hit.Count -gt 0) {
         $name = Split-Path -Leaf $f
         $offenders += [pscustomobject]@{
             file      = $name
+            line      = ($hit[0].Trim())
             allowlist = ($Allowlist -contains $name)
         }
     }

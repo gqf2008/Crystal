@@ -29,10 +29,13 @@ param(
     [int]$HoldSec = 8,
     [int]$IdleSec = 12,
     [double]$MaxRssSlopePerCycleMb = 0.5,
-    [string]$OutFile = ''
+    [string]$OutFile = '',
+    # 每轮连登连退 bot 的超时（秒）：超时按本轮失败处理并**立刻**返回（2026-09-25 修）
+    [int]$BotTimeoutSec = 180
 )
 $ErrorActionPreference = 'Continue'
 $ops = Split-Path -Parent $MyInvocation.MyCommand.Path
+. (Join-Path $ops '_run_bot.ps1')
 New-Item -ItemType Directory -Force -Path (Join-Path $ops 'out') | Out-Null
 $log = Join-Path $ops 'out/leak_plateau.log'
 $env:RUST_LOG = 'crystal_server=info'
@@ -62,10 +65,17 @@ function Sample([string]$tag) {
     }
 }
 function RunCycle([int]$n) {
-    $json = Join-Path $ops ("out/leak_plateau_cycle_{0}.json" -f $n)
-    & python (Join-Path $ops 'bot.py') --host 127.0.0.1 --port $Port `
-        --account-prefix $AccountPrefix --sessions $Sessions --hold $HoldSec --password 123456 > $json 2>&1
-    try { (Get-Content $json -Raw | ConvertFrom-Json).summary } catch { $null }
+    # 2026-09-25：改走带超时的共用 helper（原先 `& python bot.py …` 同步无超时）
+    $r = Invoke-BotJson -OpsDir $ops -BotArgs @('--host', '127.0.0.1', '--port', "$Port",
+        '--account-prefix', $AccountPrefix, '--sessions', "$Sessions", '--hold', "$HoldSec", '--password', '123456') `
+        -TimeoutSec $BotTimeoutSec -Tag "leak_plateau_cycle$n"
+    if ($r.timedOut) {
+        Write-Host ("WARN: 连登连退 bot 超过 {0}s 未退出（port={1}）——本轮按失败处理，见 {2}" -f `
+                $BotTimeoutSec, $Port, $r.errFile)
+        return $null
+    }
+    if ($null -eq $r.json) { return $null }
+    return $r.json.summary
 }
 
 $rows = @(); $baseline = Sample 'idle_before'
