@@ -31,7 +31,7 @@ $env:LIBPINYIN_DIR = 'D:/toolchains/libpinyin-install'
 if (-not $Worktree) { $Worktree = (Resolve-Path "$PSScriptRoot\..\..").Path }
 $root = 'C:\Users\gxh\AppData\Local\Temp\orig-csharp-ab'
 $exeSrc = "$Worktree\Client-Bevy\target\debug\client_bevy.exe"
-$&
+$exe = "$root\u2961_client.exe"
 . "$PSScriptRoot\build_stamp.ps1"   # 构建戳前置：不许对着旧产物下结论（见 LESSON_运行目标分支e2e前需重建二进制）
 Assert-ClientBuildStamp -Exe $exe -ScriptName 'l5u_ui_batch_2961'
 $err = "$root\l5u_$Tag.err"

@@ -50,8 +50,8 @@ $sysDlls = @('kernel32.dll','user32.dll','gdi32.dll','advapi32.dll','shell32.dll
 $apiSetPattern = '^(api-ms-win-|ext-ms-)'
 
 # ---------------- J1 产物 ----------------
-$&
-. "$PSScriptRoot\build_stamp.ps1"   # 构建戳前置：不许对着旧产物下结论（见 LESSON_运行目标分支e2e前需重建二进制）
+$exe = Join-Path $RepoRoot 'Client-Bevy\target\x86_64-pc-windows-gnu\release\client_bevy.exe'
+. "$PSScriptRoot\..\acceptance\build_stamp.ps1"   # 构建戳前置：不许对着旧产物下结论（见 LESSON_运行目标分支e2e前需重建二进制）
 Assert-ClientBuildStamp -Exe $exe -ScriptName 'package_windows_rehearsal'
 if (-not (Test-Path $exe)) {
     Fail "J1 缺 GNU release 产物：$exe（先 CARGO_BUILD_TARGET=x86_64-pc-windows-gnu cargo build --release --bin client_bevy）"

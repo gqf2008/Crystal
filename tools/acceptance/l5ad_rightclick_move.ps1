@@ -31,7 +31,7 @@ try {
     }
     $exeSrc = "$ClientHome\Client-Bevy\target\debug\client_bevy.exe"
     if (-not (Test-Path $exeSrc)) { Write-Host "FAIL(9): 找不到客户端 $exeSrc"; exit 9 }
-$&
+    $exe = Join-Path (Split-Path -Parent $exeSrc) 'l5ad_client.exe'
 . "$PSScriptRoot\build_stamp.ps1"   # 构建戳前置：不许对着旧产物下结论（见 LESSON_运行目标分支e2e前需重建二进制）
 Assert-ClientBuildStamp -Exe $exe -ScriptName 'l5ad_rightclick_move'
     Get-CimInstance Win32_Process -Filter "Name='l5ad_client.exe'" -EA SilentlyContinue |

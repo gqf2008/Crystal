@@ -31,7 +31,7 @@ if (-not $Worktree) { $Worktree = (Resolve-Path "$PSScriptRoot\..\..").Path }
 if (-not $ClientExe) { $ClientExe = Join-Path $Worktree 'Client-Bevy\target\debug\client_bevy.exe' }
 $root = 'C:\Users\gxh\AppData\Local\Temp\orig-csharp-ab'
 New-Item -ItemType Directory -Force -Path $root | Out-Null
-$&
+$exe = Join-Path $root "$Tag`_client.exe"
 . "$PSScriptRoot\build_stamp.ps1"   # 构建戳前置：不许对着旧产物下结论（见 LESSON_运行目标分支e2e前需重建二进制）
 Assert-ClientBuildStamp -Exe $exe -ScriptName 'l5z_ime_font'
 $json = Join-Path $PSScriptRoot 'l5z_ime_font_results.json'
