@@ -520,7 +520,35 @@ J3 线程与句柄稳定 / J4 测量段 RSS 斜率 ≤ 0.5MB/轮），2026-09-24
 派生：**入场成本 = ②−① = 0.066 MB/会话**；**广播/走动成本 = ③−② = 0.067 MB/会话**。
 原始读数：`tools/ops/out/memattr_{login_only,in_map_idle,in_map_walk}.json`（外加一份合并报告）。
 
-> **更正（同日复核，2026-09-26）——上表的三档**不能**用来下"3.5MB 未复现"的结论，已撤回该说法。**
+> **撤回记录（2026-09-26，保留供对照）**：上表那次（N=3）**不能**用来下「3.5MB 未复现」的结论——
+> 部署库里 10 个 `opsload*` 账号**全部 0 个角色**，三档 bot JSON 里 `new_character_result: null`、`frames: 4`、
+> `bytes: 21`，**没有"确实进了图"的证据**；当时已撤回该说法（见 git 历史 + 线程 `crystal-worldpath-mem-attribution`）。
+> **下面是补齐前置后的正式结果。**
+
+#### 4.7.1 正式结果：**未复现**（20 会话、release、master `1275f5d21`、每档均有进图证据）
+
+前置（这次真的做通了）：**分批播种**——`NewCharacter` IP 防刷（`gate/actor.rs:1181-1203`：同 IP 每小时建角
+**>4 次即封 24h**，封禁是**内存态**）⇒ 每批只能建 3–4 个角、**批间重启服务端**清封禁；播种判据取 **DB 真源**
+（`bot.py --self-provision` 的 `ok` 会**假否**：本轮 bot 报 `ok=False` 而 DB 里角色确实建成了）。
+最终 **20 个账号各自有角色**（DB 实证）。
+
+| 档 | sessions | rss_idle | rss_loaded | per_session | 证据 |
+|---|---|---|---|---|---|
+| `--login-only` | 20 | 30.0 MB | 31.8 MB | 0.090 MB | ⚠ 见下：未保持连接 |
+| 进图不动 | 20 | 29.9 MB | 49.0 MB | **0.955 MB** | 20/20 ok、`frames_recv=293207` |
+| `--activity walk` | 20 | 29.5 MB | 52.9 MB | **1.170 MB** | 20/20 ok、`frames_recv=316121` |
+
+**结论**：进图后的稳态成本 **~0.95MB/会话**（走动再 +0.215），与 §4.6 的 0.78–0.81MB/会话同量级；
+**§4 记的「世界路径 ~3.5MB/会话」在 20 会话、当前 master、release 下未复现** ⇒ 该数字视为**过期**，
+外推随之下修：`RSS ≈ 28MB + 0.95MB × 会话` ⇒ **200 会话约 0.22GB**（原记 0.73GB，差 3 倍多）。
+
+⚠ **第①档不可当基线**：`bot.py --login-only` 实测 `wall_sec=0.08`、`frames_recv=0` —— 它登录后**没有保持连接**
+（与 `--hold 30` 不符），0.090MB/会话是瞬态而非稳态。这暴露了仪器的下一个缺口：**每档都应要求
+`wall_sec ≈ hold_sec`**（否则"没保持"的档也会产出数字）。已记入下一步。
+
+原始读数：`tools/ops/out/memattr_{login_only,in_map_idle,in_map_walk}.json`。
+
+<details><summary>上一次（N=3）的失败读数与更正全文</summary>
 > 复核证据：① 部署库里 10 个 `opsload*` 账号**全部 0 个角色**（`select a.username,count(c.name) …`）；
 > ② 三档的 bot JSON（`tools/ops/out/memattr_*.json`）里 `new_character_result: null`、`frames: 4`、
 > `bytes: 21`、`system_messages: []` —— **没有任何"确实进了图"的证据**，`ok:true` 只表示"流程没抛异常"。
@@ -531,6 +559,8 @@ J3 线程与句柄稳定 / J4 测量段 RSS 斜率 ≤ 0.5MB/轮），2026-09-24
 > （例如要求 bot JSON 出现进图证据/角色存在性前置），否则会给"没进图"的档产出 per-session 数字（假绿）。
 > 修好后重跑：`pwsh tools/ops/mem_attribution.ps1 -DeployDir <dir> -Port 7101 -Sessions 20 -HoldSec 30`，
 > 再据此改写 §4/§4.6 里的 3.5MB（本小节即那次改写的入口）。
+
+</details>
 
 ## 5. tick 健康
 
