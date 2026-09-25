@@ -19,8 +19,24 @@
 - push `master` / PR → Actions artifacts（三平台 zip，可直接下载验证）；
 - 打 tag `v*` → 自动发布 GitHub Release（六个 zip + release notes）。
 
-Windows 客户端 zip 内已自动带上 MSYS2 UCRT64 运行库 DLL（`libpinyin`/`glib`/`libdb` 等），
+Windows 客户端 zip 内已自动带上 MSYS2 UCRT64 运行库 DLL（`glib`/`libdb`/`libiconv`/`libintl`/`libpcre2`/
+`libstdc++`/`libgcc`/`libwinpthread` 共 8 个，由 objdump 按导入闭包解析）、`assets/` 与 `libpinyin/{data,conf}`，
 解压即跑；从源码运行时才需要自行把 `D:\toolchains\msys64\ucrt64\bin` 加进 `PATH`。
+> **更正与实测（2026-09-25）**：上文原先把 `libpinyin` 与 glib/libdb 并列写成"DLL"，属**措辞不准**——
+> 本端把 libpinyin 以 `libpinyin.a` **静态链接**进 exe（导入表里没有 pinyin*），随包带的是它的
+> **数据与配置**（缺了才会退化为禁用 IME）。其余依赖里 `api-ms-win-*`/`combase`/`pdh`/`powrprof`/
+> `uiautomationcore` 等由 Windows 自带（CI 配方本就不分发）。
+>
+> **本机可复跑的打包预演**（发版日关键路径，防止"等到打 tag 才发现配方漂移"）：
+> ```powershell
+> # 先构建 GNU release 产物（CI 同款目标）
+> $env:CARGO_BUILD_TARGET='x86_64-pc-windows-gnu'; cargo build --release --bin client_bevy
+> pwsh tools/ops/package_windows_rehearsal.ps1 -SmokeServer 127.0.0.1:7000
+> ```
+> 判据 J1 产物 / J2 staging（8 DLL + assets + libpinyin 数据）/ **J2b 依赖闭包**（stage 内每个 PE 的导入
+> 要么在 stage、要么 System32 或 `api-ms-win-*` 虚拟 api-set）/ J3 zip 结构断言 / **J4 解压到干净目录真启动**。
+> 实测：zip 69.3MB / 38 条目 / 依赖闭包 0 缺失 / 解压后 `alive=true, control_rpc=true, **entered_game=true**`
+> —— 即发布产物不仅能起来，还能连上服务器**登录并进图**。
 macOS 产物未签名：首次打开被 Gatekeeper 拦截时右键 → 打开，或
 `xattr -dr com.apple.quarantine client_bevy`。
 
