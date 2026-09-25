@@ -17,6 +17,9 @@ use crate::util::wire::build_packet_bytes;
 type GateActorRef = kameo::actor::ActorRef<GateActor>;
 type RxChannel = tokio::sync::mpsc::Receiver<Vec<u8>>;
 
+// 等待原语统一走 `test_wait`（静默窗口 + 进度续期 + 硬上限）：固定死线在满载机器上会假红。
+use crate::actors::world::test_wait::wait_opcode_body;
+
 async fn setup_gate_and_session(
     session_id: u64,
 ) -> (GateActorRef, tokio::sync::mpsc::Sender<Vec<u8>>, RxChannel) {
@@ -119,23 +122,6 @@ async fn e2e_setup_login(
 // ============================================================
 
 /// 等待指定 opcode 的包并返回其 body（去掉 4 字节头）；超时返回 None
-async fn wait_opcode_body(rx: &mut RxChannel, opcode: i16, secs: u64) -> Option<Vec<u8>> {
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(secs);
-    while tokio::time::Instant::now() < deadline {
-        let remaining = deadline - tokio::time::Instant::now();
-        match tokio::time::timeout(remaining, rx.recv()).await {
-            Ok(Some(data)) if data.len() >= 4 => {
-                if i16::from_le_bytes([data[2], data[3]]) == opcode {
-                    return Some(data[4..].to_vec());
-                }
-            }
-            Ok(Some(_)) => continue,
-            _ => return None,
-        }
-    }
-    None
-}
-
 /// #2827：存入/取回精炼物品**失败**也必须回确认包（C# `Enqueue(p)`，PlayerObject.cs:12511-12601）——
 /// 客户端只有收到 `S.DepositRefineItem` 才会发 `C.RefineItem`（Bevy refine.rs:227-231），
 /// 缺包会让 UI 精炼链路永久卡在「已请求存入武器…」。

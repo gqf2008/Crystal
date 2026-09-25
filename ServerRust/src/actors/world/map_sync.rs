@@ -631,22 +631,8 @@ mod tests {
 
     type RxChannel = tokio::sync::mpsc::Receiver<Vec<u8>>;
 
-    async fn wait_opcode_body(rx: &mut RxChannel, opcode: i16, secs: u64) -> Option<Vec<u8>> {
-        let deadline = tokio::time::Instant::now() + Duration::from_secs(secs);
-        while tokio::time::Instant::now() < deadline {
-            let remaining = deadline - tokio::time::Instant::now();
-            match tokio::time::timeout(remaining, rx.recv()).await {
-                Ok(Some(data)) if data.len() >= 4 => {
-                    if i16::from_le_bytes([data[2], data[3]]) == opcode {
-                        return Some(data[4..].to_vec());
-                    }
-                }
-                Ok(Some(_)) => continue,
-                _ => return None,
-            }
-        }
-        None
-    }
+    // 等待原语统一走 `test_wait`（固定死线在满载机器上会假红）
+    use crate::actors::world::test_wait::wait_opcode_body;
 
     async fn login(
         gate_ref: &ActorRef<GateActor>,

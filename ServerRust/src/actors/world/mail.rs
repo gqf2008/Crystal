@@ -1240,32 +1240,8 @@ mod mail_flow_e2e {
         out
     }
 
-    /// 等到目标 opcode 为止；返回（目标 body, 期间全部包）。超时返回 None
-    async fn recv_until(
-        rx: &mut RxChannel,
-        opcode: i16,
-        secs: u64,
-    ) -> Option<(Vec<u8>, Vec<(i16, Vec<u8>)>)> {
-        let deadline = tokio::time::Instant::now() + Duration::from_secs(secs);
-        let mut seen = Vec::new();
-        while tokio::time::Instant::now() < deadline {
-            let remaining = deadline - tokio::time::Instant::now();
-            match tokio::time::timeout(remaining, rx.recv()).await {
-                Ok(Some(data)) if data.len() >= 4 => {
-                    let op = i16::from_le_bytes([data[2], data[3]]);
-                    let body = data[4..].to_vec();
-                    if op == opcode {
-                        seen.push((op, body.clone()));
-                        return Some((body, seen));
-                    }
-                    seen.push((op, body));
-                }
-                Ok(Some(_)) => continue,
-                _ => return None,
-            }
-        }
-        None
-    }
+    // 等待原语统一走 `test_wait`（静默窗口 + 进度续期；固定死线在满载机器上会假红）
+    use crate::actors::world::test_wait::recv_until;
 
     fn chats_contain(pkts: &[(i16, Vec<u8>)], needle: &str) -> bool {
         pkts.iter().any(|(op, body)| {
