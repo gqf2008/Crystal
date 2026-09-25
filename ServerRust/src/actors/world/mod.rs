@@ -11758,89 +11758,15 @@ fn send_sell_item_response(
 // ============================================================
 
 fn send_mail_received_packet(gate_ref: &ActorRef<GateActor>, session_id: u64, mail: &MailMessage) {
-    let mut body = Vec::new();
-    body.extend_from_slice(&mail.mail_id.to_le_bytes());
-    write_dotnet_string(&mut body, &mail.sender_name);
-    write_dotnet_string(&mut body, &mail.subject);
-    body.extend_from_slice(&mail.timestamp.to_le_bytes());
-    body.push(if mail.read { 1u8 } else { 0u8 });
-    body.push(if mail.collected { 1u8 } else { 0u8 });
-    // #3103 读侧：`MailInfo.Locked`（客户端读信窗/列表的删除守卫）
-    body.push(if mail.locked { 1u8 } else { 0u8 });
-    body.extend_from_slice(&(mail.gold as u32).to_le_bytes());
-    body.push(mail.items.len() as u8);
-    if gate_ref
-        .tell(SendToClient {
-            session_id,
-            data: build_packet_bytes(
-                mir2_shared::enums::ServerPacketIds::ReceiveMail as i16,
-                &body,
-            ),
-        })
-        .try_send()
-        .is_err()
-    {
-        warn!(
-            "gate mailbox full: SendToClient dropped (session={} packet=ReceiveMail)",
-            session_id
-        );
-    }
+    // **单一真源**：转发到 `social_packets` 的实现（本文件原来另有一份，导致
+    // 「列表条目带不带附件」两边各改一半——客户端在 #3120 ① 补了读条目，服务端这份没跟，
+    // 于是带附件的邮件推送在客户端一律解析失败。见 social_packets.rs 的注释。）
+    crate::actors::social_packets::send_mail_received_packet(gate_ref, session_id, mail);
 }
 
 fn send_mail_content_packet(gate_ref: &ActorRef<GateActor>, session_id: u64, mail: &MailMessage) {
-    let mut body = Vec::new();
-    body.extend_from_slice(&mail.mail_id.to_le_bytes());
-    write_dotnet_string(&mut body, &mail.sender_name);
-    write_dotnet_string(&mut body, &mail.subject);
-    write_dotnet_string(&mut body, &mail.body);
-    body.extend_from_slice(&mail.timestamp.to_le_bytes());
-    body.push(if mail.read { 1u8 } else { 0u8 });
-    body.push(if mail.collected { 1u8 } else { 0u8 });
-    // #3103 读侧：`MailInfo.Locked`（同上）
-    body.push(if mail.locked { 1u8 } else { 0u8 });
-    body.extend_from_slice(&(mail.gold as u32).to_le_bytes());
-    body.push(mail.items.len() as u8);
-    // 发送附件物品信息
-    for item in &mail.items {
-        body.extend_from_slice(&item.unique_id.to_le_bytes());
-        body.extend_from_slice(&(item.item_index as u32).to_le_bytes());
-        // #3103 读侧：`UserItem.Info.Image`（读包裹窗附件格的图标索引）
-        body.extend_from_slice(
-            &item
-                .info
-                .as_ref()
-                .map(|i| i.image)
-                .unwrap_or(0)
-                .to_le_bytes(),
-        );
-        write_dotnet_string(
-            &mut body,
-            &item
-                .info
-                .as_ref()
-                .map(|i| i.name.clone())
-                .unwrap_or_default(),
-        );
-        body.extend_from_slice(&item.count.to_le_bytes());
-        body.extend_from_slice(&item.current_dura.to_le_bytes());
-        body.extend_from_slice(&item.max_dura.to_le_bytes());
-    }
-    if gate_ref
-        .tell(SendToClient {
-            session_id,
-            data: build_packet_bytes(
-                mir2_shared::enums::ServerPacketIds::ReceiveMail as i16,
-                &body,
-            ),
-        })
-        .try_send()
-        .is_err()
-    {
-        warn!(
-            "gate mailbox full: SendToClient dropped (session={} packet=ReceiveMail)",
-            session_id
-        );
-    }
+    // 同上：转发到 `social_packets` 的单一真源，避免两份实现各自漂移。
+    crate::actors::social_packets::send_mail_content_packet(gate_ref, session_id, mail);
 }
 
 /// #2786：PlayerInspect 包的**身份段**（两端手写线格式，客户端 `handle_progress.rs`

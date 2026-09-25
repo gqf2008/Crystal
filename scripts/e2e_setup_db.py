@@ -76,8 +76,27 @@ def main() -> int:
         cur.execute("UPDATE characters SET spouse_name=NULL WHERE name IN ('bevychar','bevy2char')")
     # 2) bevychar 装备恢复（fishing/mount 用例依赖）：
     #    Weapon 槽 = BlueFishingRod(793)、Mount 槽 = BengalTiger(764)
-    cur.execute("SELECT COUNT(*) FROM inventory_equipment WHERE character_name='bevychar' AND slot IN (0,10)")
-    if cur.fetchone()[0] < 2:
+    #
+    # 判据必须是**槽里的物品身份**，不能是「有多少行」。历史实现用
+    # `COUNT(*) ... slot IN (0,10) < 2` —— 2026-09-25 实测：开发库里该角色武器槽是
+    # HoaSword(281)、坐骑槽是 BengalTiger，行数已经是 2，于是整段恢复被**静默跳过**，
+    # 鱼竿没装上 ⇒ fishing-test 假红（服务端其实正确回了「你需要装备鱼竿才能钓鱼」）。
+    def equipped_index(slot: int):
+        cur.execute(
+            "SELECT item_json FROM inventory_equipment WHERE character_name='bevychar' AND slot=?",
+            (slot,),
+        )
+        row = cur.fetchone()
+        if not row or not row[0]:
+            return None
+        try:
+            return json.loads(row[0]).get("item_index")
+        except Exception:
+            return None
+
+    weapon_ok = equipped_index(0) == 793
+    mount_ok = equipped_index(10) == 764
+    if not (weapon_ok and mount_ok):
         cur.execute("SELECT item_json FROM inventory_backpack WHERE character_name='bevy2char' AND grid=0 LIMIT 1")
         row = cur.fetchone()
         template = json.loads(row[0]) if row else {}
@@ -96,12 +115,13 @@ def main() -> int:
                 bait['unique_id'] = uid + 2; bait['item_index'] = 798; bait['count'] = 50; bait['slots'] = []
                 d['slots'] = [None, None, bait, None, None]
             return json.dumps(d, ensure_ascii=False)
-        for slot, uid, idx in ((0, 79301, 793), (10, 76401, 764)):
-            cur.execute("SELECT COUNT(*) FROM inventory_equipment WHERE character_name='bevychar' AND slot=?", (slot,))
-            if cur.fetchone()[0] == 0:
-                cur.execute(
-                    "INSERT INTO inventory_equipment (character_name, slot, item_json) VALUES ('bevychar', ?, ?)",
-                    (slot, eq_item(uid, idx, mount=(slot == 10))),
+        for slot, uid, idx, ok in ((0, 79301, 793, weapon_ok), (10, 76401, 764, mount_ok)):
+            if ok:
+                continue
+            # 用 INSERT OR REPLACE：槽里若被换成别的武器（如剑）也要**换回**鱼竿/坐骑
+            cur.execute(
+                "INSERT OR REPLACE INTO inventory_equipment (character_name, slot, item_json) VALUES ('bevychar', ?, ?)",
+                (slot, eq_item(uid, idx, mount=(slot == 10))),
                 )
     # 确保已有鱼竿也带鱼饵（#1319：#1313 抛竿消耗 Bait 槽鱼饵，无饵钓鱼失败）
     cur.execute("SELECT item_json FROM inventory_equipment WHERE character_name='bevychar' AND slot=0")
@@ -155,6 +175,24 @@ def main() -> int:
             "INSERT INTO inventory_backpack (character_name, grid, item_json) VALUES ('bevychar', 2, ?)",
             (make_item(template, 3002, 430),),
         )
+    # 5) 商城可购前置（gameshop-test 依赖）：C# 里「这件商品能不能用金币/信用点买」由**每件商品
+    #    自己的 CanBuyGold/CanBuyCredit 标志**决定——服务端 `PlayerObject.cs:13794/13803`、
+    #    客户端 `MirGameShopCell.cs:195/199` 都按它判定；而原版 MirDB 里这些标志默认 false，
+    #    于是「有目录有价格，但一件都买不了」（2026-09-25 实测：105 件全部 can_buy_gold=0、
+    #    can_buy_credit=0，购买被服务端按货币分支拒绝，用例报「未收到购买邮件」）。
+    #    这里把**最便宜、库存不限**的一件标成可用金币购买（价格需 ≤ 测试号金币 1000000）。
+    cur.execute(
+        "SELECT item_index, gold_price FROM game_shop_items "
+        "WHERE gold_price > 0 AND stock = 0 ORDER BY gold_price LIMIT 1"
+    )
+    row = cur.fetchone()
+    if row:
+        cur.execute(
+            "UPDATE game_shop_items SET can_buy_gold = 1 WHERE item_index = ?", (row[0],)
+        )
+        print(f"E2E db setup: 商城可购前置 -> item {row[0]} gold_price={row[1]} can_buy_gold=1")
+    else:
+        print("E2E db setup: 警告：目录里没有 gold_price>0 的商品，gameshop-test 仍会 FAIL")
     con.commit()
     cur.execute("SELECT name, x, y FROM characters WHERE name IN ('bevychar','bevy2char')")
     print("E2E db setup:", cur.fetchall())

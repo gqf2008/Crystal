@@ -1538,15 +1538,23 @@ pub(crate) fn auto_gameshop_test(
                     shop.items.len(),
                     shop.gold
                 );
-                // 选第一件金币价 <= 我的金币 的商品
-                let target = shop.items.iter().find(|it| it.gold_price > 0);
+                // 选第一件**可以用金币买**且金币价 > 0 的商品。
+                //
+                // 必须同时看 `can_buy_gold`：服务端 `gameshop_currency_cost` 会按「该商品是否支持
+                // 这种货币」拒绝（C# 双币开关），而这里发的是 `p_type = 1`（金币）。历史夹具是
+                // 「按金币价挑、却发 p_type = 0（信用点）」——2026-09-25 实测：目录 106 件、金币
+                // 1000000，购买包发出后服务端按货币分支拒绝，邮件不来、用例假红。
+                let target = shop
+                    .items
+                    .iter()
+                    .find(|it| it.gold_price > 0 && it.can_buy_gold);
                 match target {
                     Some(it) => {
                         *bought_item = Some(it.item_index);
                         net.send_packet(&client_bevy::network::GameshopBuyWire {
                             g_index: it.item_index,
                             quantity: 1,
-                            p_type: 0,
+                            p_type: 1, // 1 = 金币（与服务端 gameshop_currency_cost 的取值一致）
                         });
                         tracing::info!(
                             "[SHOPTEST] 购买 #{} {} {}金币",
