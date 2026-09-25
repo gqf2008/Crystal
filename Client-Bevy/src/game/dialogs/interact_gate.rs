@@ -1,4 +1,4 @@
-//! 40 窗「点 X 关」交互门禁 —— 把实机巡回脚本的契约搬进 `cargo test --lib`。
+//! 41 窗「点 X 关」交互门禁 —— 把实机巡回脚本的契约搬进 `cargo test --lib`。
 //!
 //! 背景：`tools/acceptance/ui_interact_sweep.ps1` 需要「服务端 + 真实 `Data/` 资产 +
 //! 桌面窗口」，只能在开发机人工跑，进不了任何门禁；于是「窗口有没有标准关闭钮、
@@ -27,7 +27,7 @@ use crate::resources::libraries::{Libraries, LibraryName};
 use crate::scenes::AppState;
 use bevy::prelude::*;
 
-/// 巡回脚本 `$kinds` 的 A 类窗口（40 项）＋ `hero_manage`（脚本里单独走状态窗路径，
+/// 巡回脚本 `$kinds` 的 A 类窗口（41 项）＋ `hero_manage`（脚本里单独走状态窗路径，
 /// 同样要「点 X 关」，故并入本门禁）。
 const SWEEP_KINDS: &[(&str, DialogKind)] = &[
     ("inventory", DialogKind::Inventory),
@@ -70,6 +70,8 @@ const SWEEP_KINDS: &[(&str, DialogKind)] = &[
     ("item_rental_browse", DialogKind::ItemRentalBrowse),
     ("quest_detail", DialogKind::QuestDetail),
     ("input_box", DialogKind::InputBox),
+    // #3209：写邮件窗（状态驱动，RPC 直接切 `MailState.compose`）——同样要「点 X 关」
+    ("mail_compose", DialogKind::MailCompose),
     ("hero_manage", DialogKind::HeroManage),
 ];
 
@@ -295,6 +297,16 @@ fn open_window(app: &mut App, kind: DialogKind) {
                 .visible = true;
             app.world_mut().resource_mut::<DialogManager>().open(kind);
         }
+        // #3209：写邮件窗由 `MailState.compose` 驱动（`mail_compose_ui_system` 按它切根
+        // Visibility），不进 `DialogManager`——与 hero_manage 同款的状态驱动窗。
+        DialogKind::MailCompose => {
+            let mut mail = app.world_mut().resource_mut::<super::mail::MailState>();
+            mail.compose = true;
+            mail.compose_parcel = false;
+            // 同 RPC：写信窗必须连父窗（`Mail` 列表窗）一起开——
+            // `mail_compose_follow_system` 的孤儿守卫否则会立刻把它关掉
+            app.world_mut().resource_mut::<DialogManager>().open(DialogKind::Mail);
+        }
         _ => app.world_mut().resource_mut::<DialogManager>().open(kind),
     }
 }
@@ -317,6 +329,12 @@ fn close_window(app: &mut App, kind: DialogKind) {
                 .resource_mut::<super::storage::StorageState>()
                 .visible = false;
             app.world_mut().resource_mut::<DialogManager>().close(kind);
+        }
+        DialogKind::MailCompose => {
+            let mut mail = app.world_mut().resource_mut::<super::mail::MailState>();
+            mail.compose = false;
+            mail.compose_parcel = false;
+            app.world_mut().resource_mut::<DialogManager>().close(DialogKind::Mail);
         }
         _ => app.world_mut().resource_mut::<DialogManager>().close(kind),
     }
@@ -382,11 +400,14 @@ fn press(app: &mut App, btn: Entity) {
 fn is_closed(app: &App, kind: DialogKind) -> bool {
     match kind {
         DialogKind::HeroManage => !app.world().resource::<super::hero::HeroState>().managing,
+        // 状态驱动窗：判据取**状态位本身**，不能退化成 `DialogManager.is_open`
+        // （那对不进 mgr 的窗恒为 false ⇒ 关窗断言会恒绿、白测）
+        DialogKind::MailCompose => !app.world().resource::<super::mail::MailState>().compose,
         _ => !app.world().resource::<DialogManager>().is_open(kind),
     }
 }
 
-/// 40 窗「点 X 关」闭环：每窗开 → 定位标准关闭钮 → 按压 → 断言关栈。
+/// 41 窗「点 X 关」闭环：每窗开 → 定位标准关闭钮 → 按压 → 断言关栈。
 #[test]
 fn sweep_windows_close_via_standard_close_button() {
     let mut app = sweep_app();
@@ -499,7 +520,7 @@ fn sweep_kind_list_matches_live_manifest() {
     };
 
     let manifest_kinds = names("sweep");
-    assert_eq!(manifest_kinds.len(), 40, "清单 sweep 应是 40 项");
+    assert_eq!(manifest_kinds.len(), 41, "清单 sweep 应是 41 项");
 
     // 本模块比清单多一项 hero_manage（清单把它登记在 excluded：走状态窗专用段）
     let ours: Vec<&str> = SWEEP_KINDS

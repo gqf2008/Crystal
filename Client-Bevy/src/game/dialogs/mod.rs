@@ -342,7 +342,7 @@ impl DialogManager {
     }
 }
 
-/// 40 窗「点 X 关」交互门禁（headless 版实机巡回脚本，随 `cargo test --lib` 进 CI）
+/// 41 窗「点 X 关」交互门禁（headless 版实机巡回脚本，随 `cargo test --lib` 进 CI）
 #[cfg(test)]
 mod interact_gate;
 
