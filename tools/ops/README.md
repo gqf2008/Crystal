@@ -135,9 +135,11 @@ pwsh tools/ops/health_report.ps1 -LogFile ops_out/server.log -ProcessName mir2_s
 
 ## 5b. 内存阶梯：`memory_ramp.ps1`
 
-与 `capacity_ramp.ps1` 的区别：**只按 PID 管控自己启动的服务端**（不按进程名 `Stop-Process`），
-所以可以在同一台机器上保留别的服务端实例；采样每 2s 一次、取保持期最大值（`Process` 属性必须
-`Refresh()`，否则整轮都读到同一个陈旧值——踩过）。
+**只按 PID 管控自己启动的服务端**（不按进程名 `Stop-Process`），所以可以在同一台机器上保留别的
+服务端实例；采样每 2s 一次、取保持期最大值（`Process` 属性必须 `Refresh()`，否则整轮都读到同一个
+陈旧值——踩过）。
+（2026-09-25 更新：`capacity_ramp.ps1` 原本是「按进程名清场 + 按进程名取 RSS」，已改齐到同一口径，
+并由静态门禁 `check_process_scope.ps1` 防回流。）
 
 ```powershell
 # A/B：同一份代码 stash 前后各 build 一次 release，分别跑
@@ -432,9 +434,10 @@ pwsh tools/ops/tick_lag_probe.ps1 -DeployDir <deploy> -StepsCsv '10,20,50' -Hold
      -OutFile tools/ops/out/tick_lag.json     # 退出码 0 过 / 1 判据红 / 2 前置失败
 ```
 
-两处刻意与 `capacity_ramp.ps1` 不同：**绝不按进程名杀 `mir2_server`**（同机可能有别的 agent 的开发服
-7000 与其它 deploy 实例，本工具只停自己启动的 PID）；端口从 `<deploy>\config\server.toml` 的
-`listen_addr` 读（读错端口会让机器人静默连不上，从而得到"零滞后"的假绿）。
+**绝不按进程名杀 `mir2_server`**（同机可能有别的 agent 的开发服 7000 与其它 deploy 实例，本工具只停
+自己启动的 PID；`capacity_ramp.ps1` 自 2026-09-25 起同口径，门禁 `check_process_scope.ps1`）；
+端口从 `<deploy>\config\server.toml` 的 `listen_addr` 读（读错端口会让机器人静默连不上，从而得到
+"零滞后"的假绿）。
 
 实测（2026-09-25，release 构建，同图 1912 只怪）：10/20/50 会话 × 150s → `lag_pct` ≤ 0.1%、
 `interval_ms` 29974–30032、零丢包零踢线；对照（主机 95.6% CPU）`lag_pct` 0.2%——**判据对主机 CPU 抢占
@@ -509,6 +512,29 @@ pwsh tools/ops/tick_lag_probe.ps1 -DeployDir <deploy> -StepsCsv '50' -HoldSec 15
 
 > 门禁只扫**代码行**、跳过注释行——注释里常写"原先 `& python bot.py …`"这种说明，
 > 把它们算成违规会让门禁自己变噪音（第一版就踩到，实测 4 个脚本被自己的注释误伤）。
+
+### 静态门禁：`check_process_scope.ps1`
+
+同一类问题的另一半：**按进程名清场**。本机常态是多 agent 并行 —— 7000 上常驻一个开发服、
+其它 agent 可能正在用实机客户端跑验收；演练若用 `Get-Process -Name mir2_server | Stop-Process -Force`
+清场，会把**别人的**服务端一起带走，对方拿到的是假红（登录 `result=4` / 连不上），重试再多也修不了
+（`LESSON_多agent并行时按进程名清进程会污染他人GUI实验`）。
+
+```powershell
+pwsh tools/ops/check_process_scope.ps1              # 0 无新增 / 1 有新增未迁移 / 2 前置失败或门禁自检失败
+pwsh tools/ops/check_process_scope.ps1 -Strict      # allowlist 里的一起报红（全部迁移完后用）
+```
+
+扫描面 `tools/ops` + `tools/acceptance` + `scripts` 的 `*.ps1`，判据只认**共享名**（`mir2_server` /
+`client_bevy`）与「`Get-Process … | Stop-Process`」管道，所以 `Stop-Process -Name <自己的唯一名>`
+（LESSON 推荐的做法）与只做存在性探测的 `if (-not (Get-Process -Name mir2_server …)) { exit 9 }`
+都不会被误判。**自带沙箱正/负对照**（4 个临时脚本：2 个乱杀必须被抓、2 个合规写法不许被误判），
+判据空了直接 exit 2 —— 门禁自己不许假绿。
+
+待迁移清单（本轮只记名、不静默放过）：`fault_injection.ps1`（杀服务端就是故障注入的目的）、
+`l5y_reconnect.ps1`（断线重连要真杀服务端）、`run_real_e2e.ps1`（仓库级 harness 开跑前清场）。
+2026-09-25 已改齐：`capacity_ramp.ps1`（清场 + RSS 取数都改成只认自己的 PID）、`login_latency_probe.ps1`
+（原先按 `$ExePath` 过滤后仍按进程名杀，现改为**前置失败**让操作者处置残留，不再静默清理）。
 
 ### 端口契约（同 5c）
 

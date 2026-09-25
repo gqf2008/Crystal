@@ -176,14 +176,21 @@ cd Client-Bevy && cargo test                     # 794 lib + 7 bin + 2 + 53
 
 三侧 `cargo fmt -- --check` 均须 0 差异。
 
-另有两条**离线的覆盖对账门禁**（秒级，不起客户端）：
+另有四条**离线的对账/卫生门禁**（秒级，不起客户端）：
 
 ```bash
 pwsh tools/acceptance/e2e_lock_selftest.ps1      # 实机资源锁自证（§5.4）
 pwsh tools/acceptance/flag_coverage_check.ps1    # 客户端 auto 开关覆盖清单对账
+pwsh tools/ops/check_process_scope.ps1           # ops/验收脚本不得按进程名清共享资源
+pwsh tools/ops/check_bot_timeouts.ps1            # ops 演练不得有同步无超时的 bot 调用
 ```
 
-后者把「哪些 `--xxx-test` 开关进发版门禁、哪些只是历史探针」钉在
+后两条是**运营工具自身的卫生门禁**（本机常态多 agent 并行：7000 上常驻开发服）：前者禁止
+`Get-Process -Name mir2_server | Stop-Process -Force` 这类按进程名清场（会把别人正在跑的验收
+打成假红，见 `LESSON_多agent并行时按进程名清进程会污染他人GUI实验`），后者禁止"同步无超时的
+bot 调用"（端口不一致时会静默挂死）。两条都自带阳性对照，且各有 allowlist 作为待迁移清单。
+
+`flag_coverage_check.ps1` 把「哪些 `--xxx-test` 开关进发版门禁、哪些只是历史探针」钉在
 `tools/acceptance/CLIENT_AUTO_FLAGS.md` 上：源码新增/删除开关、或清单把某个开关标成 `gate`
 而门禁脚本里其实没跑它，门禁都会红（两条阳性对照均已实做：注入假开关 → C3 红；桶标记改成
 `gate` 但脚本没跑 → C5 红）。
