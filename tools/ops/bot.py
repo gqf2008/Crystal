@@ -27,6 +27,7 @@ OP_KEEPALIVE = 2
 OP_NEW_ACCOUNT = 3
 OP_LOGIN = 5
 OP_NEW_CHARACTER = 6
+OP_NEW_CHARACTER_SUCCESS = 11   # ServerPacketIds::NewCharacterSuccess
 OP_STARTGAME = 8
 OP_LOGOUT = 9
 # 注意方向：**收到**的聊天是 ServerPacketIds::Chat = 30；ClientPacketIds::Chat = 13 是我们发出去的，
@@ -181,7 +182,17 @@ def one_session(idx: int, host: str, port: int, account: str, password: str,
             sock.sendall(frame(OP_NEW_CHARACTER,
                                dotnet_string(char_name) + bytes([0, 0])))
             opcode, ack = recv_frame(sock)
-            res["new_character_result"] = ack[0] if ack else -1
+            # 建角**成功**时服务端回的是 `S.NewCharacterSuccess`（opcode 11），body 是
+            # dotnet 字符串（角色名）+ index + level + class + gender + last_access。
+            # 旧代码不看 opcode、直接读 `ack[0]` 当 Result —— 那其实是**名字长度前缀**
+            # （实测 "OpsBot0" ⇒ 7），于是把「建角成功」判成失败，fresh-deploy 冒烟报假红。
+            res["new_character_frame"] = int(opcode)
+            if opcode == OP_NEW_CHARACTER_SUCCESS:
+                res["new_character_result"] = 0            # 成功（与旧口径兼容）
+                res["new_character_name_len"] = ack[0] if ack else -1
+            else:
+                # 兼容「回 S.NewCharacter{Result}」的实现（被限流/被拒时走这条）
+                res["new_character_result"] = ack[0] if ack else -1
             res["stage"] = "start_game"
             sock.sendall(frame(OP_STARTGAME, struct.pack("<i", 0)))
             res["start_sent"] = round(time.time() - t0, 3)

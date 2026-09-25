@@ -54,7 +54,30 @@ macOS 产物未签名：首次打开被 Gatekeeper 拦截时右键 → 打开，
 
    旧格式 `.MirADB` 用 `migrate` 子命令（用法见 `ServerRust/src/bin/migrate.rs` 顶部注释）。
 
+   > **版本支持与核验（2026-09-25）**：工具原先只实现 **≤84** 的旧布局，拿当前发布数据
+   > （`Server.MirDB` **version 112**）实跑会失败——物品段读到第 607/1628 个就 EOF、之后各段全空
+   > （exit 1、990 条 parse error，落库 items 384 / monsters 0 / npcs 0）。现已按
+   > `Shared/Data/ItemData.cs` 与 `Server/MirDatabase/MonsterInfo.cs` 的版本分支补齐
+   > **v>84 布局**（`StackSize` u16、自描述 `Stats` 块 `int count + count×(u8 stat, i32 value)`、`Slots`），
+   > 并给每段条目数加了「不合理即失败」的上限检查（防止错位后 `for 0..18 亿` 空转）。
+   >
+   > **一条命令核验整条路径**（J1 迁移干净 / J2 定义表行数 / J3 起服+首启导入 / J4 新玩家全路径冒烟 / J5 库里真有账号角色）：
+   >
+   > ```powershell
+   > pwsh tools/ops/fresh_mirdb_deploy.ps1 -MirDb <path-to-Server.MirDB> `
+   >      -ServerDir ServerRust/target/release -DataRoot <含 Daneo1989 与 config/ 的目录> -Port 7500
+   > ```
+   >
+   > 实测（原版 `Server.MirDB` v112）：maps **463** / items **1628** / monsters **555** / NPCs **375** /
+   > quests **154** / magics **109**；首启自动导入 **21688** 条掉落、**796** 页 NPC 脚本、**1124** 条商品、recipes，
+   > 零 `ERROR`；新玩家全路径（注册→登录→建角→进图）收到 **5222** 帧世界数据。
+   > 阳性对照：把 v>84 分支关掉 → **J1 立即红**（exit 1、990 parse error、items 638）。
+
 2. **启动一次服务端**：`init_db_pool` 会自动建表 + 补列（`schema_version` 迁移）。
+
+   首启还会**自动导入**运行期数据（表为空才导）：掉落（`Envir/Drops`）、NPC 脚本页（`Envir/NPCs`）、
+   商品（`Envir/*.txt`）、配方（`Envir/Recipe`）。所以第 2 步之后 `npc_goods`/`monster_drops`/`npc_scripts`
+   才非空——这是预期，不是漏导。
 
 3. **注册账号 / 建角色**：客户端登录界面走注册流程（真实服务端联调通过），
    或直接用 SQLite 建测试账号。自动回归脚本默认用 `test/123456`（角色 `bevychar`）
