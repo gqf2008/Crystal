@@ -450,10 +450,27 @@ fn read_stats<R: Read>(reader: &mut BinaryReader<R>) -> std::io::Result<HashMap<
     Ok(map)
 }
 
+fn stats_to_json(stats: &HashMap<u8, i32>) -> String {
+    let items: Vec<String> = stats
+        .iter()
+        .map(|(k, v)| format!("\"{}\":{}", k, v))
+        .collect();
+    format!("{{{}}}", items.join(","))
+}
+
+/// 自描述 Stats 块（`Shared/Data/Stat.cs:36-42`）：`int count` 后跟 `count` 组 `(u8 stat, i32 value)`。
+/// v>84 的所有定义类都用它替换了 ≤84 的固定字段块（ItemInfo / MonsterInfo …）。
+/// count 做上限检查：读到这里若已经错位，count 会是垃圾（实测 NPC 段曾读出 18 亿），
+/// 明确报错比拿垃圾写库好。
 fn read_stats_dict<R: Read>(reader: &mut BinaryReader<R>) -> std::io::Result<HashMap<u8, i32>> {
-    // Stats.Save() format: count (Int32) + entries (key: byte, value: Int32)
     let count = reader.read_raw_i32()?;
-    let mut stats = HashMap::new();
+    if !(0..=1024).contains(&count) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("Stats count 不合理（疑似已错位）: {}", count),
+        ));
+    }
+    let mut stats: HashMap<u8, i32> = HashMap::new();
     for _ in 0..count {
         let key = reader.read_raw_u8()?;
         let value = reader.read_raw_i32()?;
@@ -462,12 +479,21 @@ fn read_stats_dict<R: Read>(reader: &mut BinaryReader<R>) -> std::io::Result<Has
     Ok(stats)
 }
 
-fn stats_to_json(stats: &HashMap<u8, i32>) -> String {
-    let items: Vec<String> = stats
-        .iter()
-        .map(|(k, v)| format!("\"{}\":{}", k, v))
-        .collect();
-    format!("{{{}}}", items.join(","))
+/// 读「某一段的条目数」并做**合理上限**检查。
+///
+/// 为什么必须有：读取一旦在某段错位，下一段的 count 会读成垃圾（实测把 NPC 段读成
+/// 1819626079），而原实现 `for i in 0..count` 会**照跑十亿次**——刷屏几 GB 日志、CPU 跑满、
+/// 拖住后续所有尝试（实测留下三个进程、其中一个烧了 351s CPU）。
+/// 真实定义表的条目数在本项目量级是「几百到几万」，故上限取 1_000_000：超过即视为已错位，立刻失败。
+fn read_section_count<R: Read>(reader: &mut BinaryReader<R>, what: &str) -> std::io::Result<i32> {
+    let count = reader.read_raw_i32()?;
+    if !(0..=1_000_000).contains(&count) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("{what} 段条目数不合理（疑似前面已错位）: {count}"),
+        ));
+    }
+    Ok(count)
 }
 
 // ============================================================
@@ -704,8 +730,15 @@ fn read_map_info<R: Read>(
 
 fn read_item_info<R: Read>(
     reader: &mut BinaryReader<R>,
-    _version: i32,
+    version: i32,
 ) -> std::io::Result<ParsedItemInfo> {
+    // 版本分叉（对照 `Shared/Data/ItemData.cs:69-204` 的 `ItemInfo(BinaryReader, version, …)`）：
+    // 原版在 v84 之后同时改了三处，本工具此前只实现了 ≤84 的老布局 ⇒ 拿 v112 的
+    // `Server.MirDB` 跑会在第 607 个物品处把整个剩余文件读穿（实测：1628 个物品只成功 607 个，
+    // 之后全是 `failed to fill whole buffer`）。所以这里按版本走两条路。
+    if version > 84 {
+        return read_item_info_v85_plus(reader);
+    }
     // File was saved with OLD Save format (before commit 8d03fafe added Slots to Save).
     // Format: Index, Name, 6 type/grade bytes, Shape(i16), Weight, Light, ReqAmount,
     // Image(u16), Durability(u16), StackSize(u32), Price(u32),
@@ -790,9 +823,100 @@ fn read_item_info<R: Read>(
     let can_fast_run = reader.read_boolean()?;
     let can_awakening = reader.read_boolean()?;
 
-    // No Slots in this version of the file (added in commit 8d03fafe)
-    let slots = 0u8;
+    // Slots 自 v84 起出现（C# `if (version > 83) Slots = reader.ReadByte();`）；≤83 的老文件没有。
+    let slots = if version > 83 {
+        reader.read_raw_u8()?
+    } else {
+        0u8
+    };
 
+    let stats_json = stats_to_json(&stats);
+
+    let has_tool_tip = reader.read_boolean()?;
+    let tool_tip = if has_tool_tip {
+        reader.read_string()?
+    } else {
+        String::new()
+    };
+
+    Ok(ParsedItemInfo {
+        index,
+        name,
+        type_byte,
+        grade,
+        required_type,
+        required_class,
+        required_gender,
+        set_type,
+        shape,
+        weight,
+        light,
+        required_amount,
+        image,
+        durability,
+        stack_size,
+        price,
+        start_item,
+        effect,
+        bool_flags,
+        bind_mode,
+        special_mode,
+        random_stats_id,
+        can_fast_run,
+        can_awakening,
+        slots,
+        stats_json,
+        has_tool_tip,
+        tool_tip,
+    })
+}
+
+/// v>84 的 `ItemInfo` 布局。与 ≤84 的差别（逐条对照 `Shared/Data/ItemData.cs`）：
+///
+/// 1. `StackSize` 由 **u32 变 u16**（`:88-95`）；
+/// 2. 那批**固定** Stats（MinAC..CriticalDamage、Bag/Hand/WearWeight、Strong..MPRatePercent、
+///    MaxACRatePercent..PoisonAttack、Reflect/HPDrainRatePercent）**整段不再存在**，
+///    改由自描述的 `Stats(reader, …)` 读（`:188-191` → `Shared/Data/Stat.cs:36-42`：
+///    `int count` 后跟 `count` 组 `(u8 stat, i32 value)`）；
+/// 3. 多一个 `Slots`(u8)（`:183-186`，version > 83）。
+///
+/// 这三处任何一个读错都会让**后续所有物品错位**（不是只坏一个物品），所以顺序必须逐字对齐。
+fn read_item_info_v85_plus<R: Read>(
+    reader: &mut BinaryReader<R>,
+) -> std::io::Result<ParsedItemInfo> {
+    let index = reader.read_raw_i32()?;
+    let name = reader.read_string()?;
+    let type_byte = reader.read_raw_u8()?;
+    let grade = reader.read_raw_u8()?;
+    let required_type = reader.read_raw_u8()?;
+    let required_class = reader.read_raw_u8()?;
+    let required_gender = reader.read_raw_u8()?;
+    let set_type = reader.read_raw_u8()?;
+
+    let shape = reader.read_raw_i16()?;
+    let weight = reader.read_raw_u8()?;
+    let light = reader.read_raw_u8()?;
+    let required_amount = reader.read_raw_u8()?;
+
+    let image = reader.read_raw_u16()?;
+    let durability = reader.read_raw_u16()?;
+
+    let stack_size = reader.read_raw_u16()?; // v>84: u16（老布局是 u32）
+    let price = reader.read_raw_u32()?;
+
+    let start_item = reader.read_boolean()?;
+    let effect = reader.read_raw_u8()?;
+    let bool_flags = reader.read_raw_u8()?;
+
+    let bind_mode = reader.read_raw_i16()?;
+    let special_mode = reader.read_raw_i16()?; // Unique
+    let random_stats_id = reader.read_raw_u8()?;
+    let can_fast_run = reader.read_boolean()?;
+    let can_awakening = reader.read_boolean()?;
+    let slots = reader.read_raw_u8()?;
+
+    // 自描述 Stats：int count + count 组 (u8 stat, i32 value)
+    let stats = read_stats_dict(reader)?;
     let stats_json = stats_to_json(&stats);
 
     let has_tool_tip = reader.read_boolean()?;
@@ -836,8 +960,14 @@ fn read_item_info<R: Read>(
 
 fn read_monster_info<R: Read>(
     reader: &mut BinaryReader<R>,
-    _version: i32,
+    version: i32,
 ) -> std::io::Result<ParsedMonsterInfo> {
+    // 版本分叉（对照 `Server/MirDatabase/MonsterInfo.cs:53-148`）：v>84 起 `Stats` 改成自描述块，
+    // 且 DropPath（v≥89）确实存在。工具此前只实现 ≤84 的老布局 ⇒ 拿 v112 的库跑，
+    // 怪物会“条条成功、条条错位”，直到 NPC 段的 count 读成垃圾（实测 1819626079）。
+    if version > 84 {
+        return read_monster_info_v85_plus(reader);
+    }
     // File was saved with OLD MonsterInfo Save format (before commit 4ee54261).
     // Format: Index(i32), Name, Image(u16), AI(u8), Effect(u8), Level(u16),
     // ViewRange(u8), CoolEye(u8), HP(u32),
@@ -905,6 +1035,59 @@ fn read_monster_info<R: Read>(
         auto_rev,
         undead,
         can_recall: false, // 旧格式二进制无 CanRecall（v115+ 字段），默认 false
+        drop_path,
+    })
+}
+
+/// v>84 的 `MonsterInfo`。逐条对照 `Server/MirDatabase/MonsterInfo.cs:53-148`：
+/// `Index, Name, Image(u16), AI(u8), Effect(u8), Level(u16), ViewRange(u8), CoolEye(u8),
+///  Stats(自描述), Light(u8), AttackSpeed(u16), MoveSpeed(u16), Experience(u32),
+///  CanPush, CanTame, AutoRev(≥18), Undead, DropPath(≥89), [CanRecall ≥115], [IsBoss ≥116]`。
+/// 本库是 v112 ⇒ 读 DropPath、不读 CanRecall/IsBoss。
+fn read_monster_info_v85_plus<R: Read>(
+    reader: &mut BinaryReader<R>,
+) -> std::io::Result<ParsedMonsterInfo> {
+    let index = reader.read_raw_i32()?;
+    let name = reader.read_string()?;
+    let image = reader.read_raw_u16()?;
+    let ai = reader.read_raw_u8()?;
+    let effect = reader.read_raw_u8()?;
+    let level = reader.read_raw_u16()?;
+    let view_range = reader.read_raw_u8()?;
+    let cool_eye = reader.read_raw_u8()?;
+
+    let stats = read_stats_dict(reader)?;
+    let stats_json = stats_to_json(&stats);
+
+    let light = reader.read_raw_u8()?;
+    let attack_speed = reader.read_raw_u16()?;
+    let move_speed = reader.read_raw_u16()?;
+    let experience = reader.read_raw_u32()?;
+    let can_push = reader.read_boolean()?;
+    let can_tame = reader.read_boolean()?;
+    let auto_rev = reader.read_boolean()?; // v>=18
+    let undead = reader.read_boolean()?;
+    let drop_path = reader.read_string()?; // v>=89
+
+    Ok(ParsedMonsterInfo {
+        index,
+        name,
+        image,
+        ai,
+        effect,
+        level,
+        view_range,
+        cool_eye,
+        stats_json,
+        light,
+        attack_speed,
+        move_speed,
+        experience,
+        can_push,
+        can_tame,
+        auto_rev,
+        undead,
+        can_recall: false, // v<115 ⇒ 文件里没有该字段
         drop_path,
     })
 }
@@ -2518,7 +2701,7 @@ async fn main() -> anyhow::Result<()> {
     create_tables(&pool).await?;
 
     // === MapInfo[] ===
-    let map_count = reader.read_raw_i32()?;
+    let map_count = read_section_count(&mut reader, "map")?;
     info!("Migrating {} maps...", map_count);
     let mut map_ok = 0;
     for i in 0..map_count {
@@ -2536,7 +2719,7 @@ async fn main() -> anyhow::Result<()> {
     info!("  Maps migrated: {}", map_ok);
 
     // === ItemInfo[] ===
-    let item_count = reader.read_raw_i32()?;
+    let item_count = read_section_count(&mut reader, "item")?;
     info!("Migrating {} items...", item_count);
     let mut item_ok = 0;
     for i in 0..item_count {
@@ -2554,7 +2737,7 @@ async fn main() -> anyhow::Result<()> {
     info!("  Items migrated: {}", item_ok);
 
     // === MonsterInfo[] ===
-    let monster_count = reader.read_raw_i32()?;
+    let monster_count = read_section_count(&mut reader, "monster")?;
     info!("Migrating {} monsters...", monster_count);
     let mut monster_ok = 0;
     for i in 0..monster_count {
@@ -2572,7 +2755,7 @@ async fn main() -> anyhow::Result<()> {
     info!("  Monsters migrated: {}", monster_ok);
 
     // === NPCInfo[] ===
-    let npc_count = reader.read_raw_i32()?;
+    let npc_count = read_section_count(&mut reader, "npc")?;
     info!("Migrating {} NPCs...", npc_count);
     let mut npc_ok = 0;
     for i in 0..npc_count {
@@ -2590,7 +2773,7 @@ async fn main() -> anyhow::Result<()> {
     info!("  NPCs migrated: {}", npc_ok);
 
     // === QuestInfo[] ===
-    let quest_count = reader.read_raw_i32()?;
+    let quest_count = read_section_count(&mut reader, "quest")?;
     info!("Migrating {} quests...", quest_count);
     let mut quest_ok = 0;
     for i in 0..quest_count {
@@ -2664,7 +2847,7 @@ async fn main() -> anyhow::Result<()> {
 
     // === ConquestInfo[] (v66+) ===
     if version >= 66 {
-        let conquest_count = reader.read_raw_i32()?;
+        let conquest_count = read_section_count(&mut reader, "conquest")?;
         if conquest_count > 100_000 {
             warn!(
                 "Conquest count ({}) seems invalid, skipping",
