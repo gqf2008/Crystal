@@ -490,6 +490,10 @@ enum ControlCommand {
     /// 等效于"输入法已提交这些字符"。用来驱动真实文本框路径（如建角名字框），
     /// 而不是绕过去直接改状态——否则"能不能打字"这条永远不会被测到。
     TypeText { text: String, reply: Sender<String> },
+    /// 合成**功能键**（2026-09-26）：`{"key":"enter|escape|backspace|tab"}`。
+    /// `type_text` 只管"字符"，而打开聊天输入行（Enter）、取消（Escape）、删字（Backspace）
+    /// 这些**非字符键**同样要能被夹具驱动——否则"键盘路径"只测得了一半。
+    Key { key: String, reply: Sender<String> },
     /// 只读探针：建角对话框状态（可见性/名字/焦点/职业/性别/名字是否合法）。
     /// 为什么需要：建角发生在 **Select 态**（"非 Game"），`state` RPC 只回 `not in game`，
     /// 夹具此前无法知道"名字到底打进去了没有、窗口到底开没开"——判据只能靠猜。
@@ -552,6 +556,29 @@ impl Drop for PendingClick {
 /// 悬停用的光标位置：探针优先，其次真实窗口光标（纯函数便于单测）。
 pub fn resolve_cursor(probe: Option<Vec2>, window: Option<Vec2>) -> Option<Vec2> {
     probe.or(window)
+}
+
+/// 功能键名 → `KeyboardInput` 并投递（`type_text` 只管字符，非字符键走这里）。
+/// 返回 `false` = 键名不认识（调用方应回报，别静默）。
+fn inject_named_key(keys: &mut MessageWriter<KeyboardInput>, name: &str) -> bool {
+    use bevy::input::keyboard::KeyCode;
+    let (key_code, logical_key, text): (KeyCode, Key, Option<&'static str>) =
+        match name.to_ascii_lowercase().as_str() {
+            "enter" | "return" => (KeyCode::Enter, Key::Enter, Some("\r")),
+            "escape" | "esc" => (KeyCode::Escape, Key::Escape, None),
+            "backspace" => (KeyCode::Backspace, Key::Backspace, None),
+            "tab" => (KeyCode::Tab, Key::Tab, None),
+            _ => return false,
+        };
+    keys.write(KeyboardInput {
+        key_code,
+        logical_key,
+        state: ButtonState::Pressed,
+        text: text.map(|t| t.into()),
+        repeat: false,
+        window: Entity::PLACEHOLDER,
+    });
+    true
 }
 
 /// 悬停/点击命中用的光标来源（探针优先，其次真实窗口光标）。
@@ -1651,6 +1678,32 @@ fn handle_conn(mut stream: std::net::TcpStream, tx: Sender<ControlCommand>) {
                     json!({"error": "control channel closed"})
                 }
             }
+            "key" => {
+                let key = params
+                    .get("key")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_ascii_lowercase();
+                if key.is_empty() {
+                    json!({"error": "missing key"})
+                } else {
+                    let (reply_tx, reply_rx) = bounded::<String>(1);
+                    if tx
+                        .send(ControlCommand::Key {
+                            key: key.clone(),
+                            reply: reply_tx,
+                        })
+                        .is_ok()
+                    {
+                        let s = reply_rx
+                            .recv_timeout(std::time::Duration::from_secs(3))
+                            .unwrap_or_else(|_| "{}".to_string());
+                        serde_json::from_str::<Value>(&s).unwrap_or_else(|_| json!({}))
+                    } else {
+                        json!({"error": "control channel closed"})
+                    }
+                }
+            }
             "diag_closebtn" => {
                 let _ = tx.send(ControlCommand::DiagCloseBtn);
                 json!({"ok": true})
@@ -2011,6 +2064,17 @@ fn drain_control_outside_game(
                 }
                 let _ = reply.try_send(json!({"ok": true, "chars": n}).to_string());
             }
+            ControlCommand::Key { key, reply } => {
+                let ok = inject_named_key(&mut keys, &key);
+                let _ = reply.try_send(
+                    if ok {
+                        json!({"ok": true, "key": key})
+                    } else {
+                        json!({"ok": false, "error": "unknown key"})
+                    }
+                    .to_string(),
+                );
+            }
             ControlCommand::NewCharProbe { reply } => {
                 let s = match new_char.as_ref() {
                     Some(nc) => json!({
@@ -2050,6 +2114,7 @@ fn control_reply(cmd: &ControlCommand) -> Option<&Sender<String>> {
         | ControlCommand::ChatSize { reply, .. }
         | ControlCommand::Click { reply, .. }
         | ControlCommand::TypeText { reply, .. }
+        | ControlCommand::Key { reply, .. }
         | ControlCommand::NewCharProbe { reply }
         | ControlCommand::DialogRect { reply, .. }
         | ControlCommand::GetScroll { reply }
@@ -2487,6 +2552,17 @@ fn apply_control_commands(
                 let _ = reply.try_send(
                     json!({"ok": false, "error": "only available outside game (select screen)"})
                         .to_string(),
+                );
+            }
+            ControlCommand::Key { key, reply } => {
+                let ok = inject_named_key(&mut q.keys, &key);
+                let _ = reply.try_send(
+                    if ok {
+                        json!({"ok": true, "key": key})
+                    } else {
+                        json!({"ok": false, "error": "unknown key"})
+                    }
+                    .to_string(),
                 );
             }
             ControlCommand::DiagCloseBtn => {
