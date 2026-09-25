@@ -452,6 +452,7 @@ pwsh tools/acceptance/l5y_reconnect.ps1 -ServerWorkDir %TEMP%\e2e_workdir
 | 客户端黑屏 / 缺图 / 中文变方框 | `Data/` 不在可执行文件同目录（或路径不对） |
 | 服务端报 `map file not found` | `Daneo1989/` 缺失或与 `server.map_data_dir` 不一致 |
 | 交任务没奖励 / 任务对话为空 / 任务列表空 | 任务与 NPC 脚本目录 = `<server.map_data_dir>/Envir/{Quests,NPCs}`；数据根不对时启动日志有 `quest_dir 不存在` 与 `任务奖励全部为 0` 告警（正常为 `Resolved N kill tasks…` + `Quest rewards resolved: x/y`） |
+| 建角点确定没反应 / 无法创建角色 | 角色名规则 = `3..=15` 个字符（中文/下划线/ASCII 字母数字，= C# `Envir.CharacterReg`）。规则真源在 `SharedRust/src/validation.rs`，客户端（确定键与名字边框）与服务端（gate 预检 + world 建角）**都调它**：客户端不再对"2 字名字"显示合法，服务端拒绝时也会回 `S.NewCharacter{Result=1}`（客户端显示"创建角色失败！"）。排查时看服务端日志 `NewCharacter rejected: invalid name` 与客户端 `⛔ 新建角色被拒绝 result=` |
 | 登录提示「密码错误」但密码没错 | 该账号**已在线**（服务端拒绝重复登录，C# 同语义）。等前一个连接断开（或重启服务端）再登 |
 | `refine-test` 报「未收到 NPCRefine / 未收到精炼结果」 | 前置没做：角色不在铁匠旁（`CallNPC` 距离 ≤2 格）或没跑 `scripts/e2e_refine_prep.py prepare`（`run_real_e2e.ps1` 会自动做） |
 | 端口被占用 | `config/server.toml` 的 `network.listen_addr`；客户端同步改 `config.ini` 的 `ServerAddr` |

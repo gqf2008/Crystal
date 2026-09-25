@@ -1130,12 +1130,9 @@ impl Message<NewCharacterRequest> for WorldActor {
         }
         // C# 规则（Globals.MinCharacterNameLength=3 / MaxCharacterNameLength=15 / Envir.CharacterReg）：
         // 名称 3..15 字符，仅中文/下划线/ASCII 字母数字
-        let name_len = msg.name.chars().count();
-        let valid_name = (3..=15).contains(&name_len)
-            && msg.name.chars().all(|c| {
-                c == '_' || c.is_ascii_alphanumeric() || ('\u{4e00}'..='\u{9fa5}').contains(&c)
-            });
-        if !valid_name {
+        // 2026-09-25：改用**共享真源**（此前这里是第三份拷贝；客户端那份曾写成 1..=15，
+        // 于是 2 字名字在客户端"合法"、到服务端被拒 ⇒ owner 报的"无法创建角色"）。
+        if !mir2_shared::validation::character_name_valid(&msg.name) {
             // C# CharacterReg 不匹配 → Result=1
             send_new_character_result(&self.gate_ref, msg.session_id, 1);
             return;

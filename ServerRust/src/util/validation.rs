@@ -19,10 +19,12 @@ pub const MAX_PASSWORD_LEN: usize = 15;
 pub const MIN_PASSWORD_LEN: usize = 5;
 
 /// 最大角色名长度（C# Globals.MaxCharacterNameLength = 15，按字符计数）。
-pub const MAX_CHAR_NAME_LEN: usize = 15;
+/// 角色名长度上限（**真源在 SharedRust**，见 `mir2_shared::validation`）
+pub use mir2_shared::validation::MAX_CHARACTER_NAME_CHARS as MAX_CHAR_NAME_LEN;
 
 /// 最小角色名长度（C# Globals.MinCharacterNameLength = 3，按字符计数）。
-pub const MIN_CHAR_NAME_LEN: usize = 3;
+/// 角色名长度下限（**真源在 SharedRust**，见 `mir2_shared::validation`）
+pub use mir2_shared::validation::MIN_CHARACTER_NAME_CHARS as MIN_CHAR_NAME_LEN;
 
 /// 最大 NPC 输入长度(对话框文本输入)。
 pub const MAX_NPC_INPUT_LEN: usize = 64;
@@ -59,15 +61,13 @@ pub fn validate_password(pw: &str) -> bool {
     pw.chars().all(|c| c.is_ascii_alphanumeric())
 }
 
-/// 验证角色名：3-15 字符（按字符计数），字符集对齐 C# Envir.CharacterReg
-/// `[\u4e00-\u9fa5_A-Za-z0-9]`（中文/下划线/ASCII 字母数字）。
+/// 验证角色名：**委托给共享真源** `mir2_shared::validation::character_name_valid`
+/// （3..=15 字符、中文/下划线/ASCII 字母数字；= C# `Envir.CharacterReg`）。
+///
+/// 2026-09-25：此前这里与客户端各写一份规则，客户端那份是 `1..=15` ⇒ 2 字中文名在客户端"合法"、
+/// 到服务端被静默拒绝（owner 报的"无法创建角色"）。规则只能有一份，两端都调共享函数。
 pub fn validate_character_name(name: &str) -> bool {
-    let len = name.chars().count();
-    if !(MIN_CHAR_NAME_LEN..=MAX_CHAR_NAME_LEN).contains(&len) {
-        return false;
-    }
-    name.chars()
-        .all(|c| c == '_' || c.is_ascii_alphanumeric() || ('\u{4e00}'..='\u{9fa5}').contains(&c))
+    mir2_shared::validation::character_name_valid(name)
 }
 
 /// 验证 NPC 对话输入:≤64 字符,无 control chars。

@@ -1586,6 +1586,53 @@ async fn e2e_login_flow() {
     assert!(!rx.is_closed());
 }
 
+/// 建角：**名字非法时 gate 必须回 `S.NewCharacter{Result=1}`**，不许静默丢弃。
+///
+/// 背景（owner 2026-09-25 反馈"无法创建角色"）：gate 侧的名字预检原先只 `warn!` 后 `return`，
+/// 客户端收不到任何回执；而客户端那份规则当时是 `1..=15`、服务端是 `3..=15` ⇒ 2 字中文名
+/// （如"小明"）在界面上显示合法、点确定后**什么都不会发生**。
+///
+/// 判据：只起 gate（不起 world）也能跑到名字校验分支 ⇒ 2 字名字必须换来 Result=1 的回包；
+/// 去掉回包（或让 gate 静默 return）时本测试会因 2s 内收不到包而红。
+#[tokio::test]
+async fn e2e_new_character_short_name_gets_result_packet() {
+    let session_id = 91u64;
+    let (gate_ref, _tx, mut rx) = setup_gate_and_session(session_id).await;
+    let _ = e2e_setup_login(&gate_ref, session_id, &mut rx).await;
+
+    // "小明" = 2 字中文（服务端规则 3..=15 ⇒ 非法）
+    let mut body = Vec::new();
+    let _ = mir2_shared::binary::write_dotnet_string(&mut body, "小明");
+    body.push(0u8); // gender = Male
+    body.push(0u8); // class = Warrior
+    let pkt = build_packet_bytes(
+        mir2_shared::enums::ClientPacketIds::NewCharacter as i16,
+        &body,
+    );
+    let _ = gate_ref
+        .ask(ClientData {
+            session_id,
+            data: pkt,
+        })
+        .await;
+
+    let nc_opcode = mir2_shared::enums::ServerPacketIds::NewCharacter as i16;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+    loop {
+        let data = tokio::time::timeout_at(deadline, rx.recv())
+            .await
+            .expect("超时：非法名字被静默拒绝（客户端收不到 S.NewCharacter 回执）")
+            .expect("channel closed");
+        if data.len() >= 5 {
+            let opcode = i16::from_le_bytes([data[2], data[3]]);
+            if opcode == nc_opcode {
+                assert_eq!(data[4], 1u8, "C# 语义：CharacterReg 不匹配 → Result=1");
+                return;
+            }
+        }
+    }
+}
+
 #[test]
 fn e2e_start_game_flow() {
     let rt = tokio::runtime::Builder::new_multi_thread()

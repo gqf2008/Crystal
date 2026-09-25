@@ -1218,13 +1218,31 @@ impl Message<ClientData> for GateActor {
                     );
                     return;
                 }
-                forward_new_character(
+                if let Err(result_code) = forward_new_character(
                     &self.world_ref,
                     &self.session_usernames,
                     msg.session_id,
                     payload,
                 )
-                .await;
+                .await
+                {
+                    // 拒绝必须**回包**（C#：`S.NewCharacter{Result}`；世界侧对同一规则回 Result=1）。
+                    // 此前这里只 `warn!` 后静默 return ⇒ 客户端收不到任何回执，
+                    // 玩家看到的就是"点了确定没反应 / 无法创建角色"（owner 2026-09-25 反馈）。
+                    let data =
+                        build_packet_bytes(ServerPacketIds::NewCharacter as i16, &[result_code]);
+                    let gate_ref = ctx.actor_ref().clone();
+                    let _ = gate_ref
+                        .tell(SendToClient {
+                            session_id: msg.session_id,
+                            data,
+                        })
+                        .try_send();
+                    warn!(
+                        "NewCharacter rejected at gate: session={} result={}",
+                        msg.session_id, result_code
+                    );
+                }
             }
             x if x == ClientPacketIds::ChangePassword as i16 => {
                 forward_change_password(
@@ -3167,37 +3185,35 @@ fn forward_remove_storage_password(
 }
 
 /// NewCharacter: [name: DotNetString(7bit)][gender: u8][class: u8]（对齐 C# ClientPackets.NewCharacter）
+/// 返回 `Err(result_code)` 表示**在 Gate 侧就被拒绝**（调用方必须把 `S.NewCharacter{Result=code}`
+/// 回给客户端——静默丢弃会让玩家看到"点了确定没反应"）。
 async fn forward_new_character(
     world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>,
     session_usernames: &HashMap<SessionId, String>,
     session_id: SessionId,
     payload: &[u8],
-) {
+) -> Result<(), u8> {
     if payload.len() < 4 {
-        return;
+        return Err(1);
     }
-    let world_ref = match world_ref {
-        Some(w) => w,
-        None => {
-            return;
-        }
-    };
-    // 用 SharedRust 的 DotNetString 解析（7-bit 长度前缀），与客户端一致
+    // 用 SharedRust 的 DotNetString 解析（7-bit 长度前缀），与客户端一致。
+    // 顺序：**先校验输入、再判断能不能转发** —— 输入非法时不需要 world 就能给出正确的拒绝码，
+    // 也让"坏输入必须回 Result=1"这条判据可以在只起 gate 的测试里钉住（不必拉起整个世界）。
     let mut cur = std::io::Cursor::new(payload);
     let name = match mir2_shared::binary::read_dotnet_string(&mut cur) {
         Ok(n) => n,
         Err(e) => {
             warn!("NewCharacter name parse failed: {}", e);
-            return;
+            return Err(1);
         }
     };
     let gender = match cur.get_ref().get(cur.position() as usize).copied() {
         Some(g) => g,
-        None => return,
+        None => return Err(1),
     };
     let class = match cur.get_ref().get(cur.position() as usize + 1).copied() {
         Some(c) => c,
-        None => return,
+        None => return Err(1),
     };
     // hair 由服务端随机生成（C# HumanObject.NewCharacter: Hair = Random.Next(0, 9)）
     let hair = 0;
@@ -3208,8 +3224,15 @@ async fn forward_new_character(
             "NewCharacter rejected: invalid name '{}' from session {}",
             name, session_id
         );
-        return;
+        // C#：CharacterReg 不匹配 → Result=1（与世界侧同一码）
+        return Err(1);
     }
+    let world_ref = match world_ref {
+        Some(w) => w,
+        None => {
+            return Err(1);
+        }
+    };
     debug!(
         "NewCharacter: session={} name={} class={} gender={} hair={}",
         session_id, name, class, gender, hair
@@ -3221,7 +3244,7 @@ async fn forward_new_character(
             "NewCharacter rejected: no account mapping for session={}",
             session_id
         );
-        return;
+        return Err(1);
     };
     let req = crate::actors::world::NewCharacterRequest {
         session_id,
@@ -3235,6 +3258,7 @@ async fn forward_new_character(
         Ok(()) => info!("NewCharacter ask completed: session={}", session_id),
         Err(e) => warn!("NewCharacter ask failed: session={} err={}", session_id, e),
     }
+    Ok(())
 }
 
 /// DeleteCharacter: [character_index: i32]
