@@ -127,3 +127,39 @@ impl Packet for DeleteCharacterSuccess {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::packets::Packet;
+    use chrono::TimeZone;
+
+    /// `NewCharacterSuccess` 的读写必须**自洽**（字段序 index → name → level → class → gender → ticks）。
+    ///
+    /// 为什么专门钉它：2026-09-26 实测过一次"服务端手写 body 时把 name 放在 index 前面"的事故——
+    /// 客户端 `read_body` 解析失败、`if let Ok(...)` 静默跳过，角色**建出来了但界面毫无反应**
+    /// （玩家体感＝"无法创建角色"）。判据必须是**往返相等**，而不是"两边各自看着都对"。
+    #[test]
+    fn new_character_success_roundtrip() {
+        let one = NewCharacterSuccess {
+            character: crate::packets::CharacterSummary {
+                index: 7,
+                name: "小明明".to_string(),
+                level: 3,
+                class: crate::enums::MirClass::Taoist,
+                gender: crate::enums::MirGender::Female,
+                last_access: chrono::Utc.timestamp_opt(1_700_000_000, 0).unwrap(),
+            },
+        };
+        let mut body = Vec::new();
+        one.write_body(&mut body).expect("write_body");
+        // 首 4 字节必须是 index（而不是 dotnet 字符串长度）——正是事故里被写反的那一处
+        assert_eq!(
+            i32::from_le_bytes([body[0], body[1], body[2], body[3]]),
+            7,
+            "首字段必须是 index；若这里变成字符串长度，就是字段序又写反了"
+        );
+        let two = NewCharacterSuccess::read_body(&mut body.as_slice()).expect("read_body");
+        assert_eq!(two, one, "NewCharacterSuccess 往返必须相等");
+    }
+}
