@@ -4,6 +4,13 @@ use super::*;
 use bevy::prelude::*;
 
 /// --fishing-test：打开钓鱼 → 抛竿 → 等 FishingUpdate → 等收获聊天消息
+///
+/// 2026-09-25：整轮**没有鱼咬钩**时服务端静默收竿（C# `PlayerObject.UpdateFish` 同样不 Enqueue
+/// 结果消息，见 `Server/MirObjects/PlayerObject.cs:11199-11231`），这是**合法结果**而不是缺陷——
+/// 旧实现到点没看到聊天消息就判失败，实测约 20~25% 假红（4 次单跑中 1 次、整轮验收里也红过一次）。
+/// 现在按 C# 语义区分两种「没消息」：① 咬过钩却没消息 = 收竿链断了 → 仍判失败；
+/// ② 整轮没咬钩 → 重抛再等，最多 `MAX_CASTS` 次仍没咬钩才判失败（≈3e-4 才误报）。
+const MAX_CASTS: u8 = 5;
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn auto_fishing_test(
     net: ResMut<client_bevy::network::NetConnection>,
@@ -14,6 +21,8 @@ pub(crate) fn auto_fishing_test(
     mut mgr: ResMut<client_bevy::game::dialogs::DialogManager>,
     mut t: Local<f32>,
     mut stage: Local<u8>,
+    mut casts: Local<u8>,
+    mut bite_seen: Local<bool>,
 ) {
     use client_bevy::scenes::AppState;
     if *state != AppState::Game {
@@ -29,7 +38,8 @@ pub(crate) fn auto_fishing_test(
                 mgr.toggle(client_bevy::game::dialogs::DialogKind::Fishing);
             }
             net.send_packet(&client_bevy::network::FishingCastWire { fishing_type: 0 });
-            tracing::info!("[FISHTEST] 抛竿");
+            *bite_seen = false;
+            tracing::info!("[FISHTEST] 抛竿（第 {} 次）", *casts + 1);
             *stage = 1;
             *t = 0.0;
         }
@@ -55,8 +65,10 @@ pub(crate) fn auto_fishing_test(
             }
         }
         2 => {
-            if *t < 12.0 {
-                return;
+            // 咬钩是瞬时事件：服务端只在咬钩那一拍把 FoundFish 置真（随后等待拍又置假，
+            // 见 ServerRust/src/actors/world/tick.rs 的 waits 分支），所以这里必须**latch**。
+            if fishing.found_fish {
+                *bite_seen = true;
             }
             let hit = chat
                 .lines
@@ -69,15 +81,44 @@ pub(crate) fn auto_fishing_test(
                         || text.contains("需要装备鱼竿")
                 })
                 .map(|(text, _, _, _)| text.clone());
-            match hit {
-                Some(text) => {
-                    tracing::info!("[FISHTEST] ✅ 收获消息: {}", text);
-                    *stage = 9;
-                }
-                None => {
-                    tracing::warn!("[FISHTEST] ❌ 未收到收获消息");
-                    *stage = 9;
-                }
+            if let Some(text) = hit {
+                tracing::info!(
+                    "[FISHTEST] ✅ 收获消息: {}（第 {} 次抛竿）",
+                    text,
+                    *casts + 1
+                );
+                *stage = 9;
+                return;
+            }
+            // 本轮结束：服务端收竿（Fishing=false）或 12s 兜底超时
+            if fishing.fishing && *t < 12.0 {
+                return;
+            }
+            if *bite_seen {
+                // 咬钩后服务端**必然**收竿并回一条结果消息（钓到了物品！/ 鱼跑了...）
+                tracing::warn!(
+                    "[FISHTEST] ❌ 咬钩后未收到收竿消息（第 {} 次抛竿，收竿链断了）",
+                    *casts + 1
+                );
+                *stage = 9;
+            } else if *casts + 1 < MAX_CASTS {
+                *casts += 1;
+                tracing::info!(
+                    "[FISHTEST] ↩ 第 {} 次抛竿整轮未咬钩（C# 同样静默收竿，属合法结果）→ 重抛",
+                    *casts
+                );
+                net.send_packet(&client_bevy::network::FishingCastWire { fishing_type: 0 });
+                // 回到「等 FishingUpdate」阶段：新一拍的 `fishing=true` 到达前，
+                // 客户端的 `fishing.fishing` 仍是 false（那是**上一轮**收竿后的残留），
+                // 留在 stage 2 会把 5 次重抛在几十毫秒内空转完（实测）。
+                *stage = 1;
+                *t = 0.0;
+            } else {
+                tracing::warn!(
+                    "[FISHTEST] ❌ 连续 {} 次抛竿都没有咬钩（咬钩链路异常）",
+                    *casts + 1
+                );
+                *stage = 9;
             }
         }
         _ => {}
