@@ -193,19 +193,29 @@ cd Client-Bevy && cargo test                     # 794 lib + 7 bin + 2 + 53
 
 三侧 `cargo fmt -- --check` 均须 0 差异。
 
-另有四条**离线的对账/卫生门禁**（秒级，不起客户端）：
+另有五条**离线的对账/卫生门禁**（秒级，不起客户端）：
 
 ```bash
 pwsh tools/acceptance/e2e_lock_selftest.ps1      # 实机资源锁自证（§5.4）
 pwsh tools/acceptance/flag_coverage_check.ps1    # 客户端 auto 开关覆盖清单对账
 pwsh tools/ops/check_process_scope.ps1           # ops/验收脚本不得按进程名清共享资源
 pwsh tools/ops/check_bot_timeouts.ps1            # ops 演练不得有同步无超时的 bot 调用
+pwsh tools/ops/check_doc_tool_refs.ps1           # 文档引用的 tools/** 脚本必须存在且**已入库**
 ```
 
 后两条是**运营工具自身的卫生门禁**（本机常态多 agent 并行：7000 上常驻开发服）：前者禁止
 `Get-Process -Name mir2_server | Stop-Process -Force` 这类按进程名清场（会把别人正在跑的验收
 打成假红，见 `LESSON_多agent并行时按进程名清进程会污染他人GUI实验`），后者禁止"同步无超时的
 bot 调用"（端口不一致时会静默挂死）。两条都自带阳性对照，且各有 allowlist 作为待迁移清单。
+
+最后一条（2026-09-26 补）针对本仓的**白名单式 `.gitignore`**：`tools/acceptance/`、`tools/ops/`
+下新脚本默认被忽略且**不报错**，于是"作者以为提交了、其实只在那台机器上"的事发生过两次
+（`walgit_entry.py`、逐窗截图矩阵那套 6 个文件），文档却把它们当方法引用着。判据＝
+**文档引用的可执行脚本（.ps1/.py/.sh/.bat/.cmd）必须存在且在 `git ls-files` 里**；
+`tools/ops/out/*.json` 这类**演练产物路径**不入判据。上线时抓到 8 个引用但未入库的脚本
+（`player_walk*.ps1`/`ui_sweep.ps1`/`ui_bugfix_verify.ps1`/`npc_text_verify.ps1`/
+`ime_rpc_verify.ps1`/`seed_db.py`/`smoke_r5.ps1`），已一并入库，**allowlist 为空**；
+沙箱阳性/阴性对照（未入库→红、不存在→红、已入库→绿、产物 json→不判）均已实做。
 
 `flag_coverage_check.ps1` 把「哪些 `--xxx-test` 开关进发版门禁、哪些只是历史探针」钉在
 `tools/acceptance/CLIENT_AUTO_FLAGS.md` 上：源码新增/删除开关、或清单把某个开关标成 `gate`
