@@ -265,6 +265,11 @@ Write-Host ("[3/4] 部署 {0} → {1}" -f $ServerExe, $deployExe)
 Copy-Item -LiteralPath $ServerExe -Destination $deployExe -Force
 $outLog = Join-Path $DeployDir 'server.out.log'
 $errLog = Join-Path $DeployDir 'server.err.log'
+# NOTE（2026-09-26 实测）：本脚本自己会正常退出（`Start-Process` 起完服务端即继续，最后 exit 0），
+# 但**服务端是长驻子进程** —— 在"把 stdout 接进管道/等整棵进程树结束"的自动化宿主里，
+# `pwsh -File restart_e2e_server.ps1 | …` 会看起来一直不返回（进程树里有服务端）。
+# 脚本化调用请改成 `Start-Process pwsh -ArgumentList … -PassThru`（然后轮询 `HasExited`/读
+# `server_build_record.json`），或直接调用后用记录文件判断结果。
 Start-Process -FilePath $deployExe -WorkingDirectory $DataRoot -WindowStyle Hidden `
     -RedirectStandardOutput $outLog -RedirectStandardError $errLog | Out-Null
 $up = $false

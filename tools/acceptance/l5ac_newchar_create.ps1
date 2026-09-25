@@ -10,7 +10,9 @@ param(
     [string]$Pass = '123456',
     [string]$Name = '小明明',
     [string]$ClientHome = 'E:\Users\gxh\Documents\GitHub\Crystal-wt-blend',
-    [string]$ServerWorkDir = 'E:\Users\gxh\Documents\GitHub\Crystal\ServerRust',
+    # 留空 = 从 `%TEMP%\e2e_run\server_build_record.json` 的 `data_root` 解析（= **正在跑的那个服务端**用的库）。
+    # 判据来源必须是受测实例那一份（本仓踩过：判据读主检出的库、受测服务端却跑在别的目录 → 假红）。
+    [string]$ServerWorkDir = '',
     # 幂等开关：跑之前把这个测试账号（`$User`）的角色清掉，好让建角正路能反复跑。
     # **默认关**，且只动 `$User` 这一个账号的角色行；生产库别开。
     [switch]$CleanupCreated
@@ -26,8 +28,14 @@ try {
     if (-not (Get-NetTCPConnection -LocalPort 7000 -State Listen -EA SilentlyContinue)) {
         Write-Host 'FAIL(9): 7000 上没有服务端'; exit 9
     }
+    if (-not $ServerWorkDir) {
+        $rec = Join-Path $env:TEMP 'e2e_run\server_build_record.json'
+        if (-not (Test-Path $rec)) { Write-Host "FAIL(9): 没有 $rec —— 请先 pwsh tools\ops\restart_e2e_server.ps1（或用 -ServerWorkDir 显式指定）"; exit 9 }
+        $ServerWorkDir = (Get-Content $rec -Raw | ConvertFrom-Json).data_root
+    }
     $db = Join-Path $ServerWorkDir 'Data\crystal.db'
     if (-not (Test-Path $db)) { Write-Host "FAIL(9): 找不到库 $db"; exit 9 }
+    Write-Host ("[前置] 受测库 = {0}（服务端部署记录 data_root）" -f $db)
     if ($CleanupCreated) {
         Write-Host ("WARN: -CleanupCreated 会删掉账号 '{0}' 的**全部角色行**（测试账号专用）" -f $User)
         $del = "delete from characters where account_username='$User'"
