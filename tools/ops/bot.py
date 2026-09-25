@@ -238,6 +238,13 @@ def one_session(idx: int, host: str, port: int, account: str, password: str,
             res["login_reply_sec"] = round(time.time() - t0, 3)
             res["ok"] = True
             res["stage"] = "login_only_done"
+            # `--hold` 期间**保持已登录会话**再登出：此前这里立即 LOGOUT，导致
+            # `wall_sec≈0.08s`、`frames=0` —— 容量标定想测的"登录后稳态 per-session 成本"
+            # 根本测不到（拿到的 0.09MB/会话是瞬态；`mem_attribution.ps1` 的三档对比因此缺了基线）。
+            # 只影响 `--login-only`（其它路径本来就会在 hold 后返回）；登录延迟字段不受影响。
+            remaining = hold_sec - (time.time() - t0)
+            if remaining > 0:
+                time.sleep(remaining)
             sock.sendall(frame(OP_LOGOUT, b""))
             return res
 

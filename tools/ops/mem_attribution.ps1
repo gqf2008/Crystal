@@ -24,6 +24,11 @@ param(
 )
 $ErrorActionPreference = 'Continue'
 $ops = Split-Path -Parent $MyInvocation.MyCommand.Path
+# `tools/ops/out/` 是 gitignore 的产物目录：**新 worktree 里不存在**，而下面要把 bot JSON 写进去
+# （否则 Set-Content 静默失败 ⇒ 三档都变成 per-session=空，且只在末尾报 INCOMPLETE，像是"没测到"）。
+# 实测踩到：在干净 worktree 里跑这一条就得先建目录。
+$outDir = Join-Path $ops 'out'
+if (-not (Test-Path -LiteralPath $outDir)) { New-Item -ItemType Directory -Force -Path $outDir | Out-Null }
 $exe = Join-Path $DeployDir 'mir2_server.exe'
 $log = Join-Path $DeployDir 'memattr.log'
 
@@ -104,17 +109,29 @@ foreach ($t in $tiers) {
     # 或 `frames`/`opcodes` 明显多于登录往返），否则记 ok=$false 并注明"没有进图证据"，
     # 避免给"登录后保持"产出 per-session 数字。
     $entryEvidence = $true
-    if ($jsonExists -and $t.name -ne 'login_only') {
+    # **保持时长判据（每档都要）**：`bot.py --login-only` 实测 `wall_sec=0.08`（请求 --hold 30）
+    # —— 它登录后立刻退出、并没有保持连接，于是那档的 RSS 增量是**瞬态**而不是稳态；
+    # 上一轮就是因为缺这条前置，才把一个"没保持连接"的档当成了合法读数（已撤回重测）。
+    $heldOk = $true
+    $heldSec = $null
+    if ($jsonExists) {
         try {
             $bj = Get-Content $json -Raw | ConvertFrom-Json
             $s0 = @($bj.sessions)[0]
+            $heldSec = [double]$bj.summary.wall_sec
+            $heldOk = ($heldSec -ge ($HoldSec * 0.8))
+            if (-not $heldOk) {
+                Write-Host ("WARN: {0} 档没有保持连接（wall_sec={1}s，要求≈{2}s）——本档读数不可用" -f $t.name, $heldSec, $HoldSec) -ForegroundColor Yellow
+            }
             $frames = [int]$s0.frames
             $charRes = $s0.new_character_result
-            $entryEvidence = ($null -ne $charRes) -or ($frames -ge 8)
+            # **进图证据只对"进图档"要求**：只登录档本来就没有角色/地图帧（`frames=0` 是正常的），
+            # 对它套这条判据会让一个**有效**的登录后稳态读数被误判为不可用（实测踩到）。
+            $entryEvidence = if ($t.name -eq 'login_only') { $true } else { (($null -ne $charRes) -or ($frames -ge 8)) }
             if (-not $entryEvidence) {
                 Write-Host ("WARN: {0} 档没有进图证据（char_result={1} frames={2}）——本档读数不可用" -f $t.name, $charRes, $frames) -ForegroundColor Yellow
             }
-        } catch { $entryEvidence = $false }
+        } catch { $entryEvidence = $false; $heldOk = $false }
     }
     if (-not $done) { Write-Host ("WARN: {0} 档 bot 超时" -f $t.name) }
     Receive-Job $job -EA SilentlyContinue | Out-Null
@@ -125,8 +142,10 @@ foreach ($t in $tiers) {
     } else { $null }
     $rows += [pscustomobject]@{
         tier          = $t.name
-        ok            = (($null -ne $delta) -and $entryEvidence)
+        ok            = (($null -ne $delta) -and $entryEvidence -and $heldOk)
         entry_evidence = $entryEvidence
+        held_sec      = $heldSec
+        hold_expected = $HoldSec
         sessions      = $Sessions
         rss_idle_mb   = $rssIdle
         rss_loaded_mb = $rssLoaded
