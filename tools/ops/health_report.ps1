@@ -41,7 +41,11 @@ $jitter = if ($gapAvg -gt 0) { [Math]::Round((($gapMax - $gapAvg) / $gapAvg) * 1
 # `Session N read error: 远程主机强迫关闭了一个现有的连接`——它不是故障，是断连的正常表现。
 # 把两类混在一起会让健康判定永远 FAIL（本轮实测就是这个坑）。
 $allErrors = @($lines | Where-Object { $_ -match '\sERROR\s' })
-$benignPattern = 'read error.*(forced|强迫关闭|os error 10054)|Connection reset'
+# 良性断连：客户端正常退出/网络另一端消失时，服务端会在该 socket 上读到/写到 10054（WSAECONNRESET）。
+# 2026-09-25 修：原先只匹配 `read error`，漏了 **write error** —— 抖动演练里客户端被代理掐断时服务端
+# 打的正是 `Session 1 write error: … (os error 10054)`，于是被算成"真错误"，抖动项假红
+# （同一条还会让 alert_probe 把"玩家正常退出"报成告警）。读、写两种都要算良性。
+$benignPattern = '(read|write) error.*(forced|强迫关闭|os error 10054|os error 10053)|Connection reset|Broken pipe'
 $errors = @($allErrors | Where-Object { $_ -notmatch $benignPattern })
 $benignDisconnects = $allErrors.Count - $errors.Count
 $warns = @($lines | Where-Object { $_ -match '\sWARN\s' })
