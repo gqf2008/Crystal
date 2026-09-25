@@ -25,27 +25,6 @@ param(
         'fault_injection.ps1' = '杀服务端就是本演练的目的（故障注入）；待迁移到按自己 PID'
         'l5y_reconnect.ps1'   = '断线重连需要真杀服务端；待迁移到按自己 PID'
         'run_real_e2e.ps1'    = '仓库级 harness 开跑前清场；待迁移到按自己 PID'
-        # 以下 20 个：起客户端前按共享名批量清 client_bevy（跨行管道形态）。批次 issue #3181。
-        'l5a_combat.ps1'                = '批次 #3181：按共享名清 client_bevy，待改为唯一判别'
-        'l5d_npc_link.ps1'              = '批次 #3181：按共享名清 client_bevy，待改为唯一判别'
-        'l5e_storage_roundtrip.ps1'     = '批次 #3181：按共享名清 client_bevy，待改为唯一判别'
-        'l5f_mail_roundtrip.ps1'        = '批次 #3181：按共享名清 client_bevy，待改为唯一判别'
-        'l5g_quest_finish.ps1'          = '批次 #3181：按共享名清 client_bevy，待改为唯一判别'
-        'l5g2_quest_carry_items.ps1'    = '批次 #3181：按共享名清 client_bevy，待改为唯一判别'
-        'l5g3_quest_item_tasks.ps1'     = '批次 #3181：按共享名清 client_bevy，待改为唯一判别'
-        'l5g4_kill_tasks.ps1'           = '批次 #3181：按共享名清 client_bevy，待改为唯一判别'
-        'l5h_buy_item.ps1'              = '批次 #3181：按共享名清 client_bevy，待改为唯一判别'
-        'l5i_crossmap.ps1'              = '批次 #3181：按共享名清 client_bevy，待改为唯一判别'
-        'l5j_revive.ps1'                = '批次 #3181：按共享名清 client_bevy，待改为唯一判别'
-        'l5k_ranking_scroll.ps1'        = '批次 #3181：按共享名清 client_bevy，待改为唯一判别'
-        'l5l_npc_scroll_hitrect.ps1'    = '批次 #3181：按共享名清 client_bevy，待改为唯一判别'
-        'l5m_inventory_z.ps1'           = '批次 #3181：按共享名清 client_bevy，待改为唯一判别'
-        'l5n_shop_filters.ps1'          = '批次 #3181：按共享名清 client_bevy，待改为唯一判别'
-        'l5o_settings_options.ps1'      = '批次 #3181：按共享名清 client_bevy，待改为唯一判别'
-        'l5p_mount_portrait.ps1'        = '批次 #3181：按共享名清 client_bevy，待改为唯一判别'
-        'l5q_shop_viewer.ps1'           = '批次 #3181：按共享名清 client_bevy，待改为唯一判别'
-        'l5r_ranged_projectile.ps1'     = '批次 #3181：按共享名清 client_bevy，待改为唯一判别'
-        'l5s_switch_survives_combat.ps1' = '批次 #3181：按共享名清 client_bevy，待改为唯一判别'
     },
     [switch]$Strict,
     [switch]$SkipSelfTest

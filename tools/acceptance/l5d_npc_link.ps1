@@ -22,7 +22,11 @@ $ErrorActionPreference = 'Continue'
 $env:PATH = 'D:\toolchains\msys64\ucrt64\bin;D:\toolchains\libpinyin-install\bin;' + $env:PATH
 $env:LIBPINYIN_DIR = 'D:/toolchains/libpinyin-install'
 $acc = 'E:\Users\gxh\Documents\GitHub\Crystal\tools\acceptance'
-$exe = 'E:\Users\gxh\Documents\GitHub\Crystal\Client-Bevy\target\debug\client_bevy.exe'
+$exe = 'E:\Users\gxh\Documents\GitHub\Crystal\Client-Bevy\target\debug\client_bevy.exe'
+# 唯一进程名（见 LESSON_多agent并行时按进程名清进程会污染他人GUI实验）：只用自己改名的副本，
+# 清场也只清这个唯一名——公共名 client_bevy.exe 可能是别的 agent 的验收或人工 GUI 会话。
+$exeSrc = $exe
+$exe = Join-Path (Split-Path -Parent $exe) 'l5d_client.exe'
 function Rpc([string]$m, [hashtable]$q = @{}) {
     $c = New-Object Net.Sockets.TcpClient; $c.Connect('127.0.0.1', 9000); $s = $c.GetStream()
     $b = [Text.Encoding]::UTF8.GetBytes((@{ jsonrpc='2.0'; id=1; method=$m; params=$q } | ConvertTo-Json -Compress) + "`n")
@@ -32,9 +36,13 @@ function Rpc([string]$m, [hashtable]$q = @{}) {
 function Shot([string]$n) { Rpc 'screenshot' @{ path = "$acc\player_shots\l5d_$n.png" } | Out-Null; Start-Sleep -Milliseconds 700 }
 
 if (-not (Get-Process -Name mir2_server -EA SilentlyContinue)) { Write-Host '服务端未运行'; exit 9 }
-Get-CimInstance Win32_Process -Filter "Name='client_bevy.exe'" -EA SilentlyContinue |
+Get-CimInstance Win32_Process -Filter "Name='l5d_client.exe'" -EA SilentlyContinue |
     ForEach-Object { Stop-Process -Id $_.ProcessId -Force -EA SilentlyContinue }
 Start-Sleep -Milliseconds 900
+# 硬链接起唯一命名副本：不占额外磁盘（同一个文件、多一个目录项），
+# 且源文件正被别的进程执行时也能建链（Copy-Item 会因文件占用失败）。失败则退回拷贝。
+try { New-Item -ItemType HardLink -Path $exe -Target $exeSrc -Force -ErrorAction Stop | Out-Null }
+catch { Copy-Item -LiteralPath $exeSrc -Destination $exe -Force }
 $proc = Start-Process -FilePath $exe -ArgumentList '--real-net','--auto-enter','--e2e-user','test','--e2e-pass','123456' `
     -WorkingDirectory 'E:\Users\gxh\Documents\GitHub\Crystal\Client-Bevy' `
     -RedirectStandardOut "$acc\l5d_client.log" -RedirectStandardError "$acc\l5d_client.err.log" -PassThru
@@ -81,5 +89,8 @@ Write-Host ("click hits = {0}" -f ($hit.hits -join ' | '))
 Write-Host ("storage_probe = {0}" -f ($sp | ConvertTo-Json -Compress))
 
 } finally {
+    # 收尾：只清自己那份唯一命名的客户端（不再依赖"下一次运行按公共名清场"——那会误杀别人）。
+    Get-CimInstance Win32_Process -Filter "Name='l5d_client.exe'" -EA SilentlyContinue |
+        ForEach-Object { Stop-Process -Id $_.ProcessId -Force -EA SilentlyContinue }
     Exit-E2eLock   # 幂等：没持锁时直接返回
 }
