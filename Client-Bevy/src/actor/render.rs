@@ -7,7 +7,6 @@ use crate::actor::{LocalPlayer, MonsterName, NpcName, PlayerName};
 use crate::map_renderer::{make_image, GameData, GameLibraries};
 use crate::resources::libraries::{ArrayLibType, LibraryName};
 use crate::scenes::AppState;
-use crate::ui::sprite_ui::load_ui_font;
 use crate::ui::sprite_ui::{UiFont, UiImageCache};
 use bevy::prelude::*;
 use bevy::sprite::Anchor;
@@ -125,7 +124,7 @@ pub fn actor_name_label_system(
     mut ui_font: ResMut<UiFont>,
 ) {
     if !ui_font.0.is_strong() {
-        ui_font.0 = load_ui_font(&mut fonts);
+        crate::ui::sprite_ui::ensure_ui_font(&mut fonts, &mut ui_font);
     }
     let font = ui_font.0.clone();
     for (e, p, m, n, g) in &actors {
@@ -223,7 +222,7 @@ pub fn actor_guild_label_system(
     mut ui_font: ResMut<UiFont>,
 ) {
     if !ui_font.0.is_strong() {
-        ui_font.0 = load_ui_font(&mut fonts);
+        crate::ui::sprite_ui::ensure_ui_font(&mut fonts, &mut ui_font);
     }
     let font = ui_font.0.clone();
     for (e, guild) in &players {
@@ -372,7 +371,7 @@ mod tests {
         use crate::ui::outlined_text::{outline_on, OutlineShadow};
 
         let mut world = World::new();
-        // UiFont 强句柄 → 系统跳过 load_ui_font 磁盘路径（空字体仅作句柄占位）
+        // UiFont 强句柄 → 系统跳过 ensure_ui_font 的读盘路径（空字体仅作句柄占位）
         let mut fonts = Assets::<Font>::default();
         let font = fonts.add(Font::from_bytes(vec![]));
         world.insert_resource(fonts);

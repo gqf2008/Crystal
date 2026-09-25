@@ -244,7 +244,7 @@ fn build_select_ui(
     cjk_font: &mut UiCjkFont,
 ) {
     libs.0.ensure_initialized();
-    ui_font.0 = crate::ui::sprite_ui::load_ui_font(fonts);
+    crate::ui::sprite_ui::ensure_ui_font(fonts, ui_font);
     let font = ui_font.0.clone();
     // 可能含中文（动态填充/服务端文案）：用自带 CJK 的主字体（Arial handle 画中文是豆腐）
     let cjk = shared_cjk_font(fonts, cjk_font);

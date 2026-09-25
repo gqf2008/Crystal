@@ -178,7 +178,7 @@ fn spawn_notice(
 ) {
     libs.0.ensure_initialized();
     if !ui_font.0.is_strong() {
-        ui_font.0 = crate::ui::sprite_ui::load_ui_font(&mut fonts);
+        crate::ui::sprite_ui::ensure_ui_font(&mut fonts, &mut ui_font);
     }
     if !notice.cjk_font.is_strong() {
         notice.cjk_font = shared_cjk_font(&mut fonts, &mut cjk_font);

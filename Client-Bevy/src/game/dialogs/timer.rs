@@ -157,7 +157,7 @@ fn spawn_timer(
 ) {
     libs.0.ensure_initialized();
     if !ui_font.0.is_strong() {
-        ui_font.0 = crate::ui::sprite_ui::load_ui_font(&mut fonts);
+        crate::ui::sprite_ui::ensure_ui_font(&mut fonts, &mut ui_font);
     }
     let _ = shared_cjk_font(&mut fonts, &mut cjk_font); // C# 窗口内无文本，仅沙漏 + 数字位
 

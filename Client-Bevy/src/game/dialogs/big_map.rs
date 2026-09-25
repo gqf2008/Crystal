@@ -186,7 +186,7 @@ fn spawn_big_map(
 ) {
     libs.0.ensure_initialized();
     if !ui_font.0.is_strong() {
-        ui_font.0 = crate::ui::sprite_ui::load_ui_font(&mut fonts);
+        crate::ui::sprite_ui::ensure_ui_font(&mut fonts, &mut ui_font);
     }
     // 标题/行文本可能含中文（#2599：动态文本 CJK 需主字体自带，不能依赖回退）
     let font = ui_font.0.clone();

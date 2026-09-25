@@ -434,6 +434,12 @@ pwsh tools/acceptance/l5y_reconnect.ps1 -ServerWorkDir %TEMP%\e2e_workdir
   与本文档所在批次记录：原版死控件/资源包缺图/协议自洽偏离项。
 - **鼠标自动化限制**：无焦点窗口里鼠标事件到不了 winit（本机 `SetForegroundWindow` 返回 0），
   因此依赖真实鼠标的交互由「真实实体 + 真实系统」的行为级单测覆盖，真机用例走 RPC 等价入口。
+- **UI 字体（2026-09-25 owner 拍板）**：**全局统一使用中文字体** —— UI 主字体自带 CJK
+  （Windows 优先系统宋体 `simsun.ttc`，缺失回退内置 `assets/fonts/AlibabaPuHuiTi-3-55-Regular.ttf`），
+  **不再**用 "Arial 主字体 + Han 字形回退"（该回退只在实体首次排版成立，换页/改字重排版会把中文
+  退化成 .notdef 豆腐）。字体**全局只加载一次**（`ensure_ui_font`），不再每开一个窗口就多驻留一份。
+  判据：`ui_font_bytes_cover_cjk` + `ui_font_and_cjk_font_share_one_source`（阳性对照：改回 Arial 即红）。
+  视觉上与 C# 的差异：Latin 由宋体 Latin 字形渲染，不再是 Arial。
 - macOS 产物未签名。
 
 ---

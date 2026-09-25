@@ -72,7 +72,7 @@ pub fn credits_update_system(
         if existing == 0 {
             libs.0.ensure_initialized();
             if !ui_font.0.is_strong() {
-                ui_font.0 = crate::ui::sprite_ui::load_ui_font(&mut fonts);
+                crate::ui::sprite_ui::ensure_ui_font(&mut fonts, &mut ui_font);
             }
             let font = ui_font.0.clone();
             // 面板尺寸：Prguse[360]（原版 MirMessageBox 456x190）
