@@ -13,6 +13,7 @@
 //! `MEM_PROBE_DELTA …`：**这一轮变化最大的几个精确尺寸**（见 `actors/world/session.rs`）。
 //! 默认关闭：`ENABLED=false` 时分配路径只多两次原子读，且整个模块在默认构建里**不编译**。
 use std::alloc::{GlobalAlloc, Layout, System};
+use std::ptr;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 static ENABLED: AtomicBool = AtomicBool::new(false);
@@ -46,6 +47,110 @@ static PREV_COUNT: [AtomicUsize; EXACT_MAX + 1] = [const { AtomicUsize::new(0) }
 static BASE_LIVE: [AtomicUsize; EXACT_MAX + 1] = [const { AtomicUsize::new(0) }; EXACT_MAX + 1];
 static BASE_COUNT: [AtomicUsize; EXACT_MAX + 1] = [const { AtomicUsize::new(0) }; EXACT_MAX + 1];
 static BASE_SET: AtomicBool = AtomicBool::new(false);
+
+// ---- 按调用点归因（2026-09-25 加）----
+// 尺寸直方图能说「留下了多少、多大」，但说不出「谁留下的」。于是给每次分配加一个**标签**：
+// 分配时把当前标签写进分配块前面 16 字节的头部，释放时读回来，按标签减。
+// 标签由调用点在**可疑区域**用 `let _g = TagGuard::enter(TAG_X);` 圈定（RAII 退出即还原）。
+//
+// 为什么用头部而不是别的：释放时必须知道"这块是谁分配的"，头里存是最省事、最不依赖上下文的做法。
+// 代价与边界（都刻意限制在探针构建里）：
+//   * `align > 16` 的类型（SIMD 等）走**不带头部**的老路径：只计总量，不计标签（罕见，且在标签和里显账）；
+//   * `realloc` 用"新分配 + 拷贝 + 释放旧的"实现（头部才容易维护），比原生 realloc 多一次拷贝；
+//   * 标签和与总活跃字节的差额会在 dump 里打出来（`gap`），不是 0 就说明有未加标签的字节。
+pub const TAG_UNKNOWN: usize = 0;
+pub const TAG_MATERIALIZE: usize = 1;
+pub const TAG_SPAWN_SEND: usize = 2;
+pub const TAG_LOGIN: usize = 3;
+pub const TAG_LOGOUT: usize = 4;
+pub const TAG_CLEANUP: usize = 5;
+pub const TAG_TICK: usize = 6;
+pub const TAG_DB: usize = 7;
+pub const TAG_N: usize = 8;
+pub const TAG_NAMES: [&str; TAG_N] = [
+    "unknown",
+    "materialize",
+    "spawn_send",
+    "login",
+    "logout",
+    "cleanup",
+    "tick",
+    "db",
+];
+const TAG_HEADER: usize = 16;
+static LIVE_BY_TAG: [AtomicUsize; TAG_N] = [const { AtomicUsize::new(0) }; TAG_N];
+static PREV_BY_TAG: [AtomicUsize; TAG_N] = [const { AtomicUsize::new(0) }; TAG_N];
+/// 当前标签（线程局部）：把 tag 限制在设置它的那条线程上，避免多线程 runtime 下跨线程污染。
+/// （已知边界：同一线程上交错执行的任务会共享它；所以标签只用于粗粒度定位，不能当精确归属。）
+/// 这里单开一个模块放 `thread_local!`，是为了把 clippy 的 missing_const_for_thread_local
+/// 允许范围压到最小——该 lint 对已经是 `const { … }` 的写法在 clippy 1.97 上仍报（误报），
+/// 而属性挂在 `thread_local!` 调用上不会传进宏展开。
+#[allow(clippy::missing_const_for_thread_local)]
+mod cur_tag {
+    use super::TAG_UNKNOWN;
+    use std::cell::Cell;
+
+    thread_local! {
+        pub(super) static CUR_TAG: Cell<usize> = const { Cell::new(TAG_UNKNOWN) };
+    }
+}
+
+/// 当前标签（TLS 取不到时按 `unknown`——TLS 析构期间分配器仍可能被调用）。
+pub fn current_tag() -> usize {
+    cur_tag::CUR_TAG
+        .try_with(|c| c.get())
+        .unwrap_or(TAG_UNKNOWN)
+}
+
+fn set_current_tag(tag: usize) {
+    let _ = cur_tag::CUR_TAG.try_with(|c| c.set(tag));
+}
+
+/// RAII：进入可疑区域时打标签，离开自动还原（含 panic 路径）。
+pub struct TagGuard(usize);
+
+impl TagGuard {
+    pub fn enter(tag: usize) -> Self {
+        let prev = current_tag();
+        set_current_tag(tag);
+        TagGuard(prev)
+    }
+}
+
+impl Drop for TagGuard {
+    fn drop(&mut self) {
+        set_current_tag(self.0);
+    }
+}
+
+/// 输出各标签的活跃字节与本轮增量，并刷新上一轮快照；返回 `(标签和, 总活跃字节)` 供调用方打差额。
+pub fn report_tags(mut emit: impl FnMut(&'static str, usize, i64)) -> (usize, usize) {
+    let mut sum = 0usize;
+    for tag in 0..TAG_N {
+        let live = LIVE_BY_TAG[tag].load(Ordering::Relaxed);
+        let prev = PREV_BY_TAG[tag].load(Ordering::Relaxed);
+        sum += live;
+        if live != 0 || prev != 0 {
+            emit(TAG_NAMES[tag], live, live as i64 - prev as i64);
+        }
+    }
+    for tag in 0..TAG_N {
+        PREV_BY_TAG[tag].store(LIVE_BY_TAG[tag].load(Ordering::Relaxed), Ordering::Relaxed);
+    }
+    (sum, LIVE_BYTES.load(Ordering::Relaxed))
+}
+
+#[inline]
+fn track_tag(tag: usize, size: usize, add: bool) {
+    if tag >= TAG_N {
+        return;
+    }
+    if add {
+        LIVE_BY_TAG[tag].fetch_add(size, Ordering::Relaxed);
+    } else {
+        LIVE_BY_TAG[tag].fetch_sub(size, Ordering::Relaxed);
+    }
+}
 
 /// 记一次精确尺寸的分配/释放。超过 `EXACT_MAX` 的尺寸不记（仍然计入总量与三档分桶）。
 ///
@@ -232,6 +337,35 @@ pub struct CountingAllocator;
 
 unsafe impl GlobalAlloc for CountingAllocator {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+        // 带头部路径：把当前标签写进块首，释放时据此按标签减（见 TAG_* 注释）。
+        //
+        // ⚠️ 布局决策**只看 layout.align()，绝不看 enabled()**：一旦它跟着运行时开关变，
+        // 「开关打开之前分配、打开之后释放」的块就会走错分支——dealloc 会把 ptr-16 当成标签头读
+        // （其实是无关数据），再按带头的布局去 free，直接堆损坏。实测过一次：服务端起得来、
+        // 20 个客户端**全部**登录失败（ok=0 failed=20），日志里没有 panic，很难查。
+        // 代价：mem-probe 构建里 16 字节对齐以内的分配总是多 16 字节头部（哪怕没开探针）；
+        // 默认构建不含本模块，所以生产零影响。
+        if layout.align() <= TAG_HEADER {
+            let Ok(tagged) =
+                Layout::from_size_align(layout.size().saturating_add(TAG_HEADER), TAG_HEADER)
+            else {
+                return System.alloc(layout);
+            };
+            let base = System.alloc(tagged);
+            if base.is_null() {
+                return base;
+            }
+            let tag = current_tag();
+            ptr::write(base as *mut usize, tag);
+            if enabled() {
+                LIVE_BYTES.fetch_add(layout.size(), Ordering::Relaxed);
+                ALLOCS.fetch_add(1, Ordering::Relaxed);
+                bucket(layout.size()).fetch_add(layout.size(), Ordering::Relaxed);
+                track(layout.size(), true);
+                track_tag(tag, layout.size(), true);
+            }
+            return base.add(TAG_HEADER);
+        }
         let ptr = System.alloc(layout);
         if !ptr.is_null() && enabled() {
             LIVE_BYTES.fetch_add(layout.size(), Ordering::Relaxed);
@@ -243,6 +377,25 @@ unsafe impl GlobalAlloc for CountingAllocator {
     }
 
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+        if layout.align() <= TAG_HEADER {
+            let base = ptr.sub(TAG_HEADER);
+            let tag = ptr::read(base as *const usize);
+            if enabled() {
+                LIVE_BYTES.fetch_sub(layout.size(), Ordering::Relaxed);
+                DEALLOCS.fetch_add(1, Ordering::Relaxed);
+                bucket(layout.size()).fetch_sub(layout.size(), Ordering::Relaxed);
+                track(layout.size(), false);
+                track_tag(tag, layout.size(), false);
+            }
+            // 同样的参数在 alloc 里成功过，这里理论不可达；真到这儿也只能不释放（不能按老布局释放，
+            // 那会把 base 而不是 ptr 交给系统分配器）。
+            if let Ok(tagged) =
+                Layout::from_size_align(layout.size().saturating_add(TAG_HEADER), TAG_HEADER)
+            {
+                System.dealloc(base, tagged);
+            }
+            return;
+        }
         if enabled() {
             LIVE_BYTES.fetch_sub(layout.size(), Ordering::Relaxed);
             DEALLOCS.fetch_add(1, Ordering::Relaxed);
@@ -253,6 +406,22 @@ unsafe impl GlobalAlloc for CountingAllocator {
     }
 
     unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
+        // 带头部路径：用"新分配 + 拷贝 + 释放旧的"实现（头部需要跟着搬家）。
+        // 新块用的是**当前**标签（旧标签在旧块头部，这里刻意不读——realloc 的语义是"改大小"，
+        // 调用点若在别的区域里，把新块记到当前标签更贴近"这次改动是谁引起的"）。
+        // 布局决策同样只看 align（见 alloc 的说明）。
+        if layout.align() <= TAG_HEADER {
+            let Ok(new_layout) = Layout::from_size_align(new_size, layout.align()) else {
+                return ptr::null_mut();
+            };
+            let np = self.alloc(new_layout);
+            if np.is_null() {
+                return np;
+            }
+            ptr::copy_nonoverlapping(ptr, np, layout.size().min(new_size));
+            self.dealloc(ptr, layout);
+            return np;
+        }
         let new_ptr = System.realloc(ptr, layout, new_size);
         if !new_ptr.is_null() && enabled() {
             // 近似：把 realloc 记成「先加新尺寸、再减旧尺寸」，稳态下 live_bytes 的**趋势**仍然正确
