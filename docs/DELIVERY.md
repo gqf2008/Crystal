@@ -169,14 +169,18 @@ cargo run --bin client_bevy                  # 或用发布包 client_bevy.exe
 
 ```bash
 cd SharedRust  && cargo test                     # 187 lib + 11（另有 2 个 ignored）
-cd ServerRust  && cargo test                     # 845 lib + 19 integration（gate_hardening 11 / no_blocking 2 / protocol_conformance 6；另有 3 个 ignored）
+cd ServerRust  && cargo test                     # 849 lib + 19 integration（gate_hardening 11 / no_blocking 2 / protocol_conformance 6；另有 3 个 ignored）
 cd ServerRust  && cargo clippy --lib -- -D warnings   # 0 warning（CI 同口径）
 cd Client-Bevy && cargo test                     # 794 lib + 7 bin + 2 + 53
 ```
 
 三侧 `cargo fmt -- --check` 均须 0 差异。
 
-（数字为 **2026-09-25 master `7cf7f770` 实测基线**，随批次增长；以 CI 与本地复跑为准。）
+（数字为 **2026-09-25 晚 master `45e378aa` 实测基线**，随批次增长；以 CI 与本地复跑为准。
+该次复跑逐条实跑：SharedRust `187 lib + 11`（2 ignored）、ServerRust `849 lib + 19 integration`、
+ServerRust `clippy --lib -- -D warnings` 0 warning、Client-Bevy `794 lib + 7 bin + 2 + 53`，
+三侧 `cargo fmt -- --check` 均 0 差异。ServerRust lib 从 `7cf7f770` 时的 845 涨到 849，
+增量来自任务数据根修复（#3165）新增的 3 条单测与同期其它批次。）
 
 **ServerRust 测试并行度被刻意压到 2**（`ServerRust/.cargo/config.toml` 的 `[env] RUST_TEST_THREADS = "2"`）：
 该 crate 的 e2e 用例每个都自带多线程 runtime + gate/world/social/account 全体 actor，
@@ -306,6 +310,8 @@ pwsh scripts/run_real_e2e.ps1 -IncludeInteractSweep            # 常规用例 + 
   僵尸回收、PID 复用、超龄回收、读不全宽限、继承标记复核、**跨进程串行性**（3 个子进程抢同一把锁、
   临界区不许重叠）；秒级，不起客户端。它把 `TEMP` 指向临时目录后再 dot-source，**不会碰真实锁**
   （跑在真实锁上会与别的 agent 的实机任务互相污染）；退出码 `0` 全过 / `1` 有用例红 / `2` 前置失败。
+  **当前基线（2026-09-25 晚 master `45e378aa` 复跑）：32 passed / 0 failed**（含 T9.1b 盲区回归锁、
+  T9.3/T9.3b 两条阳性对照、T9.4/T9.5 防漂移、T10 语法解析）。
 - **覆盖**：**整仓** `*.ps1`（排除 `.git`/`target`/`node_modules`）里全部会起客户端的脚本都已接入
   （#3129 铺齐 acceptance/scripts，2026-09-25 起扫描面改为整仓——`tools/ops/package_windows_rehearsal.ps1`
   这类新目录里的实机入口此前扫不到，漏锁也不会红，属假绿盲区），
