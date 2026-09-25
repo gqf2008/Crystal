@@ -14,6 +14,19 @@
 - 客户端版本哈希：16 字节，服务端只校验长度（`gate/actor.rs` ClientVersion 分支），
   压测用全 0 即可。
 
+**演练夹具前置**：多数演练（回滚 / 存储降级 / 容量标定 / 登录时延）都需要一个**能起服的最小部署目录**
+（`mir2_server.exe` + `config/server.toml` + `Data/crystal.db`，`Daneo1989` 用目录联接即可）。一条命令生成：
+
+```powershell
+pwsh tools/ops/make_deploy_dir.ps1 -SourceRoot ServerRust `
+    -ExePath ServerRust/target/debug/mir2_server.exe -OutDir $env:TEMP\deploy_run -Port 7200 -Force
+```
+
+> 为什么固化它：2026-09-25 我手工造夹具时漏了 `config/`，服务端于是退化成
+> `Config not found → 默认配置（listen 7000 + 内存库）`，演练报告只体现成 `ready=false`——
+> 读起来像"服务端起不来"，实际是夹具残缺。本脚本会**校验四件套齐全**才退出 0，
+> 且 `-Force` 拒绝用于盘根/顶层目录（防误删）。
+
 ## 1. 部署：`deploy_smoke.ps1`
 
 **判据**：① 产物存在且记录 sha256（二进制 + 客户端 exe）；② 在**全新目录**里从零起服（不是复用开发机数据目录）
@@ -51,6 +64,14 @@ pwsh tools/ops/rollback_drill.ps1 -DeployDir <部署目录（含 Data/crystal.db
 已完成任务 4 / 好友 2 / 邮件 22（另有 3 张空表 n=0），并已验证这套哈希的**敏感性与稳定性**：
 同一库连续两次快照完全一致；删一封邮件 → `mail n 22→21` 且哈希变化；给一条背包 item_json 追加一个字符
 → `inventory_backpack` 哈希变化而**未动表（宠物）哈希不变**。
+
+**2026-09-25 深夜复跑（再加行会/拍卖块 + 夹具改成一键生成）**：夹具由
+`make_deploy_dir.ps1` 一条命令造出（`-Port 7200` 顺带改写副本配置），回滚演练 `ok=true`、退出码 0、
+两阶段 `ready/login_ok` 均 true、`diff=[]`；快照除 11 张表外还含
+`guild`（TestGuild2 / 行会 sha / 成员 28 人 sha）与 `auctions`（该角色作为卖家或买家的行）。
+新增块的判据同样做了双向对照：**稳定性**（含行会/拍卖在内的两次快照完全一致）+ **敏感性**
+（行会金币+1 → 行会 sha 变；成员 rank_index 改 → 成员 sha 变；拍卖价+7 → 拍卖 sha 变；
+而未动的背包 sha 不变）。
 
 **回滚要验的不是"能起来"，而是"起来之后玩家的档还在"**：二进制回退 + DB 结构兼容（本仓表创建走
 `IF NOT EXISTS`，但字段语义变化不在守卫内）。

@@ -16,7 +16,12 @@
   - mail：排除 timestamp / body（时间戳与正文不影响"档有没有被回滚弄坏"）
   - friends：只取 friend_name / memo（friend_object_id 是**会话内**对象 id，登录后会变）
   - heroes：只取身份与成长字段（不含随登录变化的 hp/mp/autopot 之类）
+  - guild_members：排除 last_login_ms（登录就变）
 其余表按排序键规范化后整行哈希（排序键见 _TABLES）。
+
+另有两个按角色归属的块（2026-09-25 补：回滚下"行会 / 拍卖有没有被弄坏"此前无判据）：
+  "guild":    {"name":..,"gold":..,"level":..,"sha256":..,"members_n":..,"members_sha256":..}
+  "auctions": {"n":..,"sha256":..}    # 该角色作为卖家或买家的行
 """
 import hashlib
 import json
@@ -44,12 +49,53 @@ _TABLES = [
      ["mail_id"]),
 ]
 
+# 行会按名字归属（角色通过 characters.guild_name 关联）
+_GUILD_COLS = ["name", "gold", "level", "experience", "member_cap", "flag_colour", "notice_json",
+               "storage_items_json", "rank_defs_json", "buffs_json"]
+# 拍卖按「卖家或买家 = 该角色」归属；排除 consignment_date（挂单时间，与档完整性无关）
+_AUCTION_COLS = ["id", "auction_id", "seller_name", "price", "sold", "buyer_name", "item_type",
+                 "current_bid", "current_buyer", "item_json"]
+
+
+def _digest(rows) -> str:
+    canonical = json.dumps([list(r) for r in rows], ensure_ascii=False, separators=(",", ":"), default=str)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:16]
+
+
+def _guild_block(con: sqlite3.Connection, name: str) -> dict:
+    row = con.execute("select guild_name from characters where name=?", (name,)).fetchone()
+    guild = row[0] if row and row[0] else None
+    if not guild:
+        return {"name": None}
+    gu = con.execute(f"select {', '.join(_GUILD_COLS)} from guilds where name=?", (guild,)).fetchone()
+    if not gu:
+        return {"name": guild, "missing": True}
+    members = con.execute(
+        "select guild_name, member_name, rank, rank_index from guild_members "
+        "where guild_name=? order by member_name, rank_index", (guild,)
+    ).fetchall()
+    return {
+        "name": guild,
+        "gold": gu[_GUILD_COLS.index("gold")],
+        "level": gu[_GUILD_COLS.index("level")],
+        "sha256": _digest([gu]),
+        "members_n": len(members),
+        "members_sha256": _digest(members),
+    }
+
+
+def _auctions_block(con: sqlite3.Connection, name: str) -> dict:
+    rows = con.execute(
+        f"select {', '.join(_AUCTION_COLS)} from auctions "
+        "where seller_name=? or buyer_name=? order by id", (name, name)
+    ).fetchall()
+    return {"n": len(rows), "sha256": _digest(rows)}
+
 
 def _table_digest(con: sqlite3.Connection, table: str, owner_col: str, cols, order_by, owner: str) -> dict:
     sql = f"select {', '.join(cols)} from {table} where {owner_col}=? order by {', '.join(order_by)}"
     rows = con.execute(sql, (owner,)).fetchall()
-    canonical = json.dumps([list(r) for r in rows], ensure_ascii=False, separators=(",", ":"), default=str)
-    return {"n": len(rows), "sha256": hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:16]}
+    return {"n": len(rows), "sha256": _digest(rows)}
 
 
 def main() -> int:
@@ -75,9 +121,16 @@ def main() -> int:
                     tables[table] = _table_digest(con, table, owner_col, cols, order_by, name)
                 except sqlite3.Error as exc:   # 表/列与当前 schema 不一致时也出快照，如实标注
                     tables[table] = {"error": str(exc)}
+            extra = {}
+            for key, fn in (("guild", _guild_block), ("auctions", _auctions_block)):
+                try:
+                    extra[key] = fn(con, name)
+                except sqlite3.Error as exc:
+                    extra[key] = {"error": str(exc)}
             out[name] = {
                 "gold": row[0], "level": row[1], "map_index": row[2], "x": row[3], "y": row[4],
                 "tables": tables,
+                **extra,
             }
         con.close()
     except Exception as exc:
