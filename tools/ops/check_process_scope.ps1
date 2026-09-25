@@ -18,11 +18,34 @@
 #       pwsh tools/ops/check_process_scope.ps1 -SkipSelfTest   # 跳过沙箱正/负对照
 param(
     [string[]]$ScanDir = @(),
-    # 待迁移清单：这几处的"杀"是演练目的本身或仓库级 harness 的清场，本轮只明确记名、不静默放过。
+    # 待迁移清单：这几处的"杀"是演练目的本身、仓库级 harness 的清场，或**整批待迁移的验收夹具**
+    # （同一模式，已开批次 issue #3181，逐条记名、不静默放过）。迁移完一条就删一条，`-Strict` 用来
+    # 在全部迁完后把这张表清空。
     [hashtable]$Allowlist = @{
         'fault_injection.ps1' = '杀服务端就是本演练的目的（故障注入）；待迁移到按自己 PID'
         'l5y_reconnect.ps1'   = '断线重连需要真杀服务端；待迁移到按自己 PID'
         'run_real_e2e.ps1'    = '仓库级 harness 开跑前清场；待迁移到按自己 PID'
+        # 以下 20 个：起客户端前按共享名批量清 client_bevy（跨行管道形态）。批次 issue #3181。
+        'l5a_combat.ps1'                = '批次 #3181：按共享名清 client_bevy，待改为唯一判别'
+        'l5d_npc_link.ps1'              = '批次 #3181：按共享名清 client_bevy，待改为唯一判别'
+        'l5e_storage_roundtrip.ps1'     = '批次 #3181：按共享名清 client_bevy，待改为唯一判别'
+        'l5f_mail_roundtrip.ps1'        = '批次 #3181：按共享名清 client_bevy，待改为唯一判别'
+        'l5g_quest_finish.ps1'          = '批次 #3181：按共享名清 client_bevy，待改为唯一判别'
+        'l5g2_quest_carry_items.ps1'    = '批次 #3181：按共享名清 client_bevy，待改为唯一判别'
+        'l5g3_quest_item_tasks.ps1'     = '批次 #3181：按共享名清 client_bevy，待改为唯一判别'
+        'l5g4_kill_tasks.ps1'           = '批次 #3181：按共享名清 client_bevy，待改为唯一判别'
+        'l5h_buy_item.ps1'              = '批次 #3181：按共享名清 client_bevy，待改为唯一判别'
+        'l5i_crossmap.ps1'              = '批次 #3181：按共享名清 client_bevy，待改为唯一判别'
+        'l5j_revive.ps1'                = '批次 #3181：按共享名清 client_bevy，待改为唯一判别'
+        'l5k_ranking_scroll.ps1'        = '批次 #3181：按共享名清 client_bevy，待改为唯一判别'
+        'l5l_npc_scroll_hitrect.ps1'    = '批次 #3181：按共享名清 client_bevy，待改为唯一判别'
+        'l5m_inventory_z.ps1'           = '批次 #3181：按共享名清 client_bevy，待改为唯一判别'
+        'l5n_shop_filters.ps1'          = '批次 #3181：按共享名清 client_bevy，待改为唯一判别'
+        'l5o_settings_options.ps1'      = '批次 #3181：按共享名清 client_bevy，待改为唯一判别'
+        'l5p_mount_portrait.ps1'        = '批次 #3181：按共享名清 client_bevy，待改为唯一判别'
+        'l5q_shop_viewer.ps1'           = '批次 #3181：按共享名清 client_bevy，待改为唯一判别'
+        'l5r_ranged_projectile.ps1'     = '批次 #3181：按共享名清 client_bevy，待改为唯一判别'
+        'l5s_switch_survives_combat.ps1' = '批次 #3181：按共享名清 client_bevy，待改为唯一判别'
     },
     [switch]$Strict,
     [switch]$SkipSelfTest
@@ -38,16 +61,45 @@ function Find-ProcessNameKill {
         ① 该行有 Stop-Process，且引用了共享名 mir2_server / client_bevy（\b 边界，故
            `Stop-Process -Name mir2_server_ci_unique` 这种唯一命名不会被误判）；
         ② 该行同时有 Get-Process 与 Stop-Process（`Get-Process -Name x | … | Stop-Process` 管道）。
+        ③ **跨行管道**（2026-09-25 补的盲区）：按名字查到进程对象、再由**同一条管道**下游的
+           Stop-Process 杀掉——典型形态是 `Get-CimInstance Win32_Process -Filter "Name='mir2_server.exe'" |`
+           换行后 `ForEach-Object { Stop-Process -Id $_.ProcessId }`。这里 Stop-Process 用的是 `-Id`，
+           乍看像"按 PID"，但那个 Id 是**按名字查来的**，所以照样是清共享资源。
+           判据按**管道**走，不按"行窗口"走：查询行必须以 `|` 结尾，然后沿管道往下找 Stop-Process，
+           遇到不以 `|` 结尾的行就说明管道结束。这样 `if (-not (Get-Process -Name mir2_server …)) { … exit 9 }`
+           这种只做**存在性探测**的写法不会被误判（第一版按 4 行窗口找，实测把 14 个夹具的存在性探测
+           全误报成违规——门禁自己成了噪音）。
+           共享名一律带 `\b`（`client_bevy_l5t.exe` 这类**唯一命名**是 LESSON 推荐的做法，不算违规）。
+           带每次运行唯一判别（CommandLine 上的 `--control-port <本脚本端口>`）的清残留也放过。
     #>
     param([Parameter(Mandatory)][string]$Path)
     $hits = @()
     $code = @(Get-Content -LiteralPath $Path -ErrorAction SilentlyContinue |
         Where-Object { $_.Trim() -and -not $_.Trim().StartsWith('#') })
-    foreach ($ln in $code) {
-        if ($ln -notmatch 'Stop-Process') { continue }
-        if (($ln -match '\b(mir2_server|client_bevy)\b') -or ($ln -match 'Get-Process')) {
-            $hits += $ln.Trim()
+    for ($i = 0; $i -lt $code.Count; $i++) {
+        $ln = $code[$i]
+        if ($ln -match 'Stop-Process') {
+            if (($ln -match '\b(mir2_server|client_bevy)\b') -or ($ln -match 'Get-Process')) {
+                $hits += $ln.Trim()
+            }
+            continue
         }
+        $byName = ($ln -match 'Get-Process\s+-Name\s+.*\b(mir2_server|client_bevy)\b') -or
+        ($ln -match 'Get-CimInstance' -and $ln -match "Name\s*=\s*['\`"](mir2_server|client_bevy)\b")
+        if (-not $byName) { continue }
+        if ($ln.TrimEnd() -notmatch '\|$') { continue }   # 不是管道 → 只是查询/探测
+        $j = $i + 1
+        $violation = $false
+        while ($j -lt $code.Count) {
+            if ($code[$j] -match 'Stop-Process') {
+                # 带"每次运行唯一"的判别（CommandLine 上的端口/唯一名）→ 只清自己的，不算违规
+                $violation = @($code[$i..$j] | Where-Object { $_ -match 'CommandLine' }).Count -eq 0
+                break
+            }
+            if ($code[$j].TrimEnd() -notmatch '\|$') { break }
+            $j++
+        }
+        if ($violation) { $hits += $ln.Trim() }
     }
     $hits
 }
@@ -81,20 +133,40 @@ if (-not $SkipSelfTest) {
             "`$p = Start-Process -FilePath s.exe -PassThru`nif (-not `$p.HasExited) { Stop-Process -Id `$p.Id -Force }`n", $enc)
         [System.IO.File]::WriteAllText((Join-Path $sb 'good_unique_name.ps1'),
             "Stop-Process -Name mir2_server_ci_unique -Force -ErrorAction SilentlyContinue`n", $enc)
+        # 正对照 3（2026-09-25 补的盲区）：跨行管道——按名字查、换行后 Stop-Process -Id $_.ProcessId。
+        # 这是 leak_plateau.ps1 里真实存在的形态，第一版判据（只认 Get-Process / 同行 -Name）漏掉了它。
+        [System.IO.File]::WriteAllText((Join-Path $sb 'bad_crossline.ps1'),
+            "Get-CimInstance Win32_Process -Filter `"Name='mir2_server.exe'`" -EA SilentlyContinue |`n" +
+            "    ForEach-Object { Stop-Process -Id `$_.ProcessId -Force -EA SilentlyContinue }`n", $enc)
+        # 负对照 3：只做**存在性探测**（后面接 exit 9）——不是清场，不许误判
+        # （第一版按"4 行窗口"找 Stop-Process，把 14 个夹具的存在性探测全误报成违规。）
+        [System.IO.File]::WriteAllText((Join-Path $sb 'good_probe.ps1'),
+            "if (-not (Get-Process -Name mir2_server -EA SilentlyContinue)) { Write-Host '服务端未运行'; exit 9 }`n", $enc)
+        # 负对照 4：带"每次运行唯一"判别的清残留（CommandLine 上的端口）——允许
+        [System.IO.File]::WriteAllText((Join-Path $sb 'good_scoped.ps1'),
+            "Get-CimInstance Win32_Process -Filter `"Name='client_bevy.exe'`" |`n" +
+            "    Where-Object { `$_.CommandLine -match `"--control-port\s+`$Port\b`" } |`n" +
+            "    ForEach-Object { Stop-Process -Id `$_.ProcessId -Force }`n", $enc)
         $bad1 = @(Find-ProcessNameKill -Path (Join-Path $sb 'bad_pipeline.ps1'))
         $bad2 = @(Find-ProcessNameKill -Path (Join-Path $sb 'bad_stopbyname.ps1'))
+        $bad3 = @(Find-ProcessNameKill -Path (Join-Path $sb 'bad_crossline.ps1'))
         $ok1 = @(Find-ProcessNameKill -Path (Join-Path $sb 'good_pid.ps1'))
         $ok2 = @(Find-ProcessNameKill -Path (Join-Path $sb 'good_unique_name.ps1'))
+        $ok3 = @(Find-ProcessNameKill -Path (Join-Path $sb 'good_probe.ps1'))
+        $ok4 = @(Find-ProcessNameKill -Path (Join-Path $sb 'good_scoped.ps1'))
         $problems = @()
         if ($bad1.Count -eq 0) { $problems += '正对照1（Get-Process 管道杀 mir2_server）没被抓到 —— 判据空了' }
         if ($bad2.Count -eq 0) { $problems += '正对照2（Stop-Process -Name client_bevy）没被抓到 —— 判据空了' }
+        if ($bad3.Count -eq 0) { $problems += '正对照3（跨行管道：Get-CimInstance 按名查 → Stop-Process -Id）没被抓到 —— 判据空了' }
         if ($ok1.Count -ne 0) { $problems += '负对照1（按自己 PID 杀）被误判为违规' }
         if ($ok2.Count -ne 0) { $problems += '负对照2（按自己唯一命名杀）被误判为违规' }
+        if ($ok3.Count -ne 0) { $problems += '负对照3（存在性探测，后面接 exit 9）被误判为违规' }
+        if ($ok4.Count -ne 0) { $problems += '负对照4（带 CommandLine 唯一判别的清残留）被误判为违规' }
         if ($problems.Count -gt 0) {
             foreach ($p in $problems) { Write-Host ("  [自检红] " + $p) -ForegroundColor Red }
             Fail ("本门禁自身判据不可信（沙箱 $sb）")
         }
-        Write-Host '自检：沙箱正对照 2/2 乱杀被抓、负对照 2/2 合规写法未被误判 ✅'
+        Write-Host '自检：沙箱正对照 3/3 乱杀被抓（含跨行管道）、负对照 4/4 合规写法未被误判 ✅'
     } finally {
         Remove-Item -LiteralPath $sb -Recurse -Force -ErrorAction SilentlyContinue
     }

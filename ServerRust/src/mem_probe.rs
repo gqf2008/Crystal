@@ -8,8 +8,9 @@
 //! 只看 RSS 区分不了这两者，而修法完全不同（前者要改代码、后者并不影响可用性）。
 //! 计数分配器给出 `live_bytes = Σ分配 - Σ释放`：**它持续涨才是真泄漏**。
 //!
-//! 用法：`MIR2_LEAK_PROBE=1` + 带该特性的二进制 → `PlayerDisconnected` 清理后打印
-//! `MEM_PROBE sid=… live_bytes=… allocs=… deallocs=…`（见 `actors/world/session.rs`）。
+//! 用法：`MIR2_LEAK_PROBE=1` + 带该特性的二进制 → **每轮全员登出、整图清理之后的空闲点**
+//! 打印 `MEM_PROBE_IDLE …`（与 `leak_plateau` 的 RSS 采样同相位，才可比），随后打印
+//! `MEM_PROBE_DELTA …`：**这一轮变化最大的几个精确尺寸**（见 `actors/world/session.rs`）。
 //! 默认关闭：`ENABLED=false` 时分配路径只多两次原子读，且整个模块在默认构建里**不编译**。
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -24,6 +25,170 @@ static DEALLOCS: AtomicUsize = AtomicUsize::new(0);
 static LIVE_SMALL: AtomicUsize = AtomicUsize::new(0); // <= 256 B
 static LIVE_MID: AtomicUsize = AtomicUsize::new(0); // <= 16 KiB
 static LIVE_BIG: AtomicUsize = AtomicUsize::new(0); // > 16 KiB
+
+// ---- 精确尺寸直方图（2026-09-25 加）----
+// 三档分桶只能把嫌疑缩到「哪一档」，但同一个 257B–16KB 档里，384B 的会话状态与 4KB 的整页缓冲
+// 修法完全不同。所以再记**精确尺寸**：每个 size 的活跃字节与活跃对象数，并在每次 dump 时输出
+// 「与上一次 dump 相比变化最大的前 N 个尺寸」——一个泄漏会直接读成「每轮 +N 个 size=X 的对象」，
+// 而 X 往往就能认出是哪个结构/缓冲区。
+//
+// 为什么用静态数组而不是 HashMap/Vec：dump 路径**不许分配**——这里的分配会经过同一个计数分配器，
+// 把读数本身污染掉（一个 Vec 快照 512KB 就能盖过每轮 0.5MB 的信号）。
+// 这些数组在 .bss 里，不进堆，也就不会出现在 live_bytes 里。
+const EXACT_MAX: usize = 65536;
+static EXACT_LIVE: [AtomicUsize; EXACT_MAX + 1] = [const { AtomicUsize::new(0) }; EXACT_MAX + 1];
+static EXACT_COUNT: [AtomicUsize; EXACT_MAX + 1] = [const { AtomicUsize::new(0) }; EXACT_MAX + 1];
+static PREV_LIVE: [AtomicUsize; EXACT_MAX + 1] = [const { AtomicUsize::new(0) }; EXACT_MAX + 1];
+static PREV_COUNT: [AtomicUsize; EXACT_MAX + 1] = [const { AtomicUsize::new(0) }; EXACT_MAX + 1];
+// 基线快照（只在第一次 dump 时写一次）：**累计**增长比「每轮变化」鲁棒得多——一个每轮 +8KB 的
+// 泄漏会被每轮的分配抖动完全淹没（实测：单轮 top-8 里全是 ±几 KB 的噪声，看不出指纹），
+// 但 8 轮之后它在累计榜上就是 +64KB，从噪声里浮出来。
+static BASE_LIVE: [AtomicUsize; EXACT_MAX + 1] = [const { AtomicUsize::new(0) }; EXACT_MAX + 1];
+static BASE_COUNT: [AtomicUsize; EXACT_MAX + 1] = [const { AtomicUsize::new(0) }; EXACT_MAX + 1];
+static BASE_SET: AtomicBool = AtomicBool::new(false);
+
+/// 记一次精确尺寸的分配/释放。超过 `EXACT_MAX` 的尺寸不记（仍然计入总量与三档分桶）。
+///
+/// 边界（已知且刻意保留）：`fetch_sub` 在记账不平衡时会回绕（例如内存是在 `set_enabled(true)`
+/// 之前分配的、却在之后释放）。这与既有的 `LIVE_BYTES`/分桶口径一致——本探针只判**趋势**，
+/// 不做精确记账；真出现回绕，打印出来的绝对值会明显荒谬，不会被误读成小增量。
+#[inline]
+fn track(size: usize, add: bool) {
+    if size == 0 || size > EXACT_MAX {
+        return;
+    }
+    if add {
+        EXACT_LIVE[size].fetch_add(size, Ordering::Relaxed);
+        EXACT_COUNT[size].fetch_add(1, Ordering::Relaxed);
+    } else {
+        EXACT_LIVE[size].fetch_sub(size, Ordering::Relaxed);
+        EXACT_COUNT[size].fetch_sub(1, Ordering::Relaxed);
+    }
+}
+
+/// 输出「与上一 dump 相比变化最大的前 `top` 个尺寸」并就地刷新上一轮快照。
+/// 全程不分配（`emit` 由调用方直接打印，返回值不带堆对象）。
+///
+/// 参数含义（按顺序）：`size`、当前活跃字节、当前活跃对象数、本轮字节增量、本轮对象数增量。
+///
+/// 返回 `(本轮全部尺寸的正增量之和, 负增量之和)`：两者一起看就知道增长是**集中**还是**弥散**
+/// （集中在少数尺寸 = 某个结构在攒；弥散在很多尺寸 = 更像通用池/多种对象一起攒）。
+/// 第一次调用会顺便落下**基线快照**（供 `report_cumulative` 用）。
+pub fn report_changed_sizes(
+    top: usize,
+    mut emit: impl FnMut(usize, usize, usize, i64, i64),
+) -> (i64, i64) {
+    let first = !BASE_SET.swap(true, Ordering::Relaxed);
+    let mut picked = [usize::MAX; 16];
+    let top = top.min(picked.len());
+    let (mut pos_sum, mut neg_sum) = (0i64, 0i64);
+    for size in 1..=EXACT_MAX {
+        let d = EXACT_LIVE[size].load(Ordering::Relaxed) as i64
+            - PREV_LIVE[size].load(Ordering::Relaxed) as i64;
+        if d > 0 {
+            pos_sum += d;
+        } else {
+            neg_sum += d;
+        }
+    }
+    for _ in 0..top {
+        let mut best: Option<(usize, u64, i64, i64, usize, usize)> = None;
+        for size in 1..=EXACT_MAX {
+            if picked.contains(&size) {
+                continue;
+            }
+            let live = EXACT_LIVE[size].load(Ordering::Relaxed);
+            let prev_live = PREV_LIVE[size].load(Ordering::Relaxed);
+            if live == 0 && prev_live == 0 {
+                continue;
+            }
+            let dbytes = live as i64 - prev_live as i64;
+            let score = dbytes.unsigned_abs();
+            if best.is_none_or(|(_, s, _, _, _, _)| score > s) {
+                let count = EXACT_COUNT[size].load(Ordering::Relaxed);
+                let dcount = count as i64 - PREV_COUNT[size].load(Ordering::Relaxed) as i64;
+                best = Some((size, score, dbytes, dcount, live, count));
+            }
+        }
+        match best {
+            Some((size, _, dbytes, dcount, live, count)) => {
+                if let Some(slot) = picked.iter_mut().find(|c| **c == usize::MAX) {
+                    *slot = size;
+                }
+                emit(size, live, count, dbytes, dcount);
+            }
+            None => break,
+        }
+    }
+    // 原地快照（不分配）：下一次 dump 的「变化」就是相对此刻的差。
+    for size in 1..=EXACT_MAX {
+        let live = EXACT_LIVE[size].load(Ordering::Relaxed);
+        let count = EXACT_COUNT[size].load(Ordering::Relaxed);
+        PREV_LIVE[size].store(live, Ordering::Relaxed);
+        PREV_COUNT[size].store(count, Ordering::Relaxed);
+        if first {
+            BASE_LIVE[size].store(live, Ordering::Relaxed);
+            BASE_COUNT[size].store(count, Ordering::Relaxed);
+        }
+    }
+    (pos_sum, neg_sum)
+}
+
+/// 累计增长榜：相对**第一次 dump 的基线快照**，只列**仍在增长**的尺寸，按累计增量排序。
+/// 这就是找指纹的那一栏——泄漏的特征是「同一个 size 每轮都涨一点，累计几十~几百 KB」。
+/// 返回 `(全部尺寸的累计正增量之和, 负增量之和)`：与 `MEM_PROBE_NET` 配合，判断增长是
+/// **集中在少数尺寸**（top-10 就能盖住总量）还是**弥散在很多尺寸**（top-10 只占零头）。
+pub fn report_cumulative(
+    top: usize,
+    mut emit: impl FnMut(usize, usize, usize, i64, i64),
+) -> (i64, i64) {
+    if !BASE_SET.load(Ordering::Relaxed) {
+        return (0, 0);
+    }
+    let (mut pos_sum, mut neg_sum) = (0i64, 0i64);
+    for size in 1..=EXACT_MAX {
+        let grow = EXACT_LIVE[size].load(Ordering::Relaxed) as i64
+            - BASE_LIVE[size].load(Ordering::Relaxed) as i64;
+        if grow > 0 {
+            pos_sum += grow;
+        } else {
+            neg_sum += grow;
+        }
+    }
+    let mut picked = [usize::MAX; 32];
+    let top = top.min(picked.len());
+    for _ in 0..top {
+        let mut best: Option<(usize, i64, usize, usize)> = None;
+        for size in 1..=EXACT_MAX {
+            if picked.contains(&size) {
+                continue;
+            }
+            let live = EXACT_LIVE[size].load(Ordering::Relaxed);
+            let base = BASE_LIVE[size].load(Ordering::Relaxed);
+            if live == 0 && base == 0 {
+                continue;
+            }
+            let grow = live as i64 - base as i64;
+            if grow <= 0 {
+                continue; // 累计榜只看净增长
+            }
+            if best.is_none_or(|(_, g, _, _)| grow > g) {
+                best = Some((size, grow, live, EXACT_COUNT[size].load(Ordering::Relaxed)));
+            }
+        }
+        match best {
+            Some((size, grow, live, count)) => {
+                if let Some(slot) = picked.iter_mut().find(|c| **c == usize::MAX) {
+                    *slot = size;
+                }
+                let dcount = count as i64 - BASE_COUNT[size].load(Ordering::Relaxed) as i64;
+                emit(size, live, count, grow, dcount);
+            }
+            None => break,
+        }
+    }
+    (pos_sum, neg_sum)
+}
 
 /// 打开/关闭计数（由 `main.rs` 按 `MIR2_LEAK_PROBE` 决定；关闭时热路径只多一次原子读）。
 pub fn set_enabled(on: bool) {
@@ -72,6 +237,7 @@ unsafe impl GlobalAlloc for CountingAllocator {
             LIVE_BYTES.fetch_add(layout.size(), Ordering::Relaxed);
             ALLOCS.fetch_add(1, Ordering::Relaxed);
             bucket(layout.size()).fetch_add(layout.size(), Ordering::Relaxed);
+            track(layout.size(), true);
         }
         ptr
     }
@@ -81,6 +247,7 @@ unsafe impl GlobalAlloc for CountingAllocator {
             LIVE_BYTES.fetch_sub(layout.size(), Ordering::Relaxed);
             DEALLOCS.fetch_add(1, Ordering::Relaxed);
             bucket(layout.size()).fetch_sub(layout.size(), Ordering::Relaxed);
+            track(layout.size(), false);
         }
         System.dealloc(ptr, layout)
     }
@@ -94,6 +261,8 @@ unsafe impl GlobalAlloc for CountingAllocator {
             LIVE_BYTES.fetch_sub(layout.size(), Ordering::Relaxed);
             bucket(new_size).fetch_add(new_size, Ordering::Relaxed);
             bucket(layout.size()).fetch_sub(layout.size(), Ordering::Relaxed);
+            track(new_size, true);
+            track(layout.size(), false);
         }
         new_ptr
     }

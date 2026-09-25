@@ -11,6 +11,17 @@
 #   J2 每个 idle 采样 `tasks.running` 回到基线（无后台任务泄漏；基线=预热前 idle 的值）
 #   J3 测量轮 idle **线程数**与预热后基线一致（±2）；句柄数一致（±8）
 #   J4 测量轮 idle RSS 斜率 ≤ `-MaxRssSlopePerCycleMb`（默认 0.5 MB/轮，20 会话/轮）
+#   J0b 每轮**真的有 N 个会话进图**（服务端日志 `StartGame: session=` 计数 ≥ N 且
+#       `StartGame rejected` == 0）——没有这条，J1–J4 会在**空载荷**上给出绿（实测见下）
+#
+# ⚠️ J0b 的由来（2026-09-25 实测）：bot 的 `ok` 只代表「登录 + 保持连接」，**不代表进图**。
+#   本脚本原先用 `--account-prefix <p> --sessions N`，而 bot.py 的账号是从 **0** 起编号
+#   （`f"{prefix}{i}" for i in range(N)`），`seed_load_accounts.py` 播的却是 `<p>1..N` ——
+#   于是 `-Sessions 1` 用的是不存在的 `opsload0`：服务端**自动建号**（登录成功、没有角色），
+#   `StartGame rejected: character_index 0 not found`，一个会话都没进图；没有地图物化也就没有
+#   整图清理，J1–J4 全绿、RSS 斜率 0.02 MB/轮 —— **一个完全空转的运行被判成合格**。
+#   现在：① 账号改用显式 1-based 列表（与 seed_load_accounts.py 对齐）；② J0b 用**服务端侧**证据
+#   卡「真的进图了」，与 bot 的自我报告无关。
 #
 # 用法：
 #   pwsh tools/ops/leak_plateau.ps1 -DeployDir <deploy> -ExePath <mir2_server.exe> `
@@ -67,8 +78,22 @@ New-Item -ItemType Directory -Force -Path (Join-Path $ops 'out') | Out-Null
 $log = Join-Path $ops 'out/leak_plateau.log'
 $env:RUST_LOG = 'crystal_server=info'
 
-Get-CimInstance Win32_Process -Filter "Name='mir2_server.exe'" -EA SilentlyContinue |
-    ForEach-Object { Stop-Process -Id $_.ProcessId -Force -EA SilentlyContinue }
+# 前置（2026-09-25）：本机常态多 agent 并行，**绝不按进程名清场**——原先这里
+#   `Get-CimInstance -Filter "Name='mir2_server.exe'" | Stop-Process` 会把**别人正在跑**的服务端
+# 一起带走（同机 7000 上常有常驻开发服）。改成「明确前置失败，让操作者自己处置」。
+# 口径与 capacity_ramp.ps1 / login_latency_probe.ps1 一致；静态门禁 tools/ops/check_process_scope.ps1。
+foreach ($p in @($Port, ($Port + 1))) {
+    if (Get-NetTCPConnection -LocalPort $p -State Listen -EA SilentlyContinue) {
+        Write-Host ("FAIL(前置)：{0} 端口已被占用（gate 口与 admin 口都要空着；同机可能有别的 agent 的实例）" -f $p)
+        exit 2
+    }
+}
+$stale = @(Get-Process -Name mir2_server -EA SilentlyContinue | Where-Object { $_.Path -eq $ExePath })
+if ($stale.Count -gt 0) {
+    Write-Host ("FAIL(前置)：{0} 上仍有残留实例 pid={1} —— 处置后再重跑（本脚本不按进程名清场）" -f `
+            $ExePath, (($stale | ForEach-Object { $_.Id }) -join ','))
+    exit 2
+}
 Start-Sleep -Seconds 2
 $proc = Start-Process -FilePath $ExePath -WorkingDirectory $DeployDir `
     -RedirectStandardOutput $log -RedirectStandardError (Join-Path $ops 'out/leak_plateau.err.log') -PassThru
@@ -93,8 +118,11 @@ function Sample([string]$tag) {
 }
 function RunCycle([int]$n) {
     # 2026-09-25：改走带超时的共用 helper（原先 `& python bot.py …` 同步无超时）
+    # 账号用**显式 1-based 列表**（`<prefix>1..N`）：bot.py 的 `--account-prefix` 是从 0 起编号，
+    # 而 seed_load_accounts.py 播的是 1..N；用 prefix 会在 N 较小时撞上不存在的账号（见文件头 J0b）。
     $r = Invoke-BotJson -OpsDir $ops -BotArgs @('--host', '127.0.0.1', '--port', "$Port",
-        '--account-prefix', $AccountPrefix, '--sessions', "$Sessions", '--hold', "$HoldSec", '--password', '123456') `
+        '--accounts', ((1..$Sessions | ForEach-Object { "$AccountPrefix$_" }) -join ','),
+        '--hold', "$HoldSec", '--password', '123456') `
         -TimeoutSec $BotTimeoutSec -Tag "leak_plateau_cycle$n"
     if ($r.timedOut) {
         Write-Host ("WARN: 连登连退 bot 超过 {0}s 未退出（port={1}）——本轮按失败处理，见 {2}" -f `
@@ -102,18 +130,46 @@ function RunCycle([int]$n) {
         return $null
     }
     if ($null -eq $r.json) { return $null }
-    return $r.json.summary
+    # 服务端侧载荷证据（J0b）：本轮窗口里真的有几个会话进了图、有几个被拒
+    $newLines = @(Get-NewLogLines)
+    return [pscustomobject]@{
+        sum      = $r.json.summary
+        entered  = @($newLines | Where-Object { $_ -match 'StartGame: session=' }).Count
+        rejected = @($newLines | Where-Object { $_ -match 'StartGame rejected' }).Count
+    }
+}
+
+# 读「自上次调用以来的新增日志行」：J0b 要按轮窗口数进图次数，不能用全量日志。
+$script:logCursor = 0
+function Get-NewLogLines {
+    $all = @(Get-Content -LiteralPath $log -EA SilentlyContinue)
+    $new = if ($all.Count -gt $script:logCursor) { @($all[$script:logCursor..($all.Count - 1)]) } else { @() }
+    $script:logCursor = $all.Count
+    return $new
 }
 
 $rows = @(); $baseline = Sample 'idle_before'
 $rows += $baseline
+$payload = @()
 $cycleNo = 0
 foreach ($phase in @(@('warm', $WarmCycles), @('measure', $MeasureCycles))) {
     foreach ($i in 1..$phase[1]) {
         $cycleNo++
-        $sum = RunCycle $cycleNo
+        $res = RunCycle $cycleNo
+        $sum = if ($null -ne $res) { $res.sum } else { $null }
         if ($null -eq $sum -or $sum.failed -ne 0) {
-            Write-Host ("FAIL(J0): 第 {0} 轮会话失败（ok={1} failed={2}）——标定无效，不产出报告" -f $cycleNo, $sum.ok, $sum.failed)
+            Write-Host ("FAIL(J0): 第 {0} 轮会话失败（ok={1} failed={2}）——标定无效，不产出报告" -f `
+                    $cycleNo, $(if ($sum) { $sum.ok } else { 'n/a' }), $(if ($sum) { $sum.failed } else { 'n/a' }))
+            Stop-Process -Id $proc.Id -Force -EA SilentlyContinue
+            exit 3
+        }
+        $payload += [pscustomobject]@{ cycle = $cycleNo; entered = $res.entered; rejected = $res.rejected }
+        if ($res.entered -lt $Sessions -or $res.rejected -ne 0) {
+            Write-Host ("FAIL(J0b): 第 {0} 轮只有 {1}/{2} 个会话真的进图（StartGame rejected={3}）——" -f `
+                    $cycleNo, $res.entered, $Sessions, $res.rejected)
+            Write-Host '           bot 的 ok 只代表「登录 + 保持连接」，不代表进图；没进图不会物化地图、也不会触发整图清理，'
+            Write-Host '           后面的 online/tasks/线程/句柄/RSS 判据等于在**空载荷**上判绿（实测 -Sessions 1 时 RSS 斜率 0.02 也判绿）。'
+            Write-Host ("           先查账号/角色是否存在：seed_load_accounts.py 播的是 {0}1..N，本脚本已按同一口径取账号。" -f $AccountPrefix)
             Stop-Process -Id $proc.Id -Force -EA SilentlyContinue
             exit 3
         }
@@ -135,7 +191,8 @@ $slope = if ($measured.Count -ge 2) {
     ($measured[-1].rss_mb - $measured[0].rss_mb) / ($measured.Count - 1)
 } else { 99 }
 $j4 = ($slope -le $MaxRssSlopePerCycleMb)
-$ok = $j1 -and $j2 -and $j3 -and $j4
+$j0b = -not (@($payload | Where-Object { $_.entered -lt $Sessions -or $_.rejected -ne 0 }).Count -gt 0)
+$ok = $j0b -and $j1 -and $j2 -and $j3 -and $j4
 
 # 2026-09-25 补：J4 用的是**端点斜率**（首尾两点），在只有 5 个采样点时会被单点离群值主导 ——
 # 实测同一份夹具、同一份设置连跑两次：0.482（ok）与 0.81（ok=false）。所以报告里同时给出
@@ -184,6 +241,9 @@ $report = [ordered]@{
     J3_thread_span            = $j3thr
     J3_handle_span            = $j3hnd
     J4_plateau_not_leak       = $j4
+    J0b_payload_entered       = $j0b
+    payload_entered_per_round = $payload
+    account_scheme            = ($AccountPrefix + '1..N（1-based，与 seed_load_accounts.py 一致）')
     samples                   = $rows
     server_alive_at_end       = $alive
 }
