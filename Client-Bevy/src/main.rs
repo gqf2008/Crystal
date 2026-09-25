@@ -78,6 +78,42 @@ use client_bevy::ui::sprite_ui::mark_ui_render_layers;
 // #2521：layer 1 向下传播到 UiEntity 的后代（RenderLayers 不随层级传播）
 use client_bevy::ui::sprite_ui::propagate_ui_render_layers;
 
+/// 打印一次窗口度量（物理尺寸 / 逻辑尺寸 / DPI scale）。
+///
+/// 为什么需要它：本端 UI 全按 1024×768 **逻辑**画布排布，而 `bevy_window::WindowResolution::new`
+/// 收的是**物理**像素——高 DPI 机器上两者会分叉（150% 时逻辑只剩 682×512），底部 UI（聊天面板、
+/// 底栏）就可能被排到窗口外。这条日志把"到底是真裁切、还是截图/DPI 上下文的问题"一次问清，
+/// 避免继续靠猜（2026-09-26：拍中文界面像素证据时卡在这里，见线程
+/// `crystal-chat-panel-screenshot-mismatch`）。
+///
+/// 注意 `scale_factor()` 要等 winit 后端就绪才可信，Startup 里可能还是 1.0 ⇒ 这里等
+/// "scale != 1 或者已经跑了 120 帧"再打，只打一次。
+fn log_window_metrics(
+    windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
+    mut frames: Local<u32>,
+    mut done: Local<bool>,
+) {
+    if *done {
+        return;
+    }
+    *frames += 1;
+    let Ok(w) = windows.single() else { return };
+    let scale: f32 = w.scale_factor();
+    if scale == 1.0 && *frames < 120 {
+        return;
+    }
+    let res = &w.resolution;
+    tracing::info!(
+        "🪟 窗口度量：physical={}x{} logical={:.0}x{:.0} scale={} （设计画布 1024x768 逻辑；logical < 设计画布 ⇒ 底部 UI 会被裁）",
+        res.physical_width(),
+        res.physical_height(),
+        res.width(),
+        res.height(),
+        scale
+    );
+    *done = true;
+}
+
 fn main() {
     // --window-title <标题>：自定义窗口标题（多实例并行时便于区分，如“修复版”）
     let default_title = "Mir2 (Bevy) — 传奇2 客户端移植".to_string();
@@ -180,6 +216,8 @@ fn main() {
         client_bevy::ui::client_settings::ClientSettingsPlugin,
     ));
     app.add_systems(Update, (mark_ui_render_layers, propagate_ui_render_layers));
+    // 一次窗口度量日志（物理/逻辑/DPI）：用于定位"底部 UI 是否被窗口裁掉"这类问题。
+    app.add_systems(Update, log_window_metrics);
     // bevy_ui 迁移：三帧图按钮交互（Interaction → normal/hover/pressed 帧切换）
     app.add_systems(Update, client_bevy::ui::theme::image_button_system);
     // #2742：C# `MirImageControl.GrayScale` 等价灰度（须排在帧切换系统之后：
