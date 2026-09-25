@@ -244,6 +244,10 @@ function Get-E2eClientScript {
         `--e2e-user`（自动化登录账号）/ `client_bevy.exe` / `--real-net` / `--auto-enter`。
       不只看 `--e2e-user`：`l5r_ranged_projectile`、`l5t_minimize_survives` 这类不传 e2e 账号
       但照样起客户端的脚本，也必须接入锁（#3129 的覆盖口径就是"会起客户端"）。
+
+      扫描面＝整仓 *.ps1 / *.bat / *.cmd（2026-09-25 扩：只认 *.ps1 时，一个
+      `launch_client.bat` 起客户端能整体绕开锁与门禁，见 T9.3c/T9.3d），判据分档同
+      e2e_lock.ps1 的 Get-E2eClientScripts，两份必须给同一结论（T9.4 钉真仓、T9.4b 钉假仓）。
     #>
     param([string]$Root)
     # 这三个是"锁自己的脚本"，不算实机入口（接入器正文里就写着 `--e2e-user` 之类的示例，
@@ -251,24 +255,83 @@ function Get-E2eClientScript {
     # 同 e2e_lock.ps1 的共享判据（T9.4 要求两份名单一致）：工具/判据脚本只是**提到**这些字样，不是实机入口。
     $selfNames = @('e2e_lock.ps1', 'e2e_lock_selftest.ps1', 'enroll_e2e_lock.ps1', 'check_process_scope.ps1')
     $out = @()
-    # 扫描面与 e2e_lock.ps1 的共享判据一致：**整个仓库**的 *.ps1（排除 .git/target/node_modules）。
+    # 扫描面与 e2e_lock.ps1 的共享判据一致：**整个仓库**的 *.ps1/.bat/.cmd（排除 .git/target/node_modules）。
     # 写死目录清单会让新目录里的实机入口静默漏网（见 T9.1b/T9.3b）。
     $skipDirs = '\\(\.git|target|node_modules)\\'
-    $files = @(Get-ChildItem -LiteralPath $Root -Recurse -File -Filter *.ps1 -EA SilentlyContinue |
-        Where-Object { $_.FullName -notmatch $skipDirs })
+    $exts = @('.ps1', '.bat', '.cmd')
+    $files = @(Get-ChildItem -LiteralPath $Root -Recurse -File -EA SilentlyContinue |
+        Where-Object { $exts -contains $_.Extension.ToLowerInvariant() -and $_.FullName -notmatch $skipDirs })
+    $texts = @{}
     foreach ($f in $files) {
         if ($selfNames -contains $f.Name) { continue }
         $text = Get-Content -LiteralPath $f.FullName -Raw -EA SilentlyContinue
-        if ($null -eq $text) { continue }
+        if ($null -ne $text) { $texts[$f.FullName] = $text }
+    }
+    # 判据 A（直连入口）：正文自己带「起客户端」字样（与 e2e_lock.ps1 的共享判据同口径）。
+    $direct = @()
+    foreach ($f in $files) {
+        if (-not $texts.ContainsKey($f.FullName)) { continue }
+        $text = $texts[$f.FullName]
         if ($text -notmatch '--e2e-user|client_bevy\.exe|--real-net|--auto-enter') { continue }
-        $out += [pscustomobject]@{
+        $kind = $f.Extension.ToLowerInvariant().TrimStart('.')
+        $direct += [pscustomobject]@{
             Name    = $f.Name
             Path    = $f.FullName
-            Armed   = (($text -match 'e2e_lock\.ps1') -and ($text -match 'Enter-E2eLock'))
+            Kind    = $kind
+            Direct  = $true
+            Armed   = $(if ($kind -eq 'ps1') { ($text -match 'e2e_lock\.ps1') -and ($text -match 'Enter-E2eLock') } else { $false })
             # 有 Enter 还不够：早退路径（if (...) { exit 5 }）会把锁留到下一个调用者才发现要回收，
             # 所以接入必须**成对**——有 Enter 就要有 Exit（缺它即红，见 T9.2）。
-            HasExit = ($text -match 'Exit-E2eLock')
+            HasExit = $(if ($kind -eq 'ps1') { $text -match 'Exit-E2eLock' } else { $false })
+            Locked  = (($text -match 'e2e_lock\.ps1') -and ($text -match 'Enter-E2eLock') -and
+                       ($text -match 'Exit-E2eLock'))
         }
+    }
+    $out += $direct
+    # 判据 B（包装入口）：正文没有客户端字样，但**调用了**某个直连入口（典型：.bat 只写
+    # `call pwsh -File ...\l5h_buy_item.ps1`）。只认调用形态，不认「只是提到」——否则把
+    # run_real_e2e.ps1 写进默认参数值的 flag_coverage_check.ps1 会被误判成实机入口。
+    $wrappers = @()
+    foreach ($f in $files) {
+        if (-not $texts.ContainsKey($f.FullName)) { continue }
+        if (@($direct | Where-Object { $_.Path -eq $f.FullName }).Count -gt 0) { continue }
+        $text = $texts[$f.FullName]
+        $callsEntry = $false
+        foreach ($d in $direct) {
+            $esc = [regex]::Escape($d.Name)
+            foreach ($ln in ($text -split "`r`n|`n")) {
+                if ($ln -notmatch $esc) { continue }
+                if ($ln -match '(?i)\bcall\b|\bpwsh\b|\bpowershell\b|Start-Process|Invoke-|-File\b|&') {
+                    $callsEntry = $true
+                    break
+                }
+            }
+            if ($callsEntry) { break }
+        }
+        if (-not $callsEntry) { continue }
+        $wrappers += [pscustomobject]@{
+            Name    = $f.Name
+            Path    = $f.FullName
+            Kind    = $f.Extension.ToLowerInvariant().TrimStart('.')
+            Direct  = $false
+            Armed   = $false
+            HasExit = $false
+            Locked  = $false
+        }
+    }
+    $out += $wrappers
+    # 统一判定（非 *.ps1 直连入口 + 所有包装入口）：合规 = 点名 e2e_lock，或点名调用某个已接入入口。
+    $enrolled = @($direct | Where-Object { $_.Locked } | ForEach-Object { $_.Name })
+    foreach ($e in @($direct + $wrappers)) {
+        if ($e.Direct -and $e.Kind -eq 'ps1') { continue }
+        $text = $texts[$e.Path]
+        $locked = (($text -match 'e2e_lock') -or
+                   (@($enrolled | Where-Object { $text -match [regex]::Escape($_) }).Count -gt 0))
+        # 非 PowerShell 入口没有 Enter/Exit 字样：合规与否统一由 Armed/HasExit/Locked 三处表达，
+        # 这样 T9.2/T9.2b 的「必须成对」断言对它同样成立（缺委托即红）。
+        $e.Armed = $locked
+        $e.HasExit = $locked
+        $e.Locked = $locked
     }
     $out
 }
@@ -282,7 +345,11 @@ function Get-E2eScriptSurfaceProbe {
     param([string]$Root)
     if (Get-Command Get-E2eClientScripts -EA SilentlyContinue) {
         return @(Get-E2eClientScripts -RepoRoot $Root | ForEach-Object {
-            [pscustomobject]@{ Name = $_.Name; HasLock = ($_.EnterCount -gt 0 -and $_.ExitCount -gt 0) }
+            # 非 PowerShell 启动器（.bat/.cmd）正文里没有 Enter/Exit 字样，合规与否由 Locked 表达；
+            # 旧版锁脚本没有这个字段，回退到 Enter/Exit 计数（A/B 对照旧版时的正常路径）。
+            $hasLock = if ($_.PSObject.Properties['Locked']) { [bool]$_.Locked }
+                       else { ([int]$_.EnterCount -gt 0 -and [int]$_.ExitCount -gt 0) }
+            [pscustomobject]@{ Name = $_.Name; HasLock = $hasLock }
         })
     }
     @(Get-E2eClientScript -Root $Root | ForEach-Object {
@@ -321,6 +388,45 @@ Check 'T9.3b 盲区阳性对照：旧清单外目录（tools\ops）里「起客�
     ($fakeSurface.Count -eq 2 -and $fakeUnlocked.Count -eq 2) `
     ("认出：" + (($fakeSurface | ForEach-Object { $_.Name }) -join ',') + "；判不合规：" + $fakeUnlocked.Count)
 
+# T9.3c 扩展名盲区阳性对照（2026-09-25 补）：`.bat`/`.cmd` 一样能起客户端。实测只认 *.ps1 的
+# 实现对这个文件返回 0 条 ⇒ 用 .bat 起客户端就能整体绕开锁与门禁（假绿通道），而资源互斥
+# 假红（result=4 密码错误）照旧发生。所以它必须被认出来、且判不合规。
+New-Item -ItemType Directory -Path (Join-Path $fakeRoot 'scripts') -Force | Out-Null
+[System.IO.File]::WriteAllText((Join-Path $fakeRoot 'scripts\launch_client.bat'),
+    "@echo off`r`nstart `"`" client_bevy.exe --e2e-user bevychar --real-net`r`n",
+    (New-Object System.Text.ASCIIEncoding))
+$surfaceBat = @(Get-E2eScriptSurfaceProbe -Root $fakeRoot)
+$batEntry = @($surfaceBat | Where-Object { $_.Name -eq 'launch_client.bat' })
+Check 'T9.3c 扩展名盲区阳性对照：.bat 起客户端也必须被认出来且判不合规（扫描面退回只认 *.ps1 即红）' `
+    ($batEntry.Count -eq 1 -and -not $batEntry[0].HasLock) `
+    ("认出：" + (($surfaceBat | ForEach-Object { $_.Name }) -join ','))
+
+# T9.3d 阴性对照：`.bat` 点名调用**已接入的 .ps1 夹具**（把拿锁委托出去）不许判成不合规——
+# 否则扩展名判据只会制造假红，逼人给 .bat 也照抄一份 Enter/Exit（.bat 根本没有那种写法）。
+[System.IO.File]::WriteAllText((Join-Path $fakeRoot 'tools\acceptance\fake_enrolled.ps1'),
+    ". `"`$PSScriptRoot\e2e_lock.ps1`"`nEnter-E2eLock`nclient.exe --e2e-user test`nExit-E2eLock`n",
+    (New-Object System.Text.UTF8Encoding($false)))
+[System.IO.File]::WriteAllText((Join-Path $fakeRoot 'scripts\run_enrolled.bat'),
+    "call pwsh -NoProfile -File tools\acceptance\fake_enrolled.ps1`r`n",
+    (New-Object System.Text.ASCIIEncoding))
+$surfaceDeleg = @(Get-E2eScriptSurfaceProbe -Root $fakeRoot)
+$delegEntry = @($surfaceDeleg | Where-Object { $_.Name -eq 'run_enrolled.bat' })
+Check 'T9.3d 阴性对照：.bat 点名调用已接入的 .ps1 入口时不许判不合规（委托拿锁是合法形态，别造假红）' `
+    ($delegEntry.Count -eq 1 -and $delegEntry[0].HasLock) `
+    ("认出：" + (($surfaceDeleg | ForEach-Object { $_.Name }) -join ','))
+
+# T9.3e 阴性对照：**只是提到**某个实机入口名（没调用）的文件不算入口 —— 否则
+# `flag_coverage_check.ps1` 这种把 `scripts\run_real_e2e.ps1` 当默认参数值的静态门禁会被
+# 误判成实机入口、凭空变红。判据：包装入口只认调用形态（call/&/pwsh/Start-Process/-File）。
+[System.IO.File]::WriteAllText((Join-Path $fakeRoot 'tools\acceptance\fake_mentions_only.ps1'),
+    "`$gate = Join-Path `$Root 'tools\acceptance\fake_no_lock.ps1'`n",
+    (New-Object System.Text.UTF8Encoding($false)))
+$surfaceMentions = @(Get-E2eScriptSurfaceProbe -Root $fakeRoot)
+$mentionsEntry = @($surfaceMentions | Where-Object { $_.Name -eq 'fake_mentions_only.ps1' })
+Check 'T9.3e 阴性对照：只提到入口名（没调用）的文件不算实机入口（包装判据不许误伤静态门禁）' `
+    ($mentionsEntry.Count -eq 0) `
+    ("认出：" + (($surfaceMentions | ForEach-Object { $_.Name }) -join ','))
+
 # T9.4/T9.5：两处判据不许漂移 + 接入器与门禁必须同口径
 # （本自检里的 Get-E2eClientScript 是为了 A/B 对照旧版锁脚本才自带的副本；锁脚本里另有一份
 #  Get-E2eClientScripts 供批量接入器使用——两份口径一旦漂移，就会出现「接入器说都接了、门禁说没接」。）
@@ -334,6 +440,20 @@ if (Get-Command Get-E2eClientScripts -EA SilentlyContinue) {
 } else {
     Write-Host '  [SKIP] T9.4 —— 被测锁脚本没提供 Get-E2eClientScripts（A/B 对照旧版时的正常情况）' -ForegroundColor DarkGray
 }
+# T9.4b：两份判据在**扩展名与委托判定**上也必须同结论。T9.4 只对真仓比名字，而真仓里此刻
+# 没有 .bat/.cmd，所以「只扩了一份扫描面」这种漂移它挡不住 —— 这里拿上面那个含 .bat 的假仓再比一次。
+if (Get-Command Get-E2eClientScripts -EA SilentlyContinue) {
+    $sharedFake = @(Get-E2eClientScripts -RepoRoot $fakeRoot |
+        ForEach-Object { "{0}|{1}" -f $_.Name, [bool]$_.Locked } | Sort-Object)
+    $localFake = @(Get-E2eClientScript -Root $fakeRoot |
+        ForEach-Object { "{0}|{1}" -f $_.Name, [bool]$_.Locked } | Sort-Object)
+    $diffFake = @(Compare-Object -ReferenceObject $localFake -DifferenceObject $sharedFake)
+    Check 'T9.4b 两份判据在扩展名（.bat/.cmd）与「委托拿锁」判定上必须同结论（防只扩一份）' `
+        ($diffFake.Count -eq 0) ("仅自检认得：" + (($diffFake | Where-Object SideIndicator -eq '<=' | ForEach-Object InputObject) -join ',') +
+                                 "；仅共享判据认得：" + (($diffFake | Where-Object SideIndicator -eq '=>' | ForEach-Object InputObject) -join ','))
+} else {
+    Write-Host '  [SKIP] T9.4b —— 被测锁脚本没提供 Get-E2eClientScripts（A/B 对照旧版时的正常情况）' -ForegroundColor DarkGray
+}
 $enroller = Join-Path $PSScriptRoot 'enroll_e2e_lock.ps1'
 if (Test-Path -LiteralPath $enroller) {
     $enrollOut = (& (Get-Process -Id $PID).Path -NoProfile -NoLogo -File $enroller 2>&1) -join "`n"
@@ -343,9 +463,20 @@ if (Test-Path -LiteralPath $enroller) {
     Write-Host "  [SKIP] T9.5 —— 没有 $enroller（新增夹具时可以没有接入器，但要手工照抄已接入夹具的写法）" -ForegroundColor DarkGray
 }
 
+# T9.6：接入器对非 PowerShell 启动器只许「报人工」，不许假装能自动插入——它是文本启动器，
+# 往里插 Enter/Exit 只会把 .bat/.cmd 改坏。判据：输出里有「需人工接入」，且没有对该 .bat 的插入行。
+if (Test-Path -LiteralPath $enroller) {
+    $enrollFake = (& (Get-Process -Id $PID).Path -NoProfile -NoLogo -File $enroller -RepoRoot $fakeRoot 2>&1) -join "`n"
+    Check 'T9.6 接入器不会去改非 PowerShell 启动器（只报「需人工接入」，不出现对 .bat 的自动插入行）' `
+        (($enrollFake -match '需人工接入') -and ($enrollFake -notmatch 'DRY\s+launch_client\.bat')) `
+        ("接入器输出末段：" + (($enrollFake -split "`n" | Select-Object -Last 2) -join ' / '))
+} else {
+    Write-Host "  [SKIP] T9.6 —— 没有 $enroller" -ForegroundColor DarkGray
+}
+
 # ---------------- T10 语法解析（接入是插入式改动，最容易插出语法错） ----------------
 Write-Host 'T10 语法解析：所有实机入口 + 锁本体 + 本自检都必须能被 PowerShell 解析'
-$parseTargets = @($clientScripts | ForEach-Object { $_.Path }) + @(
+$parseTargets = @($clientScripts | Where-Object { $_.Path -match '\.ps1$' } | ForEach-Object { $_.Path }) + @(
     $LockScriptPath,
     (Join-Path $PSScriptRoot 'e2e_lock_selftest.ps1')
 )
@@ -358,7 +489,8 @@ foreach ($p in $parseTargets) {
         $parseBad += ("{0}: {1}" -f (Split-Path -Leaf $p), (($errs | ForEach-Object { $_.Message }) -join '; '))
     }
 }
-Check 'T10.1 全部文件解析无错' ($parseBad.Count -eq 0) ("解析失败 " + $parseBad.Count + " 个：" + ($parseBad -join ' | '))
+Check 'T10.1 全部 PowerShell 文件解析无错（.bat/.cmd 不是 PowerShell 语法，不在此列）' `
+    ($parseBad.Count -eq 0) ("解析失败 " + $parseBad.Count + " 个：" + ($parseBad -join ' | '))
 
 Reset-Lock
 Remove-Item -LiteralPath $sandbox -Recurse -Force -EA SilentlyContinue

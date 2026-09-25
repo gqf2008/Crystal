@@ -87,11 +87,20 @@ function Get-LockBlock {
 }
 
 $targets = @(Get-E2eClientScripts -RepoRoot $RepoRoot)
-Write-Host ("实机入口扫描：{0} 个脚本会起客户端（判据：--e2e-user / client_bevy.exe / --real-net / --auto-enter，扫描面＝整仓 *.ps1）" -f $targets.Count)
+Write-Host ("实机入口扫描：{0} 个脚本会起客户端（判据：--e2e-user / client_bevy.exe / --real-net / --auto-enter，扫描面＝整仓 *.ps1/.bat/.cmd）" -f $targets.Count)
 
 $changed = 0
 $skipped = 0
+$manual = 0
 foreach ($t in $targets) {
+    # 非 PowerShell 启动器（.bat/.cmd）：本接入器只会往 .ps1 里插 dot-source + try/finally，
+    # 对文本启动器插进去就是把文件改坏（它没有那种写法），所以只如实报给人工：
+    # 要么让它点名调用一个已接入的 .ps1 夹具、要么让它在正文里点名 e2e_lock。
+    if ($t.Kind -ne 'ps1') {
+        Write-Host ("  MANUAL {0,-32} 非 PowerShell 启动器（{1}）：需人工接入（点名已接入的 .ps1 或 e2e_lock）" -f $t.Name, $t.Kind)
+        $manual++
+        continue
+    }
     $check = Test-E2eLockEnrollment -Path $t.Path
     if ($check.ok) {
         Write-Host ("  SKIP   {0,-32} 已接入（Enter×{1} Exit×{2}）" -f $t.Name, $t.EnterCount, $t.ExitCount)
@@ -128,7 +137,8 @@ foreach ($t in $targets) {
 }
 
 Write-Host ''
-Write-Host ("合计：需改 {0} 个、已接入 {1} 个{2}" -f $changed, $skipped, $(if ($Apply) { '（已写入）' } else { '（dry-run：加 -Apply 才会写）' }))
+Write-Host ("合计：需改 {0} 个、需人工接入 {1} 个、已接入 {2} 个{3}" -f $changed, $manual, $skipped,
+    $(if ($Apply) { '（已写入）' } else { '（dry-run：加 -Apply 才会写）' }))
 if ($changed -gt 0 -and $Apply) {
     Write-Host '改完请跑门禁：pwsh tools/acceptance/e2e_lock_selftest.ps1'
 }
