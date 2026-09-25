@@ -453,3 +453,5 @@ Mir2Test.ini
 !tools/acceptance/CLIENT_AUTO_FLAGS.md
 !tools/acceptance/flag_coverage_check.ps1
 !tools/acceptance/l5y_reconnect.ps1
+!tools/ops/_run_bot.ps1
+!tools/ops/check_bot_timeouts.ps1

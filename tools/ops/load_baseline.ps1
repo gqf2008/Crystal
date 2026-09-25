@@ -13,16 +13,26 @@ param(
     [double]$MaxLoginP95Sec = 1.0,
     # 日志窗口回看行数：DEBUG 级别下服务端 ~1k 行/秒（怪物 AI 逐只打点），
     # 默认 40k 行只覆盖几秒，会漏掉 10s 一次的 "World tick" 行 → tick 指标恒"不可用"。
-    [int]$WindowTailLines = 200000
+    [int]$WindowTailLines = 200000,
+    # 单次 bot 会话超时（秒）：超时即按该次采样失败处理并**立刻**返回，不阻塞整轮（2026-09-25 修）
+    [int]$BotTimeoutSec = 180
 )
 $ErrorActionPreference = 'Continue'
 $ops = Split-Path -Parent $MyInvocation.MyCommand.Path
 $repo = Split-Path -Parent (Split-Path -Parent $ops)
 $bot = Join-Path $ops 'bot.py'
 
+# 2026-09-25：改用带超时的共用 helper。此前 `& python $bot …` 是**同步无超时**调用：
+# 只要服务端没绑到 -Port（部署配置端口不一致）就会一直等 ⇒ 整轮静默挂死（同类缺陷见 storage_degrade_drill）。
+. (Join-Path $ops '_run_bot.ps1')
 function Run-Bot([string[]]$extra) {
-    $out = & python $bot --host $Host_ --port $Port @extra 2>&1 | Select-Object -Last 1
-    try { return ($out | ConvertFrom-Json) } catch { return $null }
+    $r = Invoke-BotJson -OpsDir $ops -BotArgs (@('--host', $Host_, '--port', "$Port") + @($extra)) `
+        -TimeoutSec $BotTimeoutSec -Tag 'load_baseline'
+    if ($r.timedOut) {
+        Write-Host ("WARN: bot 超过 {0}s 未退出（port={1}）——该次采样按失败处理，见 {2}" -f $BotTimeoutSec, $Port, $r.errFile)
+        return $null
+    }
+    return $r.json
 }
 
 # tick 与 RSS 的窗口前后对比

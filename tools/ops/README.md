@@ -32,8 +32,19 @@ pwsh tools/ops/deploy_smoke.ps1 -ServerDir target/release -DataRoot .. -OutDir o
 → 再次起服 → ① 登录仍成功 ② 数据快照**逐字段不变** ③ 报告落 JSON。
 
 ```powershell
-pwsh tools/ops/rollback_drill.ps1 -NewBinary <new.exe> -PrevBinary <prev.exe> -ServerDir <运行目录>
+pwsh tools/ops/rollback_drill.ps1 -DeployDir <部署目录（含 Data/crystal.db、config/，以及新版 mir2_server.exe）> `
+    -PrevBinary <上一版 mir2_server.exe> -Port 7200 -Account <有角色的账号> -OutFile tools/ops/out/rollback.json
 ```
+
+> 参数说明（2026-09-25 更正：本文档此前写的是 `-NewBinary/-ServerDir`，脚本里根本没有这两个参数）。
+> `-DeployDir` 里放的**新版**二进制就是回滚对象；脚本会把它复制成 `mir2_server.prev.exe`、
+> 跑完第一轮后用它覆盖回 `mir2_server.exe` 再跑第二轮，以此证明"回滚可用且玩家档不变"。
+> `-Port` 与部署配置 `[network].listen_addr` 不一致时，脚本会生成临时配置并按 `mir2_server <config>` 启动
+> （与 `storage_degrade_drill` 同一套端口/超时契约）；冒烟 bot 有 `-BotTimeoutSec` 超时，超时按失败处理。
+
+**2026-09-25 复跑（master `a5c014835` 构建 + 上一版 = 2026-09-23 release 构建 `ABD8D212…`）**：
+`ok=true`、退出码 0 —— ① 新版起服 + 登录冒烟通过；② **回滚到 2026-09-23 的二进制后仍能起服 + 登录**；
+③ 角色档逐字段不变（`present=true, unchanged=true, diff=[]`）。
 
 **回滚要验的不是"能起来"，而是"起来之后玩家的档还在"**：二进制回退 + DB 结构兼容（本仓表创建走
 `IF NOT EXISTS`，但字段语义变化不在守卫内）。抽到的快照字段是 `characters.gold/level/map_index`。
@@ -315,6 +326,32 @@ pwsh tools/ops/tick_lag_probe.ps1 -DeployDir <deploy> -StepsCsv '50' -HoldSec 15
 `alert=true, reasons=['真错误 1 条 > 0','邮箱背压丢包 1 次'], exit 3` ✅
 
 值班侧仍需外部资源：告警通道（IM/邮件/电话）、值班表、演练流程——仓库里没有，也不该编造。
+
+## 7b. 演练脚本的两条工程护栏（2026-09-25 新增）
+
+### 带超时的 bot 调用：`_run_bot.ps1`
+
+`Invoke-BotJson -OpsDir <ops> -BotArgs @(…) -TimeoutSec 120 -Tag <名字>`：起 `bot.py`、**有界等待**、
+超时即杀并返回 `timedOut=$true`（调用方按该次采样失败处理）。自检：`pwsh tools/ops/_run_bot.ps1 -SelfTest`
+——用一个必然睡眠 30s 的子进程配 2s 超时，必须 `timedOut=True` 且实际用时 <10s（去掉超时机制这条自检会红）。
+
+> 为什么要有它：`& python bot.py … | Select-Object -Last 1` 这种同步写法没有超时，只要被测服务端没绑到
+> `-Port`（部署配置端口不一致）就会一直等 ⇒ **整个演练静默挂死**（`storage_degrade_drill` 实测挂了
+> 6 分钟以上、无任何输出）。已迁移：`storage_degrade_drill` / `deploy_smoke` / `load_baseline` / `rollback_drill`。
+
+### 静态门禁：`check_bot_timeouts.ps1`
+
+扫 `tools/ops/*.ps1`，凡出现同步直调 `& python … bot.py` 就报出来；历史遗留的 8 个脚本列在
+`-Allowlist` 里（**那就是待迁移清单**：`fault_injection` / `leak_plateau` / `fresh_mirdb_deploy` /
+`migration_drill` / `capacity_ramp` / `memory_cycle` / `memory_ramp` / `login_latency_probe`）。
+新增脚本再这么写即红（阳性对照：往扫描目录放一个同步直调的假脚本 → `[违规]` + exit 1）；
+迁移完成后用 `-Strict` 让 allowlist 也必须清空。
+
+### 端口契约（同 5c）
+
+服务端读的是部署目录 `config/server.toml` 的 `[network].listen_addr`，而 `-Port` 只作用于 bot。
+`deploy_smoke` 本来就改写副本配置；`storage_degrade_drill` / `rollback_drill` 现在也会在两者不一致时
+生成临时配置并按 `mir2_server <config>` 启动（输出里写明用哪份）。
 
 ## 当前状态（2026-09-23）
 
