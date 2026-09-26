@@ -23,17 +23,50 @@ use crate::scenes::AppState;
 use crate::ui::outlined_text::spawn_outlined_label;
 use crate::ui::sprite_ui::{shared_cjk_font, UiCjkFont};
 use crate::ui::theme::{
-    load_lib_image, spawn_animated_icon_button, spawn_close_button, spawn_panel,
+    load_lib_image, spawn_animated_icon_button, spawn_close_button, spawn_icon_button, spawn_panel,
     spawn_scroll_bar_ui, UiScrollList,
 };
 
 /// #2892 批B：面板精灵与 C# 原生尺寸/原点（C# `NPCDialog.Index = 995; Library = Libraries.Prguse`，
-/// 实测与 `Prguse[384]` 同为 440x224 的同一张图；无 Location → 默认 (0,0)）
+/// 无 `Location` → 默认 (0,0)）。
+///
+/// 更正（2026-09-26）：`Prguse[384]` 与 `Prguse[995]` **同为 440x224 但不是同一张图**
+/// ——384 的框线更细、正文区多一条横向分隔线（把两张图导出来比才看得出；窗口级几何对表与
+/// 写死尺寸审计都看不出来）。本端曾按"同一张图"用了 384，现按 C# 用 995。
 pub const PANEL: (LibraryName, usize) = (LibraryName::Prguse, 384);
 
 /// 面板尺寸（Prguse[384] 实测 440x224）
 pub const PANEL_W: f32 = 440.0;
 pub const PANEL_H: f32 = 224.0;
+
+/// 面板背景：`Prguse[995]`（C# `NPCDialog` 构造器 `Index = 995; Library = Libraries.Prguse;`，
+/// `NPCDialogs.cs:52`）。**曾用 `Prguse[384]`**——两张图同为 440x224，所以窗口级几何对表与
+/// 尺寸审计都看不出来，只有把图导出来比才看得见（384 的框线更细、正文区里多一条横向分隔线）。
+pub const NPC_PANEL: (LibraryName, usize) = (LibraryName::Prguse, 995);
+
+/// 翻页箭头：`UpButton` = `Prguse[197/198/199]` @(417,34)、`DownButton` = `[207/208/209]` @(417,175)，
+/// 两颗都显式 `Size = new Size(16, 14)`（`NPCDialogs.cs:78-108`）。
+/// 本端此前**没有画这两颗钮**，只用滚轮滚动——原版是"滚轮 + 箭头 + 可拖的 PositionBar"三件套。
+pub const NPC_UP_POS: (f32, f32) = (417.0, 34.0);
+pub const NPC_DOWN_POS: (f32, f32) = (417.0, 175.0);
+pub const NPC_ARROW_SIZE: (f32, f32) = (16.0, 14.0);
+pub const NPC_UP_FRAMES: (usize, usize, usize) = (197, 198, 199);
+pub const NPC_DOWN_FRAMES: (usize, usize, usize) = (207, 208, 209);
+
+/// `UpButton.Click` 语义（`NPCDialogs.cs:82-86`）：`if (_index <= 0) return; _index--;`
+pub fn npc_scroll_up(offset: usize) -> usize {
+    offset.saturating_sub(1)
+}
+
+/// `DownButton.Click` 语义（`NPCDialogs.cs:94-99`）：
+/// `if (_index + MaximumLines >= CurrentLines.Count) return; _index++;`
+pub fn npc_scroll_down(offset: usize, total: usize, visible: usize) -> usize {
+    if offset + visible >= total {
+        offset
+    } else {
+        offset + 1
+    }
+}
 /// 关闭键 `Prguse2[360..362]` @(413,3)（`NPCDialogs.cs:139-140`，无 `Size` → 原生 24x21）
 pub const CLOSE_POS: (f32, f32) = (413.0, 3.0);
 
@@ -70,6 +103,12 @@ pub struct NpcDialogWidget;
 
 #[derive(Component)]
 pub struct NpcClose;
+
+/// 翻页箭头（C# `NPCDialog.UpButton` / `DownButton`）
+#[derive(Component)]
+pub struct NpcScrollUp;
+#[derive(Component)]
+pub struct NpcScrollDown;
 
 #[derive(Component)]
 /// 行号（0..8）。字段公开给 `npc_rows` 只读探针做行矩形换算——
@@ -133,6 +172,7 @@ impl Plugin for NpcDialogPlugin {
                 npc_dialog_server_events,
                 npc_input_state_system,
                 npc_ui_system,
+                npc_scroll_arrows_system,
                 crate::ui::outlined_text::sync_outline_ui_system,
             )
                 .chain()
@@ -163,8 +203,8 @@ fn spawn_npc_dialog(
     }
     let cjk = npc.cjk_font.clone();
 
-    // 背景 Prguse[384] @ (0,0)；面板根（bevy_ui Node + ImageNode + Overflow::clip）
-    let Some(bg) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 384) else {
+    // 背景 Prguse[995] @ (0,0)；面板根（bevy_ui Node + ImageNode + Overflow::clip）
+    let Some(bg) = load_lib_image(&mut libs, &mut images, NPC_PANEL.0, NPC_PANEL.1) else {
         return;
     };
     let panel = spawn_panel(&mut commands, bg, 0.0, 0.0, PANEL_W, PANEL_H, 30);
@@ -189,6 +229,43 @@ fn spawn_npc_dialog(
     commands.entity(panel).with_children(|p| {
         // 滚动条（轨道 + 滑块，UiScrollThumb 子节点）
         spawn_scroll_bar_ui(p, (420.0, 34.0, 4.0, 144.0), 8);
+        // 翻页箭头（C# UpButton/DownButton；`NPCDialogs.cs:78-108`）
+        if let (Some(n), Some(h), Some(pr)) = (
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse, NPC_UP_FRAMES.0),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse, NPC_UP_FRAMES.1),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse, NPC_UP_FRAMES.2),
+        ) {
+            spawn_icon_button(
+                p,
+                n,
+                h,
+                pr,
+                NPC_UP_POS.0,
+                NPC_UP_POS.1,
+                NPC_ARROW_SIZE.0,
+                NPC_ARROW_SIZE.1,
+                9,
+            )
+            .insert((NpcScrollUp, NpcDialogWidget));
+        }
+        if let (Some(n), Some(h), Some(pr)) = (
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse, NPC_DOWN_FRAMES.0),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse, NPC_DOWN_FRAMES.1),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse, NPC_DOWN_FRAMES.2),
+        ) {
+            spawn_icon_button(
+                p,
+                n,
+                h,
+                pr,
+                NPC_DOWN_POS.0,
+                NPC_DOWN_POS.1,
+                NPC_ARROW_SIZE.0,
+                NPC_ARROW_SIZE.1,
+                9,
+            )
+            .insert((NpcScrollDown, NpcDialogWidget));
+        }
         // 关闭按钮 Prguse2[360-362] @ (413,3)
         if let Some(mut btn) =
             spawn_close_button(p, &mut libs, &mut images, CLOSE_POS.0, CLOSE_POS.1, 9)
@@ -247,6 +324,39 @@ fn spawn_npc_dialog(
 
 /// 显示/关闭 + 文本渲染 + 选项点击
 #[allow(clippy::type_complexity)]
+fn npc_scroll_arrows_system(
+    npc: Res<NpcDialogState>,
+    up: Query<(Entity, &Interaction), (With<NpcScrollUp>, Without<NpcScrollDown>)>,
+    down: Query<(Entity, &Interaction), (With<NpcScrollDown>, Without<NpcScrollUp>)>,
+    mut scroll: Query<&mut UiScrollList, With<NpcDialogWidget>>,
+    mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
+) {
+    fn edge(
+        e: Entity,
+        inter: &Interaction,
+        prev: &mut std::collections::HashMap<Entity, Interaction>,
+    ) -> bool {
+        let was = prev.insert(e, *inter);
+        *inter == Interaction::Pressed && was != Some(Interaction::Pressed)
+    }
+    if !npc.visible {
+        return;
+    }
+    let up_clicked = up.iter().any(|(e, i)| edge(e, i, &mut prev_inter));
+    let down_clicked = down.iter().any(|(e, i)| edge(e, i, &mut prev_inter));
+    if !(up_clicked || down_clicked) {
+        return;
+    }
+    if let Ok(mut sl) = scroll.single_mut() {
+        let (total, visible) = (sl.total, sl.visible);
+        sl.offset = if up_clicked {
+            npc_scroll_up(sl.offset)
+        } else {
+            npc_scroll_down(sl.offset, total, visible)
+        };
+    }
+}
+
 fn npc_ui_system(
     mut commands: Commands,
     mut npc: ResMut<NpcDialogState>,
@@ -1251,5 +1361,57 @@ mod tests {
             PANEL_W - old.2,
             PANEL_H - old.3
         );
+    }
+
+    /// 门禁（金标准逐窗复核 · MC 窗）：NPC 面板背景必须是 `Prguse[995]`。
+    ///
+    /// 依据：C# `NPCDialog` 构造器 `Index = 995; Library = Libraries.Prguse;`（`NPCDialogs.cs:52`）。
+    /// 本端曾用 `Prguse[384]` —— 两张图**同为 440x224**，所以窗口级几何对表（`window_rect_table.py`）
+    /// 与写死尺寸审计（`control_size_audit.py`）都看不出来，只有把两张图导出来比才看得见
+    /// （384 的框线更细、正文区多一条横向分隔线）。
+    ///
+    /// 阳性对照：把常量改回 `(LibraryName::Prguse, 384)` → 本测试红。
+    #[test]
+    fn npc_panel_is_prguse_995() {
+        assert_eq!(
+            NPC_PANEL,
+            (LibraryName::Prguse, 995),
+            "C# NPCDialog 背景是 Prguse[995]（不是 384；两者同尺寸，只有比图才看得出）"
+        );
+    }
+
+    /// 门禁（金窗逐窗复核 · NPC 窗）：翻页箭头的位置/三帧/尺寸逐字对齐 C#。
+    ///
+    /// 依据：`NPCDialogs.cs:78-108` —— `UpButton` `Index=197/HoverIndex=198/PressedIndex=199`、
+    /// `Size=(16,14)`、`Location=(417,34)`；`DownButton` `207/208/209`、`Size=(16,14)`、`(417,175)`。
+    /// 本端此前**没有这两颗钮**（只有滚轮），是"少画控件"而不是尺寸问题。
+    ///
+    /// 阳性对照：把 `NPC_UP_POS` 改成 `(420.0, 34.0)`（旧滚动条轨道 x）或把 `NPC_UP_FRAMES`
+    /// 改成 `(0,1,2)` → 本测试红。
+    #[test]
+    fn npc_scroll_arrows_match_csharp() {
+        assert_eq!(NPC_UP_POS, (417.0, 34.0));
+        assert_eq!(NPC_DOWN_POS, (417.0, 175.0));
+        assert_eq!(NPC_ARROW_SIZE, (16.0, 14.0));
+        assert_eq!(NPC_UP_FRAMES, (197, 198, 199));
+        assert_eq!(NPC_DOWN_FRAMES, (207, 208, 209));
+    }
+
+    /// 门禁：翻页箭头的点击语义逐字对齐 C#（`NPCDialogs.cs:82-99`）。
+    ///
+    /// 上：`if (_index <= 0) return;` → 0 时不动，其余 −1；
+    /// 下：`if (_index + MaximumLines >= 行数) return;` → 到底不动，其余 +1。
+    ///
+    /// 阳性对照：把 `npc_scroll_up` 改成 `offset.saturating_sub(2)`、或把 `npc_scroll_down` 的
+    /// 钳位条件写成 `offset >= total` → 本测试红。
+    #[test]
+    fn npc_arrow_scroll_semantics_match_csharp() {
+        assert_eq!(npc_scroll_up(0), 0, "到顶不动（C# `_index <= 0 return`）");
+        assert_eq!(npc_scroll_up(3), 2);
+        // 10 行、可见 8 行：offset 2 已到底（2+8 >= 10）⇒ 下不动
+        assert_eq!(npc_scroll_down(2, 10, 8), 2, "到底不动（C# `_index + MaximumLines >= 行数`）");
+        assert_eq!(npc_scroll_down(1, 10, 8), 2);
+        assert_eq!(npc_scroll_down(0, 8, 8), 0, "刚好一屏时不滚");
+        assert_eq!(npc_scroll_down(0, 1, 8), 0, "只有一行时不滚");
     }
 }
