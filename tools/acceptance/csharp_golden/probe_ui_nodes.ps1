@@ -14,7 +14,16 @@ param(
     [string]$Repo = 'E:\Users\gxh\Documents\GitHub\Crystal',
     [string]$ClientHome = 'E:\Users\gxh\Documents\GitHub\Crystal-wt-blend',
     [int]$ControlPort = 9095,
-    [string]$Out = "$env:TEMP\golden_ab_probe.json"
+    [string]$Out = "$env:TEMP\golden_ab_probe.json",
+    # 要问的点（逻辑坐标），**单串 `x,y;x,y;…`**。为什么不用 [string[]]：`pwsh -File` 传数组参数时
+    # PowerShell 会把后续 token 当**位置参数**绑定，实测把 `-Points 891,97 909,113` 里的 "909,113" 塞给了
+    # 别的参数（客户端收到 `--control-port "909113"` → 回退 9000 → 探针永远读不到 9095 ⇒ 白等整轮）。
+    # 默认那组是背包标题栏归因时用的；做**几何对表**时按目标传，例：角色窗装备格表
+    # C# `CharacterDialog.cs:229-340`（页内偏移 + CharacterPage(8,90) + 对话框(760,0)）：
+    #   -Points '891,97;909,113;971,97;...'  （Weapon 左上/中心、Helmet 左上…）
+    [string]$Points = '265,45;270,15;330,12;400,12;480,12;560,12;310,25;310,100;150,10',
+    # 只开背包窗（角色窗会盖住 x>=760 的点）；要在角色窗上取几何时把它关掉，别让 z 更高的窗抢先命中
+    [switch]$InventoryOnly
 )
 $ErrorActionPreference = 'Continue'
 . "$PSScriptRoot\..\e2e_lock.ps1"
@@ -51,7 +60,7 @@ try {
     foreach ($i in 1..40) { Start-Sleep -Milliseconds 500; $s2 = Rpc 'state'; if ("$($s2.map)" -eq '0') { break } }
     $s3 = Rpc 'state'; Write-Host ("对齐后 map={0} tile=({1},{2})" -f $s3.map, $s3.tile_x, $s3.tile_y)
     $null = Rpc 'dialog' @{ kind = 'inventory'; action = 'open' }
-    $null = Rpc 'dialog' @{ kind = 'character'; action = 'open' }
+    if (-not $InventoryOnly) { $null = Rpc 'dialog' @{ kind = 'character'; action = 'open' } }
     Start-Sleep -Seconds 3
     $res = [ordered]@{}
     $res['state'] = $s3
@@ -59,11 +68,12 @@ try {
     foreach ($k in @('inventory', 'character')) {
         $res["rect_$k"] = Rpc 'dialog_rect' @{ kind = $k }
     }
-    $pts = @(265, 45), (270, 15), (330, 12), (400, 12), (480, 12), (560, 12), (310, 25), (310, 100), (150, 10)
     $nodes = [ordered]@{}
-    foreach ($p in $pts) {
-        $r = Rpc 'ui_nodes_at' @{ x = $p[0]; y = $p[1] }
-        $nodes["$($p[0]),$($p[1])"] = $r
+    foreach ($p in ($Points -split ';' | Where-Object { $_.Trim() })) {
+        $xy = $p.Trim().Split(',')
+        if ($xy.Count -ne 2) { Write-Host "跳过非法点 '$p'（要 x,y）"; continue }
+        $r = Rpc 'ui_nodes_at' @{ x = [double]$xy[0]; y = [double]$xy[1] }
+        $nodes["$([double]$xy[0]),$([double]$xy[1])"] = $r
     }
     $res['nodes'] = $nodes
     $json = $res | ConvertTo-Json -Depth 8
