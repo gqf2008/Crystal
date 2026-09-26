@@ -305,7 +305,9 @@ fn open_window(app: &mut App, kind: DialogKind) {
             mail.compose_parcel = false;
             // 同 RPC：写信窗必须连父窗（`Mail` 列表窗）一起开——
             // `mail_compose_follow_system` 的孤儿守卫否则会立刻把它关掉
-            app.world_mut().resource_mut::<DialogManager>().open(DialogKind::Mail);
+            app.world_mut()
+                .resource_mut::<DialogManager>()
+                .open(DialogKind::Mail);
         }
         _ => app.world_mut().resource_mut::<DialogManager>().open(kind),
     }
@@ -334,7 +336,9 @@ fn close_window(app: &mut App, kind: DialogKind) {
             let mut mail = app.world_mut().resource_mut::<super::mail::MailState>();
             mail.compose = false;
             mail.compose_parcel = false;
-            app.world_mut().resource_mut::<DialogManager>().close(DialogKind::Mail);
+            app.world_mut()
+                .resource_mut::<DialogManager>()
+                .close(DialogKind::Mail);
         }
         _ => app.world_mut().resource_mut::<DialogManager>().close(kind),
     }

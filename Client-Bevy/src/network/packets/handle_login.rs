@@ -200,7 +200,9 @@ pub(crate) fn handle_login(
                     session.select_reload = true;
                 }
                 Err(e) => {
-                    tracing::warn!("⚠️ NewCharacterSuccess 解析失败（字段序与共享包不一致？）: {e}");
+                    tracing::warn!(
+                        "⚠️ NewCharacterSuccess 解析失败（字段序与共享包不一致？）: {e}"
+                    );
                 }
             }
         }

@@ -24,8 +24,8 @@ use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
 use crate::ui::sprite_ui::{shared_cjk_font, UiCjkFont};
 use crate::ui::theme::{
-    load_lib_image, spawn_icon_button, spawn_image, spawn_image_native, spawn_label, spawn_label_center, spawn_panel,
-    CloseButton, ImageButton,
+    load_lib_image, spawn_icon_button, spawn_image, spawn_image_native, spawn_label,
+    spawn_label_center, spawn_panel, CloseButton, ImageButton,
 };
 
 /// #2892 批B：面板精灵与 C# 原生尺寸（C# `HelpDialog.Index = 920; Library = Libraries.Prguse`）
@@ -234,7 +234,16 @@ fn spawn_help(
     commands.entity(panel).with_children(|p| {
         // 标题图 Title[57] @(18,9)：不设 Size ⇒ 美术原生 **45x14**
         // （曾写死 103x17，把 HELP 标题拉伸成 QUEST DIARY 那个尺寸）
-        let _ = spawn_image_native(p, &mut libs, &mut images, LibraryName::Title, 57, 18.0, 9.0, 9);
+        let _ = spawn_image_native(
+            p,
+            &mut libs,
+            &mut images,
+            LibraryName::Title,
+            57,
+            18.0,
+            9.0,
+            9,
+        );
         // 关闭 [360-362] @(509,3)；Previous @(210,485)；Next @(310,485)
         let buttons: [(HelpBtnKind, usize, usize, usize, f32, f32); 3] = [
             (HelpBtnKind::Close, 360, 361, 362, 509.0, 3.0),

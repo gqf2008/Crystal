@@ -3368,12 +3368,20 @@ mod tests {
         assert_eq!(notice_next_scroll(0, -1, 5), 0, "到顶不动");
         // 短于 25 行：一屏放得下 ⇒ 下按钮恒定不动（C# `len-25 <= 0`）
         assert_eq!(notice_next_scroll(0, 1, 5), 0, "不足 25 行时下按钮不动");
-        assert_eq!(notice_next_scroll(4, 1, 5), 0, "不足 25 行时越界下标收敛到 0");
+        assert_eq!(
+            notice_next_scroll(4, 1, 5),
+            0,
+            "不足 25 行时越界下标收敛到 0"
+        );
         // 长公告：下到 len-25 停（100-25=75），不是 len-1
         assert_eq!(notice_next_scroll(0, 1, 100), 1);
         assert_eq!(notice_next_scroll(74, 1, 100), 75);
         assert_eq!(notice_next_scroll(75, 1, 100), 75, "到 len-25 再加不动");
-        assert_eq!(notice_next_scroll(90, 0, 100), 75, "越界（公告变短）也收敛到 len-25");
+        assert_eq!(
+            notice_next_scroll(90, 0, 100),
+            75,
+            "越界（公告变短）也收敛到 len-25"
+        );
         assert_eq!(notice_next_scroll(75, -1, 100), 74);
         assert_eq!(notice_next_scroll(1, -1, 100), 0);
         // 空公告：恒 0（C# `Notice.MultiText.Length - 1` 会是 -1，本端取 0 避免下溢）

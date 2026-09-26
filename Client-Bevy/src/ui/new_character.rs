@@ -685,10 +685,7 @@ fn new_char_ui_system(
     // 此前直接读 `window.cursor_position()`：自动化（click/cursor RPC 注入探针）时它拿到的是
     // 真实鼠标位置——无头/共享桌面下是 (0,0)，于是建角窗的按钮**永远点不到**，
     // "建角"这条链路既没法夹具化、也没法真机复现（owner 反馈的"无法创建角色"）。
-    let (mx, my) = cursor_src
-        .pos()
-        .map(|p| (p.x, p.y))
-        .unwrap_or((0.0, 0.0));
+    let (mx, my) = cursor_src.pos().map(|p| (p.x, p.y)).unwrap_or((0.0, 0.0));
     let lclick = mouse.just_pressed(MouseButton::Left);
 
     // 名字输入聚焦

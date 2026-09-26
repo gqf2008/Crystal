@@ -64,7 +64,10 @@ fn main() {
 fn emit_build_stamp() {
     let manifest = PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"));
     // 仓库根 = crate 目录的上一级（本仓布局 Client-Bevy/ 在根下）
-    let repo = manifest.parent().map(|p| p.to_path_buf()).unwrap_or(manifest);
+    let repo = manifest
+        .parent()
+        .map(|p| p.to_path_buf())
+        .unwrap_or(manifest);
     let git = |args: &[&str]| -> Option<String> {
         let out = Command::new("git")
             .args(args)

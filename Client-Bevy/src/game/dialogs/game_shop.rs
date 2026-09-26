@@ -23,8 +23,9 @@ use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
 use crate::ui::sprite_ui::{shared_cjk_font, UiCjkFont, UiFont};
 use crate::ui::theme::{
-    load_lib_image, spawn_close_button, spawn_container, spawn_icon_button, spawn_image, spawn_image_native,
-    spawn_label, spawn_label_center, spawn_panel, spawn_scroll_bar_ui, UiScrollList,
+    load_lib_image, spawn_close_button, spawn_container, spawn_icon_button, spawn_image,
+    spawn_image_native, spawn_label, spawn_label_center, spawn_panel, spawn_scroll_bar_ui,
+    UiScrollList,
 };
 
 /// #2892 批B：面板精灵与 C# 原生尺寸（C# `GameShopDialog.Index = 749; Location = Center`）
@@ -1112,7 +1113,16 @@ fn spawn_game_shop(
         cat_thumb = Some(thumb);
         // 标题 Title[26]（C# (18,9)）：不设 Size ⇒ 美术原生 **87x15**
         // （曾写死 103x17 = `Title[15]`「QUEST DIARY」的尺寸，把 GAMESHOP 标题拉伸）
-        let _ = spawn_image_native(p, &mut libs, &mut images, LibraryName::Title, 26, 18.0, 9.0, 8);
+        let _ = spawn_image_native(
+            p,
+            &mut libs,
+            &mut images,
+            LibraryName::Title,
+            26,
+            18.0,
+            9.0,
+            8,
+        );
         // 关闭（C# (671,4)）
         if let Some(mut btn) =
             spawn_close_button(p, &mut libs, &mut images, CLOSE_POS.0, CLOSE_POS.1, 10)

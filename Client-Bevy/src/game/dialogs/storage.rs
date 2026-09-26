@@ -26,8 +26,8 @@ use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
 use crate::ui::sprite_ui::{shared_cjk_font, UiCjkFont, UiFont};
 use crate::ui::theme::{
-    load_lib_image, spawn_icon_button, spawn_image, spawn_item_cell_ui_root,
-    spawn_label, spawn_panel, CloseButton, ImageButton, UiItemCell, UiItemCellData, UiItemCellIcon,
+    load_lib_image, spawn_icon_button, spawn_image, spawn_item_cell_ui_root, spawn_label,
+    spawn_panel, CloseButton, ImageButton, UiItemCell, UiItemCellData, UiItemCellIcon,
 };
 
 /// #2892 批B：面板精灵与 C# 原生尺寸（C# `StorageDialog.Index = 586; Library = Libraries.Prguse`）
@@ -1251,7 +1251,12 @@ fn storage_server_events(
         if let ServerEvent::StoragePrompt = ev {
             // C# `S.NPCStorage` → `StorageDialog.Show()` → 有密码且未解锁 → `PromptStorageUnlock()`
             // （`NPCDialogs.cs:2982-2988`）。服务端只在**有密码**时发这个包（`npc.rs:781`）。
-            start_unlock_prompt(&mut input_box_state, &mut text_input_state, &mut storage, &mut pwd_flow);
+            start_unlock_prompt(
+                &mut input_box_state,
+                &mut text_input_state,
+                &mut storage,
+                &mut pwd_flow,
+            );
         }
         if let ServerEvent::StorageResized {
             size,
@@ -1686,7 +1691,10 @@ pub fn send_pwd_packet(net: &NetConnection, pkt: &PwdPacket) {
             net.send_packet(&mir2_shared::packets::client::storage::UnlockStorage {
                 password: password.clone(),
             });
-            tracing::info!("🔓 发送 C.UnlockStorage（len={}）", password.chars().count());
+            tracing::info!(
+                "🔓 发送 C.UnlockStorage（len={}）",
+                password.chars().count()
+            );
         }
     }
 }
@@ -2623,7 +2631,10 @@ mod tests {
         f.step = super::StoragePwdStep::SetNew;
 
         let r = super::storage_password_step("", &mut st, &mut f);
-        assert!(r.keep_open && r.packet.is_none(), "空输入：C# `return false`（原地）");
+        assert!(
+            r.keep_open && r.packet.is_none(),
+            "空输入：C# `return false`（原地）"
+        );
 
         let r = super::storage_password_step("abc123", &mut st, &mut f);
         assert!(r.keep_open, "第一步成功后仍要问确认（输入框保持打开）");
@@ -2784,9 +2795,14 @@ mod tests {
         super::manage_storage_password(&mut ib, &mut input, &mut st, &mut f);
         assert!(ib.open, "未设密码时必须弹输入框");
         assert_eq!(f.step, super::StoragePwdStep::SetNew);
-        assert_eq!(ib.purpose, crate::game::dialogs::input_box::InputPurpose::StoragePassword);
+        assert_eq!(
+            ib.purpose,
+            crate::game::dialogs::input_box::InputPurpose::StoragePassword
+        );
         assert!(
-            input.masked.contains(&crate::game::dialogs::input_box::INPUT_FIELD_ID),
+            input
+                .masked
+                .contains(&crate::game::dialogs::input_box::INPUT_FIELD_ID),
             "C# `InputTextBox.Password = true` ⇒ 必须遮罩"
         );
         assert!(f.cancel_hides_storage, "首次设置取消要连窗一起关");
@@ -2800,7 +2816,10 @@ mod tests {
         let (mut ib, mut input) = (InputBoxState::default(), TextInputState::default());
         let mut f = flow();
         super::manage_storage_password(&mut ib, &mut input, &mut st, &mut f);
-        assert!(st.change_confirm && !ib.open, "已设过先弹确认框、不直接问密码");
+        assert!(
+            st.change_confirm && !ib.open,
+            "已设过先弹确认框、不直接问密码"
+        );
     }
 
     /// 源码级守卫（owner 反馈项）：密码流程**不得**再回到「自造三钮面板 + 在烘字按钮上叠中文标签」。

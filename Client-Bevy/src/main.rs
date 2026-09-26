@@ -132,7 +132,10 @@ fn main() {
     // 同源数据也由 control RPC `build_stamp` 暴露，供夹具断言"被测 exe 就是当前提交构建的"。
     // 整条定长记录原样打印（同一个字符串也就是 exe 里被 `build_stamp.ps1` 扫描的那条），
     // 保证"日志里看到的"与"夹具扫到的"永远是同一个值。
-    tracing::info!("🧾 客户端构建：{}", client_bevy::control::BUILD_STAMP_RECORD);
+    tracing::info!(
+        "🧾 客户端构建：{}",
+        client_bevy::control::BUILD_STAMP_RECORD
+    );
     // 渲染错误策略必须在 DefaultPlugins 之前装：RenderPlugin::build 走的是
     // `init_resource::<RenderErrorHandler>()`，先插入者胜出。覆盖它只为一件事——
     // 「最小化窗口」触发的那次可恢复表面配置失败不再退进程（bevy 默认策略对任何

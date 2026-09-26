@@ -334,7 +334,9 @@ fn npc_goods_title_system(
 ) {
     let craft = state.panel == mir2_shared::enums::PanelType::Craft;
     let want = if craft { TITLE_IMG_CRAFT } else { TITLE_IMG };
-    if let Some(h) = crate::ui::sprite_ui::ui_image(&mut libs, &mut images, &mut cache, want.0, want.1) {
+    if let Some(h) =
+        crate::ui::sprite_ui::ui_image(&mut libs, &mut images, &mut cache, want.0, want.1)
+    {
         for mut img in &mut title {
             if img.image != h {
                 img.image = h.clone();
@@ -729,7 +731,11 @@ mod tests {
     /// 阳性对照：把 `TITLE_IMG` 改成 `(LibraryName::Title, 0)` → 第一条断言红。
     #[test]
     fn npc_goods_title_variants_match_csharp() {
-        assert_eq!(TITLE_IMG, (LibraryName::Title, 27), "买卖档标题是 Title[27]");
+        assert_eq!(
+            TITLE_IMG,
+            (LibraryName::Title, 27),
+            "买卖档标题是 Title[27]"
+        );
         assert_eq!(
             TITLE_IMG_CRAFT,
             (LibraryName::Title, 12),
