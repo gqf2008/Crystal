@@ -70,3 +70,12 @@
 | **界面打磨（P3-2 行会 NOTICE 空黑区、#782 仓库/商城物品名）** | 逐个修 + 门禁 | **已全部关闭**：P3 系列（宠物占位串／行会空面板／商城内部 ID／商城试穿预览）见 walgit 看板「P3：界面/文案瑕疵」线程（closed, 28 条）；#782 走与商城同一条名称降级链（PR #3040，master `f31ebf04`）。另有「部分地图灯光错位」同批关闭（对照原版 `GameScene` Map Lights 段） |
 
 外部五项在人工提供资源后可**直接照本清单执行**，无需再补工具。
+
+**2026-09-26 复核（master `7eaf3a01e`）：清单未漂移，可照本执行。** 逐条对过——
+① 路径引用：本文点到的 `tools/ops/bot.py` 等脚本均存在（`tools/**` 的文档引用还有
+`check_doc_tool_refs.ps1` 做常驻门禁，覆盖所有 `*.md`）；② 参数与写法一致：
+`capacity_ramp.ps1`（`-StepsCsv`/`-DeployDir`/`-Port`）、`deploy_smoke.ps1`（`-ReleaseDir`/`-SourceRoot`/`-DeployDir`/`-Port`）、
+`mem_leak_gate.ps1`（`-DeployDir`/`-MeasureCycles`，且其判据自检 `-SelfTest` 五象限当日复跑通过）、
+`health_report.ps1`（`-Log`）、`memory_cycle.ps1`（`-DeployDir`/`-ExePath`/`-RoundsCsv`，**注意它没有 `-Sessions`**，
+轮次用 `-RoundsCsv` 表达）。同日发版三闸在 `bf7c24b6e` 上全绿（见 `docs/DELIVERY.md` 复跑段），
+故外部资源到位后直接按本清单跑即可；本机不再重复投入这五项。
