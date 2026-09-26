@@ -3387,9 +3387,26 @@ fn apply_control_commands(
                         .map(|t| t.chars().count())
                         .unwrap_or(0),
                     // 同 bag_probe：带上 count，判据看件数（可堆叠物品存取时占用格数可能不变）。
-                    "occupied": occupied_cells_with_uid_count(&q.storage.items)
-                        .into_iter()
-                        .map(|(c, n, _uid, cnt)| json!({"cell": c, "name": n, "count": cnt}))
+                    // P3-3（#782）：`name` 是**线包/表里那份**，`display` 是**格子/悬浮提示真正画的**
+                    // 那份（`StorageState::display_name` = 玩家所见）。两者在「表刚到货、还没回写
+                    // `item.name`」这类时序下有分叉，夹具判据必须钉在 `display` 上，否则会把
+                    // 「玩家已看到真名」误判成「还在显示 #id」。
+                    "occupied": q
+                        .storage
+                        .items
+                        .iter()
+                        .enumerate()
+                        .filter_map(|(c, s)| {
+                            s.as_ref().map(|it| {
+                                json!({
+                                    "cell": c,
+                                    "name": it.name,
+                                    "display": q.storage.display_name(it),
+                                    "count": it.count,
+                                    "unique_id": it.unique_id,
+                                })
+                            })
+                        })
                         .collect::<Vec<_>>(),
                 });
                 tracing::info!("🎮 control storage_probe: {payload}");
@@ -3517,6 +3534,15 @@ fn apply_control_commands(
                     .map(|(row, it)| {
                         json!({
                             "row": row, "item_index": it.item_index, "name": it.name,
+                            // P3-3（#782）：商城行**真正画出来**的名字（`resolve_shop_name`
+                            // = `item_names::resolve_item_name`，与 `game_shop` 渲染同一份函数）。
+                            // 夹具判据钉在 `display`：`name` 只是线包/目录里那份，占位期可能是 `#id`。
+                            "display": crate::game::dialogs::game_shop::resolve_shop_name(
+                                &it.name,
+                                &q.shop.item_names,
+                                it.item_index,
+                            )
+                            .0,
                             "class": it.class, "category": it.category,
                             "deal": it.deal, "top_item": it.top_item, "date": it.date,
                             "gold": it.gold_price, "credit": it.credit_price,
