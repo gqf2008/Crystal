@@ -71,6 +71,30 @@ macOS 产物未签名：首次打开被 Gatekeeper 拦截时右键 → 打开，
 
 ---
 
+## 1.5 上线就绪证据地图（2026-09-26 复核）
+
+做「能不能上线运营」这个判断时，**按这张表逐行看**即可——每行都写明判据落在哪个文件/小节、
+以及用什么命令能复跑。**产品代码自 `bf7c24b6e` 起零改动**（`git rev-list --count bf7c24b6e..HEAD -- Client-Bevy ServerRust SharedRust` = 0），
+所以下表各行互相对齐、不存在"证据来自不同代码"的拼接问题。
+
+| 维度 | 判据 / 证据 | 位置 | 状态 |
+|---|---|---|---|
+| 发版三闸 | 客户端 GNU release + 打包预演 **J1–J4**（产物/staging/依赖闭包/zip 结构/**解压即跑**）；服务端 release + 全新目录 `deploy_smoke`；`mem_leak_gate`（判据 = 活跃字节窗口内**一次都没回落**即判泄漏） | 本文 §1 复跑段；`tools/ops/{package_windows_rehearsal,deploy_smoke,mem_leak_gate}.ps1` | 全绿（`bf7c24b6e`：18m42s / PASS / exit 0 / dips=2） |
+| 玩法验收（五闭环） | 战斗含掉落 → 跨图 5/5 → 复活回绑定点 → 买卖（金币+背包 delta）→ 任务接取/交付 → 仓库存取 → 邮件收发 | `tools/acceptance/l5{a,i,j,h,g,e,f}_*.ps1`；walgit `crystal-five-loops` | 全 PASS（同一批代码） |
+| 界面验收 | 44 窗「开→点标准 X→关」交互巡回 | `tools/acceptance/ui_interact_sweep.ps1` + `interact_sweep_manifest.json` | 44/44 |
+| 容量 / 背压 / tick 滞后 | `capacity_ramp.ps1` 阶梯（自起服务端、只认自己 PID） | `tools/ops/CAPACITY.md` §4.8 | 120 会话 **ok 120/0 失败、背压四项全 0、`max_abs_lag_pct=0.0`**（20→120 无拐点） |
+| 每会话内存 | `mem_attribution.ps1` 三档对照（含"进图证据"前置） | CAPACITY §4.7.1 / §4.9（口径对照） | 入场 **0.945MB/会话**；旧记 3.5MB 已认定过期 |
+| 短长稳（本机最长窗口） | 40 会话 × 30 分钟时间序列（RSS/tick 滞后/错误分类） | CAPACITY §5.9 | 无线性漂移；`lag_max=0.1%`；4383 条 ERROR 全部是"客户端突然断开"良性类 |
+| 单机故障语义 | `fault_injection.ps1`：kill -9 中途崩溃 / 网络抖动 / DB 只读 | `tools/ops/EXTERNAL_OPS_HANDOFF.md` 末尾 | kill **2.4s 感知 / 4s 恢复**；抖动 `server_real_errors=0`；只读 **不 panic** |
+| 网络劣化边界 | `latency_proxy.py` × `bot.py` 扫描 100/200/400/800ms × 0/5/10/20% | 同上 | 服务端**四档零真错误**；登录 p95 与时延 **1:1**；完成率下降来自**客户端超时策略** |
+| owner 反馈（7 条） | 建角 / 中文字体 / 鼠标移动 / 写邮件窗 / 底部对话框 / 地图灯光 / 魔法特效 | 各自夹具（`l5ac`/字体 cmap 断言+截图/`l5ad`/`l5ab`/`l5t_chat_dialog4`/`l5ag_maplight_stream`） | 每条都有实机判据（其中三条证明是**旧构建**造成） |
+| 工具链可信度 | 构建戳（exe 内固化 commit，夹具启动前比对）+ T11.1–T11.5 + 实机锁覆盖面 + 进程作用域 + 文档引用门禁 | `tools/acceptance/{build_stamp,e2e_lock_selftest}.ps1`、`tools/ops/check_process_scope.ps1`、`check_doc_tool_refs.ps1` | 全部在闸内（本轮还修掉 `$&` 事故与"仅 tools 前进即判陈旧"两处） |
+
+**仍未达成、且本机做不了（必须外部资源）**——逐项在本表下方的交接清单里有判据与所需输入：
+独立压测机 + 生产拓扑、**≥24h（建议 72h）长稳**、告警通道与值班流程、
+相邻的一对发布产物 + 脱敏生产库（迁移/回滚演练）、真实渲染客户端的容量画像。
+见 `tools/ops/EXTERNAL_OPS_HANDOFF.md`。
+
 ## 2. 运行前置：必须自备的游戏数据
 
 **仓库不含游戏素材与数据库**（体积大且版权归原版），需要从原 C# 版的数据包取得：
