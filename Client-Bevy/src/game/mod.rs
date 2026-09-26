@@ -53,6 +53,8 @@ impl Plugin for GamePlugin {
         // 各 Update 键位系统汇总，消费者见 input_gate 模块注释
         // （单独注册：下方插件元组已 15 个达上限）
         app.add_plugins(input_gate::TextInputGatePlugin);
+        // #3264：物品图标帧号缓存（`item_index → Items 帧`；觉醒材料格等只有索引的地方用）
+        app.add_plugins(item_names::ItemImageCachePlugin);
         // #2633 批次4：本地玩家状态写系统（player_vitals/player_status，GameSet::PlayerState
         // 先于 Hud 读）；单独注册同上（插件元组上限）。
         app.add_plugins(player_state::PlayerStatePlugin);

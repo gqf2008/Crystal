@@ -922,6 +922,9 @@ pub enum ServerEvent {
         /// C# 客户端守卫读 `Info.Bind`（`MirItemCell.cs:1793`），本端此前没把它带出来，
         /// 导致"不可邮寄物品"没有早提示。未知（没拉过该索引）时调用方不得拦截。
         bind: u16,
+        /// #3264：`ItemInfo.image`（`Items` 库帧号）——觉醒材料格这类**只有 item_index**
+        /// 的地方要画图标就必须有它（C# 用 `UserItem.Info.Image` 直接取帧）。
+        image: u16,
     },
     UserInformation {
         name: String,
