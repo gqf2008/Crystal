@@ -356,6 +356,11 @@ fn input_box_ui_system(
             .chars()
             .take(INPUT_MAX_LEN)
             .collect();
+        tracing::info!(
+            "⌨️ [INPUTBOX] 确认：purpose={:?} body_len={}（密码流程只看长度）",
+            state.purpose,
+            body.chars().count()
+        );
         match state.purpose.clone() {
             InputPurpose::GuildWarReturn => {
                 net.send_packet(&mir2_shared::packets::client::guild::GuildWarReturn {

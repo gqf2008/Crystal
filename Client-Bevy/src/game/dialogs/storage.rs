@@ -114,9 +114,12 @@ pub struct StorageState {
     /// 流程要求关闭仓库窗（C# `Hide()`；由 `storage_password_cancel` 置位、驱动系统落地，
     /// 因为取消回调发生在 `input_box` 系统里、拿不到 `DialogManager`）
     pub close_requested: bool,
-    /// C# `StorageDialog._forcingPasswordSetup`（本端目前只在「取消置 false」与
-    /// 「不一致时是否重来」两处读它；强制设密码闸门本身是下一轮的事）
+    /// C# `StorageDialog._forcingPasswordSetup`（无密码时 `ForceStoragePasswordSetup` 置位：
+    /// 置位期间「两次不一致」要从头重来，取消则关窗）
     pub forcing_setup: bool,
+    /// C# `StorageDialog._pendingOpenAfterPasswordSet`（`:3109-3114` / `:3067-3072`）：
+    /// 设密码流程结束后要自动把仓库窗打开
+    pub pending_open_after_set: bool,
     /// 当前页（C# `RefreshStorage1`/`RefreshStorage2`）
     pub page: StoragePage,
     /// 是否处于扩容状态（C# `UserInformation.HasExpandedStorage`；第 2 页放行条件）
@@ -869,6 +872,51 @@ fn storage_ui_system(
     }
 }
 
+/// C# `StorageDialog.Show()` 的「真开窗」部分（`NPCDialogs.cs:2967/2990`）：背包推到仓库右侧并排，
+/// 然后打开仓库 + 背包两个窗。**密码闸门通过后**才会走到这里（#3260）。
+fn show_storage_window(
+    storage: &mut StorageState,
+    mgr: &mut DialogManager,
+    inv_entities: &mut Query<
+        (&mut Node, &DialogRoot),
+        With<crate::game::dialogs::inventory::InventoryPanel>,
+    >,
+    inv_origin: &mut crate::game::dialogs::inventory::InventoryOrigin,
+) {
+    storage.visible = true;
+    // 原版 C#：仓库打开时同时显示背包，且背包推到 (仓宽+5, 仓Y)=(393,0)
+    // （`NPCDialogs.cs:2967/2990` `InventoryDialog.Location = new Point(Size.Width + 5, Location.Y)`）
+    // —— 否则 388x346 的仓库完全罩住 316x236 的背包。
+    let mut min_x = f32::MAX;
+    for (node, root) in inv_entities.iter() {
+        if root.0 == DialogKind::Inventory {
+            if let Val::Px(v) = node.left {
+                min_x = min_x.min(v);
+            }
+        }
+    }
+    if min_x < f32::MAX {
+        let dx = STORAGE_W + 5.0 - min_x;
+        for (mut node, root) in inv_entities.iter_mut() {
+            if root.0 == DialogKind::Inventory {
+                let cur = match node.left {
+                    Val::Px(v) => v,
+                    _ => 0.0,
+                };
+                node.left = Val::Px(cur + dx);
+            }
+        }
+        *inv_origin = crate::game::dialogs::inventory::InventoryOrigin(STORAGE_W + 5.0, 0.0);
+    }
+    if !mgr.is_open(DialogKind::Storage) {
+        mgr.open.push(DialogKind::Storage);
+    }
+    if !mgr.is_open(DialogKind::Inventory) {
+        mgr.open.push(DialogKind::Inventory);
+    }
+    tracing::info!("🏬 仓库窗已打开（密码闸门通过）");
+}
+
 /// 仓库交互：选中+点击 存入/取出（原版 C# MirItemCell 拖放语义）
 ///
 /// C# `MirItemCell` 的存入/取出目标选择：点击格为空 → 用它；否则取该网格**首个空格**
@@ -1124,37 +1172,40 @@ fn storage_server_events(
             storage.rent_confirm = false;
             storage.selected = None;
             if *visible {
-                // 原版 C#：仓库打开时同时显示背包，且背包推到 (仓宽+5, 仓Y)=(393,0)
-                // 并排（NPCDialogs.cs:2967/2990 `InventoryDialog.Location = new Point(Size.Width+5, Location.Y)`）
-                // —— 否则 388x346 的仓库完全罩住 316x236 的背包。
-                let mut min_x = f32::MAX;
-                for (node, root) in inv_entities.iter() {
-                    if root.0 == DialogKind::Inventory {
-                        if let Val::Px(v) = node.left {
-                            min_x = min_x.min(v);
-                        }
+                // ===== #3260 金标准闸门（C# `StorageDialog.Show()`，`NPCDialogs.cs:2958-2995`）=====
+                //   `RequireStoragePassword && !HasStoragePassword` → `ForceStoragePasswordSetup()`
+                //   （先设密码，**不显示仓库**；设完 `_pendingOpenAfterPasswordSet` 触发 Show() 再开）
+                //   `RequireStoragePassword && !_storageUnlocked` → `PromptStorageUnlock()`
+                if storage.require_password && !storage.has_password {
+                    storage.pending_open_after_set = true;
+                    storage.forcing_setup = true;
+                    storage.visible = false;
+                    if mgr.is_open(DialogKind::Storage) {
+                        mgr.close(DialogKind::Storage);
                     }
+                    start_set_password_flow(
+                        &mut input_box_state,
+                        &mut text_input_state,
+                        &mut pwd_flow,
+                    );
+                    tracing::info!("🔒 仓库闸门：未设密码 → 强制先设密码（仓库窗暂不显示）");
+                    continue;
                 }
-                if min_x < f32::MAX {
-                    let dx = STORAGE_W + 5.0 - min_x;
-                    for (mut node, root) in &mut inv_entities {
-                        if root.0 == DialogKind::Inventory {
-                            let cur = match node.left {
-                                Val::Px(v) => v,
-                                _ => 0.0,
-                            };
-                            node.left = Val::Px(cur + dx);
-                        }
+                if storage.require_password && !storage.unlocked {
+                    storage.visible = false;
+                    if mgr.is_open(DialogKind::Storage) {
+                        mgr.close(DialogKind::Storage);
                     }
-                    *inv_origin =
-                        crate::game::dialogs::inventory::InventoryOrigin(STORAGE_W + 5.0, 0.0);
+                    start_unlock_prompt(
+                        &mut input_box_state,
+                        &mut text_input_state,
+                        &mut storage,
+                        &mut pwd_flow,
+                    );
+                    tracing::info!("🔓 仓库闸门：未解锁 → 先问密码");
+                    continue;
                 }
-                if !mgr.is_open(DialogKind::Storage) {
-                    mgr.open.push(DialogKind::Storage);
-                }
-                if !mgr.is_open(DialogKind::Inventory) {
-                    mgr.open.push(DialogKind::Inventory);
-                }
+                show_storage_window(&mut storage, &mut mgr, &mut inv_entities, &mut inv_origin);
             } else {
                 // #2960：双闸门配对——visible=false 时 mgr 栈必须同步不含 Storage，
                 // 否则 (visible=false, mgr=open) 失配，RPC `dialog storage toggle`
@@ -1217,6 +1268,9 @@ fn storage_server_events(
             let msg = match *result {
                 4 => {
                     storage.has_password = true;
+                    // C# `HandleStoragePasswordResult`（`:3052-3073`）：`_storageUnlocked = true`；
+                    // 若是 `ForceStoragePasswordSetup` 路径，设完要**自动把仓库窗打开**（`Show()`）
+                    storage.unlocked = true;
                     if had_password {
                         TEXT_PWD_CHANGE_SUCCESS
                     } else {
@@ -1247,16 +1301,27 @@ fn storage_server_events(
                 crate::game::chat::ChatChannel::System,
             );
             tracing::info!("🔒 仓库密码结果 result={}：{msg}", result);
+            // C# `:3067-3072`：`_pendingOpenAfterPasswordSet` 时设完密码直接 `Show()`
+            if *result == 4 && storage.pending_open_after_set {
+                storage.pending_open_after_set = false;
+                storage.forcing_setup = false;
+                show_storage_window(&mut storage, &mut mgr, &mut inv_entities, &mut inv_origin);
+            }
         }
         if let ServerEvent::StoragePrompt = ev {
             // C# `S.NPCStorage` → `StorageDialog.Show()` → 有密码且未解锁 → `PromptStorageUnlock()`
             // （`NPCDialogs.cs:2982-2988`）。服务端只在**有密码**时发这个包（`npc.rs:781`）。
-            start_unlock_prompt(
-                &mut input_box_state,
-                &mut text_input_state,
-                &mut storage,
-                &mut pwd_flow,
-            );
+            if storage.unlocked {
+                // 已解锁：C# `Show()` 走「直接开窗」分支
+                show_storage_window(&mut storage, &mut mgr, &mut inv_entities, &mut inv_origin);
+            } else {
+                start_unlock_prompt(
+                    &mut input_box_state,
+                    &mut text_input_state,
+                    &mut storage,
+                    &mut pwd_flow,
+                );
+            }
         }
         if let ServerEvent::StorageResized {
             size,
@@ -1706,6 +1771,7 @@ pub fn storage_password_cancel(st: &mut StorageState, flow: &mut StoragePwdFlow)
     if flow.cancel_hides_storage {
         // C# `CancelStoragePasswordSetup()`（`:3116-3121`）→ `Hide()`
         st.forcing_setup = false;
+        st.pending_open_after_set = false;
         st.unlocked = false;
         st.visible = false;
         st.close_requested = true;
@@ -2856,6 +2922,130 @@ mod tests {
         assert!(
             src.contains("StoragePwdChangeOk") && src.contains("StoragePwdChangeCancel"),
             "改密确认框应有 OK/Cancel 两颗"
+        );
+    }
+
+    // ========================================================================
+    // #3260 密码闸门门禁（C# `StorageDialog.Show()`，`NPCDialogs.cs:2958-2995`）
+    // ========================================================================
+
+    /// `RequireStoragePassword && !HasStoragePassword` → **先设密码、不显示仓库**
+    /// （C# `:2974-2980` `ForceStoragePasswordSetup`）。
+    #[test]
+    fn gate_forces_password_setup_when_required() {
+        use crate::network::server_event::ServerEvent;
+        let mut app = storage_test_app();
+        {
+            let mut st = app.world_mut().resource_mut::<StorageState>();
+            st.require_password = true;
+            st.has_password = false;
+            st.unlocked = false;
+        }
+        app.world_mut().write_message(ServerEvent::StorageOpened {
+            items: vec![None; 80],
+            visible: true,
+        });
+        app.update();
+
+        let st = app.world().resource::<StorageState>();
+        assert!(
+            st.pending_open_after_set && st.forcing_setup,
+            "闸门必须置「设完自动开」+「强制设密码」"
+        );
+        assert!(!st.visible, "设密码期间不显示仓库（C# 连 Visible=true 都没设）");
+        assert!(
+            !app.world()
+                .resource::<DialogManager>()
+                .is_open(DialogKind::Storage),
+            "设密码期间 mgr 栈里也不该有 Storage（双闸门配对）"
+        );
+        let ib = app
+            .world()
+            .resource::<crate::game::dialogs::input_box::InputBoxState>();
+        assert!(ib.open, "闸门必须直接弹 MirInputBox 问新密码");
+        let flow = app.world().resource::<StoragePwdFlow>();
+        assert_eq!(flow.step, super::StoragePwdStep::SetNew);
+    }
+
+    /// `RequireStoragePassword && !_storageUnlocked` → 先问密码（C# `:2982-2988`）。
+    #[test]
+    fn gate_prompts_unlock_when_locked() {
+        use crate::network::server_event::ServerEvent;
+        let mut app = storage_test_app();
+        {
+            let mut st = app.world_mut().resource_mut::<StorageState>();
+            st.require_password = true;
+            st.has_password = true;
+            st.unlocked = false;
+        }
+        app.world_mut().write_message(ServerEvent::StorageOpened {
+            items: vec![None; 80],
+            visible: true,
+        });
+        app.update();
+
+        let st = app.world().resource::<StorageState>();
+        assert!(st.unlock_prompt_open, "未解锁必须先问密码");
+        assert!(!st.visible && !st.pending_open_after_set);
+        assert_eq!(
+            app.world().resource::<StoragePwdFlow>().step,
+            super::StoragePwdStep::Unlock
+        );
+    }
+
+    /// 闸门通过（`require` 且已解锁）→ 照旧开窗（**回归**：闸门不得挡住正常路径）。
+    #[test]
+    fn gate_lets_unlocked_open_through() {
+        use crate::network::server_event::ServerEvent;
+        let mut app = storage_test_app();
+        {
+            let mut st = app.world_mut().resource_mut::<StorageState>();
+            st.require_password = true;
+            st.has_password = true;
+            st.unlocked = true;
+        }
+        app.world_mut().write_message(ServerEvent::StorageOpened {
+            items: vec![None; 80],
+            visible: true,
+        });
+        app.update();
+
+        let st = app.world().resource::<StorageState>();
+        assert!(st.visible, "闸门通过后必须开窗");
+        assert!(
+            app.world()
+                .resource::<DialogManager>()
+                .is_open(DialogKind::Storage),
+            "mgr 栈要同步 open Storage"
+        );
+    }
+
+    /// 设完密码（`result=4`）→ `_pendingOpenAfterPasswordSet` 触发 `Show()`：窗自动开
+    /// （C# `:3067-3072`）。
+    #[test]
+    fn gate_opens_window_after_password_set() {
+        use crate::network::server_event::ServerEvent;
+        let mut app = storage_test_app();
+        {
+            let mut st = app.world_mut().resource_mut::<StorageState>();
+            st.require_password = true;
+            st.has_password = false;
+            st.pending_open_after_set = true;
+            st.forcing_setup = true;
+        }
+        app.world_mut()
+            .write_message(ServerEvent::StoragePasswordResult { result: 4 });
+        app.update();
+
+        let st = app.world().resource::<StorageState>();
+        assert!(st.has_password && st.unlocked, "成功回包要更新两个判据");
+        assert!(!st.pending_open_after_set && !st.forcing_setup, "一次性标记要清掉");
+        assert!(st.visible, "设完密码应自动把仓库窗打开");
+        assert!(
+            app.world()
+                .resource::<DialogManager>()
+                .is_open(DialogKind::Storage),
+            "mgr 栈要同步 open Storage"
         );
     }
 }

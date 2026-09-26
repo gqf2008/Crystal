@@ -1,7 +1,14 @@
 # l5e_storage_roundtrip.ps1 — ⑤ 邮件仓库闭环（仓库半段）：造物 → 存 → 取，用格数增减判成交
 #
 # 判据（缺一不可，全部取状态而非像素）：
-#   A) 开仓库前置达成：storage_probe.total != 0（窗口真开、服务端真发了 UserStorage）
+#   A0) 密码闸门（#3260）：`RequireStoragePassword && !HasStoragePassword` 时 C# `StorageDialog.Show()`
+#       走 `ForceStoragePasswordSetup` —— **先设密码、窗不显示**；本夹具用 `MirInputBox` 真实路径输入
+#       （点输入区拿焦点 → `type_text` → Enter）走完「新密码 → 确认」，然后断言客户端自己把窗打开
+#       （`_pendingOpenAfterPasswordSet`）。已设过密码的库走 `PromptStorageUnlock`（输一次密码解锁）。
+#       判据：闸门期间 `storage_probe.visible=false`（**不是** total：total 是格数容量，
+#       服务端在无密码时就已经下发过 UserStorage）；过闸后 `visible=true`。输入法是中文时先切英文
+#       （`ime_probe.enabled` → 按一次 Shift），否则字母进拼音组合、数字选候选。
+#   A) 开仓库前置达成：storage_probe.visible=true **且** total != 0（窗口真开、内容真到手）
 #   B) 存入：bag.used 减 1 且 storage.used 加 1，且物品出现在仓库的 occupied 里
 #   C) 取回：storage.used 减 1 且 bag.used 加 1
 # 判据仪器：bag_probe / storage_probe 的 occupied（格号→名称），动作侧 storage_store/
@@ -95,6 +102,8 @@ function ItemCount($probe) {
 #   但 `npc_object_id` 仍为 0——此时点行发出的 CallNPC{object_id:0} 会被服务端静默丢弃，
 #   表现成「点了没反应」。判据必须是 storage_probe.total != 0（窗真开），而不是中间态字段；
 #   未成立就重新按名字定位 NPC 并重发 npc_call（object_id 可能随地图重建变化）。
+# 注意只认**地图名**：服务端 `MAPMOVE` 按 `map_infos.file_name` 查图（`session.rs:6598-6620`），
+# 传索引会查不到（实测 `@mapmove 40 …` 无反应/无换图，`@mapmove D002 …` → map=D002 tile=(174,217)）。
 Rpc 'chat' @{ message = '@mapmove D002 174 217' } | Out-Null
 # 硬前置：**等换图真的完成**（`state.map` 变成 D002）再扫 nearby。
 # 2026-09-26 实测踩到过假 FAIL：`@mapmove` 发出后立刻轮询 `nearby`，拿到的是**上一张图**的
@@ -161,18 +170,103 @@ foreach ($attempt in 1..3) {
 
     # ③ 点 <Access/@Storage> → 轮询到仓库窗真开（total 非 0 才算达成前置）
     Rpc 'click' @{ x = $link.cx; y = $link.cy } | Out-Null
-    foreach ($i in 1..10) {
+    # #3260 密码闸门：`RequireStoragePassword && !HasStoragePassword` 时，C# `StorageDialog.Show()`
+    # 走 `ForceStoragePasswordSetup` —— **先设密码、不显示仓库**（`NPCDialogs.cs:2974-2980`）。
+    # 所以判据分两段：① 先抓到「闸门状态 + total=0」（闸门确实挡住了窗）；
+    # ② 用**真实 UI 路径**过闸（`MirInputBox` 里输入新密码 → 回车 → 再输确认 → 回车），
+    #    过闸后客户端应自己把窗打开（`_pendingOpenAfterPasswordSet`，`:3067-3072`）。
+    $gateSeen = $false
+    $unlockSeen = $false
+    foreach ($i in 1..14) {
         Start-Sleep 1
         $st0 = Rpc 'storage_probe'
-        if ($st0.total -ne 0) { $opened = $true; break }
+        if ($null -eq $st0) { continue }
+        if ($st0.require_password -and -not $st0.has_password -and -not $gateSeen) {
+            # 判据是 `visible`（= C# `StorageDialog.Visible`），不是 `total`：`total` 是**格数容量**，
+            # 服务端在「无密码」时就已经下发过 UserStorage（C# `SendStorage()` 同款），
+            # 所以闸门期间 total=80 但窗**没显示**（实测就是这样，一开始把 total 当「窗开」判错了）。
+            if ($st0.visible) {
+                Write-Host ("FAIL(A1): 闸门期间仓库窗不该显示（visible={0} total={1}）" -f $st0.visible, $st0.total)
+                exit 4
+            }
+            Write-Host ("闸门出现：require={0} has={1} pending={2} unlocked={3} step={4} total={5}（仓库未开，符合 C# Show()）" -f `
+                    $st0.require_password, $st0.has_password, $st0.pending_open_after_set, $st0.unlocked, $st0.pwd_step, $st0.total)
+            Shot '0a_password_gate'
+            # 先点一下 `MirInputBox` 的输入区拿到焦点：`click` 是**分帧注入**（phase3 才会真正派发），
+            # 点 NPC 行那次 click 的 phase3 会落在闸门开框**之后**，把输入焦点清掉 ⇒ 直接 `type_text`
+            # 打进去的字会没人接（实测 body_len=0，状态机停在 SetNew）。玩家也是先点框再打字。
+            # 输入区绝对坐标 = 面板(368,306) + InputTextBox(23,86) 240x19 的中心。
+            # 鼠标点击这条路要**核验焦点**再打字：自动化里 `click` 是分帧注入，
+            # 后续相位/其它控件可能把焦点又清掉（实测：点完 400ms 后 active=None）。
+            # 判据直接读 `storage_probe.text_input_active`（= `TextInputState.active`），
+            # 不对就重点，拿到焦点才继续。
+            $focused = $false
+            foreach ($tryFocus in 1..6) {
+                Rpc 'click' @{ x = 511; y = 401 } | Out-Null
+                Start-Sleep -Milliseconds 300
+                $stFocus = Rpc 'storage_probe'
+                if ($stFocus.text_input_active -eq 40) { $focused = $true; break }
+            }
+            Write-Host ("聚焦：input_box_open={0} active={1} text_len={2}（试 {3} 次，focused={4}）" -f `
+                    $stFocus.input_box_open, $stFocus.text_input_active, $stFocus.input_box_text_len, $tryFocus, $focused)
+            if (-not $focused) {
+                Write-Host 'FAIL(A2a): 点输入区拿不到焦点（TextInputState.active != 40）'
+                exit 4
+            }
+            # 打 ASCII 密码前必须确认输入法是**英文**模式：中文模式下字母进拼音组合、
+            # 数字选候选（实测把「阿保存」打进密码框）。`ime_probe.enabled=true` 时按一次
+            # Shift（单按切换中/英，C# 客户端同款）再继续。
+            $ime = Rpc 'ime_probe'
+            if ($ime.enabled) {
+                Rpc 'key' @{ key = 'shift' } | Out-Null
+                Start-Sleep -Milliseconds 300
+                $ime2 = Rpc 'ime_probe'
+                Write-Host ("输入法：中文 → 切英文（enabled={0}）" -f $ime2.enabled)
+            }
+            Rpc 'type_text' @{ text = 'abc123' } | Out-Null
+            Rpc 'key' @{ key = 'enter' } | Out-Null
+            Start-Sleep -Milliseconds 900
+            $stMid = Rpc 'storage_probe'
+            Write-Host ("第一遍输入后 step={0}（期望 SetConfirm{{ new: ... }}）" -f $stMid.pwd_step)
+            if ("$($stMid.pwd_step)" -notlike '*SetConfirm*') {
+                Write-Host ('FAIL(A2): 输完新密码后状态机没走到「等确认」（step=' + $stMid.pwd_step + '）')
+                exit 4
+            }
+            Rpc 'type_text' @{ text = 'abc123' } | Out-Null
+            Rpc 'key' @{ key = 'enter' } | Out-Null
+            $gateSeen = $true
+            continue
+        }
+        # 已设过密码（第二次起跑）→ C# `Show()` 走 `PromptStorageUnlock`：同样先不开窗，
+        # 输入密码过闸后才由服务端 `UserStorage` 开窗。输入的密码就是本夹具第一次设的那个。
+        if ($st0.require_password -and $st0.has_password -and -not $st0.unlocked -and $st0.unlock_prompt_open -and -not $unlockSeen) {
+            Write-Host ("解锁提示出现：step={0} unlocked={1} total={2}（未输入前不开窗）" -f $st0.pwd_step, $st0.unlocked, $st0.total)
+            if ($st0.visible) {
+                Write-Host ("FAIL(A3): 未解锁时仓库窗不该显示（visible={0}）" -f $st0.visible)
+                exit 4
+            }
+            Shot '0c_unlock_prompt'
+            Rpc 'click' @{ x = 511; y = 401 } | Out-Null   # 同上：先点输入区拿焦点
+            Start-Sleep -Milliseconds 400
+            $imeU = Rpc 'ime_probe'
+            if ($imeU.enabled) { Rpc 'key' @{ key = 'shift' } | Out-Null; Start-Sleep -Milliseconds 300 }
+            Rpc 'type_text' @{ text = 'abc123' } | Out-Null
+            Rpc 'key' @{ key = 'enter' } | Out-Null
+            $unlockSeen = $true
+            continue
+        }
+        # 「窗真开」的判据：`visible`（Show() 的结果）+ 内容已在（total != 0）
+        if ($st0.visible -and $st0.total -ne 0) { $opened = $true; break }
     }
     if ($opened) { break }
     Write-Host ("[attempt {0}] 点了 [@Storage] 但 storage_probe.total 仍为 0——重试" -f $attempt)
 }
-if (-not $opened) {
-    Write-Host ('FAIL(A): 3 次尝试后仓库窗仍未开（storage_probe.total=0）；npc=' + $npc.name)
-    exit 4
-}
+    if (-not $opened) {
+        Write-Host ('FAIL(A): 3 次尝试后仓库窗仍未开（storage_probe.visible=false）；npc=' + $npc.name)
+        exit 4
+    }
+    if ($gateSeen) { Write-Host '闸门：已用 MirInputBox 走完「新密码 → 确认」，客户端自动开窗 ✅' }
+    if ($unlockSeen) { Write-Host '闸门：已用 MirInputBox 输入密码解锁，客户端开窗 ✅' }
 Write-Host ("storage open: total={0} used={1} visible={2}" -f $st0.total, $st0.used, $st0.visible)
 Shot '1_storage_open'
 
