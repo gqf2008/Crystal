@@ -11,6 +11,9 @@
 #   A) 开仓库前置达成：storage_probe.visible=true **且** total != 0（窗口真开、内容真到手）
 #   B) 存入：bag.used 减 1 且 storage.used 加 1，且物品出现在仓库的 occupied 里
 #   C) 取回：storage.used 减 1 且 bag.used 加 1
+#   D) P3-3（#782）物品名：仓库格的**显示名**（`StorageState::display_name`，与格子/悬浮提示
+#      同一份函数）必须是真名，不能停在 `#id` 内部 ID 占位——占位只允许是中间态，
+#      15s 内解析不出来就是真缺陷（判据读 `storage_probe.occupied[].display`）。
 # 判据仪器：bag_probe / storage_probe 的 occupied（格号→名称），动作侧 storage_store/
 # storage_take 发的是与点击路径同一个包（C.StoreItem=15 / C.TakeBackItem=16）。
 #
@@ -297,6 +300,43 @@ Write-Host ("  store sub-checks（按件数）: storage+1={0} bag-1={1} item-at-
 $stored = $c1 -and $c2 -and $c3
 Shot '2_stored'
 
+# ---- P3-3（#782）：格子里显示的是**真名**还是内部 ID（`#782` 那种）？----------------
+# 判据取 `display`（= `StorageState::display_name`，与格子/悬浮提示**同一份函数**），
+# 不是 `name`（线包/本地表里那份）：两者在「表刚到货、还没回写 item.name」这类时序下会分叉，
+# 只认 `name` 会把「玩家已经看到真名」误判成「还在显示 #id」。
+# 降级链是「线包名 → 本地表 → 按索引发一次 RequestItemInfo → 占位 #id」，所以占位只允许是
+# **中间态**：轮询到真名才算 PASS；一直停在 #id ⇒ 真缺陷（服务端没回 NewItemInfo，
+# 或该索引不在服务端 item_infos 里），不能记绿。
+# 位置：**必须在取回之前**——取回后那个格就空了，判据会变成对空格求显示名（本夹具实测踩过）。
+function CellDisplay([object]$probe, [int]$cell) {
+    $row = @($probe.occupied | Where-Object { $_.cell -eq $cell }) | Select-Object -First 1
+    if ($null -eq $row) { return '' }
+    $n = "$($row.display)"
+    if (-not $n) { $n = "$($row.name)" }   # 兼容没有 display 字段的旧构建
+    return $n
+}
+$storedName = ''; $nameOk = $false; $nameTries = 0; $stName = $null
+foreach ($i in 1..15) {
+    $nameTries = $i
+    $sp = Rpc 'storage_probe'
+    if ($null -ne $sp) {
+        $stName = $sp
+        $storedName = CellDisplay $sp $dstCell
+        if ($storedName -and $storedName -notmatch '^#\d+$') { $nameOk = $true; break }
+    }
+    Start-Sleep 1
+}
+Write-Host ("item name（P3-3/#782）: 仓库格[{0}] 显示名='{1}'，轮询 {2} 次" -f $dstCell, $storedName, $nameTries)
+$phCells = @($stName.occupied | ForEach-Object {
+        $n = "$($_.display)"; if (-not $n) { $n = "$($_.name)" }
+        if ($n -match '^#\d+$') { "$($_.cell):$n" }
+    })
+if ($nameOk) {
+    Write-Host ('  PASS：格子显示真名（不是内部 ID）；其余占位格：' + $(if ($phCells.Count) { $phCells -join ',' } else { '（无）' }))
+} else {
+    Write-Host ('  FAIL：仓库格仍是内部 ID 占位（显示名=' + $storedName + '）——降级链没走通')
+}
+
 # 取回：仓库格 dstCell → 原背包格
 Rpc 'storage_take' @{ from = $dstCell; to = $srcCell } | Out-Null
 $bag2 = $null; $st2 = $null
@@ -315,8 +355,9 @@ Write-Host ("  take sub-checks: storage回0={0} bag回满={1}" -f $t1, $t2)
 $taken = $t1 -and $t2
 Shot '3_taken'
 
-Write-Host ("VERDICT store={0} take={1}" -f $(if ($stored) { 'PASS' } else { 'FAIL' }), $(if ($taken) { 'PASS' } else { 'FAIL' }))
-if (-not ($stored -and $taken)) { exit 5 }
+Write-Host ("VERDICT store={0} take={1} itemname={2}" -f `
+    $(if ($stored) { 'PASS' } else { 'FAIL' }), $(if ($taken) { 'PASS' } else { 'FAIL' }), $(if ($nameOk) { 'PASS' } else { 'FAIL' }))
+if (-not ($stored -and $taken -and $nameOk)) { exit 5 }
 
 } finally {
     # 收尾：只清自己那份唯一命名的客户端（不再依赖"下一次运行按公共名清场"——那会误杀别人）。

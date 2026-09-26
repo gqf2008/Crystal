@@ -16,6 +16,9 @@
 #   D) 点区段 `TopItems` → `0 < filtered < total`（只有置顶），且与 C 的行集不同
 #   E) 点区段 `Show All` → 回到 `filtered == total`
 #   并校验三个点击点确实落在**对应按钮**的矩形里（`ui_nodes_at`：rect 与 C# 常量对齐）
+#   A2) P3-3（#782）商城半段：商品行的**显示名**（`shop_probe.rows[].display` =
+#       `game_shop::resolve_shop_name`，与商品行渲染同一份函数）必须全是真名，
+#       不能停在 `#id` 内部 ID 占位（占位只允许是 RequestItemInfo 回包到达前的中间态）。
 #
 # 退出码：0 = 全 PASS；10 = 判据未达成；9 = 服务端/客户端未就绪
 param(
@@ -99,6 +102,38 @@ Write-Host ("[A] 开窗：class_filter={0} section_filter={1} category='{2}' fil
 $okA = ("$($p.section_filter)" -eq 'Show All') -and ([int]$p.filtered -eq $total) -and ("$($p.class_filter)" -ne '')
 Write-Host ("[A] 开着的是「自己的职业 + Show All」且过滤后=全量 → {0}" -f $(if ($okA) { 'PASS' } else { 'FAIL' }))
 $verdict = $okA
+
+# ---- P3-3（#782）商城半段：商品行的**显示名**不能是 `#id` 内部 ID -------------------
+# 判据取 `display`（= `game_shop::resolve_shop_name` = `item_names::resolve_item_name`，
+# 与商品行渲染**同一份函数**），不是 `name`（目录/线包那份）。
+# 降级链是「目录自带名 → 本地物品名表 → 按索引发一次 RequestItemInfo → 占位 #id」，
+# 所以占位只允许是**中间态**：轮询到真名才算 PASS；15s 一直停在 #id ⇒ 真缺陷。
+function RowNames([object]$probe) {
+    @($probe.rows | ForEach-Object {
+            $n = "$($_.display)"; if (-not $n) { $n = "$($_.name)" }   # 兼容没有 display 的旧构建
+            $n
+        })
+}
+$shopNameOk = $false
+$pName = $null          # 轮询到的那次读数（打印必须用它，不能用 [A] 的旧快照——否则日志会把
+                        # 已经解析好的名字显示成第 1 次的占位，看着像 FAIL 实为 PASS）
+foreach ($i in 1..15) {
+    $pn = Probe
+    if ($null -ne $pn) {
+        $pName = $pn
+        $names = RowNames $pn
+        $ph = @($names | Where-Object { -not $_ -or $_ -match '^#\d+$' })
+        if ($names.Count -gt 0 -and $ph.Count -eq 0) { $shopNameOk = $true; break }
+        if ($names.Count -gt 0 -and $ph.Count -gt 0 -and $i -eq 1) {
+            Write-Host ("  [物品名] 第 1 次读仍有占位：{0}（继续轮询等 RequestItemInfo 回包）" -f ($ph -join ','))
+        }
+    }
+    Start-Sleep 1
+}
+$shown = (RowNames $pName) -join ','
+Write-Host ("[A2] 商城行显示名（P3-3/#782，第 {0} 次读数）：[{1}] → {2}" -f $i, $shown, `
+        $(if ($shopNameOk) { 'PASS' } else { 'FAIL' }))
+$verdict = $verdict -and $shopNameOk
 
 # 三个点击点：职业 Show All（539,37）、区段 DealItems（280,68）、区段 TopItems（209,68）
 $classAll = Btn 539 37
