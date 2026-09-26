@@ -530,13 +530,19 @@ impl Packet for UserSlotsRefresh {
     }
 
     fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
+        // 2026-09-27：写侧必须与 `read_body` **对称**——读写两侧本来就都用
+        // `read_from_with_info`/`write_to_with_info`（带 ItemInfo 的形态），而这里此前误写成裸
+        // `write_to`（不带 info 标志）⇒ 任何「段非空」的 `S.UserSlotsRefresh` 都会被客户端解析失败、
+        // **静默丢弃**（`handle_progress.rs` 的 `if read_body().is_ok()` 什么都不做）。
+        // 今天没有发送方（本端服务端不发这个包，C# 只在 NPC 脚本 `UnequipItem` 发），所以是**潜伏缺陷**；
+        // 一旦有人开始发就会被静默吞掉。门禁：`user_slots_refresh_roundtrip_preserves_items`。
         if let Some(ref inventory) = self.inventory {
             writer.write_u8(1)?;
             writer.write_i32::<LittleEndian>(inventory.len() as i32)?;
             for item in inventory {
                 if let Some(ref item) = item {
                     writer.write_u8(1)?;
-                    item.write_to(writer)?;
+                    item.write_to_with_info(writer)?;
                 } else {
                     writer.write_u8(0)?;
                 }
@@ -551,7 +557,7 @@ impl Packet for UserSlotsRefresh {
             for item in equipment {
                 if let Some(ref item) = item {
                     writer.write_u8(1)?;
-                    item.write_to(writer)?;
+                    item.write_to_with_info(writer)?;
                 } else {
                     writer.write_u8(0)?;
                 }
@@ -664,5 +670,65 @@ mod tests {
         assert!(!read2.require_storage_password);
         assert_eq!(read2.storage_password_last_set, 0);
         assert_eq!(read2.expanded_storage_expiry_time, 0);
+    }
+
+    /// 门禁（2026-09-27）：`S.UserSlotsRefresh` 的**写侧与读侧必须同格式**。
+    ///
+    /// 原样：写侧用裸 `UserItem::write_to`（不带 ItemInfo 标志），读侧却用 `read_from_with_info`
+    /// （先读一个 info 存在标志）⇒ 只要任一段非空，客户端 `read_body` 必然失败、整个包被静默丢弃
+    /// （`handle_progress.rs` 的 `if read_body().is_ok()` 什么都不做）。
+    ///
+    /// 阳性对照（落地时实做）：把 `write_body` 里的 `write_to_with_info` 改回 `write_to` → 本测试立即红
+    /// （`read_body` 返回 Err 或字段错位）。
+    #[test]
+    fn user_slots_refresh_roundtrip_preserves_items() {
+        fn item(uid: u64, index: i32, name: &str) -> crate::data::item::UserItem {
+            let mut it = crate::data::item::UserItem {
+                unique_id: uid,
+                item_index: index,
+                count: 1,
+                ..Default::default()
+            };
+            it.info = Some(crate::data::item::ItemInfo {
+                index,
+                name: name.to_string(),
+                ..Default::default()
+            });
+            it
+        }
+
+        let pkt = UserSlotsRefresh {
+            // 段非空 + 混合空槽：正是「旧写侧必炸」的形状
+            inventory: Some(vec![
+                Some(item(11, 782, "马鞍")),
+                None,
+                Some(item(12, 953, "BlackCreatureStone")),
+            ]),
+            equipment: Some(vec![None, Some(item(13, 1268, "屠龙"))]),
+        };
+        let mut buf = Vec::new();
+        pkt.write_body(&mut buf).unwrap();
+        let mut cur = Cursor::new(&buf);
+        let read = UserSlotsRefresh::read_body(&mut cur).expect(
+            "写侧与读侧同格式时才能解析（旧写侧 write_to + 读侧 read_from_with_info 必失败）",
+        );
+        assert_eq!(read.inventory, pkt.inventory);
+        assert_eq!(read.equipment, pkt.equipment);
+        // 名字真的过线了（`to_inv_item` 的 `info.name`：不带 info 时会退化成 `#<index>`）
+        let inv = read.inventory.unwrap();
+        assert_eq!(inv[0].as_ref().unwrap().info.as_ref().unwrap().name, "马鞍");
+        assert_eq!(inv[1], None);
+        assert_eq!(inv[2].as_ref().unwrap().unique_id, 12);
+
+        // 「段为 None」也要能往返（C# `HasInventory/HasEquipment` 语义）
+        let pkt_none = UserSlotsRefresh {
+            inventory: None,
+            equipment: None,
+        };
+        let mut buf2 = Vec::new();
+        pkt_none.write_body(&mut buf2).unwrap();
+        let read2 = UserSlotsRefresh::read_body(&mut Cursor::new(&buf2)).unwrap();
+        assert_eq!(read2.inventory, None);
+        assert_eq!(read2.equipment, None);
     }
 }

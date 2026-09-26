@@ -926,6 +926,17 @@ pub enum ServerEvent {
         /// 的地方要画图标就必须有它（C# 用 `UserItem.Info.Image` 直接取帧）。
         image: u16,
     },
+    /// `S.UserSlotsRefresh`（C# `GameScene.UserSlotsRefresh` → `UserObject.SetSlots`）：
+    /// **整表替换**背包/装备两段（`None` = 该段未携带，对应 C# 的 `HasInventory/HasEquipment`）。
+    ///
+    /// C# 原版语义（`UserObject.cs:125-131`）：`Inventory = p.Inventory; Equipment = p.Equipment;`
+    /// 然后 `BindAllItems()`（按本地 `ItemInfoList` 重新绑名字/图标）+ `RefreshStats()`。
+    /// 本端此前只 `tracing::info!` 一行、**什么都不做**——本轮按 C# 语义接上（替换两段 + 失效单发锁，
+    /// 属性/重量的刷新由既有 UserInformation 同口径路径负责）。
+    UserSlotsRefreshed {
+        inventory: Option<Vec<Option<InvItem>>>,
+        equipment: Option<Vec<Option<InvItem>>>,
+    },
     UserInformation {
         name: String,
         level: u16,
