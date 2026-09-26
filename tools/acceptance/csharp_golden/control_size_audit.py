@@ -69,8 +69,39 @@ NUM = re.compile(r"^\s*(\d+(?:\.\d+)?)\s*(?:f32|f64)?\s*$")
 def scan_file(path, data_dir, rows):
     text = open(path, encoding="utf-8", errors="replace").read()
     lines = text.split("\n")
-    loads = [(text[:m.start()].count("\n") + 1, m.group(1) or "", m.group(2), int(m.group(3)))
+    loads = [(text[:m.start()].count("\n") + 1, m.group(1) or "", m.group(2), int(m.group(3)),
+              m.start(), None)
              for m in LOAD.finditer(text)]
+    # **元组形式**的 load：`if let (Some(n), Some(h), Some(pr)) = (load…, load…, load…) {`
+    # —— 这种写法**没有 `let x =` 绑定**，上面正则抓到的 var 是空串，按"句柄变量名配对"就被整组跳过
+    # ⇒ 假阴性（实测 `big_map.rs` 的滚屏箭头 12x12 写成 16x14 就是这样漏掉的）。
+    # 这里把元组模式里的 `Some(<var>)` 按**顺序**补给该元组内的 load。
+    # 模式部分是 `(Some(n), Some(h), Some(pr))` —— **里面还有括号**，所以用惰性匹配到 `)\s*=\s*(`，
+    # 而不是 `[^)]*`（后者在第一个 `)` 就停了，group(1) 只会是 "Some(n"）。
+    TUPLE = re.compile(r"if\s+let\s*\((.*?)\)\s*=\s*\(", re.S)
+    for tm in TUPLE.finditer(text):
+        vars_in_order = re.findall(r"Some\(\s*(\w+)\s*\)", tm.group(1))
+        if not vars_in_order:
+            continue
+        # 找出 `=(` 之后那个配平括号的区间
+        i = text.index("(", tm.start(0) + len("if let ("))
+        i = text.index("=", tm.start(0)) + 1
+        depth = 0
+        j = i
+        while j < len(text):
+            if text[j] == "(":
+                depth += 1
+            elif text[j] == ")":
+                depth -= 1
+                if depth == 0:
+                    break
+            j += 1
+        k = 0
+        for n, (ln, var, lib, idx, off, _grp) in enumerate(loads):
+            if i <= off <= j and not var and k < len(vars_in_order):
+                # 记**组号**（= 该 `if let` 的起点）：同组的三条 load 是兄弟，彼此不算"中间插了别的 load"
+                loads[n] = (ln, vars_in_order[k], lib, idx, off, tm.start())
+                k += 1
     if not loads:
         return
     for m in SPAWN.finditer(text):
@@ -85,13 +116,22 @@ def scan_file(path, data_dir, rows):
         prev = [l for l in loads if l[0] <= line and l[1] and l[1] in handles]
         if not prev:
             continue
-        lline, _var, lib, idx = prev[-1]
+        # **优先取 normal 帧**（`args[1]`）：控件的尺寸按 C# `MirImageControl.Size` =
+        # `Library.GetTrueSize(Index)` 取的是**当前 `Index`（= normal 帧）**的尺寸；若拿 hover/pressed
+        # 帧去比就会产出假阳性（实测：`npc_goods` 买钮 normal=Title[312]（76x25，与写死值一致），
+        # 但按"最后一个匹配"取到 hover=313（80x25）⇒ 报了一条假 FAIL）。
+        normal_handle = args_probe[1] if len(args_probe) > 1 else ""
+        same = [l for l in prev if l[1] == normal_handle]
+        lline, _var, lib, idx, _off, lgrp = (same[-1] if same else prev[0])
         # 再收紧两档，压掉"变量名撞车"的假阳性：
         #   ① 距离 ≤ 8 行（`if let Some(h) = load…` 紧跟着 `spawn_*(p, h, …)` 的写法）；
         #   ② 这两行之间**不许再有别的 load**（否则说明这次的 h 来自更近的那次）。
         if line - lline > 8:
             continue
-        if any(lline < l[0] <= line for l in loads):
+        # 中间有**别的 load** 才算"这次句柄来自更近的那次"；**同一 `if let` 元组内的兄弟 load 不算**
+        # （`if let (Some(n),Some(h),Some(pr)) = (load…,load…,load…)` 里 `pr` 必然夹在中间，
+        #  按"任何 load"判会把整组否掉 —— 实测就是这样漏掉 big_map 滚屏箭头那条的）
+        if any(lline < l[0] <= line and l[5] != lgrp for l in loads):
             continue
         args = args_probe
         # spawn_icon_button(p,n,h,pr,x,y,w,h,z) → w,h = 6,7；spawn_image(p,h,x,y,w,h,z) → 4,5
@@ -129,10 +169,27 @@ def main():
     ap.add_argument("--subdir", default=os.path.join("Client-Bevy", "src"))
     ap.add_argument("--selftest", action="store_true",
                     help="跑正/负对照：临时改坏一处尺寸必须被报出，未改的副本必须 0 命中")
+    ap.add_argument("--known", default="",
+                    help="已知待核清单（每行 `file<TAB>lib<TAB>idx<TAB>w<TAB>h`，`#` 开头为注释）。"
+                         "清单内的命中只提示、不判红；**新增**命中才 FAIL。"
+                         "默认取脚本同目录的 control_size_audit_known.txt（存在时）。")
     a = ap.parse_args()
 
     if a.selftest:
         return selftest(a)
+
+    known_path = a.known or os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                         "control_size_audit_known.txt")
+    known = set()
+    if known_path and os.path.exists(known_path):
+        for line in open(known_path, encoding="utf-8"):
+            line = line.split("#", 1)[0].strip()
+            if not line:
+                continue
+            parts = line.split()
+            if len(parts) >= 5:
+                known.add((parts[0].replace("/", os.sep), parts[1], int(parts[2]),
+                           float(parts[3]), float(parts[4])))
 
     rows = []
     root = os.path.join(a.repo, a.subdir)
@@ -141,17 +198,44 @@ def main():
             if fn.endswith(".rs"):
                 scan_file(os.path.join(dirpath, fn), a.data, rows)
     rows.sort(key=lambda r: (r["file"], r["line"]))
+    new_rows = []
     for r in rows:
+        key = (os.path.normpath(r["file"]), r["lib"], r["index"], r["explicit"][0], r["explicit"][1])
+        r["known"] = key in known
+        if not r["known"]:
+            new_rows.append(r)
         print("%-52s:%-5d %s[%d] 美术=%sx%s 写死=%gx%g" % (
             r["file"], r["line"], r["lib"], r["index"], r["art"][0], r["art"][1],
             r["explicit"][0], r["explicit"][1]))
-    print(f"合计 {len(rows)} 处「写死尺寸 ≠ 美术原生尺寸」（含按比例裁宽的进度条等已知故意项，需人工筛）")
-    if rows:
+    print(f"合计 {len(rows)} 处「写死尺寸 ≠ 美术原生尺寸」，其中已知待核 {len(rows) - len(new_rows)}、"
+          f"**新增 {len(new_rows)}**")
+    if new_rows:
         print("VERDICT=FAIL：写死尺寸与美术不一致——要么改成按图头取尺寸（spawn_image_native），"
               "要么人工确认是「按比例裁宽」后加白名单并说明理由")
         return 1
-    print("VERDICT=PASS：0 处写死尺寸与美术不一致")
+    if rows:
+        print(f"VERDICT=PASS（新增 0；{len(rows)} 条已在 {os.path.basename(known_path)} 登记为待核）")
+    else:
+        print("VERDICT=PASS：0 处写死尺寸与美术不一致")
     return 0
+
+
+def load_known(path):
+    known = set()
+    if path and os.path.exists(path):
+        for line in open(path, encoding="utf-8"):
+            line = line.split("#", 1)[0].strip()
+            if not line:
+                continue
+            parts = line.split()
+            if len(parts) >= 5:
+                known.add((os.path.normpath(parts[0].replace("/", os.sep)), parts[1], int(parts[2]),
+                           float(parts[3]), float(parts[4])))
+    return known
+
+
+def row_key(r):
+    return (os.path.normpath(r["file"]), r["lib"], r["index"], r["explicit"][0], r["explicit"][1])
 
 
 def _scan_root(root, subdir, data_dir):
@@ -180,8 +264,19 @@ def selftest(a):
     with tempfile.TemporaryDirectory() as tmp:
         dst = os.path.join(tmp, a.subdir)
         shutil.copytree(src, dst)
-        neg = _scan_root(tmp, a.subdir, a.data)
-        print(f"[负对照] 原样扫描命中 {len(neg)}（期望 0）")
+        known_path = a.known or os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                             "control_size_audit_known.txt")
+        known = load_known(known_path)
+        # 副本里的 `file` 是绝对路径 ⇒ 归一到"相对 subdir"的口径后再与 known 表比
+        def rel_key(r):
+            p = os.path.normpath(r["file"])
+            marker = os.sep + os.path.normpath(a.subdir) + os.sep
+            i = p.find(marker)
+            rel = p[i + 1:] if i >= 0 else p
+            return (os.path.normpath(rel), r["lib"], r["index"], r["explicit"][0], r["explicit"][1])
+
+        neg = [r for r in _scan_root(tmp, a.subdir, a.data) if rel_key(r) not in known]
+        print(f"[负对照] 原样扫描的**新增**命中 {len(neg)}（期望 0；已知待核表 {len(known)} 条不算）")
         ok &= (len(neg) == 0)
 
         target = os.path.join(dst, "game", "dialogs", "group.rs")
@@ -194,7 +289,7 @@ def selftest(a):
             return 1
         open(target, "w", encoding="utf-8").write(text.replace(old, new))
         pos = _scan_root(tmp, a.subdir, a.data)
-        hit = [r for r in pos if r["file"].endswith("group.rs")]
+        hit = [r for r in pos if r["file"].endswith("group.rs") and rel_key(r) not in known]
         print(f"[正对照] 改坏一处后命中 {len(hit)} 条（期望 ≥1）："
               + "; ".join(f"group.rs:{r['line']} {r['lib']}[{r['index']}] 美术={r['art']} 写死={r['explicit']}"
                           for r in hit))

@@ -1,0 +1,36 @@
+# 已知待核：写死尺寸 != 美术原生尺寸（**待办队列**，不是「白名单通过」）
+# 生成：py -3.12 control_size_audit.py --repo . --data Data
+# 每行 file<TAB>lib<TAB>index<TAB>w<TAB>h；清单内只提示，**新增**命中才 FAIL
+# 背景：2026-09-26 发现本工具对 if let (Some(n),Some(h),Some(pr)) = (load...,load...,load...)
+#       这种主流写法完全失明（元组里没有 let x = 绑定）=> 一度报 0 命中；补上元组解析与
+#       normal 帧优先配对后浮现出下面这些，逐条核完就删掉对应行。
+Client-Bevy\src\game\dialogs\big_map.rs	Prguse2	197	16	14	# 美术 12x12
+Client-Bevy\src\game\dialogs\big_map.rs	Prguse2	207	16	14	# 美术 12x12
+Client-Bevy\src\game\dialogs\game_shop.rs	Prguse2	197	16	14	# 美术 12x12
+Client-Bevy\src\game\dialogs\game_shop.rs	Prguse2	207	16	14	# 美术 12x12
+Client-Bevy\src\game\dialogs\game_shop.rs	Prguse2	240	16	14	# 美术 16x16
+Client-Bevy\src\game\dialogs\game_shop.rs	Prguse2	243	16	14	# 美术 16x16
+Client-Bevy\src\game\dialogs\game_shop.rs	Prguse	361	24	21	# 美术 16x15
+Client-Bevy\src\game\dialogs\game_shop.rs	Prguse2	240	16	14	# 美术 16x16
+Client-Bevy\src\game\dialogs\game_shop.rs	Prguse2	243	16	14	# 美术 16x16
+Client-Bevy\src\game\dialogs\group.rs	Prguse	114	60	23	# 美术 28x25
+Client-Bevy\src\game\dialogs\group.rs	Title	133	60	23	# 美术 60x25
+Client-Bevy\src\game\dialogs\group.rs	Title	136	44	22	# 美术 60x25
+Client-Bevy\src\game\dialogs\inventory.rs	Prguse2	366	20	20	# 美术 16x15
+Client-Bevy\src\game\dialogs\keyboard_layout.rs	Prguse2	197	16	14	# 美术 12x12
+Client-Bevy\src\game\dialogs\keyboard_layout.rs	Prguse2	207	16	14	# 美术 12x12
+Client-Bevy\src\game\dialogs\keyboard_layout.rs	Title	120	72	25	# 美术 60x25
+Client-Bevy\src\game\dialogs\mentor.rs	Prguse	114	24	22	# 美术 28x25
+Client-Bevy\src\game\dialogs\mentor.rs	Title	213	24	22	# 美术 76x25
+Client-Bevy\src\game\dialogs\mentor.rs	Title	216	24	22	# 美术 76x25
+Client-Bevy\src\game\dialogs\npc_goods.rs	Title	312	76	25	# 美术 80x25
+Client-Bevy\src\game\dialogs\potion_belt.rs	Prguse	1926	16	15	# 美术 16x16
+Client-Bevy\src\game\dialogs\potion_belt.rs	Prguse	1923	16	15	# 美术 16x14
+Client-Bevy\src\game\dialogs\quest_log.rs	Title	193	76	25	# 美术 68x25
+Client-Bevy\src\game\dialogs\quest_log.rs	Title	270	76	25	# 美术 68x25
+Client-Bevy\src\game\dialogs\quest_log.rs	Title	273	76	25	# 美术 68x25
+Client-Bevy\src\game\dialogs\quest_log.rs	Prguse2	197	16	14	# 美术 12x12
+Client-Bevy\src\game\dialogs\quest_log.rs	Prguse2	207	16	14	# 美术 12x12
+Client-Bevy\src\game\dialogs\quest_log.rs	Title	270	76	25	# 美术 68x25
+Client-Bevy\src\game\dialogs\storage.rs	Title	210	70	23	# 美术 76x25
+Client-Bevy\src\game\dialogs\storage.rs	Title	210	70	23	# 美术 76x25
