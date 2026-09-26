@@ -258,7 +258,9 @@ fn spawn_big_map(
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 198),
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 199),
         ) {
-            spawn_icon_button(p, n, h, pr, pw - 21.0, 48.0, 16.0, 14.0, 8)
+            // 尺寸取**美术原生**（`Prguse2[197]` 图头 12x12）：C# `ScrollUpButton` 不设 `Size`，
+            // 而 `MirImageControl` 构造器把 `AutoSize` 置 true ⇒ 尺寸一律由帧决定
+            spawn_icon_button(p, n, h, pr, pw - 21.0, 48.0, 12.0, 12.0, 8)
                 .insert(BigMapBtn(BigMapBtnKind::ScrollUp));
         }
         if let (Some(n), Some(h), Some(pr)) = (
@@ -266,7 +268,7 @@ fn spawn_big_map(
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 208),
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 209),
         ) {
-            spawn_icon_button(p, n, h, pr, pw - 21.0, 417.0, 16.0, 14.0, 8)
+            spawn_icon_button(p, n, h, pr, pw - 21.0, 417.0, 12.0, 12.0, 8)
                 .insert(BigMapBtn(BigMapBtnKind::ScrollDown));
         }
         // 位置条 Prguse2[205] (W-21, 61) 12x18（y 随滚动动态调整）

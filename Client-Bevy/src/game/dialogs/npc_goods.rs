@@ -278,7 +278,9 @@ fn spawn_npc_goods(
             load_lib_image(&mut libs, &mut images, LibraryName::Title, 313),
             load_lib_image(&mut libs, &mut images, LibraryName::Title, 314),
         ) {
-            spawn_icon_button(p, n, h, pr, 77.0, 304.0, 76.0, 25.0, 10).insert(NpcGoodsBuy);
+            // `Title[312]` 图头 80x25（C# `NPCDialogs.cs:1122-1132` `BuyButton` 无显式 Size
+            // ⇒ AutoSize 取美术尺寸；原写死 76x25 是错的）
+            spawn_icon_button(p, n, h, pr, 77.0, 304.0, 80.0, 25.0, 10).insert(NpcGoodsBuy);
         }
         // 8 行商品（#110：左侧通用 UiItemCell 图标 + 右侧名称/价格文本，对齐 C# MirGoodsCell）
         for i in 0..ROW_COUNT {

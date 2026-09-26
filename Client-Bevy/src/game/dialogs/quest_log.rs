@@ -782,7 +782,8 @@ fn spawn_quest_log(
             load_lib_image(&mut libs, &mut images, LibraryName::Title, 194),
             load_lib_image(&mut libs, &mut images, LibraryName::Title, 195),
         ) {
-            spawn_icon_button(p, n, h, pr, 200.0, 436.0, 76.0, 25.0, 10).insert(QuestLogClose);
+            // `Title[193]` 图头 68x25（C# `QuestDialogs.cs:676-686` `_closeButton` 无显式 Size）
+            spawn_icon_button(p, n, h, pr, 200.0, 436.0, 68.0, 25.0, 10).insert(QuestLogClose);
         }
         // 已接计数标签（C# `_takenQuestsLabel @(210,7)`；原写死 (18,20) 压住标题栏）
         spawn_label(
@@ -838,7 +839,8 @@ fn spawn_quest_log(
             load_lib_image(&mut libs, &mut images, LibraryName::Title, 271),
             load_lib_image(&mut libs, &mut images, LibraryName::Title, 272),
         ) {
-            spawn_icon_button(p, n, h, pr, 20.0, 285.0, 76.0, 25.0, 10)
+            // `Title[270]` 图头 68x25（C# `QuestDialogs.cs:105-114` `_acceptButton` 无显式 Size）
+            spawn_icon_button(p, n, h, pr, 20.0, 285.0, 68.0, 25.0, 10)
                 .insert((QuestLogAccept, Visibility::Hidden));
         }
         if let (Some(n), Some(h), Some(pr)) = (
@@ -846,7 +848,8 @@ fn spawn_quest_log(
             load_lib_image(&mut libs, &mut images, LibraryName::Title, 274),
             load_lib_image(&mut libs, &mut images, LibraryName::Title, 275),
         ) {
-            spawn_icon_button(p, n, h, pr, 110.0, 285.0, 76.0, 25.0, 10)
+            // `Title[273]` 图头 68x25（C# `QuestDialogs.cs:123-133` `_finishButton` 无显式 Size）
+            spawn_icon_button(p, n, h, pr, 110.0, 285.0, 68.0, 25.0, 10)
                 .insert((QuestLogFinish, Visibility::Hidden));
         }
     });
@@ -1214,7 +1217,8 @@ fn spawn_quest_detail(
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 198),
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 199),
         ) {
-            spawn_icon_button(p, n, h, pr, 293.0, 33.0, 16.0, 14.0, 11).insert(QuestDetailScrollUp);
+            // `Prguse2[197]/[207]` 图头 12x12（C# 显式 Size 被 `AutoSize=true` 顶掉，见 MirImageControl ctor）
+            spawn_icon_button(p, n, h, pr, 293.0, 33.0, 12.0, 12.0, 11).insert(QuestDetailScrollUp);
         }
         // 下滚 Prguse2[207/208/209] @(293,280)
         if let (Some(n), Some(h), Some(pr)) = (
@@ -1222,7 +1226,7 @@ fn spawn_quest_detail(
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 208),
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 209),
         ) {
-            spawn_icon_button(p, n, h, pr, 293.0, 280.0, 16.0, 14.0, 11)
+            spawn_icon_button(p, n, h, pr, 293.0, 280.0, 12.0, 12.0, 11)
                 .insert(QuestDetailScrollDown);
         }
         // 位置条 Prguse2[205/206] @(293,48) 12x18（C# `Visible=false` 起始；行数不足一页恒隐）
@@ -1279,7 +1283,8 @@ fn spawn_quest_detail(
             load_lib_image(&mut libs, &mut images, LibraryName::Title, 271),
             load_lib_image(&mut libs, &mut images, LibraryName::Title, 272),
         ) {
-            spawn_icon_button(p, n, h, pr, 120.0, 436.0, 76.0, 25.0, 11).insert(Visibility::Hidden);
+            // `Title[270]` 图头 68x25（C# `QuestDialogs.cs:568-578` `_pauseButton` 无显式 Size）
+            spawn_icon_button(p, n, h, pr, 120.0, 436.0, 68.0, 25.0, 11).insert(Visibility::Hidden);
         }
         if let (Some(n), Some(h), Some(pr)) = (
             load_lib_image(&mut libs, &mut images, LibraryName::Title, 203),

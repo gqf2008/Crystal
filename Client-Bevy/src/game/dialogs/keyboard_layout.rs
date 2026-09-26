@@ -556,26 +556,32 @@ fn spawn_keyboard_layout(
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 198),
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 199),
         ) {
-            spawn_icon_button(p, n, h, pr, 491.0, 88.0, 16.0, 14.0, 10).insert(KeyboardScrollUp);
+            // `Prguse2[197]` 图头 12x12；C# 虽写 `Size=(16,14)`，但 `MirImageControl` 构造器把
+            // `AutoSize` 置 true ⇒ `Size` getter 返回 `GetTrueSize(Index)`，显式 Size 被美术尺寸顶掉
+            spawn_icon_button(p, n, h, pr, 491.0, 88.0, 12.0, 12.0, 10).insert(KeyboardScrollUp);
         }
         if let (Some(n), Some(h), Some(pr)) = (
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 207),
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 208),
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 209),
         ) {
-            spawn_icon_button(p, n, h, pr, 491.0, 363.0, 16.0, 14.0, 10).insert(KeyboardScrollDown);
+            spawn_icon_button(p, n, h, pr, 491.0, 363.0, 12.0, 12.0, 10).insert(KeyboardScrollDown);
         }
         // 位置条 (491,101)
         if let Some(h) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 205) {
             spawn_image(p, h, 491.0, 101.0, 12.0, 18.0, 9).insert(KeyboardPositionBar(101.0));
         }
-        // 重置按钮 Title[120/121/122] (30,400) 72x25
+        // 重置按钮 Title[120/121/122] (30,400)：图头 60x25。C# `KeyboardLayoutDialog.cs:131-141`
+        // 虽显式写了 `Size = new Size(72, 25)`，但 `MirImageControl.Size` getter 在
+        // `AutoSize = true`（`MirImageControl.cs:170` 构造器默认，全程未置 false）时直接返回
+        // `Library.GetTrueSize(Index)`，且 `DrawControl` 只按 `DisplayLocation` 原尺寸绘制、
+        // 不按 `Size` 拉伸 ⇒ 显式 Size 是死值，原版实际就是美术原生 60x25。
         if let (Some(n), Some(h), Some(pr)) = (
             load_lib_image(&mut libs, &mut images, LibraryName::Title, 120),
             load_lib_image(&mut libs, &mut images, LibraryName::Title, 121),
             load_lib_image(&mut libs, &mut images, LibraryName::Title, 122),
         ) {
-            spawn_icon_button(p, n, h, pr, 30.0, 400.0, 72.0, 25.0, 10).insert((
+            spawn_icon_button(p, n, h, pr, 30.0, 400.0, 60.0, 25.0, 10).insert((
                 KeyboardReset,
                 // #93 通用 Tooltip：C# 重置按钮 Hint
                 crate::ui::tooltip::TooltipHint("重置为默认键位".to_string()),

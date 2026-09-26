@@ -751,7 +751,9 @@ fn spawn_inventory_dialog(
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 367),
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 368),
         ) {
-            spawn_icon_button(p, n, h, pr, 291.0, 212.0, 20.0, 20.0, INV_CHILD_Z).insert(InvDelBtn);
+            // 删除钮 `Prguse2[366/367/368]` 图头 16x15（C# `DelItemButton` 不设 `Size`；
+            // 本端曾自造 20x20 ⇒ 比原版大一圈）
+            spawn_icon_button(p, n, h, pr, 291.0, 212.0, 16.0, 15.0, INV_CHILD_Z).insert(InvDelBtn);
         }
     });
     // 格子背景不在此预生成：#276 由 inv_grid_sync_system 按 Inventory 组件 items.len()

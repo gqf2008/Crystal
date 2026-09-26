@@ -210,7 +210,9 @@ fn spawn_group(
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 115),
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 116),
         ) {
-            spawn_icon_button(p, n, h, pr, 25.0, 219.0, 60.0, 23.0, 10).insert((
+            // `Prguse[114]` 图头 28x25（C# `GroupDialog.cs:69-79` `SwitchButton` 无显式 Size
+            // ⇒ AutoSize 取美术尺寸；原写死 60x23 是错的）
+            spawn_icon_button(p, n, h, pr, 25.0, 219.0, 28.0, 25.0, 10).insert((
                 GroupSwitch,
                 // #2771：C# `GroupDialog.cs:78` `GroupSwitch` Hint（允许/拒绝队伍请求）
                 crate::ui::tooltip::UiHint {
@@ -224,7 +226,8 @@ fn spawn_group(
             load_lib_image(&mut libs, &mut images, LibraryName::Title, 134),
             load_lib_image(&mut libs, &mut images, LibraryName::Title, 135),
         ) {
-            spawn_icon_button(p, n, h, pr, 70.0, 219.0, 60.0, 23.0, 10).insert((
+            // `Title[133]` 图头 60x25（C# `GroupDialog.cs:82-92` `AddButton` 无显式 Size）
+            spawn_icon_button(p, n, h, pr, 70.0, 219.0, 60.0, 25.0, 10).insert((
                 GroupAddBtn,
                 // #2771：C# `GroupDialog.cs:91` `GroupAdd` Hint（添加）
                 crate::ui::tooltip::UiHint {
@@ -238,7 +241,8 @@ fn spawn_group(
             load_lib_image(&mut libs, &mut images, LibraryName::Title, 137),
             load_lib_image(&mut libs, &mut images, LibraryName::Title, 138),
         ) {
-            spawn_icon_button(p, n, h, pr, 140.0, 219.0, 44.0, 22.0, 10).insert((
+            // `Title[136]` 图头 60x25（C# `GroupDialog.cs:95-105` `DelButton` 无显式 Size）
+            spawn_icon_button(p, n, h, pr, 140.0, 219.0, 60.0, 25.0, 10).insert((
                 GroupDelBtn,
                 // #2771：C# `GroupDialog.cs:104` `GroupRemove` Hint（移除）
                 crate::ui::tooltip::UiHint {
