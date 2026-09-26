@@ -6,6 +6,18 @@
 //   - 主物品格 (202,91)、材料标签 (67,317)/(192,317)、结果 (112,354)
 //   - 觉醒类型选择（武器：攻/魔/道）
 // 网络：AwakeningNeedMaterials → 材料需求；Awakening → 觉醒结果（服务端全链路已支持）
+//
+// #3264：C# 一共 7 个 `MirItemCell`（`GridType = AwakenItem`，`NPCDialogs.cs:1935-2008`）：
+//   [0] 主物品 @(202,91)（可放）；[1]/[2] 只读**需求材料格** @(31,316)/(155,316)（`Enabled = false`，
+//   由 `setNeedItems` 按服务端包填图 + `NeedItemLabel1/2` @(67,317)/(192,317) 写「需要 x×n」）；
+//   [3..6] @(175,199)/(230,199)/(175,256)/(230,256) 是**玩家手动放置**的材料格
+//   （C# `CheckNeedMaterials` 按名字比对 [1]/[2] 与 [3..6]）。
+// 本端实现 [0] + [1] + [2]（含图标/边框/文案，实机抽点已核）。
+// **[3..6] 不实现，并说明理由（不是漏项）**：本端 Rust 服务端结算觉醒材料时**按背包逐索引计数并消耗**
+//   （`ServerRust/src/actors/world/awakening.rs` 的 `CountItemsByIndex` / `ConsumeItemsByIndex`），
+//   且全仓**没有 `MirGridType::AwakenItem` 的服务端处理臂**（只有枚举定义）⇒ 画 4 个"能放东西"的格子
+//   会是假交互。要与 C# 完全一致，需要先在服务端加「觉醒材料格状态 + `MoveItem{AwakenItem}` 臂 + 结算改造」，
+//   属独立一轮（产品是否需要这个交互要先确认）。
 // ============================================================================
 
 use bevy::prelude::*;
@@ -29,6 +41,22 @@ pub const PANEL_SIZE: (f32, f32) = (360.0, 420.0);
 /// （`Client/MirControls/MirItemCell.cs:184-186`）。本端此前画 36x28：不仅命中区比原版矮 4px，
 /// `npc_awake_render_system` 还会把物品图**拉伸**到节点尺寸 ⇒ 图标纵向被压扁。
 pub const MAIN_CELL_SIZE: (f32, f32) = (36.0, 32.0);
+/// C# `ItemCells[1]`/`[2]`（"Required" 只读材料格）@(31,316)/(155,316)，
+/// `BorderColour = Color.Lime`、`Enabled = false`（`NPCDialogs.cs:1947-1968`）。
+pub const NEED_CELL_POS: [(f32, f32); 2] = [(31.0, 316.0), (155.0, 316.0)];
+/// 对应的两行需求文案（C# `NeedItemLabel1/2` @(67,317)/(192,317)，`NPCDialogs.cs:1876-1895`）
+pub const NEED_LABEL_POS: [(f32, f32); 2] = [(67.0, 317.0), (192.0, 317.0)];
+/// C# `BorderColour = Color.Lime`（只读材料格边框）
+pub const NEED_CELL_BORDER: Color = Color::srgb(0.0, 1.0, 0.0);
+
+/// C# `setNeedItems`（`NPCDialogs.cs:2165-2193`）的需求文案：
+/// `MaterialsCount[i] != 0` 才画格 + 写 `NeedItemQuantity` 文案（否则清空）。
+pub fn need_item_text(name: &str, count: i32) -> String {
+    if count == 0 {
+        return String::new();
+    }
+    format!("需要 {} ×{}", name, count)
+}
 
 /// #1356：觉醒面板服务模式（C# PanelType：Awakening/Disassemble/Downgrade/Reset）
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -111,7 +139,13 @@ pub struct NpcAwakeMainIcon;
 pub struct NpcAwakeMainName;
 
 #[derive(Component)]
-pub struct NpcAwakeMaterialText;
+pub struct NpcAwakeMaterialText(pub usize);
+
+/// #3264：只读材料格（C# `ItemCells[1]/[2]`，`Enabled = false`）与其图标层
+#[derive(Component)]
+pub struct NpcAwakeNeedCell(pub usize);
+#[derive(Component)]
+pub struct NpcAwakeNeedIcon(pub usize);
 
 #[derive(Component)]
 pub struct NpcAwakeResultText;
@@ -248,9 +282,49 @@ fn spawn_npc_awake(
         )
         .insert(NpcAwakeMainIcon);
         spawn_label(p, &cjk, "", 202.0, 122.0, 11.0, Color::WHITE, 9).insert(NpcAwakeMainName);
-        // 材料需求标签（C# (67,317)/(192,317)）
-        for x in [67.0, 192.0] {
-            spawn_label(p, &cjk, "", x, 317.0, 11.0, Color::WHITE, 9).insert(NpcAwakeMaterialText);
+        // 只读材料格 + 需求文案（C# `ItemCells[1]/[2]` @(31,316)/(155,316) 36x32、
+        // `NeedItemLabel1/2` @(67,317)/(192,317)，`NPCDialogs.cs:1947-1968` / `:2165-2193`）
+        for (i, (cx, cy)) in NEED_CELL_POS.iter().enumerate() {
+            let cell_bg = images.add(crate::map_renderer::make_image(
+                vec![255, 255, 255, 255],
+                1,
+                1,
+            ));
+            // 注意：**不能**先 `spawn_container` 再 `insert(Node{..default()})` —— 那会把容器
+            // 自己的 `position_type/left/top/width/height` 覆盖成默认值（实机抽点表现为"格子不存在"，
+            // 只命中到面板）。这里直接按需要的样式建节点。
+            p.spawn((
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: Val::Px(*cx),
+                    top: Val::Px(*cy),
+                    width: Val::Px(MAIN_CELL_SIZE.0),
+                    height: Val::Px(MAIN_CELL_SIZE.1),
+                    border: UiRect::all(Val::Px(1.0)),
+                    ..default()
+                },
+                BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.0)),
+                BorderColor::all(NEED_CELL_BORDER),
+                ZIndex(9),
+                NpcAwakeNeedCell(i),
+            ))
+                .with_children(|c| {
+                    c.spawn((
+                        Node {
+                            position_type: PositionType::Absolute,
+                            left: Val::Px(1.0),
+                            top: Val::Px(1.0),
+                            width: Val::Px(MAIN_CELL_SIZE.0 - 2.0),
+                            height: Val::Px(MAIN_CELL_SIZE.1 - 2.0),
+                            ..default()
+                        },
+                        ImageNode::new(cell_bg),
+                        ZIndex(1),
+                        NpcAwakeNeedIcon(i),
+                    ));
+                });
+            let (lx, ly) = NEED_LABEL_POS[i];
+            spawn_label(p, &cjk, "", lx, ly, 11.0, Color::WHITE, 9).insert(NpcAwakeMaterialText(i));
         }
         // 结果标签（C# GoldLabel (112,354)）
         spawn_label(
@@ -282,6 +356,27 @@ mod tests {
             (36.0, 32.0),
             "C# MirItemCell 默认 Size = (36, 32)（MirItemCell.cs:184-186）"
         );
+    }
+
+    /// 门禁（#3264）：两个**只读材料格**必须落在 C# `ItemCells[1]/[2]` 的坐标上，
+    /// 且文案规则与 C# `setNeedItems`（`NPCDialogs.cs:2165-2193`）一致：`count == 0` 不写文案。
+    /// 阳性对照：把 `NEED_CELL_POS` 改回「只有主格」的旧值（例如 (0,0)）⇒ 坐标断言即红。
+    #[test]
+    fn need_material_cells_match_csharp() {
+        assert_eq!(
+            NEED_CELL_POS,
+            [(31.0, 316.0), (155.0, 316.0)],
+            "C# ItemCells[1]/[2] @(31,316)/(155,316)"
+        );
+        assert_eq!(
+            NEED_LABEL_POS,
+            [(67.0, 317.0), (192.0, 317.0)],
+            "C# NeedItemLabel1/2 @(67,317)/(192,317)"
+        );
+        assert_eq!(NEED_CELL_BORDER, Color::srgb(0.0, 1.0, 0.0), "C# BorderColour = Color.Lime");
+        // `count == 0` → 空文案（C# `if (MaterialsCount[i] != 0) … else NeedItemLabel.Text = ""`）
+        assert_eq!(need_item_text("勇气印记", 0), "");
+        assert_eq!(need_item_text("勇气印记", 3), "需要 勇气印记 ×3");
     }
 }
 
@@ -522,7 +617,17 @@ fn npc_awake_render_system(
     state: Res<NpcAwakeState>,
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
-    mut icon: Query<(&mut ImageNode, &NpcAwakeMainIcon), Without<NpcAwakeMainName>>,
+    net: Res<NetConnection>,
+    item_info: Res<crate::game::item_names::ItemInfoCache>,
+    mut requested: Local<std::collections::HashSet<i32>>,
+    mut icon: Query<
+        (&mut ImageNode, &NpcAwakeMainIcon),
+        (Without<NpcAwakeMainName>, Without<NpcAwakeNeedIcon>),
+    >,
+    mut need_icons: Query<
+        (&mut ImageNode, &NpcAwakeNeedIcon),
+        (Without<NpcAwakeMainIcon>, Without<NpcAwakeMainName>),
+    >,
     mut name: Query<
         &mut Text,
         (
@@ -533,7 +638,7 @@ fn npc_awake_render_system(
         ),
     >,
     mut mats: Query<
-        &mut Text,
+        (&mut Text, &NpcAwakeMaterialText),
         (
             With<NpcAwakeMaterialText>,
             Without<NpcAwakeResultText>,
@@ -573,13 +678,37 @@ fn npc_awake_render_system(
             .map(|i| i.name.clone())
             .unwrap_or_default();
     }
-    let mat_text: Vec<String> = state
-        .materials
-        .iter()
-        .map(|m| format!("材料#{} x{}", m.item_id, m.count))
-        .collect();
-    for (i, mut text) in mats.iter_mut().enumerate() {
-        text.0 = mat_text.get(i).cloned().unwrap_or_default();
+    // 只读材料格 + 需求文案（C# `setNeedItems`）：`MaterialsCount[i] != 0` 才画格/写文案。
+    // 名字与图标帧都来自 `NewItemInfo` 缓存；表里没有就**发一次** `RequestItemInfo`（按索引去重，C#
+    // `GameScene.RequestItemInfo` 同语义），名字先占位 `#id`。
+    for (mut node, slot) in &mut need_icons {
+        if let Some(m) = state.materials.get(slot.0).filter(|m| m.count != 0) {
+            if let Some(frame) = item_info.images.get(&m.item_id).copied() {
+                if let Some(h) =
+                    load_lib_image(&mut libs, &mut images, LibraryName::Items, frame as usize)
+                {
+                    node.image = h;
+                }
+            } else if requested.insert(m.item_id) {
+                net.send_packet(&mir2_shared::packets::client::info::RequestItemInfo {
+                    item_index: m.item_id,
+                });
+                tracing::info!("🛠️ 觉醒材料缺物品信息，请求 ItemInfo: idx={}", m.item_id);
+            }
+        }
+    }
+    for (mut text, slot) in &mut mats {
+        text.0 = match state.materials.get(slot.0).filter(|m| m.count != 0) {
+            Some(m) => {
+                let name = item_info
+                    .names
+                    .get(&m.item_id)
+                    .cloned()
+                    .unwrap_or_else(|| format!("#{}", m.item_id));
+                need_item_text(&name, m.count)
+            }
+            None => String::new(),
+        };
     }
     for mut text in &mut res {
         text.0 = state.result_text.clone();

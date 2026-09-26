@@ -263,6 +263,8 @@ fn provision_foreign_resources(app: &mut App) {
     app.init_resource::<crate::control::CursorProbe>();
     app.init_resource::<crate::game::dialogs::minimap::CurrentMapIndex>();
     app.init_resource::<crate::game::object_state::InfoCache>();
+    // #3264：觉醒材料格渲染要查「物品索引 → 图标帧」缓存（生产由 `ItemImageCachePlugin` 注册）
+    app.init_resource::<crate::game::item_names::ItemInfoCache>();
     app.init_resource::<crate::game::player_menu::PlayerMenuState>();
     app.init_resource::<crate::game::dialogs::quest_tracking::QuestTrackingState>();
     app.init_resource::<crate::ui::pinyin_ime::ImeFocus>();

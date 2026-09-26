@@ -1364,6 +1364,8 @@ pub(crate) fn handle_progress(
                     required_gender: p.info.required_gender.bits(),
                     // #3120 ② 残余：把绑定位一起带出来（C# 客户端守卫读 `Info.Bind`）
                     bind: p.info.bind.bits(),
+                    // #3264：图标帧号（觉醒材料格等只有 item_index 的地方画图标要用）
+                    image: p.info.image,
                 });
                 tracing::info!("📦 NewItemInfo: idx={} name={}", p.info.index, p.info.name);
             }

@@ -22,7 +22,49 @@
 //! 仓库（`dialogs::storage`）与商城（`dialogs::game_shop`）共用本模块的同一对函数，
 //! 避免两条降级链各自漂移（#782 的验收判据就是「两个界面走同一降级链」）。
 
+use bevy::prelude::*;
 use std::collections::HashMap;
+
+/// #3264：按需请求到的**物品信息缓存**（`item_index → 名字/图标帧`）。
+///
+/// 为什么单独一张表：名字表历史上是**每个窗各存一份**（`StorageState.item_names` 等），
+/// 而「某索引叫什么名、图标是哪一帧」是全客户端同一事实，散着存必然漂移。这里用资源做单一来源，
+/// 由下面这个系统统一消费 `ServerEvent::ItemInfoReceived`；需要图标的窗（觉醒材料格）直接查它。
+#[derive(Resource, Default)]
+pub struct ItemInfoCache {
+    pub names: HashMap<i32, String>,
+    pub images: HashMap<i32, u16>,
+}
+
+/// 消费 `NewItemInfo` 回包，把 `index → image` 记进 [`ItemImageTable`]。
+pub fn item_info_cache_system(
+    mut events: MessageReader<crate::network::server_event::ServerEvent>,
+    mut cache: ResMut<ItemInfoCache>,
+) {
+    for ev in events.read() {
+        if let crate::network::server_event::ServerEvent::ItemInfoReceived {
+            index,
+            name,
+            image,
+            ..
+        } = ev
+        {
+            remember_item_name(&mut cache.names, *index, name);
+            cache.images.insert(*index, *image);
+        }
+    }
+}
+
+pub struct ItemImageCachePlugin;
+
+impl bevy::prelude::Plugin for ItemImageCachePlugin {
+    fn build(&self, app: &mut bevy::prelude::App) {
+        app.init_resource::<ItemInfoCache>().add_systems(
+            bevy::prelude::Update,
+            item_info_cache_system.run_if(bevy::prelude::in_state(crate::scenes::AppState::Game)),
+        );
+    }
+}
 
 /// 把 `NewItemInfo` / `UserInformation` 下发的名字写进本地表。
 ///
@@ -122,5 +164,34 @@ mod tests {
         // 空名字不得覆盖已有名字
         assert!(!remember_item_name(&mut names, 782, ""));
         assert_eq!(names.get(&782).map(String::as_str), Some("马鞍"));
+    }
+
+    /// #3264 门禁：`NewItemInfo` 回包必须把**名字与图标帧**都写进 [`ItemInfoCache`]
+    /// （觉醒材料格只有 `item_index`，画图标就靠这张表）。
+    /// 阳性对照：去掉 `item_info_cache_system` 里的 `cache.images.insert(...)` ⇒ 本测试 FAILED。
+    #[test]
+    fn item_info_cache_stores_name_and_image() {
+        use bevy::ecs::message::Messages;
+        use bevy::ecs::system::RunSystemOnce;
+        let mut world = World::new();
+        world.init_resource::<Messages<crate::network::server_event::ServerEvent>>();
+        world.init_resource::<ItemInfoCache>();
+        world
+            .resource_mut::<Messages<crate::network::server_event::ServerEvent>>()
+            .write(crate::network::server_event::ServerEvent::ItemInfoReceived {
+                index: 1042,
+                name: "勇气印记".to_string(),
+                item_type: 35,
+                shape: 100,
+                required_gender: 0,
+                bind: 0,
+                image: 3210,
+            });
+        world
+            .run_system_once(item_info_cache_system)
+            .expect("item_info_cache_system 应成功");
+        let cache = world.resource::<ItemInfoCache>();
+        assert_eq!(cache.names.get(&1042).map(String::as_str), Some("勇气印记"));
+        assert_eq!(cache.images.get(&1042), Some(&3210));
     }
 }
