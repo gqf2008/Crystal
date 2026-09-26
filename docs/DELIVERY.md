@@ -229,7 +229,7 @@ cd Client-Bevy && cargo test                     # 794 lib + 7 bin + 2 + 53
 
 三侧 `cargo fmt -- --check` 均须 0 差异。
 
-另有五条**离线的对账/卫生门禁**（秒级，不起客户端）：
+另有六条**离线的对账/卫生门禁**（秒级，不起客户端）：
 
 ```bash
 pwsh tools/acceptance/e2e_lock_selftest.ps1      # 实机资源锁自证（§5.4）
@@ -237,6 +237,8 @@ pwsh tools/acceptance/flag_coverage_check.ps1    # 客户端 auto 开关覆盖�
 pwsh tools/ops/check_process_scope.ps1           # ops/验收脚本不得按进程名清共享资源
 pwsh tools/ops/check_bot_timeouts.ps1            # ops 演练不得有同步无超时的 bot 调用
 pwsh tools/ops/check_doc_tool_refs.ps1           # 文档引用的 tools/** 脚本必须存在且**已入库**
+py -3.12 tools/acceptance/csharp_golden/control_size_audit.py --selftest \
+    --repo . --data Data                          # 窗内控件：写死尺寸必须等于美术原生尺寸（金标准 §3.4）
 ```
 
 后两条是**运营工具自身的卫生门禁**（本机常态多 agent 并行：7000 上常驻开发服）：前者禁止
