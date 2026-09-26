@@ -2010,6 +2010,8 @@ fn whisper_partner(text: &str, chat_type: mir2_shared::enums::ChatType) -> Optio
 fn chat_server_events(
     mut events: MessageReader<crate::network::server_event::ServerEvent>,
     mut chat: ResMut<ChatState>,
+    // #3261：C# `MainDialogs.cs:791-794`——`ChatType.Announcement` 还要弹顶部横幅
+    mut chat_notice: ResMut<crate::game::dialogs::chat_notice::ChatNoticeState>,
     filter: Res<ChatFilter>,
 ) {
     use crate::network::server_event::ServerEvent;
@@ -2042,6 +2044,12 @@ fn chat_server_events(
                     chat_channel(*chat_type),
                 );
             }
+            // C# `ChatType.Announcement`（`MainDialogs.cs:791-794`）：进面板之外，
+            // 再弹一次顶部横幅（`ShowNotice(RegexFunctions.CleanChatString(text))`，10s）。
+            // 文案里的 `{}` 标记由 `chat_notice_system` 的 `strip_color_tags` 去掉。
+            if *chat_type == mir2_shared::enums::ChatType::Announcement {
+                chat_notice.show(text.clone());
+            }
         }
         // #2563：SendOutputMessage 不再进聊天——C# GameScene.cs:5621 只路由到顶部
         // 浮动 OutputLines（game/output_lines.rs 消费 ServerEvent::OutputMessage）
@@ -2050,6 +2058,41 @@ fn chat_server_events(
 
 #[cfg(test)]
 mod tests {
+
+    /// #3261 门禁（金标准 ⑧ 长尾窗）：`ChatType.Announcement` 聊天消息必须**同时**进聊天面板
+    /// 并弹顶部横幅（C# `MainDialogs.cs:791-794`）。修复前 `ChatNoticeState` 根本没有写入方
+    /// ⇒ 横幅在实机上永远不出现。阳性对照：去掉 `chat_server_events` 里的 `Announcement` 分支 ⇒ 红。
+    #[test]
+    fn announcement_chat_shows_banner_and_adds_line() {
+        use bevy::ecs::message::Messages;
+        use bevy::ecs::system::RunSystemOnce;
+        let mut world = World::new();
+        world.init_resource::<Messages<crate::network::server_event::ServerEvent>>();
+        world.init_resource::<ChatState>();
+        world.init_resource::<ChatFilter>();
+        world.init_resource::<crate::game::dialogs::chat_notice::ChatNoticeState>();
+        world
+            .resource_mut::<Messages<crate::network::server_event::ServerEvent>>()
+            .write(crate::network::server_event::ServerEvent::Chat {
+                text: "全服公告".to_string(),
+                chat_type: mir2_shared::enums::ChatType::Announcement,
+            });
+        world
+            .run_system_once(chat_server_events)
+            .expect("chat_server_events 应成功");
+
+        let notice = world.resource::<crate::game::dialogs::chat_notice::ChatNoticeState>();
+        assert!(notice.visible, "Announcement 必须弹横幅");
+        assert_eq!(notice.text, "全服公告");
+        assert_eq!(
+            notice.remaining,
+            crate::game::dialogs::chat_notice::VIEW_TIME_SECS
+        );
+        assert!(
+            !world.resource::<ChatState>().lines.is_empty(),
+            "同一句也要进聊天面板（C# 是「进面板 + 弹横幅」两件事）"
+        );
+    }
 
     /// 门禁（owner 缺陷①）：聊天窗滚轮的命中位置必须走统一口径 `resolve_cursor`
     /// —— `CursorProbe`（注入式验收/自动化）优先，其次才是真实窗口光标。

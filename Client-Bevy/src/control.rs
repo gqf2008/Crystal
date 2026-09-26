@@ -848,6 +848,9 @@ struct ControlQueries<'w, 's> {
     /// #3260：`storage_probe` 也带上「输入框开着吗 / 哪个文本域聚焦」——
     /// 夹具判「闸门弹框」与「打字有没有落点」时不用猜
     text_input: Res<'w, crate::game::dialogs::text_input::TextInputState>,
+    /// #3261：顶部公告横幅是**状态驱动**窗（`ChatNoticeState.visible` + 10s 计时），
+    /// RPC 开/关要切状态（与 Storage/HeroManage/InputBox 同款），否则根恒 Hidden
+    chat_notice: ResMut<'w, crate::game::dialogs::chat_notice::ChatNoticeState>,
     map_cameras: Query<
         'w,
         's,
@@ -2485,6 +2488,24 @@ fn apply_control_commands(
                         }
                         DialogAction::Close => q.input_box.open = false,
                         DialogAction::Toggle => q.input_box.open = !q.input_box.open,
+                    }
+                } else if kind == DialogKind::ChatNotice {
+                    // #3261：横幅由 `ChatNoticeState.visible` 驱动（10s 计时）⇒ RPC 直接切状态；
+                    // 开的时候把计时也拉满，否则 `remaining=0` 会让它在下一帧就自己隐掉。
+                    match action {
+                        DialogAction::Open => {
+                            q.chat_notice.visible = true;
+                            q.chat_notice.remaining =
+                                crate::game::dialogs::chat_notice::VIEW_TIME_SECS;
+                        }
+                        DialogAction::Close => q.chat_notice.visible = false,
+                        DialogAction::Toggle => {
+                            q.chat_notice.visible = !q.chat_notice.visible;
+                            if q.chat_notice.visible {
+                                q.chat_notice.remaining =
+                                    crate::game::dialogs::chat_notice::VIEW_TIME_SECS;
+                            }
+                        }
                     }
                 } else if kind == DialogKind::Storage {
                     // Storage 双门控：`StorageState.visible` 与 `DialogManager.open`
