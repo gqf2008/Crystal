@@ -878,6 +878,9 @@ struct ControlQueries<'w, 's> {
     awake: Res<'w, crate::game::dialogs::npc_awake::NpcAwakeState>,
     /// `awake_probe` 用：背包格锁（判「放进觉醒格后来源背包格被锁」；C# `SelectedCell.Locked`）。
     inv_locked: Res<'w, crate::game::dialogs::inventory::InvLockedSlots>,
+    /// `awake_probe` 用：背包**选中格**（C# `GameScene.SelectedCell`）——觉醒格是"先选后放"，
+    /// 夹具要先证明"点背包真的选中了那一格"（否则后续断言全是在空气上做的）。
+    inv_click: Res<'w, crate::game::dialogs::inventory::InvClickState>,
     map_cameras: Query<
         'w,
         's,
@@ -3494,6 +3497,8 @@ fn apply_control_commands(
                     "main_uid": q.awake.selected_uid.unwrap_or(0),
                     "awake_type": q.awake.awake_type.map(|t| format!("{t:?}")),
                     "result": q.awake.result,
+                    // 「先选后放」的第一步：背包当前选中格（C# GameScene.SelectedCell）
+                    "inv_selected": q.inv_click.selected(),
                     "slots": slots,
                 });
                 tracing::info!("🎮 control awake_probe: {payload}");
