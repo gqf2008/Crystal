@@ -173,6 +173,26 @@ py -3.12 tools/acceptance/csharp_golden/window_rect_table.py `
 > 边界：这是**窗口级**几何。窗内控件（行高、列距、按钮位置）要靠 `ui_nodes_at` 逐点或像素 A/B
 > —— 例如角色窗 14 个装备格已用前者验过（14/14 与 C# 表一致）。
 
+### 3.4 窗内控件：`control_size_audit.py`（写死尺寸 ≠ 美术原生尺寸 = 0）
+
+原版大量控件只写 `Index`/`Library`/`Location`，**尺寸就是美术尺寸**；本端若在这些地方写死一个数字，
+很容易抄成另一张图的尺寸（实测：技能页翻页钮抄成 40x22、三处标题图抄成 `Title[15]` 的 103x17）。
+这类"拉伸精灵"逐个窗口肉眼找太慢，用机械扫描一次扫全仓：
+
+```powershell
+py -3.12 tools/acceptance/csharp_golden/control_size_audit.py `
+     --repo <Rust 仓库根> --data <含 *.Lib 的 Data>
+```
+
+判据（**启发式，输出要人工过一遍**）：把 `load_lib_image(…, LibraryName::X, N)` 的句柄变量与
+其后 ≤8 行、且中间没有别的 `load` 的 `spawn_icon_button/spawn_image` 里那个**同名句柄**配对，
+再比"写死的 (w,h)"与"X[N] 图头尺寸"。配对**必须靠句柄变量名**：只按"最近一次 load"配会把面板背景
+配到小按钮上（实测产出 48 条、大半是假阳性）。
+
+**当前结果：0 命中**（2026-09-26，master 0f9da9ae4 上跑）。作为门禁跑的意义是"新增控件时别再抄尺寸"；
+真要"按比例裁宽"的精灵（进度条/经验条，C# 用 `Draw(Index, section, …)` 自绘）会落进结果里，
+人工确认后加白名单，别直接当缺陷改。
+
 ## 4. 存档导出（dbtool）
 
 `dbtool` 用原版 `Server.Library.dll` 读 `Server.MirDB`（游戏数据）与 `Server.MirADB`（账号/角色），
