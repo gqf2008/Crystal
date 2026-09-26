@@ -570,6 +570,24 @@ release 下未复现**（相差 3.5 倍以上），该数字视为**过期**；�
 
 ## 5. tick 健康
 
+### 4.8 容量阶梯 + tick 滞后在今天的 master 上刷新（2026-09-26，release，20 会话封顶）
+
+目的：此前"容量/背压/滞后"的读数是更早 master 上的；本轮把**容量阶梯**与**tick 滞后**都重跑到
+与发版三闸同一批代码上（`tools/ops/capacity_ramp.ps1`，自起服务端、只认自己 PID）。
+
+本机可用账号当前为 **20 个**（`opsload1..20`，分批播种绕过 `NewCharacter` 的 IP 防刷，见 §4.7.1），
+故阶梯封顶在 20：
+
+| 阶梯 | 结果 |
+|---|---|
+| `5 / 10 / 15 / 20`（Hold 20s） | 每档 **ok 全通、failed 0**；`knee_sessions=null`（**本阶梯内未出现劣化**）；顶档 `rss_per_session=0.98MB`；`mailbox_full / slow_reader_kicks / broadcast_deferred / broadcast_outbox_full` **全为 0** |
+| `20`（Hold **60s**，为了采 tick 心跳） | `ok 20/20`、`rss_per_session=0.95MB`、四个背压计数 **0**、**`max_abs_lag_pct = 0.0`**、`lag_measured=true`（20s 那轮因短于 tick 周期未采到心跳，工具自身已如实标注） |
+
+口径说明：`knee_sessions=null` 只代表**在 20 会话内未见拐点**，不等于安全线只有 20 —— 更早的
+本机基线是 ≥120 会话零丢包（当时账号更多）；要把 20 以上的阶梯补齐，只需再播种账号（同一配方）。
+**这一条也再次印证 §4.7 的结论**：20 会话下每会话 ~0.95MB，与旧的 3.5MB 相差甚远。
+
+
 INFO 心跳实测：2 在线 / 3824 只怪时 `interval_ms=29989 / 30008`、`lag_pct=0.0`——tick 准时。
 **注意**：按 DEBUG 行推算会得到「100 ticks 用 40–70s」的假象，那是 DEBUG 日志 I/O 自己造成的
 （每只怪 AI 打点，约 175KB/s）；测 tick 一律用 INFO。
