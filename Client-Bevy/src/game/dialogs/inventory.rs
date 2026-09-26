@@ -194,6 +194,41 @@ pub const WEIGHT_TEXT_Y: f32 = 212.0;
 /// 就是 8（`17 处 z=10` 是别的窗口的基础层，各有各的层号）。
 pub const INV_CHILD_Z: i32 = 8;
 
+/// 三个页签的**未选中/选中**美术索引（原版 C# `InventoryDialog` 的
+/// `ItemButton`/`ItemButton2`/`QuestButton` 换图规则）：
+///   - `ItemButton`（ITEMS I）选中 197 / 未选中 737（`RefreshInventory2` 里换 737）；
+///   - `ItemButton2`（ITEMS II）选中 168 / 未选中 738（`RefreshInventory` 里换 738）；
+///   - `QuestButton`（QUEST）选中 198 / 未选中 739。
+/// C# 的 `MirButton` 不设 `HoverIndex` ⇒ 悬停与常态同一张图，所以这三帧同源。
+pub const INV_TAB_ART: [(usize, usize); 3] = [(737, 197), (738, 168), (739, 198)];
+
+/// 页签横向位置（C# `InventoryDialog.cs`：(6,7)/(76,7)/(146,7)）
+pub const INV_TAB_X: [f32; 3] = [6.0, 76.0, 146.0];
+
+/// 页签在当前页应使用哪一张美术（纯函数，便于门禁单测；表见 [`INV_TAB_ART`]）。
+///
+/// 特殊一档：**未扩容（46 格）**时 ITEMS II 由 `738` 换成灰掉的 `169`
+/// （C# 两处 `Refresh*` 都有 `if (GameScene.User.Inventory.Length == 46) ItemButton2.Index = 169;`）
+/// ——金标准帧里那格是灰蓝的"锁住"态，正是这一条。越界（不存在第 4 张页签）返回 `None`。
+pub fn inv_tab_art_index(page: usize, tab: usize, slots: usize) -> Option<usize> {
+    let &(inactive, active) = INV_TAB_ART.get(tab)?;
+    if page == tab {
+        return Some(active);
+    }
+    if tab == 1 && slots == INV_BASE_BAG_SLOTS {
+        return Some(169);
+    }
+    Some(inactive)
+}
+
+/// 未扩容背包的格数 —— **本端口径**（把腰带排除在外）。
+///
+/// C# 的 `User.Inventory` 是 `UserItem[46]`：`0..5` 是腰带、`6..45` 才是背包
+/// （`InventoryDialog` 里 `Grid[idx].ItemSlot = 6 + idx` 就是这条映射）。本端
+/// [`Inventory::items`] 只存背包那一段（所以 `MAX_INV_SLOTS = 80` 对应 C# 的 Grid 8x10），
+/// 因此"C# 的 `Length == 46`（未扩容）"在本端口径下是 **40**。
+pub const INV_BASE_BAG_SLOTS: usize = GRID_COLS * GRID_ROWS;
+
 /// 扩容钮层（与基础层同层，靠生成顺序压在其他基础元素上）
 pub const INV_ADD_Z: i32 = INV_CHILD_Z;
 
@@ -312,6 +347,7 @@ impl Plugin for InventoryDialogPlugin {
                 inventory_shift_right_system,
                 inv_grid_sync_system,
                 inventory_ui_system,
+                inv_tab_art_system,
                 inv_weight_bar_system,
                 inv_selection_system,
                 inv_locked_icon_system,
@@ -639,21 +675,27 @@ fn spawn_inventory_dialog(
     commands.entity(panel).with_children(|p| {
         // 标签页按钮（Title 737/197 道具，738/168 道具2，739/198 任务）
         // #1342：任务页签（QuestGrid 8x5，C# QuestInventory）
-        let tabs: [(usize, usize, usize, f32); 3] = [
-            (0, 737, 197, 6.0),
-            (1, 738, 168, 76.0),
-            (2, 739, 198, 146.0),
-        ];
-        for (idx, normal, hover, x) in tabs {
-            if let (Some(n), Some(h), Some(pr)) = (
-                load_lib_image(&mut libs, &mut images, LibraryName::Title, normal),
-                load_lib_image(&mut libs, &mut images, LibraryName::Title, hover),
-                load_lib_image(&mut libs, &mut images, LibraryName::Title, hover),
-            ) {
-                // DialogWidget：inventory_ui_system 的 buttons/money/all_vis 查询域
-                // 门槛（批49 迁移遗漏 → 页签/关闭/金币负重全部失效）
-                spawn_icon_button(p, n, h, pr, x, 7.0, 72.0, 23.0, INV_CHILD_Z)
-                    .insert((InvTab(idx), DialogWidget));
+        //
+        // **选中帧**（第 2 项）：原版第 1 页是 `ItemButton.Index = 197`（亮金"按下"态），
+        // 本端曾一律用未选中帧（737/738/739）⇒ 三张页签永远都是暗的、看不出当前在哪一页
+        // （金标准 A/B 标题栏对照实测）。逐帧换图见 [`inv_tab_art_system`]。
+        for (idx, &(inactive, active)) in INV_TAB_ART.iter().enumerate() {
+            let initial = if idx == 0 { active } else { inactive };
+            // DialogWidget：inventory_ui_system 的 buttons/money/all_vis 查询域
+            // 门槛（批49 迁移遗漏 → 页签/关闭/金币负重全部失效）
+            if let Some(h) = load_lib_image(&mut libs, &mut images, LibraryName::Title, initial) {
+                spawn_icon_button(
+                    p,
+                    h.clone(),
+                    h.clone(),
+                    h,
+                    INV_TAB_X[idx],
+                    7.0,
+                    72.0,
+                    23.0,
+                    INV_CHILD_Z,
+                )
+                .insert((InvTab(idx), DialogWidget));
             }
         }
         // 关闭按钮（Prguse2 360/361/362）@(289,3)
@@ -877,6 +919,49 @@ pub struct InvConfirmNo;
 /// 丢弃/删除/扩容确认文本（迁移补齐：原版该文本从未被渲染——spawn 空串且无系统写它）
 #[derive(Component)]
 pub struct InvConfirmText;
+
+/// 页签**选中帧**跟随当前页（原版 C# `InventoryDialog` 的换图规则，见 [`INV_TAB_ART`]）。
+///
+/// 为什么单独一条系统：页签是三帧图按钮（[`crate::ui::theme::ImageButton`]），
+/// 画面由 `image_button_system` 按 `normal/hover/pressed` 每帧写回；要"换一张常态图"
+/// 就必须改 `ImageButton` 的那三个句柄，而不是直接写 `ImageNode.image`（会被下一帧覆盖）。
+///
+/// 原版语义：`RefreshInventory`（第 1 页）→ 197/738/739；`RefreshInventory2`（第 2 页）
+/// → 737/168（=169 在 46 格时）/739；任务页 → 737/738/198。
+#[allow(clippy::too_many_arguments)]
+fn inv_tab_art_system(
+    mgr: Res<DialogManager>,
+    inv_ui: Res<InvUiState>,
+    mut libs: ResMut<GameLibraries>,
+    mut images: ResMut<Assets<Image>>,
+    mut image_cache: ResMut<crate::ui::sprite_ui::UiImageCache>,
+    inv_q: Query<&Inventory, With<LocalPlayer>>,
+    mut tabs: Query<(&InvTab, &mut crate::ui::theme::ImageButton)>,
+) {
+    if !mgr.is_open(DialogKind::Inventory) {
+        return;
+    }
+    let slots = inv_q.single().map(|inv| inv.items.len()).unwrap_or(0);
+    for (tab, mut btn) in &mut tabs {
+        let Some(index) = inv_tab_art_index(inv_ui.page, tab.0, slots) else {
+            continue;
+        };
+        let Some(h) = crate::ui::sprite_ui::ui_image(
+            &mut libs,
+            &mut images,
+            &mut image_cache,
+            LibraryName::Title,
+            index,
+        ) else {
+            continue;
+        };
+        if btn.normal != h {
+            btn.normal = h.clone();
+            btn.hover = h.clone();
+            btn.pressed = h;
+        }
+    }
+}
 
 /// 显示/隐藏 + 页切换 + 关闭 + 物品图标渲染 + 双击使用/装备
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
@@ -1910,6 +1995,7 @@ fn use_or_equip(
 #[allow(clippy::too_many_arguments)]
 fn inv_add_del_buttons_system(
     inv_q: Query<&Inventory, With<LocalPlayer>>,
+    inv_ui: Res<InvUiState>,
     mut click: ResMut<InvClickState>,
     mut confirm: ResMut<InvDropConfirm>,
     mgr: Res<DialogManager>,
@@ -1930,9 +2016,21 @@ fn inv_add_del_buttons_system(
         *inter == Interaction::Pressed && was != Some(Interaction::Pressed)
     }
     let len = inv_q.single().map(|inv| inv.items.len()).unwrap_or(0);
-    // C# AddButton.Visible = openLevel < 10（上限 86 格）；
-    // 必须先判断背包对话框是否打开，否则关闭后按钮残留成屏幕上的孤按钮
-    let can_expand = mgr.is_open(DialogKind::Inventory) && len < MAX_INV_EXPAND;
+    // C# 的 AddButton 只在**第 2 页**（道具2）出现：
+    //   - `RefreshInventory()`（第 1 页）第一件事 `Reset()`，而 `Reset()` 里
+    //     `AddButton.Visible = false`；
+    //   - 任务页签分支同样只 `Reset()` 后切页，不复位 AddButton 为可见；
+    //   - 只有 `RefreshInventory2()`（第 2 页）才 `AddButton.Visible = openLevel >= 10 ? false : true`。
+    // 本端原先只判「窗口开着且 len < 86」⇒ 第 1 页也多画一颗 BUY（金标准实机帧
+    // 逐像素对照：(235,5) 48x25 那块原版为空，本端是 Title[483] 的 BUY 美术）。
+    // 「窗口是否打开」这一项仍要留着，否则关窗后按钮残留成屏幕上的孤按钮。
+    //
+    // 满格判据用 [`MAX_INV_SLOTS`]（=80，本端的"背包段"上限）而不是 `MAX_INV_EXPAND`（=86）：
+    // C# 的 `openLevel = (Inventory.Length - 46) / 4`，`openLevel < 10` ⟺ `Length < 86`
+    // ⟺ 本端口径 `items.len() < 80`。写成 86 时 `items.len()`（被 `resize` 夹在 80）永远
+    // 小于它 ⇒ 满格也照画 BUY（点了会被服务端拒），是条死守卫。
+    let can_expand =
+        mgr.is_open(DialogKind::Inventory) && inv_ui.page == 1 && len < MAX_INV_SLOTS;
     for mut vis in &mut add_vis {
         *vis = if can_expand {
             Visibility::Visible
@@ -3568,5 +3666,167 @@ mod tests {
             INV_ADD_Z, INV_CHILD_Z,
             "扩容钮仍在基础层（与页签/金币/负重同层）"
         );
+    }
+
+    /// 门禁（金标准 A/B · `crystal-csharp-golden-run`）：扩容钮（C# `AddButton`，
+    /// Title[483/484/485] 的 **BUY**）**只在背包第 2 页（道具2）**显示。
+    ///
+    /// 依据（原版 C# `Client/MirScenes/Dialogs/InventoryDialog.cs`）：
+    ///   - `RefreshInventory()`（第 1 页）第一件事就是 `Reset()`，`Reset()` 里
+    ///     `AddButton.Visible = false`；
+    ///   - 任务页签分支同样只 `Reset()` 后切页；
+    ///   - 只有 `RefreshInventory2()`（第 2 页）才
+    ///     `AddButton.Visible = openLevel >= 10 ? false : true`。
+    ///
+    /// 实机证据：金标准帧（原版 C#，BichonProvince @ (277,609)，同开背包+角色窗）
+    /// 与本站对齐帧逐像素对照，(235,5) 的 48x25 块原版为空、本端是 BUY 美术。
+    ///
+    /// 阳性对照：把 `inv_ui.page == 1` 这一项从 `can_expand` 里去掉 →
+    /// 本测试「第 1 页必须 Hidden」那一段立即红。
+    #[test]
+    fn expand_button_only_on_second_bag_page() {
+        use bevy::ecs::system::RunSystemOnce;
+
+        fn visibility_for(page: usize, slots: usize) -> Visibility {
+            let mut world = World::new();
+            let mut mgr = DialogManager::default();
+            mgr.open.push(DialogKind::Inventory);
+            world.insert_resource(mgr);
+            world.insert_resource(InvUiState { page });
+            world.insert_resource(InvClickState::default());
+            world.insert_resource(InvDropConfirm::default());
+            world.insert_resource(GameLibraries::default());
+            world.insert_resource(Assets::<Image>::default());
+            world.insert_resource(crate::ui::sprite_ui::UiImageCache::default());
+            world.spawn((
+                LocalPlayer,
+                Inventory {
+                    items: std::iter::repeat_with(|| None).take(slots).collect(),
+                    ..Default::default()
+                },
+            ));
+            world.spawn((InvAddBtn, Interaction::None, Visibility::Visible));
+            world
+                .run_system_once(inv_add_del_buttons_system)
+                .expect("inv_add_del_buttons_system 应运行");
+            *world
+                .query_filtered::<&Visibility, With<InvAddBtn>>()
+                .single(&world)
+                .expect("扩容钮实体应存在")
+        }
+
+        // 第 1 页（道具）与第 3 页（任务）：原版 Reset() 后不复位 ⇒ 必须隐藏
+        assert_eq!(
+            visibility_for(0, 46),
+            Visibility::Hidden,
+            "第 1 页（道具）不得画扩容钮 BUY——原版 RefreshInventory() 走 Reset() 把它关掉"
+        );
+        assert_eq!(
+            visibility_for(2, 46),
+            Visibility::Hidden,
+            "任务页同样只有 Reset()，不得画扩容钮 BUY"
+        );
+        // 第 2 页（道具2）：openLevel = (slots-46)/4 < 10 ⇒ 可见
+        assert_eq!(
+            visibility_for(1, 46),
+            Visibility::Visible,
+            "第 2 页 openLevel=0 < 10 ⇒ 原版 AddButton.Visible = true"
+        );
+        // 第 2 页但背包段已达上限（80 = C# Length 86 = openLevel 10）⇒ 隐藏
+        assert_eq!(
+            visibility_for(1, MAX_INV_SLOTS),
+            Visibility::Hidden,
+            "openLevel >= 10（本端口径 {MAX_INV_SLOTS} 格）⇒ 原版 AddButton.Visible = false"
+        );
+        // 还差一格满（76 = C# Length 82 = openLevel 9）⇒ 仍可见
+        assert_eq!(
+            visibility_for(1, MAX_INV_SLOTS - 4),
+            Visibility::Visible,
+            "openLevel = 9 < 10 ⇒ 原版 AddButton.Visible = true"
+        );
+        // 窗口关闭时恒隐藏（否则按钮残留成屏幕上的孤按钮）
+        let mut world = World::new();
+        world.insert_resource(DialogManager::default()); // 未打开背包
+        world.insert_resource(InvUiState { page: 1 });
+        world.insert_resource(InvClickState::default());
+        world.insert_resource(InvDropConfirm::default());
+        world.insert_resource(GameLibraries::default());
+        world.insert_resource(Assets::<Image>::default());
+        world.insert_resource(crate::ui::sprite_ui::UiImageCache::default());
+        world.spawn((
+            LocalPlayer,
+            Inventory {
+                items: std::iter::repeat_with(|| None).take(46).collect(),
+                ..Default::default()
+            },
+        ));
+        world.spawn((InvAddBtn, Interaction::None, Visibility::Visible));
+        world
+            .run_system_once(inv_add_del_buttons_system)
+            .expect("inv_add_del_buttons_system 应运行");
+        assert_eq!(
+            *world
+                .query_filtered::<&Visibility, With<InvAddBtn>>()
+                .single(&world)
+                .expect("扩容钮实体应存在"),
+            Visibility::Hidden,
+            "背包窗关闭时不得显示扩容钮"
+        );
+    }
+
+    /// 门禁（金标准 A/B · `crystal-csharp-golden-run`）：页签必须画**当前页的选中帧**。
+    ///
+    /// 原版 C# `InventoryDialog` 换图规则（`RefreshInventory` / `RefreshInventory2` /
+    /// 任务页分支）：
+    ///   第 1 页 → 197 / 738 / 739；第 2 页 → 737 / 168 / 739；任务页 → 737 / 738 / 198。
+    /// 本端曾一律画未选中帧（737/738/739）⇒ 三张页签全是暗的，看不出当前在哪一页
+    /// （金标准 A/B 标题栏 (0,0)-(316,28) 对照：原版 ITEMS I 是亮金按下态，本端是暗态）。
+    ///
+    /// 阳性对照：把 `page == tab` 改成恒取未选中（`inactive`，即修复前的行为）→ 本测试红。
+    #[test]
+    fn tab_art_follows_current_page() {
+        // 已扩容（>46 格）时的常态帧
+        let big = 86;
+        // 第 1 页（道具）：ITEMS I 亮，其余暗
+        assert_eq!(
+            inv_tab_art_index(0, 0, big),
+            Some(197),
+            "第 1 页 ITEMS I 必须是选中帧 197"
+        );
+        assert_eq!(inv_tab_art_index(0, 1, big), Some(738));
+        assert_eq!(inv_tab_art_index(0, 2, big), Some(739));
+        // 第 2 页（道具2）：ITEMS II 亮
+        assert_eq!(inv_tab_art_index(1, 0, big), Some(737));
+        assert_eq!(
+            inv_tab_art_index(1, 1, big),
+            Some(168),
+            "第 2 页 ITEMS II 必须是选中帧 168"
+        );
+        assert_eq!(inv_tab_art_index(1, 2, big), Some(739));
+        // 任务页：QUEST 亮
+        assert_eq!(inv_tab_art_index(2, 0, big), Some(737));
+        assert_eq!(inv_tab_art_index(2, 1, big), Some(738));
+        assert_eq!(
+            inv_tab_art_index(2, 2, big),
+            Some(198),
+            "任务页 QUEST 必须是选中帧 198"
+        );
+        // 未扩容（46 格）：ITEMS II 换灰掉的 169（C# `Length == 46` 那条）
+        assert_eq!(
+            inv_tab_art_index(0, 1, INV_BASE_BAG_SLOTS),
+            Some(169),
+            "46 格时 ITEMS II 必须是灰掉的 169"
+        );
+        assert_eq!(inv_tab_art_index(2, 1, INV_BASE_BAG_SLOTS), Some(169));
+        // 但"选中"优先于"灰掉"：46 格时若停在道具2 页，仍是选中帧 168
+        assert_eq!(inv_tab_art_index(1, 1, INV_BASE_BAG_SLOTS), Some(168));
+        // 其它页签不受 46 格规则影响
+        assert_eq!(inv_tab_art_index(0, 0, INV_BASE_BAG_SLOTS), Some(197));
+        assert_eq!(inv_tab_art_index(0, 2, INV_BASE_BAG_SLOTS), Some(739));
+        // 三帧同源（C# MirButton 不设 HoverIndex）：选中/未选中各是一张图，不存在第三张
+        for (inactive, active) in INV_TAB_ART {
+            assert_ne!(inactive, active, "选中帧与未选中帧不得同图");
+        }
+        assert_eq!(inv_tab_art_index(0, 3, big), None, "只有 3 张页签");
     }
 }
