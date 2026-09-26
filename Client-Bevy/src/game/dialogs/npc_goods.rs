@@ -27,6 +27,18 @@ pub const PANEL_POS: (f32, f32) = (0.0, 224.0);
 /// 关闭键 `Prguse2[360..362]` @(217,3)（`NPCDialogs.cs:1113-1114`，无 `Size` → 原生 24x21）
 pub const CLOSE_POS: (f32, f32) = (217.0, 3.0);
 
+/// 面板左上角的标题图：C# `BuyLabel = new MirImageControl { Index = 27; Library = Libraries.Title;
+/// Location = new Point(20, 9) }`（`NPCDialogs.cs:1133-1139`）——不设 `Size` ⇒ 用美术原生 **37x14**。
+/// 本端此前**没画这张图**（只画了面板/关闭/购买/列表），所以商品窗左上是空的。
+///
+/// 同一控件的**合成/加工**变体：`if (PType == PanelType.Craft) { BuyLabel.Index = 12; BuyButton.Visible = false; }`
+/// （`:1141-1145`）——`Title[12]` 是那句 "CRAFT" 文案。本端商品窗只做买卖档，craft 档由独立
+/// `craft.rs` 承担，故这里只落买卖档的 27。
+pub const TITLE_IMG: (LibraryName, usize) = (LibraryName::Title, 27);
+/// 合成/加工面板的同一张标签：`Title[12]`（C# `if (PType == PanelType.Craft) BuyLabel.Index = 12;`）
+pub const TITLE_IMG_CRAFT: (LibraryName, usize) = (LibraryName::Title, 12);
+pub const TITLE_POS: (f32, f32) = (20.0, 9.0);
+
 /// 商品行几何 = C# `MirGoodsCell`（205x32）@ `Cells[i].Location = (10, 34 + i*33)`
 /// （`Client/MirScenes/Dialogs/NPCDialogs.cs:1074-1084`、`Client/MirControls/MirGoodsCell.cs:20`）。
 ///
@@ -142,6 +154,10 @@ pub struct NpcGoodsWidget;
 #[derive(Component)]
 pub struct NpcGoodsClose;
 
+/// 左上角标题图（买卖档 `Title[27]` / 合成档 `Title[12]`，C# `BuyLabel`）——面板切换时改图
+#[derive(Component)]
+pub struct NpcGoodsTitle;
+
 #[derive(Component)]
 pub struct NpcGoodsBuy;
 
@@ -166,7 +182,12 @@ impl Plugin for NpcGoodsPlugin {
         app.add_systems(OnExit(AppState::Game), cleanup_npc_goods);
         app.add_systems(
             Update,
-            (npc_goods_dialog_sync_system, npc_goods_ui_system).run_if(in_state(AppState::Game)),
+            (
+                npc_goods_dialog_sync_system,
+                npc_goods_ui_system,
+                npc_goods_title_system,
+            )
+                .run_if(in_state(AppState::Game)),
         );
     }
 }
@@ -233,6 +254,24 @@ fn spawn_npc_goods(
         {
             btn.insert(NpcGoodsClose);
         }
+        // 标题图 Title[27] @(20,9)，按**美术原生尺寸**铺（C# 不设 Size）——缺帧要留痕，
+        // 别像 NPC 箭头那样"静默没生成"（那次是库名写错、图是 0x0）
+        match crate::ui::theme::spawn_image_native(
+            p,
+            &mut libs,
+            &mut images,
+            TITLE_IMG.0,
+            TITLE_IMG.1,
+            TITLE_POS.0,
+            TITLE_POS.1,
+            9,
+        ) {
+            // 打标记：面板在买卖/合成之间切换时改这张图（C# 是构造期定 Index，本端单实例切换）
+            Some(mut e) => {
+                e.insert((NpcGoodsTitle, NpcGoodsWidget));
+            }
+            None => tracing::warn!("🛒 商品窗：标题图缺帧（Title[27]）——左上角会空着"),
+        }
         // 购买按钮（C# (77,304)）
         if let (Some(n), Some(h), Some(pr)) = (
             load_lib_image(&mut libs, &mut images, LibraryName::Title, 312),
@@ -275,6 +314,41 @@ fn npc_goods_row_rect(i: usize, ox: f32, oy: f32) -> (f32, f32, f32, f32) {
 
 fn npc_goods_dialog_sync_system(state: Res<NpcGoodsState>, mut mgr: ResMut<DialogManager>) {
     crate::game::dialogs::sync_dialog_state(&mut mgr, DialogKind::NpcGoods, state.visible);
+}
+
+/// 标题图随面板类型切换（买卖档 `Title[27]` ↔ 合成档 `Title[12]`）。
+///
+/// 原版是在**构造期**用 `PType` 定 `BuyLabel.Index`（`NPCDialogs.cs:1141-1145`），本端是单实例
+/// 在买卖/合成之间切换，所以按状态改图才是等价做法（改图而不是重建实体，避免闪烁）。
+/// 同一段 C# 还会 `BuyButton.Visible = false`（合成档没有购买钮）——本端此前只做到"点击被忽略"
+/// （`npc_goods_ui_system` 里 craft 直接 continue），按钮**还看得见**，这里一并对齐。
+fn npc_goods_title_system(
+    state: Res<NpcGoodsState>,
+    mut libs: ResMut<GameLibraries>,
+    mut images: ResMut<Assets<Image>>,
+    mut cache: ResMut<crate::ui::sprite_ui::UiImageCache>,
+    mut title: Query<&mut ImageNode, With<NpcGoodsTitle>>,
+    mut buy: Query<&mut Visibility, With<NpcGoodsBuy>>,
+) {
+    let craft = state.panel == mir2_shared::enums::PanelType::Craft;
+    let want = if craft { TITLE_IMG_CRAFT } else { TITLE_IMG };
+    if let Some(h) = crate::ui::sprite_ui::ui_image(&mut libs, &mut images, &mut cache, want.0, want.1) {
+        for mut img in &mut title {
+            if img.image != h {
+                img.image = h.clone();
+            }
+        }
+    }
+    for mut vis in &mut buy {
+        let v = if craft {
+            Visibility::Hidden
+        } else {
+            Visibility::Visible
+        };
+        if *vis != v {
+            *vis = v;
+        }
+    }
 }
 
 fn npc_goods_ui_system(
@@ -640,5 +714,25 @@ mod tests {
             NpcGoodsState::default().panel,
             mir2_shared::enums::PanelType::Buy
         );
+    }
+
+    /// 门禁（金标准逐窗复核 ⑧）：商品窗左上角的标题图 —— 买卖档 `Title[27]`、合成档 `Title[12]`，
+    /// 都在 `(20,9)`；且合成档的购买钮要**隐藏**（C# 同一段里 `BuyButton.Visible = false`）。
+    ///
+    /// 依据：`NPCDialogs.cs:1133-1145`（`BuyLabel = new MirImageControl { Index = 27;
+    /// Library = Libraries.Title; Location = new Point(20, 9) }`，`if (PType == PanelType.Craft)
+    /// { BuyLabel.Index = 12; BuyButton.Visible = false; }`）。图头实测 `Title[27]` = 37x14。
+    /// 本端此前**完全没画这张图**（商品窗左上角是空的）——只有把 C# 的控件清单逐条对过来才看得出。
+    ///
+    /// 阳性对照：把 `TITLE_IMG` 改成 `(LibraryName::Title, 0)` → 第一条断言红。
+    #[test]
+    fn npc_goods_title_variants_match_csharp() {
+        assert_eq!(TITLE_IMG, (LibraryName::Title, 27), "买卖档标题是 Title[27]");
+        assert_eq!(
+            TITLE_IMG_CRAFT,
+            (LibraryName::Title, 12),
+            "合成档标题是 Title[12]"
+        );
+        assert_eq!(TITLE_POS, (20.0, 9.0), "C# Location = (20,9)");
     }
 }

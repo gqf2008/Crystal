@@ -111,10 +111,10 @@ pub fn spawn_image_native<'a>(
     x: f32,
     y: f32,
     z: i32,
-) -> Option<Entity> {
+) -> Option<EntityCommands<'a>> {
     let (w, h) = native_size(libs, name, index)?;
     let handle = load_lib_image(libs, images, name, index)?;
-    Some(spawn_image(parent, handle, x, y, w, h, z).id())
+    Some(spawn_image(parent, handle, x, y, w, h, z))
 }
 
 /// 图按钮交互系统：根据 Interaction 切换三帧
