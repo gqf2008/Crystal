@@ -173,6 +173,10 @@ pub struct ItemRentalState {
     pub partner_period: i32,
     /// 对方侧存入物品（租客屏幕的对方物品窗物品格）
     pub partner_item: Option<InvItem>,
+    /// P3-3（#782）：已为哪些 `item_index` 发过 `RequestItemInfo`（原版 `GameScene.RequestedItemInfo`
+    /// 的去重语义）。`S.UpdateRentalItem` 是裸 `write_to`（不带 ItemInfo），租客侧对方物品窗又直接由它
+    /// 填充 ⇒ 名字要靠「占位名 → 本地物品名表 → 按索引发一次请求 → 回包纠正」这条链自愈。
+    pub requested_item_info: std::collections::HashSet<i32>,
 }
 
 impl ItemRentalState {
@@ -936,6 +940,8 @@ fn rental_server_events(
     mut events: MessageReader<crate::network::server_event::ServerEvent>,
     mut rental: ResMut<ItemRentalState>,
     mut mgr: ResMut<DialogManager>,
+    mut net: ResMut<NetConnection>,
+    cache: Res<crate::game::item_names::ItemInfoCache>,
 ) {
     use crate::network::server_event::ServerEvent;
     for ev in events.read() {
@@ -956,8 +962,29 @@ fn rental_server_events(
                 mgr.open(DialogKind::ItemRental);
             }
             ServerEvent::RentalItemUpdate { item, fee, period } => {
-                rental.has_item = item.is_some();
-                rental.partner_item = item.clone();
+                // P3-3（#782）：`S.UpdateRentalItem` 不带 ItemInfo ⇒ 线包名是 `#<index>` 占位。
+                // 走与仓库/商城同一套降级链（占位名 → 本地物品名表 → 按索引发一次 `RequestItemInfo`
+                // → 回包纠正），否则租客侧「对方物品窗」一直显示内部 ID（本夹具修复前实测 `#953`）。
+                let mut resolved = item.clone();
+                if let Some(inv) = resolved.as_mut() {
+                    let (name, need) = crate::game::item_names::resolve_item_name(
+                        &inv.name,
+                        &cache.names,
+                        inv.item_index,
+                    );
+                    inv.name = name;
+                    if need && inv.item_index > 0 && rental.requested_item_info.insert(inv.item_index) {
+                        net.send_packet(&mir2_shared::packets::client::info::RequestItemInfo {
+                            item_index: inv.item_index,
+                        });
+                        tracing::info!(
+                            "🛏️ 租赁窗缺物品名，请求 ItemInfo: idx={}",
+                            inv.item_index
+                        );
+                    }
+                }
+                rental.has_item = resolved.is_some();
+                rental.partner_item = resolved;
                 // Rust 扩展字段（C# `S.UpdateRentalItem` 只带物品）：费用归租客、期限归物主
                 if *fee > 0 {
                     rental.fee = *fee;
@@ -969,6 +996,23 @@ fn rental_server_events(
                     "租赁更新: 物品={}",
                     if rental.has_item { "有" } else { "无" }
                 );
+            }
+            // P3-3（#782）：按需请求的回包 —— 把租赁窗两侧（自有存入 / 对方物品）的名字按索引纠正，
+            // 并允许同一索引后续再次请求（回包到了就把它从去重集合里放开）。
+            ServerEvent::ItemInfoReceived { index, name, .. } => {
+                if name.is_empty() {
+                    continue;
+                }
+                if let Some(inv) = rental.partner_item.as_mut() {
+                    if inv.item_index == *index {
+                        inv.name = name.clone();
+                    }
+                }
+                if let Some(inv) = rental.deposit_item.as_mut() {
+                    if inv.item_index == *index {
+                        inv.name = name.clone();
+                    }
+                }
             }
             ServerEvent::RentalFee { fee } => {
                 // C# `GuestItemRentDialog.SetGuestFee`（物主屏幕的对方费用窗）

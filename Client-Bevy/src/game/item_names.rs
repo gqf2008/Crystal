@@ -42,15 +42,25 @@ pub fn item_info_cache_system(
     mut cache: ResMut<ItemInfoCache>,
 ) {
     for ev in events.read() {
-        if let crate::network::server_event::ServerEvent::ItemInfoReceived {
-            index,
-            name,
-            image,
-            ..
-        } = ev
-        {
-            remember_item_name(&mut cache.names, *index, name);
-            cache.images.insert(*index, *image);
+        match ev {
+            crate::network::server_event::ServerEvent::ItemInfoReceived {
+                index,
+                name,
+                image,
+                ..
+            } => {
+                remember_item_name(&mut cache.names, *index, name);
+                cache.images.insert(*index, *image);
+            }
+            // P3-3（#782）：`UserInformation` 的物品名表（背包/装备/任务格的索引→名字）也灌进这张
+            // **全客户端唯一**的表——仓库/商城/租赁窗等按需解析都先查它，这样「本地已有名字就不请求」
+            // （原版 `GameScene.RequestItemInfo` 的 `HasItemInfo(index)` 守卫）才真的成立。
+            crate::network::server_event::ServerEvent::UserInformation { item_names, .. } => {
+                for (idx, name) in item_names {
+                    remember_item_name(&mut cache.names, *idx, name);
+                }
+            }
+            _ => {}
         }
     }
 }
@@ -78,6 +88,14 @@ pub fn remember_item_name(item_names: &mut HashMap<i32, String>, index: i32, nam
     true
 }
 
+/// P3-3（#782）：判断一个名字是不是「本模块自己产出的占位」——空串或 `#<item_index>`。
+///
+/// 单一来源：`resolve_item_name` 与各探针（`rental_probe` 等）都用它判「这一格显示的到底是不是真名」，
+/// 免得探针自己再写一遍 `format!("!{}")` 之类口径而漂移。
+pub fn is_placeholder_item_name(name: &str, item_index: i32) -> bool {
+    name.is_empty() || name == format!("#{item_index}")
+}
+
 /// 显示名解析（P3-3）：`线包自带名字 → 本地物品名表 → 需要请求 → 兜底 #id`。
 ///
 /// 返回 `(显示名, 是否需要请求物品信息)`：`true` 表示调用方**应当**按去重集合发一次
@@ -94,7 +112,7 @@ pub fn resolve_item_name(
     item_index: i32,
 ) -> (String, bool) {
     let placeholder = format!("#{item_index}");
-    if !name.is_empty() && name != placeholder {
+    if !is_placeholder_item_name(name, item_index) {
         return (name.to_string(), false);
     }
     if let Some(n) = item_names.get(&item_index) {
@@ -149,6 +167,21 @@ mod tests {
 
     /// 门禁（P3-3）：`NewItemInfo` 回包必须写进表；空名字不得覆盖已有名字。
     ///
+    /// 门禁（P3-3 / #782，2026-09-27）：占位判据 [is_placeholder_item_name] 必须与
+    /// [resolve_item_name] 的降级链**同口径**——空串与 `#<index>` 都算"没有名字"，
+    /// 真名（哪怕长得像数字）不算。探针（`rental_probe` 等）用它标「这一格是不是内部 ID」，
+    /// 一旦两处口径漂移，夹具就会把「占位」判成真名（或反之）。
+    #[test]
+    fn placeholder_helper_matches_resolve_contract() {
+        assert!(is_placeholder_item_name("", 782));
+        assert!(is_placeholder_item_name("#782", 782));
+        assert!(!is_placeholder_item_name("马鞍", 782));
+        // `#<别的索引>` 不是本格索引的占位（口径按 item_index 比，不按前缀）
+        assert!(!is_placeholder_item_name("#783", 782));
+        // 真名恰好是数字/带井号也不能被误判成占位
+        assert!(!is_placeholder_item_name("9527", 782));
+    }
+
     /// 阳性对照（落地时实做）：把 `remember_item_name` 改成直接 `return false;`
     /// （不写表）→ 本测试立即红。
     #[test]

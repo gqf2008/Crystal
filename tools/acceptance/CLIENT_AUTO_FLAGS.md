@@ -94,7 +94,8 @@
 | `--reconnect-test` | fixture | `tools/acceptance/l5y_reconnect.ps1` | `auto_reconnect_test` |
 | `--refine-test` | gate | `scripts/run_real_e2e.ps1`（发版门禁） | `auto_refine_test` |
 | `--reincarnation-test` | probe | —（历史探针，无 runner） | `auto_reincarnation_test` |
-| `--rental-test` | probe | —（历史探针，无 runner） | `auto_rental_test` |
+| `--rental-test` | fixture | `tools/acceptance/l5r_rental_name.ps1`（物主侧） | `auto_rental_test` |
+| `--rental-renter` | fixture | `tools/acceptance/l5r_rental_name.ps1`（租客侧） | `auto_rental_renter` |
 | `--repair-test` | probe | —（历史探针，无 runner） | `auto_repair_test` |
 | `--report-test` | gate | `scripts/run_real_e2e.ps1`（发版门禁） | `auto_report_test` |
 | `--resize-test` | probe | —（历史探针，无 runner） | `auto_resize_test` |
