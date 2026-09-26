@@ -35,16 +35,55 @@ pub struct SellPanelState {
     pub mode: Option<PanelType>,
     /// 面板中的目标物品（原版 C# NPCDropDialog.TargetItem）
     pub target: Option<InvItem>,
+    /// C# `NPCDropDialog.Hold`（按住/自动确认开关）：把物品放进面板后**立即确认**
+    /// （`NPCDialogs.cs:1734` `if (Hold) Confirm();`）
+    pub hold: bool,
+    /// 本帧是否要按 `hold` 语义自动确认（放进物品那一帧置位，确认逻辑复用同一段）
+    pub auto_confirm: bool,
 }
 
 const DIALOG_X: f32 = 264.0;
 const DIALOG_Y: f32 = 224.0;
+
+/// 面板精灵（**不是** C# 构造期写的 `Prguse[392]`）：
+/// C# `NPCDropDialog` 构造时 `Index = 392; Location = (264,224)`，但 `BeforeDraw`
+/// （`NPCDialogs.cs:1743-1745`）会改写为 `Index = 351; Library = Prguse2;
+/// Location = new Point(264, GameScene.Scene.NPCDialog.Size.Height)` —— 实际画的是
+/// **`Prguse2[351]`（实测 176x147）**；`Prguse[392]` 在这套数据里是**空帧（0x0）**。
+/// NPC 窗底图 `Prguse[995]` 实测 440x224 ⇒ `NPCDialog.Size.Height = 224`，与本端 (264,224) 一致。
+pub const PANEL: (LibraryName, usize) = (LibraryName::Prguse2, 351);
+pub const PANEL_SIZE: (f32, f32) = (176.0, 147.0);
+/// C# `HoldButton` `Title[293/294/295]` @(114,36)（无显式 `Size` → 图头 48x25）
+pub const HOLD_BTN_POS: (f32, f32) = (114.0, 36.0);
+pub const HOLD_FRAMES: (usize, usize, usize) = (293, 294, 295);
+/// C# `ConfirmButton` `Title[290/291/292]` @(114,62)（图头 48x25）
+pub const CONFIRM_BTN_POS: (f32, f32) = (114.0, 62.0);
+pub const CONFIRM_FRAMES: (usize, usize, usize) = (290, 291, 292);
+
+/// C# `HoldButton.Visible`：`BeforeDraw` 先置 true，再按 `PanelType` 关闭
+/// （`NPCDialogs.cs:1741/1772/1785/1789/1793/1799` —— 分解/降级/重置/精炼/查看精炼不显示）
+pub fn hold_button_visible(mode: Option<PanelType>) -> bool {
+    !matches!(
+        mode,
+        Some(PanelType::Disassemble)
+            | Some(PanelType::Downgrade)
+            | Some(PanelType::Reset)
+            | Some(PanelType::Refine)
+            | Some(PanelType::CheckRefine)
+    )
+}
 
 #[derive(Component)]
 pub struct SellPanelWidget;
 
 #[derive(Component)]
 pub struct SellPanelConfirm;
+
+/// C# `HoldButton`（按住/自动确认开关）+ 它在 `AfterDraw` 里叠画的高亮帧
+#[derive(Component)]
+pub struct SellPanelHold;
+#[derive(Component)]
+pub struct SellPanelHoldOn;
 
 /// 拖放区（原版 C# ItemCell / NPCDropPanel_Click 的 (20,55,75,75) 区域）
 #[derive(Component)]
@@ -109,11 +148,19 @@ fn spawn_sell_panel(
     let font = ui_font.0.clone();
     let cjk = shared_cjk_font(&mut fonts, &mut cjk_font);
 
-    // 背景 Prguse[392]（C# NPCDropDialog，176x146 @ (264,224)）
-    let Some(bg) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 392) else {
+    // 背景 Prguse2[351] 176x147（见 `PANEL` 注释：C# 构造期写 392，实际画 351）
+    let Some(bg) = load_lib_image(&mut libs, &mut images, PANEL.0, PANEL.1) else {
         return;
     };
-    let panel = spawn_panel(&mut commands, bg, DIALOG_X, DIALOG_Y, 176.0, 146.0, 30);
+    let panel = spawn_panel(
+        &mut commands,
+        bg,
+        DIALOG_X,
+        DIALOG_Y,
+        PANEL_SIZE.0,
+        PANEL_SIZE.1,
+        30,
+    );
     commands
         .entity(panel)
         .insert((SellPanelWidget, DialogRoot(DialogKind::Npc)));
@@ -121,11 +168,46 @@ fn spawn_sell_panel(
     commands.entity(panel).with_children(|p| {
         // 确认按钮 Title[290/291/292]（C# ConfirmButton (114,62)）
         if let (Some(n), Some(h), Some(pr)) = (
-            load_lib_image(&mut libs, &mut images, LibraryName::Title, 290),
-            load_lib_image(&mut libs, &mut images, LibraryName::Title, 291),
-            load_lib_image(&mut libs, &mut images, LibraryName::Title, 292),
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, CONFIRM_FRAMES.0),
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, CONFIRM_FRAMES.1),
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, CONFIRM_FRAMES.2),
         ) {
-            spawn_icon_button(p, n, h, pr, 114.0, 62.0, 48.0, 25.0, 10).insert(SellPanelConfirm);
+            spawn_icon_button(
+                p,
+                n,
+                h,
+                pr,
+                CONFIRM_BTN_POS.0,
+                CONFIRM_BTN_POS.1,
+                48.0,
+                25.0,
+                10,
+            )
+            .insert(SellPanelConfirm);
+        }
+        // 按住/自动确认（C# HoldButton Title[293/294/295] @(114,36)；开启时 `AfterDraw` 叠画 295）
+        if let (Some(n), Some(h), Some(pr)) = (
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, HOLD_FRAMES.0),
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, HOLD_FRAMES.1),
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, HOLD_FRAMES.2),
+        ) {
+            spawn_icon_button(
+                p,
+                n,
+                h,
+                pr,
+                HOLD_BTN_POS.0,
+                HOLD_BTN_POS.1,
+                48.0,
+                25.0,
+                10,
+            )
+            .insert(SellPanelHold);
+            let on = load_lib_image(&mut libs, &mut images, LibraryName::Title, HOLD_FRAMES.2);
+            if let Some(on) = on {
+                spawn_image(p, on, HOLD_BTN_POS.0, HOLD_BTN_POS.1, 48.0, 25.0, 11)
+                    .insert((SellPanelHoldOn, Visibility::Hidden));
+            }
         }
         // 提示文本（C# InfoLabel (30,10)）——中文走 CJK 主字体（拉丁字体出豆腐块）
         spawn_label(
@@ -161,9 +243,45 @@ fn sell_panel_ui_system(
     state: Res<SellPanelState>,
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
-    mut widgets: Query<&mut Visibility, (With<SellPanelWidget>, Without<SellPanelIcon>)>,
-    mut icons: Query<(&mut ImageNode, &mut Visibility), With<SellPanelIcon>>,
+    // 三组 `Visibility` 查询必须**可证不相交**（B0001）：互相补 `Without`，同 `LESSON_..._B0001` 口径
+    mut widgets: Query<
+        &mut Visibility,
+        (
+            With<SellPanelWidget>,
+            Without<SellPanelIcon>,
+            Without<SellPanelHold>,
+            Without<SellPanelHoldOn>,
+        ),
+    >,
+    mut icons: Query<
+        (&mut ImageNode, &mut Visibility),
+        (
+            With<SellPanelIcon>,
+            Without<SellPanelWidget>,
+            Without<SellPanelHold>,
+            Without<SellPanelHoldOn>,
+        ),
+    >,
     mut info_texts: Query<(&mut Text, &SellPanelInfo)>,
+    // #3265：Hold 开关本体 + 「按住」高亮帧（C# `HoldButton.Visible` / `AfterDraw` 叠画 295）
+    mut hold_btns: Query<
+        &mut Visibility,
+        (
+            With<SellPanelHold>,
+            Without<SellPanelHoldOn>,
+            Without<SellPanelWidget>,
+            Without<SellPanelIcon>,
+        ),
+    >,
+    mut hold_on: Query<
+        &mut Visibility,
+        (
+            With<SellPanelHoldOn>,
+            Without<SellPanelHold>,
+            Without<SellPanelWidget>,
+            Without<SellPanelIcon>,
+        ),
+    >,
 ) {
     for mut vis in &mut widgets {
         *vis = if state.visible {
@@ -176,6 +294,28 @@ fn sell_panel_ui_system(
         let new = sell_panel_prompt(state.mode).to_string();
         if text.0 != new {
             text.0 = new;
+        }
+    }
+    // Hold 开关：按面板类型决定是否显示（C# `HoldButton.Visible`），开启时叠画高亮帧 295
+    let hold_visible = state.visible && hold_button_visible(state.mode);
+    for mut vis in &mut hold_btns {
+        let want = if hold_visible {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
+        if *vis != want {
+            *vis = want;
+        }
+    }
+    for mut vis in &mut hold_on {
+        let want = if hold_visible && state.hold {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
+        if *vis != want {
+            *vis = want;
         }
     }
 
@@ -215,6 +355,7 @@ fn sell_panel_action_system(
     // 面板原点（拖后跟随；挂在 Npc kind 组随 NPC 对话框联合拖动/置顶）
     panel_origin: Query<&Node, With<SellPanelWidget>>,
     confirm_btns: Query<(Entity, &Interaction), With<SellPanelConfirm>>,
+    hold_btns: Query<(Entity, &Interaction), With<SellPanelHold>>,
     mut weapon_req: MessageWriter<RefineWeaponRequest>,
     mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
 ) {
@@ -253,6 +394,10 @@ fn sell_panel_action_system(
                     .and_then(|inv| inv.items.get(sel).and_then(|s| s.as_ref()))
                 {
                     state.target = Some(item.clone());
+                    // C# `ItemCell_Click` 末尾（`NPCDialogs.cs:1734`）：`if (Hold) Confirm();`
+                    if state.hold {
+                        state.auto_confirm = true;
+                    }
                     tracing::info!(
                         "🎯 放入面板: {} (uid={}) x{}",
                         item.name,
@@ -268,15 +413,24 @@ fn sell_panel_action_system(
     // 点背包物品时若面板已打开且无选中 → 交给背包系统选中（原版 C# SelectedCell）
     // （这里只负责面板拖放区与确认）
 
-    // 确认按钮
-    for (e, inter) in &confirm_btns {
-        if !edge(e, inter, &mut prev_inter) {
-            continue;
+    // 按住/自动确认开关（C# `HoldButton.Click += (o,e) => Hold = !Hold;`，`NPCDialogs.cs:1465`）
+    for (e, inter) in &hold_btns {
+        if edge(e, inter, &mut prev_inter) && hold_button_visible(state.mode) {
+            state.hold = !state.hold;
+            tracing::info!("🔁 出售面板 Hold={}", state.hold);
         }
-        let Some(item) = state.target.take() else {
-            continue;
-        };
-        match state.mode {
+    }
+    // 确认：按钮按下 **或** `hold` 语义下的自动确认（C# `if (Hold) Confirm();`）
+    let mut pressed = false;
+    for (e, inter) in &confirm_btns {
+        if edge(e, inter, &mut prev_inter) {
+            pressed = true;
+        }
+    }
+    if pressed || state.auto_confirm {
+        state.auto_confirm = false;
+        if let Some(item) = state.target.take() {
+            match state.mode {
             Some(PanelType::Sell) => {
                 // 原版 C# Confirm：C.SellItem{UniqueID, Count=TargetItem.Count}（卖整叠）
                 net.send_packet(&mir2_shared::packets::client::npc::SellItem {
@@ -322,7 +476,8 @@ fn sell_panel_action_system(
                 });
                 tracing::info!("🔨 面板查看精炼 {} (uid={})", item.name, item.unique_id);
             }
-            _ => {}
+                _ => {}
+            }
         }
     }
 }
@@ -338,6 +493,7 @@ fn sell_panel_server_events(
         if let ServerEvent::NpcSellPanel { panel_type } = ev {
             sell_panel.mode = Some(*panel_type);
             sell_panel.target = None;
+            sell_panel.auto_confirm = false;
             sell_panel.visible = true;
             // C# NPCDropDialog.Show() 同时打开背包
             if !mgr.is_open(crate::game::dialogs::DialogKind::Inventory) {
@@ -403,5 +559,30 @@ mod tests {
             "放入物品后点确认出售"
         );
         assert_eq!(sell_panel_prompt(None), "放入物品后点确认出售");
+    }
+
+    /// #3265 门禁：面板精灵与 Hold 开关必须按 C# `NPCDropDialog` 的**实际绘制值**（`BeforeDraw`）对齐。
+    /// 阳性对照：把 `PANEL` 改回 `Prguse[392]`（构造期那个**空帧 0x0**）⇒ 本测试 FAILED。
+    #[test]
+    fn panel_skin_and_hold_button_match_csharp_beforedraw() {
+        assert_eq!(
+            PANEL,
+            (LibraryName::Prguse2, 351),
+            "C# BeforeDraw 改写为 Index=351/Library=Prguse2（NPCDialogs.cs:1743-1745）；Prguse[392] 是空帧"
+        );
+        assert_eq!(PANEL_SIZE, (176.0, 147.0), "Prguse2[351] 图头实测 176x147");
+        assert_eq!(HOLD_BTN_POS, (114.0, 36.0), "C# HoldButton @(114,36)");
+        assert_eq!(HOLD_FRAMES, (293, 294, 295), "C# HoldButton 三帧");
+        assert_eq!(CONFIRM_BTN_POS, (114.0, 62.0), "C# ConfirmButton @(114,62)");
+        assert_eq!(CONFIRM_FRAMES, (290, 291, 292), "C# ConfirmButton 三帧");
+        // C# `HoldButton.Visible`：分解/降级/重置/精炼/查看精炼不显示
+        assert!(hold_button_visible(Some(PanelType::Sell)));
+        assert!(hold_button_visible(Some(PanelType::Repair)));
+        assert!(hold_button_visible(Some(PanelType::SpecialRepair)));
+        assert!(!hold_button_visible(Some(PanelType::Refine)));
+        assert!(!hold_button_visible(Some(PanelType::CheckRefine)));
+        assert!(!hold_button_visible(Some(PanelType::Disassemble)));
+        assert!(!hold_button_visible(Some(PanelType::Downgrade)));
+        assert!(!hold_button_visible(Some(PanelType::Reset)));
     }
 }
