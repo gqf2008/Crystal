@@ -116,6 +116,36 @@ $item = $probe.goods | Where-Object { $_.price -gt 0 } | Sort-Object price | Sel
 Write-Host ("[A] 选最便宜: row={0} item_index={1} unique_id={2} name={3} price={4} 库存={5}" -f `
     $item.row, $item.item_index, $item.unique_id, $item.name, $item.price, $item.count)
 
+# A2) P3-3（#782）NPC 商店半段：**商品名必须是真名**，不能是 `#id` 内部 ID。
+# 这条路径的名字由协议保证——`S.NPCGoods` 用 `write_to_with_info` / `read_from_with_info`
+# 对称（`SharedRust/src/packets/server/npc_interaction.rs:69-73`、`read_body` 同理），
+# 也就是商店窗拿到的是**带 ItemInfo 的线包**，不需要客户端再按需请求（与仓库/商城不同）。
+# 本判据就是把这个"静态保证"钉在实机读数上：任何一格显示成 `#<数字>` 即为回归。
+$goodsNames = @($probe.goods | ForEach-Object { "$($_.name)" })
+$badNames = @($goodsNames | Where-Object { -not $_ -or $_ -match '^#\d+$' })
+Write-Host ("[A2] 商品名（#782 NPC 商店半段）：前 3 行=[{0}]，共 {1} 行，占位={2}" -f `
+    (@($goodsNames | Select-Object -First 3) -join ','), $goodsNames.Count,
+    $(if ($badNames.Count) { $badNames -join ',' } else { '（无）' }))
+$goodsNameOk = ($goodsNames.Count -gt 0) -and ($badNames.Count -eq 0)
+Write-Host ("[A2] 商品名全为真名 → {0}" -f $(if ($goodsNameOk) { 'PASS' } else { 'FAIL' }))
+if (-not $goodsNameOk) { Write-Host 'FAIL(A2): NPC 商店里出现内部 ID 占位名（#782 回归）'; exit 3 }
+
+# 前置（夹具幂等，2026-09-27 实测踩到）：**背包满时买东西买不进来**——服务端正确拒绝
+# （放不下就不成交），于是 `buy_gold_delta`/`buy_item_received` 双双 false，看着像"买卖坏了"。
+# 本机多轮夹具跑下来背包稳定 40/40（历史 @MAKE 的 Saddle 堆积），所以先腾一格：
+# 丢一件 Saddle（`drop_item` 走的是与 UI 同一条 C.DropItem 路径）。
+$bagPre = Rpc 'bag_probe'
+if ($bagPre.used -ge $bagPre.total) {
+    $victim = @($bagPre.occupied | Where-Object { $_.name -eq 'Saddle' } | Select-Object -First 1)
+    if (-not $victim) {
+        Write-Host ("FAIL(前置): 背包已满（{0}/{1}）且没有可丢的 Saddle" -f $bagPre.used, $bagPre.total)
+        exit 2
+    }
+    Write-Host ("[前置] 背包已满（{0}/{1}）→ 丢一件 Saddle 腾格（uid={2}）" -f `
+            $bagPre.used, $bagPre.total, $victim.unique_id)
+    Rpc 'drop_item' @{ unique_id = [int64]$victim.unique_id } | Out-Null
+    Start-Sleep -Seconds 1
+}
 $bag0 = Rpc 'bag_probe'
 $gold0 = [int]$bag0.gold
 $nameBefore = NameCount $bag0 $item.name
