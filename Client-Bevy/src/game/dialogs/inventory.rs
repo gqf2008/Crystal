@@ -1473,6 +1473,9 @@ pub enum InvLockReason {
     /// `C.DepositTradeItem`/`C.RetrieveTradeItem`（交易放入/取回，`MirItemCell.cs:1554/1564`）：
     /// 锁来源格 + 交易槽，`S.DepositTradeItem`/`S.RetrieveTradeItem` 解锁（GameScene.cs:2804/2821）
     Trade,
+    /// 觉醒窗格 3..6 的取出/放入（C# `MirItemCell.cs:1677/1702` 的 `SelectedCell.Locked = true`）：
+    /// 放进觉醒格的物品，其**来源背包格**在窗里期间被锁；格被清空/关窗即解锁。
+    Awaken,
 }
 
 /// 锁定格所属网格（C# `MirItemCell.GridType`；`Locked` 语义在各网格一致，但格号空间不同）。

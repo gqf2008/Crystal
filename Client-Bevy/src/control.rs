@@ -310,6 +310,11 @@ enum ControlCommand {
     RentalProbe {
         reply: Sender<String>,
     },
+    /// 只读**觉醒窗**探针：主物品 + 格 3..6 的可放置格（物品名/索引/来源背包格号）+ 该来源格是否被锁。
+    /// 这 4 格是纯客户端态（原版服务端不处理 `MirGridType::AwakenItem`），没有状态读数就无法判定。
+    AwakeProbe {
+        reply: Sender<String>,
+    },
     /// 只读法术特效探针（2026-09-25）：当前存活的**渲染侧**特效实体读数
     /// （施法帧动画 `SpellFxAnim` + 施法/远程弹道 `SpellMissileAnim`）。
     ///
@@ -868,6 +873,11 @@ struct ControlQueries<'w, 's> {
     /// `S.UpdateRentalItem` 不带 ItemInfo，租客侧对方物品窗又直接由它填充 ⇒ 「窗里名字会不会
     /// 退化成 `#id`」只能靠状态读数判定（节点矩形拿不到格子上的文本）。
     rental: Res<'w, crate::game::dialogs::item_rental::ItemRentalState>,
+    /// `awake_probe` 用：觉醒窗状态（主物品 + 格 3..6 的可放置格物品与来源背包格号）。
+    /// 这 4 格是**纯客户端态**（原版服务端不处理 `MirGridType::AwakenItem`）⇒ 判定只能读状态。
+    awake: Res<'w, crate::game::dialogs::npc_awake::NpcAwakeState>,
+    /// `awake_probe` 用：背包格锁（判「放进觉醒格后来源背包格被锁」；C# `SelectedCell.Locked`）。
+    inv_locked: Res<'w, crate::game::dialogs::inventory::InvLockedSlots>,
     map_cameras: Query<
         'w,
         's,
@@ -1259,6 +1269,20 @@ fn handle_conn(mut stream: std::net::TcpStream, tx: Sender<ControlCommand>) {
                 let (reply_tx, reply_rx) = bounded::<String>(1);
                 if tx
                     .send(ControlCommand::StorageProbe { reply: reply_tx })
+                    .is_ok()
+                {
+                    let s = reply_rx
+                        .recv_timeout(std::time::Duration::from_secs(2))
+                        .unwrap_or_else(|_| "{}".to_string());
+                    serde_json::from_str::<Value>(&s).unwrap_or_else(|_| json!({}))
+                } else {
+                    json!({"error": "control channel closed"})
+                }
+            }
+            "awake_probe" => {
+                let (reply_tx, reply_rx) = bounded::<String>(1);
+                if tx
+                    .send(ControlCommand::AwakeProbe { reply: reply_tx })
                     .is_ok()
                 {
                     let s = reply_rx
@@ -2263,7 +2287,8 @@ fn control_reply(cmd: &ControlCommand) -> Option<&Sender<String>> {
         | ControlCommand::DialogRect { reply, .. }
         | ControlCommand::GetScroll { reply }
         | ControlCommand::ShopProbe { reply }
-        | ControlCommand::RentalProbe { reply } => Some(reply),
+        | ControlCommand::RentalProbe { reply }
+        | ControlCommand::AwakeProbe { reply } => Some(reply),
         _ => None,
     }
 }
@@ -3439,6 +3464,39 @@ fn apply_control_commands(
                         .collect::<Vec<_>>(),
                 });
                 tracing::info!("🎮 control storage_probe: {payload}");
+                let _ = reply.send(payload.to_string());
+            }
+            ControlCommand::AwakeProbe { reply } => {
+                // 觉醒窗 4 个可放置格（C# `ItemCells[3..6]`）：格里的物品 + 来源背包格号 + 该来源格是否被锁。
+                let slots: Vec<serde_json::Value> = (0..4)
+                    .map(|i| {
+                        let item = q.awake.place_items.get(i).and_then(|s| s.as_ref());
+                        let src = q.awake.place_src.get(i).and_then(|s| *s);
+                        json!({
+                            "cell": i + 3,
+                            "name": item.map(|it| it.name.clone()).unwrap_or_default(),
+                            "item_index": item.map(|it| it.item_index).unwrap_or(0),
+                            "unique_id": item.map(|it| it.unique_id).unwrap_or(0),
+                            "src_bag_slot": src,
+                            "src_locked": src.map(|s| q.inv_locked.is_locked(s)).unwrap_or(false),
+                            "placeholder": item
+                                .map(|it| crate::game::item_names::is_placeholder_item_name(
+                                    &it.name,
+                                    it.item_index,
+                                ))
+                                .unwrap_or(false),
+                        })
+                    })
+                    .collect();
+                let payload = json!({
+                    "ok": true,
+                    "main_name": q.awake.selected_item.as_ref().map(|i| i.name.clone()).unwrap_or_default(),
+                    "main_uid": q.awake.selected_uid.unwrap_or(0),
+                    "awake_type": q.awake.awake_type.map(|t| format!("{t:?}")),
+                    "result": q.awake.result,
+                    "slots": slots,
+                });
+                tracing::info!("🎮 control awake_probe: {payload}");
                 let _ = reply.send(payload.to_string());
             }
             ControlCommand::RentalProbe { reply } => {

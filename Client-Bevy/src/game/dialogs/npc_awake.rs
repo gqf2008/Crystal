@@ -49,6 +49,74 @@ pub const NEED_LABEL_POS: [(f32, f32); 2] = [(67.0, 317.0), (192.0, 317.0)];
 /// C# `BorderColour = Color.Lime`（只读材料格边框）
 pub const NEED_CELL_BORDER: Color = Color::srgb(0.0, 1.0, 0.0);
 
+/// C# `ItemCells[3..6]` 四个**可放置格** @(175,199)/(230,199)/(175,256)/(230,256)
+/// （`Client/MirScenes/Dialogs/NPCDialogs.cs:1989-2008`，`Enabled` 且 `GridType = MirGridType.AwakenItem`）。
+///
+/// 这 4 格的「内容」在原版里是对话框自己的客户端数组（`MirItemCell.cs:88`
+/// `case MirGridType.AwakenItem: return NPCAwakeDialog.Items;`），而原版**服务端完全不处理**
+/// `MirGridType.AwakenItem`（`rg -c AwakenItem Server --glob '*.cs'` 零命中）⇒ 本端也只做客户端态，
+/// **不自造**服务端格状态 / `MoveItem{AwakenItem}` 臂。
+pub const PLACE_CELL_POS: [(f32, f32); 4] = [
+    (175.0, 199.0),
+    (230.0, 199.0),
+    (175.0, 256.0),
+    (230.0, 256.0),
+];
+
+/// 觉醒物品当前可用的 `AwakeType` 上限（`Shape` 档位）：`NPCDialogs.cs` 只把 type 下拉给到这几档；
+/// 这里只用于放置规则的两档 `Shape` 判定（`< 200` 普通材料 / `== 200` 现金材料）。
+pub const AWAKEN_MATERIAL_SHAPE_CASH: i16 = 200;
+
+/// 放置规则（C# `MirItemCell.cs:1655-1785` `#region To Awakening` 的纯函数版，门禁钉它）：
+///
+/// * `slot == 0`：底材——只吃 武器/头盔/铠甲（`ItemType` 20/21/22）且 `grade` 非 `None`（本端 `3`）；
+/// * `slot == 1 || slot == 2`：只读展示格（`Enabled = false`）⇒ 一律拒绝；
+/// * `slot == 3 || slot == 4`：材料——`item_type == Awakening(113)` 且 `shape < 200`；
+/// * `slot == 5 || slot == 6`：材料——`item_type == Awakening(113)` 且 `shape == 200`
+///   （C# 原文注释 `//AllCashItem Korea Server Not Implementation.`）；
+/// * 所有格都要求**目标格为空**（C# `ItemsIdx[_itemSlot] == 0`；本端用 `Option` 表达"空"，
+///   有意偏离见 [NpcAwakeState::place_src] 的注释）。
+///
+/// 返回 `Ok(())` 或拒绝原因（仅用于日志——C# 的 `case -2` 提示框是**被注释掉的**，原版拒绝时静默）。
+pub fn awake_place_accepts(
+    slot: usize,
+    item: &InvItem,
+    cell_empty: bool,
+) -> Result<(), &'static str> {
+    if slot > 6 {
+        return Err("槽位越界");
+    }
+    if !cell_empty {
+        return Err("目标格已有物品");
+    }
+    match slot {
+        0 => {
+            // C# `ItemType.Weapon = 20 / Helmet = 21 / Armour = 22`、`ItemGrade.None = 3`（本端 +3 口径）
+            const BASE_TYPES: [u8; 3] = [20, 21, 22];
+            if BASE_TYPES.contains(&item.item_type) && item.grade != 3 {
+                Ok(())
+            } else {
+                Err("底材只收 武器/头盔/铠甲 且有品质")
+            }
+        }
+        1 | 2 => Err("只读展示格"),
+        3 | 4 => {
+            if item.item_type == 113 && item.shape < AWAKEN_MATERIAL_SHAPE_CASH {
+                Ok(())
+            } else {
+                Err("材料格只收 Awakening 且 Shape < 200")
+            }
+        }
+        _ => {
+            if item.item_type == 113 && item.shape == AWAKEN_MATERIAL_SHAPE_CASH {
+                Ok(())
+            } else {
+                Err("现金材料格只收 Awakening 且 Shape == 200")
+            }
+        }
+    }
+}
+
 /// C# `setNeedItems`（`NPCDialogs.cs:2165-2193`）的需求文案：
 /// `MaterialsCount[i] != 0` 才画格 + 写 `NeedItemQuantity` 文案（否则清空）。
 pub fn need_item_text(name: &str, count: i32) -> String {
@@ -110,6 +178,14 @@ pub struct NpcAwakeState {
     pub result_text: String,
     /// #1356：当前服务模式（觉醒/分解/降级/重置）
     pub service: NpcAwakeService,
+    /// C# `NPCAwakeDialog.Items`：格 3..6 这 4 个**可放置格**里的物品（纯客户端态）。
+    pub place_items: [Option<InvItem>; 4],
+    /// C# `NPCAwakeDialog.ItemsIdx`：每格物品的**来源背包格号**，`None` = 空。
+    ///
+    /// **有意偏离（已记录）**：C# 用 `0` 当"空"哨兵（`ItemsIdx[slot] == 0`），于是
+    /// **背包 0 号格的物品放不进去**（放进去也会被当成空）。本端用 `Option<usize>` 避开这个冲突——
+    /// 对玩家更合理，且不影响与原版的可见行为（除这个原版自身的 quirk）。
+    pub place_src: [Option<usize>; 4],
 }
 
 #[derive(Component)]
@@ -147,6 +223,13 @@ pub struct NpcAwakeNeedCell(pub usize);
 #[derive(Component)]
 pub struct NpcAwakeNeedIcon(pub usize);
 
+/// 格 3..6 的可放置格背景（点击命中用，C# `ItemCells[3..6]`）
+#[derive(Component)]
+pub struct NpcAwakePlaceCell(pub usize);
+/// 格 3..6 的物品图标层
+#[derive(Component)]
+pub struct NpcAwakePlaceIcon(pub usize);
+
 #[derive(Component)]
 pub struct NpcAwakeResultText;
 
@@ -161,10 +244,121 @@ impl Plugin for NpcAwakePlugin {
         app.add_systems(Update, awake_server_events.run_if(in_state(AppState::Game)));
         app.add_systems(
             Update,
-            (npc_awake_ui_system, npc_awake_render_system)
+            (
+                npc_awake_ui_system,
+                npc_awake_place_system,
+                npc_awake_lock_sync,
+                npc_awake_render_system,
+            )
                 .chain()
                 .run_if(in_state(AppState::Game)),
         );
+    }
+}
+
+/// 格 3..6 的点击交互（C# `MirItemCell.cs:1655-1785` To Awakening / `:1164-1178` From AwakenItem）：
+/// 先点背包选中（`InvClickState.selected`）再点目标格放入；点已有物品的格 = 取出
+/// （发 `C.MoveItem{Grid=AwakenItem, From=To=来源背包格号}` 并立即清本地态，与原版同包同参）。
+///
+/// 单独成一个系统而不是塞进 `npc_awake_ui_system`：那个系统的参数**已经在 16 个上限**上
+/// （既有 LESSON：函数式系统参数上限 16，超了连 `.chain()` 都不成立）。
+#[allow(clippy::too_many_arguments)]
+fn npc_awake_place_system(
+    mgr: Res<crate::game::dialogs::DialogManager>,
+    mut state: ResMut<NpcAwakeState>,
+    net: Res<NetConnection>,
+    inv_q: Query<&crate::game::player_state::Inventory, With<crate::actor::LocalPlayer>>,
+    mut inv_click: ResMut<crate::game::dialogs::inventory::InvClickState>,
+    mouse: Res<ButtonInput<MouseButton>>,
+    ui: (Query<&Window>, Query<&Node, With<NpcAwakeWidget>>),
+) {
+    if !mgr.is_open(crate::game::dialogs::DialogKind::NpcAwake) {
+        return;
+    }
+    if !mouse.just_pressed(MouseButton::Left) {
+        return;
+    }
+    let Ok(window) = ui.0.single() else {
+        return;
+    };
+    let Some(cursor) = window.cursor_position() else {
+        return;
+    };
+    let (ox, oy) =
+        ui.1.single()
+            .map(|n| crate::ui::theme::node_origin(n, (0.0, 0.0)))
+            .unwrap_or((0.0, 0.0));
+    let hit = PLACE_CELL_POS.iter().position(|(cx, cy)| {
+        cursor.x >= ox + cx
+            && cursor.x <= ox + cx + MAIN_CELL_SIZE.0
+            && cursor.y >= oy + cy
+            && cursor.y <= oy + cy + MAIN_CELL_SIZE.1
+    });
+    let Some(i) = hit else { return };
+    // 已有物品 → 取出
+    if let Some(item) = state.place_items.get(i).and_then(|s| s.as_ref()).cloned() {
+        if let Some(src) = state.place_src.get(i).and_then(|s| *s) {
+            net.send_packet(&mir2_shared::packets::client::item::MoveItem {
+                grid: mir2_shared::enums::MirGridType::AwakenItem,
+                from: src as i32,
+                to: src as i32,
+            });
+            tracing::info!(
+                "⚒️ 取出觉醒格 {} 的物品 {}（C.MoveItem grid=AwakenItem from/to={}）",
+                i + 3,
+                item.name,
+                src
+            );
+        }
+        state.place_items[i] = None;
+        state.place_src[i] = None;
+        return;
+    }
+    // 空格 → 用背包选中格放入（规则见 `awake_place_accepts`）
+    let Some(bag_slot) = inv_click.take_selected() else {
+        return;
+    };
+    let taken = inv_q
+        .single()
+        .ok()
+        .and_then(|inv| inv.items.get(bag_slot).and_then(|s| s.clone()));
+    let Some(item) = taken else { return };
+    match awake_place_accepts(i + 3, &item, true) {
+        Ok(()) => {
+            state.place_items[i] = Some(item.clone());
+            state.place_src[i] = Some(bag_slot);
+            tracing::info!(
+                "⚒️ 放入觉醒格 {}：{} (uid={}, 来源背包格 {})",
+                i + 3,
+                item.name,
+                item.unique_id,
+                bag_slot
+            );
+        }
+        Err(why) => {
+            // C# `case -2:` 的 MessageBox 是被注释掉的（原版拒绝时静默）⇒ 本端只记日志，不自造提示
+            tracing::info!("⚒️ 觉醒格 {} 拒绝放入 {}：{}", i + 3, item.name, why);
+        }
+    }
+}
+
+/// 同步「觉醒格来源格」的锁（C# `MirItemCell.cs:1677/1702`：放进觉醒格时 `SelectedCell.Locked = true`）。
+///
+/// 单独成一个系统而不是塞进 `npc_awake_ui_system`：那个系统的系统参数已经贴到上限，
+/// 而且「锁」是**状态的投影**——每帧幂等重建最省心（与 `craft` 的 `sync_craft_locks` 同款）：
+/// 窗开着就按 `place_src` 上锁、其余 `Awaken` 锁清掉；窗关了全清。
+fn npc_awake_lock_sync(
+    mgr: Res<crate::game::dialogs::DialogManager>,
+    state: Res<NpcAwakeState>,
+    mut locked: ResMut<crate::game::dialogs::inventory::InvLockedSlots>,
+) {
+    use crate::game::dialogs::inventory::InvLockReason;
+    locked.unlock_all(InvLockReason::Awaken);
+    if !mgr.is_open(crate::game::dialogs::DialogKind::NpcAwake) {
+        return;
+    }
+    for slot in state.place_src.iter().flatten().copied() {
+        locked.lock(InvLockReason::Awaken, slot);
     }
 }
 
@@ -318,6 +512,47 @@ fn spawn_npc_awake(
             let (lx, ly) = NEED_LABEL_POS[i];
             spawn_label(p, &cjk, "", lx, ly, 11.0, Color::WHITE, 9).insert(NpcAwakeMaterialText(i));
         }
+        // 4 个**可放置格**（C# `ItemCells[3..6]` @(175,199)/(230,199)/(175,256)/(230,256)，
+        // `NPCDialogs.cs:1989-2008`）。与只读格同款写法：直接按需要的样式建节点，
+        // **不能**先 `spawn_container` 再 `insert(Node{..default()})`（会覆盖定位/尺寸）。
+        for (i, (cx, cy)) in PLACE_CELL_POS.iter().enumerate() {
+            let cell_bg = images.add(crate::map_renderer::make_image(
+                vec![255, 255, 255, 255],
+                1,
+                1,
+            ));
+            p.spawn((
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: Val::Px(*cx),
+                    top: Val::Px(*cy),
+                    width: Val::Px(MAIN_CELL_SIZE.0),
+                    height: Val::Px(MAIN_CELL_SIZE.1),
+                    border: UiRect::all(Val::Px(1.0)),
+                    ..default()
+                },
+                BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.0)),
+                BorderColor::all(NEED_CELL_BORDER),
+                ZIndex(9),
+                NpcAwakePlaceCell(i),
+            ))
+            .with_children(|c| {
+                c.spawn((
+                    Node {
+                        position_type: PositionType::Absolute,
+                        left: Val::Px(1.0),
+                        top: Val::Px(1.0),
+                        width: Val::Px(MAIN_CELL_SIZE.0 - 2.0),
+                        height: Val::Px(MAIN_CELL_SIZE.1 - 2.0),
+                        ..default()
+                    },
+                    ImageNode::new(cell_bg),
+                    ZIndex(1),
+                    Visibility::Hidden,
+                    NpcAwakePlaceIcon(i),
+                ));
+            });
+        }
         // 结果标签（C# GoldLabel (112,354)）
         spawn_label(
             p,
@@ -377,6 +612,68 @@ mod tests {
         // `count == 0` → 空文案（C# `if (MaterialsCount[i] != 0) … else NeedItemLabel.Text = ""`）
         assert_eq!(need_item_text("勇气印记", 0), "");
         assert_eq!(need_item_text("勇气印记", 3), "需要 勇气印记 ×3");
+    }
+
+    /// 门禁（2026-09-27）：格 3..6 这 4 个**可放置格**必须落在 C# `ItemCells[3..6]` 的坐标上。
+    /// 阳性对照：把 `PLACE_CELL_POS` 任一项改掉（例如 (0,0)）⇒ 坐标断言即红。
+    #[test]
+    fn place_cells_match_csharp() {
+        assert_eq!(
+            PLACE_CELL_POS,
+            [
+                (175.0, 199.0),
+                (230.0, 199.0),
+                (175.0, 256.0),
+                (230.0, 256.0)
+            ],
+            "C# ItemCells[3..6] @(175,199)/(230,199)/(175,256)/(230,256)（NPCDialogs.cs:1989-2008）"
+        );
+    }
+
+    /// 门禁（2026-09-27）：放置规则与 C# `MirItemCell.cs:1655-1785` 的 `#region To Awakening` 一致。
+    ///
+    /// 阳性对照（落地时实做）：把格 3/4 的 `shape < 200` 改成 `shape > 200` ⇒ 第 2、3 条断言立即红。
+    #[test]
+    fn awake_place_rules_match_csharp() {
+        let mk = |item_type: u8, shape: i16, grade: u8| InvItem {
+            item_type,
+            shape,
+            grade,
+            name: "x".into(),
+            ..Default::default()
+        };
+        // 格 3/4：材料形状 < 200
+        assert!(awake_place_accepts(3, &mk(113, 100, 3), true).is_ok());
+        assert!(awake_place_accepts(4, &mk(113, 100, 3), true).is_ok());
+        assert!(
+            awake_place_accepts(3, &mk(113, 200, 3), true).is_err(),
+            "shape==200 归格 5/6"
+        );
+        assert!(
+            awake_place_accepts(3, &mk(20, 100, 3), true).is_err(),
+            "非 Awakening 类型不收"
+        );
+        // 格 5/6：材料形状 == 200（C# 注释 //AllCashItem）
+        assert!(awake_place_accepts(5, &mk(113, 200, 3), true).is_ok());
+        assert!(awake_place_accepts(6, &mk(113, 200, 3), true).is_ok());
+        assert!(awake_place_accepts(5, &mk(113, 100, 3), true).is_err());
+        // 目标格必须为空
+        assert!(awake_place_accepts(3, &mk(113, 100, 3), false).is_err());
+        // 格 0：底材（武器/头盔/铠甲 + 有品质）；1/2 只读
+        assert!(
+            awake_place_accepts(0, &mk(20, 0, 4), true).is_ok(),
+            "武器+品质"
+        );
+        assert!(
+            awake_place_accepts(0, &mk(20, 0, 3), true).is_err(),
+            "Grade=None 不行"
+        );
+        assert!(
+            awake_place_accepts(0, &mk(113, 100, 4), true).is_err(),
+            "材料不是底材"
+        );
+        assert!(awake_place_accepts(1, &mk(113, 100, 4), true).is_err());
+        assert!(awake_place_accepts(2, &mk(113, 100, 4), true).is_err());
     }
 }
 
@@ -628,6 +925,12 @@ fn npc_awake_render_system(
         (&mut ImageNode, &NpcAwakeNeedIcon),
         (Without<NpcAwakeMainIcon>, Without<NpcAwakeMainName>),
     >,
+    // 格 3..6 的图标层：只在格里有物品时显形（B0001 互斥：与上面两个 `&mut ImageNode`
+    // 查询互斥——它们都写了 `Without<NpcAwakePlaceIcon>`）。
+    mut place_icons: Query<
+        (&mut ImageNode, &mut Visibility, &NpcAwakePlaceIcon),
+        (Without<NpcAwakeMainIcon>, Without<NpcAwakeNeedIcon>),
+    >,
     mut name: Query<
         &mut Text,
         (
@@ -695,6 +998,22 @@ fn npc_awake_render_system(
                 });
                 tracing::info!("🛠️ 觉醒材料缺物品信息，请求 ItemInfo: idx={}", m.item_id);
             }
+        }
+    }
+    // 格 3..6：有物品就画图标（帧号来自物品自带 `image`），没有就隐藏整个图标层。
+    for (mut node, mut vis, slot) in &mut place_icons {
+        if let Some(item) = state.place_items.get(slot.0).and_then(|s| s.as_ref()) {
+            if let Some(h) = load_lib_image(
+                &mut libs,
+                &mut images,
+                LibraryName::Items,
+                item.image as usize,
+            ) {
+                node.image = h;
+                *vis = Visibility::Inherited;
+            }
+        } else {
+            *vis = Visibility::Hidden;
         }
     }
     for (mut text, slot) in &mut mats {
