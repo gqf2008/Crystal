@@ -23,7 +23,15 @@ param(
     #   -Points '891,97;909,113;971,97;...'  （Weapon 左上/中心、Helmet 左上…）
     [string]$Points = '265,45;270,15;330,12;400,12;480,12;560,12;310,25;310,100;150,10',
     # 只开背包窗（角色窗会盖住 x>=760 的点）；要在角色窗上取几何时把它关掉，别让 z 更高的窗抢先命中
-    [switch]$InventoryOnly
+    [switch]$InventoryOnly,
+    # 要取 `dialog_rect` 的窗口种类，逗号分隔；`all`/`sweep` = 按**单一真源**
+    # `tools/acceptance/interact_sweep_manifest.json` 的 `sweep` 名单逐窗「开→取矩形→关」
+    # （逐窗几何对表用，见 window_rect_table.py --compare）。默认只取金标准帧里那两个窗。
+    #
+    # 为什么必须逐窗开一次：`dialog_rect` 是从**关闭钮**反推窗口矩形的
+    # （`rx = cx - w/2`、`ry = cy - h/2`），窗口没开时关闭钮不存在 ⇒ 返回
+    # `{ok:false, error:"close button not found"}`（实测：45 个 kind 一口气问只回 3 个 ok）。
+    [string]$RectKinds = 'inventory,character'
 )
 $ErrorActionPreference = 'Continue'
 . "$PSScriptRoot\..\e2e_lock.ps1"
@@ -65,8 +73,29 @@ try {
     $res = [ordered]@{}
     $res['state'] = $s3
     $res['bag_probe'] = Rpc 'bag_probe'
-    foreach ($k in @('inventory', 'character')) {
-        $res["rect_$k"] = Rpc 'dialog_rect' @{ kind = $k }
+    if ($RectKinds -eq 'all' -or $RectKinds -eq 'sweep') {
+        $manifest = Join-Path $Repo 'tools\acceptance\interact_sweep_manifest.json'
+        if (-not (Test-Path -LiteralPath $manifest)) { Write-Host "FAIL(2): 缺 $manifest"; exit 2 }
+        $mf = Get-Content -LiteralPath $manifest -Raw | ConvertFrom-Json
+        $noClose = @($mf.no_close_by_design)
+        $kinds = @($mf.sweep)
+        Write-Host ("逐窗几何：按 manifest 的 {0} 个 kind 逐个「开→取矩形→关」" -f $kinds.Count)
+        foreach ($k in $kinds) {
+            $openOk = (Rpc 'dialog' @{ kind = $k; action = 'open' })
+            Start-Sleep -Milliseconds 350
+            $res["rect_$k"] = Rpc 'dialog_rect' @{ kind = $k }
+            $res["open_$k"] = $openOk
+            if ($noClose -notcontains $k) {
+                $null = Rpc 'dialog' @{ kind = $k; action = 'close' }
+                Start-Sleep -Milliseconds 120
+            }
+        }
+        # 关掉无关闭钮的那几个（RPC close 仍可用）
+        foreach ($k in ($kinds | Where-Object { $noClose -contains $_ })) { $null = Rpc 'dialog' @{ kind = $k; action = 'close' } }
+    } else {
+        foreach ($k in ($RectKinds -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ })) {
+            $res["rect_$k"] = Rpc 'dialog_rect' @{ kind = $k }
+        }
     }
     $nodes = [ordered]@{}
     foreach ($p in ($Points -split ';' | Where-Object { $_.Trim() })) {

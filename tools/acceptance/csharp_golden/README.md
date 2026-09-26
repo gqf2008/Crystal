@@ -123,6 +123,56 @@ pwsh -NoProfile -File .\csharp_kbd_login.ps1 -SandboxRoot <沙箱目录> -Accoun
 （纸娃娃正常，背包+角色窗同开）后是 26553/93912（28.3%）。
 **基准帧落盘后先看一眼窗口内容是否都渲染出来**，别默认它是对的。
 
+## 3.3 逐窗几何对表（不需要原版交互，2026-09-26 起）
+
+§3.1 把"驱动原版点开某个窗口"这条路堵掉之后，**窗口几何**仍可验：原版每扇窗的矩形是纯常量
+（`Index`+`Library` 定图 → 图头给尺寸；`Location` 给位置，或 `Location = Center;` 居中），
+把这三样从 C# 读出来就是期望矩形，与我方 `dialog_rect` 实机值比即可。
+
+```powershell
+# 1) 我方：一次起客户端，按单一真源 manifest 逐窗「开→取矩形→关」
+pwsh tools/acceptance/csharp_golden/probe_ui_nodes.ps1 -Repo <wt> -ClientHome <wt> `
+     -RectKinds all -InventoryOnly -Out %TEMP%\rects_all.json
+# 2) 对表（期望取自原版 C# 常量 + 同一套 .Lib 的图头）
+py -3.12 tools/acceptance/csharp_golden/window_rect_table.py `
+     --src <原版仓库> --data <含 *.Lib 的 Data> --compare %TEMP%\rects_all.json
+```
+
+**结果（2026-09-26，master f6a43efdc 上跑）：31 个可比窗口全部一致，0 处几何差异。**
+例外三类，各有据：
+
+1. **无关闭钮的窗**（`menu/minimap/buff/refine/timer/chat_notice`，即 manifest 的
+   `no_close_by_design`）取不到——`dialog_rect` 是**从关闭钮反推**窗口矩形的
+   （`rx = cx - w/2`），没关闭钮就没有 `cx/cy`，返回 `{ok:false,error:"close button not found"}`。
+   想让这 6 扇窗也进对表，得给 `dialog_rect` 加一条"直接从面板 Node 取矩形"的路径（未做）。
+2. `trade` 未取到：它在 manifest 的 `excluded` 里（单开不可达，需要对手方/服务端状态）。
+3. **按状态换图的窗**：`MountDialog` 面板随坐骑孔数在 `Prguse[167]`(324x377)/`Prguse[160]`(272x378)
+   之间切（C# `SwitchType`），拿哪一张取决于角色状态——工具里登记为"任一命中即 OK"，
+   与背包 ITEMS II 的 `738/169` 同一类，别当缺陷。
+
+写这个解析器时踩到并修掉的三个坑（都已写进 `window_rect_table.py` 的注释，避免后人重踩）：
+
+- **注释行**：`RankingDialog` 里 `//Size = new Size(288, 324);` 是注释掉的历史值，真值是背景图
+  原生 324x441。不剥注释就会拿注释值判出一条假 DIFF。
+- **居中不是"没有位置"**：原版大量窗写 `Location = Center;`
+  （`MirControl.cs:643` = `((ScreenWidth-Size.Width)/2, (ScreenHeight-Size.Height)/2)`），
+  `FriendDialog/GroupDialog/GuildDialog/OptionDialog/MentorDialog/RankingDialog/RelationshipDialog`
+  都是这一档；不认它会把它们全判成"期望 (0,0)"。
+- **位置是表达式或由调用点动态锚定**：`CharacterDialog` 是 `ScreenWidth - 264`；
+  `MailListDialog` 是 `(ScreenWidth - Size.Width) - 150`；`CraftDialog` 在
+  `Show()` 里 `= (InventoryDialog.X - 12, Y + 236)`（`NPCDialogs.cs:2450-2452`）；
+  `SocketDialog` 在 `SocketDialog.cs:107-110` 里按背包算
+  （`bag.X + (bag.W - w)/2, bag.Y + bag.H + 5`，且是**整数除法** ⇒ 117 不是 118）。
+  工具按"背包在 (0,0)/316x236"求值——探针正是先开背包再逐窗开，这个前置是确定的。
+
+另外两处**映射口径**（会影响"该跟谁比"，不是差异）：我方 `quest_log` 对应原版
+`QuestDiaryDialog`（`(ScreenWidth/2-300-20, 60)` = (192,60)），**不是** `QuestListDialog`
+（那扇是贴在 NPC 窗右边的列表变体，`(NPCDialog.Width+47, 0)`）；`item_rental`（204x109）对应
+`ItemRentingDialog`，`item_rental_browse`（400x174）才对应 `ItemRentalDialog`。
+
+> 边界：这是**窗口级**几何。窗内控件（行高、列距、按钮位置）要靠 `ui_nodes_at` 逐点或像素 A/B
+> —— 例如角色窗 14 个装备格已用前者验过（14/14 与 C# 表一致）。
+
 ## 4. 存档导出（dbtool）
 
 `dbtool` 用原版 `Server.Library.dll` 读 `Server.MirDB`（游戏数据）与 `Server.MirADB`（账号/角色），
