@@ -14,6 +14,10 @@
 #   D) P3-3（#782）物品名：仓库格的**显示名**（`StorageState::display_name`，与格子/悬浮提示
 #      同一份函数）必须是真名，不能停在 `#id` 内部 ID 占位——占位只允许是中间态，
 #      15s 内解析不出来就是真缺陷（判据读 `storage_probe.occupied[].display`）。
+#   E) P3-3（#782）**按需请求分支**（实机）：开仓库时，名表里没有的索引必须发一次
+#      `RequestItemInfo`（日志 `🏬 仓库缺物品名，请求 ItemInfo: idx=…`）并收到
+#      `📦 NewItemInfo`，该格最终显示真名；名表里已有的索引（本角色仓库里的 Saddle=782）
+#      **不得**被重复请求。触发条件由 `seed_storage_probe_item.py` 前置保证（见该文件头部）。
 # 判据仪器：bag_probe / storage_probe 的 occupied（格号→名称），动作侧 storage_store/
 # storage_take 发的是与点击路径同一个包（C.StoreItem=15 / C.TakeBackItem=16）。
 #
@@ -46,6 +50,21 @@ if (-not $ClientHome) { $ClientHome = $wt }
 $exe = "$ClientHome\Client-Bevy\target\debug\client_bevy.exe"
 . "$PSScriptRoot\build_stamp.ps1"   # 构建戳前置：不许对着旧产物下结论（见 LESSON_运行目标分支e2e前需重建二进制）
 Assert-ClientBuildStamp -Exe $exe -Worktree $ClientHome -ScriptName 'l5e_storage_roundtrip'
+
+# ---- 前置：仓库里放一件「本地物品名表里没有」的物品（判据 E 的触发条件）----------------
+# 见 `seed_storage_probe_item.py` 头部：`#782` 的「按需请求」分支只有「仓库里存在一个当前
+# 会话名表里没有的索引」时才会走到；而用 `@MAKE` 现造会有反效果——物品进背包 ⇒ 服务端下发的
+# `UserInformation` 把它的名字写进名表 ⇒ 再存进仓库时名表已命中，**不会**发请求。
+# 该物品既不在背包也不在装备里（背包是 Saddle/BlackCreatureStone/PrecisionNecklace/…），
+# 所以每次跑都能稳定触发同一条分支。
+$ProbeItemIndex = 221          # WoodenSword（item_infos 里的真实条目，DB 已确认）
+$ProbeItemName = 'WoodenSword'
+$dbPath = if ($env:CRYSTAL_DB_PATH) { $env:CRYSTAL_DB_PATH } else { 'E:\Users\gxh\Documents\GitHub\Crystal\ServerRust\Data\crystal.db' }
+$seedOut = & py -3.12 "$PSScriptRoot\seed_storage_probe_item.py" --db $dbPath --character bevychar `
+    --item-index $ProbeItemIndex --unique-id 990221 2>&1
+Write-Host ("[前置] 仓库探针物品（index={0}）：{1}" -f $ProbeItemIndex, ($seedOut -join ' '))
+if ($LASTEXITCODE -ne 0) { Write-Host 'FAIL(前置): 探针物品没准备好（seed_storage_probe_item.py 非 0 退出）'; exit 2 }
+
 # 唯一进程名（见 LESSON_多agent并行时按进程名清进程会污染他人GUI实验）：只用自己改名的副本，
 # 清场也只清这个唯一名——公共名 client_bevy.exe 可能是别的 agent 的验收或人工 GUI 会话。
 $exeSrc = $exe
@@ -273,6 +292,50 @@ foreach ($attempt in 1..3) {
 Write-Host ("storage open: total={0} used={1} visible={2}" -f $st0.total, $st0.used, $st0.visible)
 Shot '1_storage_open'
 
+# ---- 判据 E（#782 仓库「按需请求」分支，实机）----------------------------------------
+# 开仓库那一刻：名表里**没有**的索引必须发一次 `RequestItemInfo`，回包后该格显示真名；
+# 名表里**已有**的索引（本角色仓库里那批 Saddle=782）**不许**被重复请求
+# （原版 `GameScene.RequestItemInfo` 的 `RequestedItemInfo` 去重语义）。
+# 判据来源分两处、都是"被作用端"的：
+#   · 客户端日志（tracing 写 **stderr**）里的 `🏬 仓库缺物品名，请求 ItemInfo: idx=…` 与
+#     `📦 NewItemInfo: idx=… name=…` —— 证明"请求真的发出去、回包真的到"；
+#   · `storage_probe.occupied[].display`（= `StorageState::display_name`，与格子/悬浮提示
+#     同一份函数）—— 证明"玩家看到的是真名"。
+function ReadClientErrLog() {
+    $p = "$acc\l5e_client.err.log"
+    if (-not (Test-Path $p)) { return '' }
+    # 日志被写者持有：必须共享读（LESSON：实机判据读日志的四个坑）
+    $fs = [IO.File]::Open($p, 'Open', 'Read', 'ReadWrite')
+    try { $sr = New-Object IO.StreamReader($fs); return $sr.ReadToEnd() } finally { $fs.Dispose() }
+}
+$reqIndices = @(); $replyLines = @(); $seenName = ''
+foreach ($i in 1..15) {
+    $logTxt = ReadClientErrLog
+    $reqIndices = @([regex]::Matches($logTxt, '仓库缺物品名，请求 ItemInfo: idx=(\d+)') |
+        ForEach-Object { [int]$_.Groups[1].Value } | Sort-Object -Unique)
+    $replyLines = @([regex]::Matches($logTxt, 'NewItemInfo: idx=(\d+) name=(\S*)') |
+        ForEach-Object { "$($_.Groups[1].Value):$($_.Groups[2].Value)" } | Sort-Object -Unique)
+    $sp = Rpc 'storage_probe'
+    if ($null -ne $sp) {
+        $seenName = @($sp.occupied | ForEach-Object {
+                $n = "$($_.display)"; if (-not $n) { $n = "$($_.name)" }
+                if ($n -eq $ProbeItemName) { $n }
+            }) -join ','
+    }
+    if (($reqIndices -contains $ProbeItemIndex) -and $seenName) { break }
+    Start-Sleep 1
+}
+$e1 = $reqIndices -contains $ProbeItemIndex                    # 未知索引发过请求
+$e2 = -not ($reqIndices -contains 782)                          # 已知索引（Saddle）不被重复请求
+$e3 = @($replyLines | Where-Object { $_ -like "$ProbeItemIndex`:*" }).Count -gt 0   # 服务端回了 NewItemInfo
+$e4 = $seenName -eq $ProbeItemName                              # 玩家所见 = 真名
+Write-Host ("判据 E（仓库按需请求）: 请求索引=[{0}] 回包=[{1}] 显示名='{2}'（轮询 {3} 次）" -f `
+        ($reqIndices -join ','), ($replyLines -join ','), $seenName, $i)
+Write-Host ("  E1 未知索引 {0} 被请求={1}｜E2 已知索引 782 未被重复请求={2}｜E3 收到 NewItemInfo={3}｜E4 显示真名={4}" -f `
+        $ProbeItemIndex, $e1, $e2, $e3, $e4)
+$nameRequestOk = $e1 -and $e2 -and $e3 -and $e4
+if (-not $nameRequestOk) { Write-Host '  FAIL(E)：仓库「按需请求」分支没走通（见上四项）' }
+
 # 存入：背包格 srcCell → 仓库空格（第一个 None）。仓库格号从 occupied 反推空格。
 $dstCell = 0
 while (($st0.occupied | Where-Object { $_.cell -eq $dstCell })) { $dstCell++ }
@@ -355,9 +418,10 @@ Write-Host ("  take sub-checks: storage回0={0} bag回满={1}" -f $t1, $t2)
 $taken = $t1 -and $t2
 Shot '3_taken'
 
-Write-Host ("VERDICT store={0} take={1} itemname={2}" -f `
-    $(if ($stored) { 'PASS' } else { 'FAIL' }), $(if ($taken) { 'PASS' } else { 'FAIL' }), $(if ($nameOk) { 'PASS' } else { 'FAIL' }))
-if (-not ($stored -and $taken -and $nameOk)) { exit 5 }
+Write-Host ("VERDICT store={0} take={1} itemname={2} namerequest={3}" -f `
+    $(if ($stored) { 'PASS' } else { 'FAIL' }), $(if ($taken) { 'PASS' } else { 'FAIL' }),
+    $(if ($nameOk) { 'PASS' } else { 'FAIL' }), $(if ($nameRequestOk) { 'PASS' } else { 'FAIL' }))
+if (-not ($stored -and $taken -and $nameOk -and $nameRequestOk)) { exit 5 }
 
 } finally {
     # 收尾：只清自己那份唯一命名的客户端（不再依赖"下一次运行按公共名清场"——那会误杀别人）。
