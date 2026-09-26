@@ -104,6 +104,11 @@ struct FriendLocal {
     prev_inter: std::collections::HashMap<Entity, Interaction>,
     requested: bool,
     offset: usize,
+    /// 上一帧好友窗是否开着：**只在「刚关」那一次**清文本焦点。
+    /// 修 #3260 暴露的真缺陷：原实现 `if !open { input.active = None; }` 是**每帧**执行的，
+    /// 于是好友窗没开时会把**别的窗**的输入焦点一起清掉（实测：仓库密码 `MirInputBox` 弹出后
+    /// 被它每帧清成 `active=None`，`type_text` 打进去的字没人接，玩家打字也没用）。
+    was_open: bool,
 }
 
 /// 好友动作按钮（添加/删除/备注/邮件/私聊；bevy_ui Interaction 驱动）
@@ -263,7 +268,6 @@ fn spawn_friend(
 
 /// 显隐 + 列表渲染 + 打开时自动请求刷新（原版 C# FriendDialog.Show → RefreshFriends）
 #[allow(clippy::too_many_arguments)]
-#[allow(clippy::too_many_arguments)]
 fn friend_ui_system(
     mut mgr: ResMut<DialogManager>,
     mut friend: ResMut<FriendState>,
@@ -301,10 +305,15 @@ fn friend_ui_system(
         local.requested = false;
         friend.pending = None;
         friend.selected = None;
-        input.active = None;
+        // 只清**自己关掉时**的焦点：好友窗没开时不该动别的窗的输入焦点（#3260）
+        if local.was_open {
+            input.active = None;
+            local.was_open = false;
+        }
         local.offset = 0;
         return;
     }
+    local.was_open = true;
     if !local.requested {
         local.requested = true;
         net.send_packet(&mir2_shared::packets::client::friend::RefreshFriends);
@@ -609,5 +618,39 @@ mod tests {
         let blk = filter_friends(&friends, true);
         assert_eq!(blk.len(), 1);
         assert_eq!(blk[0].object_id, 2);
+    }
+
+    /// #3260 回归：好友窗**没开**时不得清别的窗的文本焦点。
+    ///
+    /// 修复前 `if !open { … input.active = None; }` 每帧都执行 ⇒ 只要有别的窗开着输入框
+    /// （实测：仓库密码 `MirInputBox`），焦点会被好友窗每帧清成 `None`，玩家/夹具打字全丢。
+    /// 阳性对照：把 `local.was_open` 那道判断去掉（回到每帧清）→ 本测试 FAILED。
+    #[test]
+    fn friend_closed_does_not_steal_other_dialog_text_focus() {
+        use bevy::ecs::system::RunSystemOnce;
+        let mut world = World::new();
+        world.init_resource::<FriendState>();
+        world.init_resource::<DialogManager>(); // 好友窗默认不在栈上 = 关着
+        world.init_resource::<crate::game::dialogs::text_input::TextInputState>();
+        world.init_resource::<NetConnection>();
+        world.init_resource::<ChatState>();
+        world.init_resource::<bevy::ecs::message::Messages<ComposeMail>>();
+        world.init_resource::<bevy::ecs::message::Messages<bevy::input::mouse::MouseWheel>>();
+        // 别的窗（仓库密码框）聚焦着
+        world
+            .resource_mut::<crate::game::dialogs::text_input::TextInputState>()
+            .active = Some(crate::game::dialogs::input_box::INPUT_FIELD_ID);
+
+        world
+            .run_system_once(friend_ui_system)
+            .expect("friend_ui_system 应成功");
+
+        assert_eq!(
+            world
+                .resource::<crate::game::dialogs::text_input::TextInputState>()
+                .active,
+            Some(crate::game::dialogs::input_box::INPUT_FIELD_ID),
+            "好友窗关着时不得清别人的输入焦点"
+        );
     }
 }

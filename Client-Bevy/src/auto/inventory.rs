@@ -187,6 +187,31 @@ pub(crate) fn auto_shop_test(
     }
 }
 
+/// #3260 密码闸门：`require && !has_password` 时客户端会**强制先设密码**（C# `Show()` 的
+/// `ForceStoragePasswordSetup` 路径），仓库窗在设完之前不显示。自动化要像真实玩家一样先把
+/// 这个包发出去，否则永远等不到 `storage.visible`。
+///
+/// 返回 `true` = 本帧交给闸门处理（调用方直接 `return`）。
+fn storage_password_gate_autoset(
+    storage: &client_bevy::game::dialogs::storage::StorageState,
+    net: &client_bevy::network::NetConnection,
+    sent: &mut bool,
+) -> bool {
+    if !(storage.require_password && !storage.has_password) {
+        return false;
+    }
+    if !*sent {
+        // 与 UI 走 `MirInputBox` 时发的**同一个包**（原版只有这一个设置入口）
+        net.send_packet(&mir2_shared::packets::client::storage::SetStoragePassword {
+            current_password: String::new(),
+            new_password: "123456".to_string(),
+        });
+        *sent = true;
+        tracing::info!("[STORAGE] 🔒 闸门：先设仓库密码 123456（C# Show() 强制设密码路径）");
+    }
+    true
+}
+
 /// --storage-test：自动仓库存取链路（CallNPC → [@Storage] → StoreItem → TakeBackItem）
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn auto_storage_test(
@@ -214,6 +239,7 @@ pub(crate) fn auto_storage_test(
     mut stage: Local<u8>,
     mut npc_oid: Local<Option<u32>>,
     mut inv_slot: Local<Option<usize>>,
+    mut pwd_sent: Local<bool>,
 ) {
     use client_bevy::scenes::AppState;
     if *state != AppState::Game {
@@ -270,6 +296,10 @@ pub(crate) fn auto_storage_test(
         }
         2 => {
             if *t < 2.0 {
+                return;
+            }
+            // #3260：闸门（未设密码 → 先设密码）——过了这一关才会 `visible`
+            if storage_password_gate_autoset(&storage, &net, &mut pwd_sent) {
                 return;
             }
             // #200/#283：mock 默认有仓库密码——先解锁再存取
@@ -344,6 +374,7 @@ pub(crate) fn auto_storage_equip_test(
     mut t: Local<f32>,
     mut stage: Local<u8>,
     mut npc_oid: Local<Option<u32>>,
+    mut pwd_sent: Local<bool>,
 ) {
     use client_bevy::scenes::AppState;
     if *state != AppState::Game {
@@ -397,6 +428,10 @@ pub(crate) fn auto_storage_equip_test(
         }
         2 => {
             if *t < 2.0 {
+                return;
+            }
+            // #3260：闸门（未设密码 → 先设密码）
+            if storage_password_gate_autoset(&storage, &net, &mut pwd_sent) {
                 return;
             }
             if storage.unlock_prompt_open {
@@ -1599,7 +1634,8 @@ pub(crate) fn auto_storage_unlock_test(
     net: ResMut<client_bevy::network::NetConnection>,
     state: Res<State<client_bevy::scenes::AppState>>,
     time: Res<Time>,
-    storage: Res<client_bevy::game::dialogs::storage::StorageState>,
+    mut storage: ResMut<client_bevy::game::dialogs::storage::StorageState>,
+    mut mgr: ResMut<client_bevy::game::dialogs::DialogManager>,
     npcs: Query<(
         &client_bevy::actor::NetObjectId,
         &client_bevy::actor::NpcName,
@@ -1615,6 +1651,9 @@ pub(crate) fn auto_storage_unlock_test(
     mut t: Local<f32>,
     mut stage: Local<u8>,
     mut npc_oid: Local<Option<u32>>,
+    // #3260：闸门（先设密码）+ 把解锁态复位（模拟玩家关窗）各只做一次
+    mut pwd_sent: Local<bool>,
+    mut unlocked_reset: Local<bool>,
 ) {
     use client_bevy::scenes::AppState;
     if *state != AppState::Game {
@@ -1669,6 +1708,31 @@ pub(crate) fn auto_storage_unlock_test(
         }
         2 => {
             if *t < 1.5 {
+                return;
+            }
+            // #3260 闸门第一相：未设密码 → 客户端强制先设密码（C# `Show()` → ForceStoragePasswordSetup），
+            // 设完客户端会自己把仓库窗打开（`_pendingOpenAfterPasswordSet`）。
+            if storage_password_gate_autoset(&storage, &net, &mut pwd_sent) {
+                return;
+            }
+            if !storage.has_password {
+                return; // 等 SetStoragePassword 回包
+            }
+            // 要测的是**解锁**路径（C# `PromptStorageUnlock` 只在 `!_storageUnlocked` 时走），
+            // 所以这里模拟玩家「把窗关掉」——与关闭钮写的是同一组状态（`Hide()` 里 `_storageUnlocked = false`）
+            if !*unlocked_reset && storage.visible {
+                storage.visible = false;
+                storage.unlocked = false;
+                mgr.close(client_bevy::game::dialogs::DialogKind::Storage);
+                *unlocked_reset = true;
+                if let Some(oid) = *npc_oid {
+                    net.send_packet(&mir2_shared::packets::client::npc::CallNPC {
+                        object_id: oid,
+                        key: "[@Storage]".to_string(),
+                    });
+                }
+                tracing::info!("[UNLOCK] 闸门已过（密码已设）；关窗复位解锁态 → 再点 [@Storage] 走解锁路径");
+                *t = 0.0;
                 return;
             }
             if storage.unlock_prompt_open && !storage.visible {

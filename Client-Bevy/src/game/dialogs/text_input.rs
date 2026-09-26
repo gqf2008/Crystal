@@ -90,7 +90,11 @@ fn text_input_system(
     mut keys: MessageReader<KeyboardInput>,
     mut ime: ResMut<PinyinIme>,
     mouse: Res<ButtonInput<MouseButton>>,
-    windows: Query<&Window>,
+    // 光标来源与命中判定同源（探针优先）：`click` RPC 注入的是探针光标，
+    // 这里若直读 `window.cursor_position()`，自动化点输入框永远拿不到焦点
+    // —— #3260 实测：仓库密码框弹出来后被 NPC 行那次 click 的 phase3 抢走焦点，
+    // 再点输入框也无效（探针光标到不了这里），`type_text` 打进去的字没人接。
+    cursor_src: crate::control::CursorSource,
     fields: Query<(
         Entity,
         &TextInputField,
@@ -115,33 +119,38 @@ fn text_input_system(
 
     // 点击聚焦（原版 C# MirInputBox：点击输入框激活）
     if mouse.just_pressed(MouseButton::Left) {
-        if let Ok(window) = windows.single() {
-            if let Some(cursor) = window.cursor_position() {
-                let mut clicked: Option<usize> = None;
-                for (_e, f, r, _) in &fields {
-                    if cursor.x >= r.0
+        if let Some(cursor) = cursor_src.pos() {
+            let mut clicked: Option<usize> = None;
+            for (_e, f, r, _) in &fields {
+                if cursor.x >= r.0
+                    && cursor.x <= r.0 + r.2
+                    && cursor.y >= r.1
+                    && cursor.y <= r.1 + r.3
+                {
+                    clicked = Some(f.0);
+                }
+            }
+            // 点击输入框外 → 取消聚焦
+            if clicked.is_none() && state.active.is_some() {
+                let outside = fields.iter().all(|(_, _, r, _)| {
+                    !(cursor.x >= r.0
                         && cursor.x <= r.0 + r.2
                         && cursor.y >= r.1
-                        && cursor.y <= r.1 + r.3
-                    {
-                        clicked = Some(f.0);
-                    }
+                        && cursor.y <= r.1 + r.3)
+                });
+                if outside {
+                    tracing::info!(
+                        "⌨️ [TEXTINPUT] 点击框外 → 取消聚焦（cursor=({:.0},{:.0})，原 active={:?}）",
+                        cursor.x,
+                        cursor.y,
+                        state.active
+                    );
+                    state.active = None;
                 }
-                // 点击输入框外 → 取消聚焦
-                if clicked.is_none() && state.active.is_some() {
-                    let outside = fields.iter().all(|(_, _, r, _)| {
-                        !(cursor.x >= r.0
-                            && cursor.x <= r.0 + r.2
-                            && cursor.y >= r.1
-                            && cursor.y <= r.1 + r.3)
-                    });
-                    if outside {
-                        state.active = None;
-                    }
-                }
-                if clicked.is_some() {
-                    state.active = clicked;
-                }
+            }
+            if clicked.is_some() {
+                state.active = clicked;
+                tracing::info!("⌨️ [TEXTINPUT] 点击聚焦 id={:?} cursor=({:.0},{:.0})", clicked, cursor.x, cursor.y);
             }
         }
     }
@@ -184,6 +193,7 @@ fn text_input_system(
     }
 
     if let Some(active) = state.active {
+        let mut appended = 0usize;
         for key in &key_list {
             if key.state != bevy::input::ButtonState::Pressed {
                 continue;
@@ -198,16 +208,37 @@ fn text_input_system(
                     continue;
                 }
                 text.pop();
+                appended += 1;
+            } else if key.logical_key == Key::Enter {
+                // Enter 是**提交**语义（上面的分支已发 `TextInputSubmit`），不能把它的
+                // `KeyboardInput.text`（winit 给的是 "\r"）当普通字符追加——否则密码/邮件正文
+                // 里会留下一个不可见的 CR（#3260 实测：仓库密码被存成 "abc123\r"）。
+                // 聊天框早已有同样的防护（`chat.rs` 的 `opened_trigger` 注释）。
+                continue;
             } else if let Some(t) = &key.text {
                 if !t.is_empty() {
                     text.push_str(t);
+                    appended += 1;
                 }
             }
         }
         // 内置拼音 IME 提交
         if let Some(c) = ime.take_commit() {
             state.texts[active].push_str(&c);
+            appended += 1;
         }
+        if appended > 0 {
+            tracing::info!(
+                "⌨️ [TEXTINPUT] active={active} 收到 {appended} 次字符输入，当前长度 {}",
+                state.texts[active].chars().count()
+            );
+        }
+    } else if key_list
+        .iter()
+        .any(|k| matches!(k.logical_key, Key::Character(_)))
+    {
+        // #3260 排查：有字符进来但没有任何输入框聚焦（焦点被谁清了）——不吞掉，留证据
+        tracing::info!("⌨️ [TEXTINPUT] 收到字符但 active=None（无框聚焦，字符被丢弃）");
     }
 
     // 显示同步（变化才更新，避免每帧重排文本，#31）
@@ -389,5 +420,43 @@ mod tests {
         assert_eq!(masked_display("密码1", true), "***", "中文按字符计数");
         assert_eq!(masked_display("abc", false), "abc");
         assert_eq!(masked_display("", true), "");
+    }
+
+    /// #3260 回归：Enter 只**提交**，不能把它的 `KeyboardInput.text`（winit 给的是 `"\r"`）
+    /// 当普通字符追加进文本框 —— 否则密码/邮件正文会被存成 `"abc123\r"`（实机实测过）。
+    /// 阳性对照：去掉 `Key::Enter` 那个 `continue` → 本测试 FAILED（文本尾部多出 CR）。
+    #[test]
+    fn enter_does_not_append_carriage_return() {
+        use bevy::ecs::system::RunSystemOnce;
+        let mut world = World::new();
+        world.insert_resource(TextInputState {
+            texts: vec![String::new(), "abc".to_string()],
+            active: Some(1),
+            ..Default::default()
+        });
+        world.insert_resource(PinyinIme::new());
+        world.insert_resource(ImeFocus::default());
+        world.insert_resource(ButtonInput::<MouseButton>::default());
+        world.insert_resource(Assets::<Font>::default());
+        world.init_resource::<bevy::ecs::message::Messages<KeyboardInput>>();
+        world.init_resource::<bevy::ecs::message::Messages<TextInputSubmit>>();
+
+        // Enter 带 `text = "\r"`（`inject_named_key("enter")` 就是这么发的）
+        world
+            .resource_mut::<bevy::ecs::message::Messages<KeyboardInput>>()
+            .write(KeyboardInput {
+            key_code: KeyCode::Enter,
+            logical_key: Key::Enter,
+            state: ButtonState::Pressed,
+            text: Some("\r".into()),
+            repeat: false,
+            window: Entity::PLACEHOLDER,
+        });
+        world
+            .run_system_once(text_input_system)
+            .expect("text_input_system 应成功");
+
+        let text = world.resource::<TextInputState>().texts[1].clone();
+        assert_eq!(text, "abc", "Enter 的 CR 不能被追加进文本框");
     }
 }

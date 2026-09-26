@@ -606,6 +606,22 @@ pub fn resolve_cursor(probe: Option<Vec2>, window: Option<Vec2>) -> Option<Vec2>
 /// 返回 `false` = 键名不认识（调用方应回报，别静默）。
 fn inject_named_key(keys: &mut MessageWriter<KeyboardInput>, name: &str) -> bool {
     use bevy::input::keyboard::KeyCode;
+    // Shift 是「单按切换中/英」用的（`pinyin_ime` 的 `ShiftToggle` 要 Pressed + Released，
+    // 且 `repeat=false`）；只发 Pressed 不切，所以这里发一对（#3260 夹具切英文输入用）。
+    // 注意：必须在下面的 `match` **之前**处理——否则会先撞上 `_ => return false`。
+    if name.eq_ignore_ascii_case("shift") {
+        for state in [ButtonState::Pressed, ButtonState::Released] {
+            keys.write(KeyboardInput {
+                key_code: KeyCode::ShiftLeft,
+                logical_key: Key::Shift,
+                state,
+                text: None,
+                repeat: false,
+                window: Entity::PLACEHOLDER,
+            });
+        }
+        return true;
+    }
     let (key_code, logical_key, text): (KeyCode, Key, Option<&'static str>) =
         match name.to_ascii_lowercase().as_str() {
             "enter" | "return" => (KeyCode::Enter, Key::Enter, Some("\r")),
@@ -826,6 +842,12 @@ struct ControlQueries<'w, 's> {
     /// Storage 窗由 `StorageState.visible`（服务端 `S.StorageOpened`）+ `DialogManager.open`
     /// 双门控（dialogs/storage.rs `storage_open`），RPC open/close 两边都要切
     storage: ResMut<'w, crate::game::dialogs::storage::StorageState>,
+    /// #3260：`storage_probe` 暴露密码闸门状态（require/has/unlocked/pending + 流程步），
+    /// 夹具据此判「闸门是否真的挡住了窗」而不是猜
+    storage_pwd_flow: Res<'w, crate::game::dialogs::storage::StoragePwdFlow>,
+    /// #3260：`storage_probe` 也带上「输入框开着吗 / 哪个文本域聚焦」——
+    /// 夹具判「闸门弹框」与「打字有没有落点」时不用猜
+    text_input: Res<'w, crate::game::dialogs::text_input::TextInputState>,
     map_cameras: Query<
         'w,
         's,
@@ -2129,6 +2151,9 @@ fn drain_control_outside_game(
             ControlCommand::TypeText { text, reply } => {
                 // 等效"输入法已提交该字符"：文本走 `text`，逻辑键给 Character；
                 // window 用 PLACEHOLDER（消费方只看 text/logical_key，与既有测试一致）。
+                // 日志：自动化排查时能一眼看出「RPC 到底有没有把字注入进去」（#3260 踩过：
+                // 夹具发了 type_text 但界面没反应，日志里却什么都没有，无从判断）。
+                tracing::info!("🎮 control type_text: {:?}", text);
                 let mut n = 0usize;
                 for ch in text.chars() {
                     keys.write(KeyboardInput {
@@ -2146,6 +2171,7 @@ fn drain_control_outside_game(
                 let _ = reply.try_send(json!({"ok": true, "chars": n}).to_string());
             }
             ControlCommand::Key { key, reply } => {
+                tracing::info!("🎮 control key: {key}");
                 let ok = inject_named_key(&mut keys, &key);
                 let _ = reply.try_send(
                     if ok {
@@ -2643,6 +2669,9 @@ fn apply_control_commands(
                 // 由文本框各自的系统消费（游戏内也有文本框，如邮件正文/聊天输入）。
                 // `window` 用 PLACEHOLDER：消费方（文本框）只看 `logical_key`/`text`，
                 // 与既有测试里构造 KeyboardInput 的做法一致。
+                // 日志（#3260 排查用）：自动化里「字发出去但框里没字」时，先看这条与
+                // 文本框自己的焦点日志对不对得上。
+                tracing::info!("🎮 control type_text（Game）: {text:?}");
                 let mut n = 0usize;
                 for ch in text.chars() {
                     q.keys.write(KeyboardInput {
@@ -2668,6 +2697,7 @@ fn apply_control_commands(
                 );
             }
             ControlCommand::Key { key, reply } => {
+                tracing::info!("🎮 control key（Game）: {key}");
                 let ok = inject_named_key(&mut q.keys, &key);
                 let _ = reply.try_send(
                     if ok {
@@ -3205,6 +3235,9 @@ fn apply_control_commands(
                     "chat_font": chat_line,
                     // 判据（#2961 项③）：三处都必须用共享 CJK 主字体的**同一个句柄**
                     "all_cjk": all_cjk,
+                    // #3260：中/英模式（`PinyinIme.enabled`）——自动化要打 ASCII 时先看这个：
+                    // 中文模式下字母会进拼音组合、数字会选候选（实测把「阿保存」打进密码框）
+                    "enabled": ime.enabled(),
                 });
                 tracing::info!("🎮 control ime_probe: {payload}");
                 let _ = reply.send(payload.to_string());
@@ -3289,6 +3322,24 @@ fn apply_control_commands(
                     "total": q.storage.items.len(),
                     "visible": q.storage.visible,
                     "page": format!("{:?}", q.storage.page),
+                    // #3260 密码闸门状态（C# `StorageDialog.Show()` 的三个判据 + 流程步）
+                    "require_password": q.storage.require_password,
+                    "has_password": q.storage.has_password,
+                    "unlocked": q.storage.unlocked,
+                    "pending_open_after_set": q.storage.pending_open_after_set,
+                    "unlock_prompt_open": q.storage.unlock_prompt_open,
+                    "change_confirm": q.storage.change_confirm,
+                    "pwd_step": format!("{:?}", q.storage_pwd_flow.step),
+                    "pwd_last_error": q.storage.pwd_last_error,
+                    "input_box_open": q.input_box.open,
+                    "input_box_title": q.input_box.title,
+                    "text_input_active": q.text_input.active,
+                    "input_box_text_len": q
+                        .text_input
+                        .texts
+                        .get(crate::game::dialogs::input_box::INPUT_FIELD_ID)
+                        .map(|t| t.chars().count())
+                        .unwrap_or(0),
                     // 同 bag_probe：带上 count，判据看件数（可堆叠物品存取时占用格数可能不变）。
                     "occupied": occupied_cells_with_uid_count(&q.storage.items)
                         .into_iter()
