@@ -21,7 +21,7 @@ use crate::scenes::AppState;
 use crate::ui::sprite_ui::UiFont;
 use crate::ui::sprite_ui::{shared_cjk_font, UiCjkFont};
 use crate::ui::theme::{
-    load_lib_image, spawn_close_button, spawn_container, spawn_icon_button, spawn_image,
+    load_lib_image, spawn_close_button, spawn_container, spawn_icon_button, spawn_image, spawn_image_native,
     spawn_label, spawn_panel,
 };
 use bevy::prelude::*;
@@ -195,10 +195,9 @@ fn spawn_group(
         .insert((DialogRoot(DialogKind::Group), GroupWidget));
 
     commands.entity(panel).with_children(|p| {
-        // 标题 Title[5] @(18,8)
-        if let Some(h) = load_lib_image(&mut libs, &mut images, LibraryName::Title, 5) {
-            spawn_image(p, h, 18.0, 8.0, 57.0, 15.0, 9);
-        }
+        // 标题 Title[5] @(18,8)：C# `TitleLabel` 不设 Size ⇒ 用美术原生 **55x15**
+        // （曾写死 57x15，把 GROUP 标题横向拉伸 2px）
+        let _ = spawn_image_native(p, &mut libs, &mut images, LibraryName::Title, 5, 18.0, 8.0, 9);
         // 关闭 Prguse2[360/361/362] @(206,3)
         if let Some(mut btn) =
             spawn_close_button(p, &mut libs, &mut images, CLOSE_POS.0, CLOSE_POS.1, 10)

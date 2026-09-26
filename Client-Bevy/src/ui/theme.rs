@@ -81,6 +81,42 @@ pub fn load_lib_image(
     Some(images.add(crate::map_renderer::make_image(rgba, w, h)))
 }
 
+/// 某帧的**原生尺寸**（= 原版 `MirImageControl` 不设 `Size` 时的控件尺寸）。
+///
+/// 为什么单列：原版大量控件只写 `Index`/`Library`/`Location`，尺寸**就是美术尺寸**；
+/// 本端若在这些地方写死一个数字，很容易抄成另一张图的尺寸（实测三处标题图被拉成
+/// `Title[15]` 的 103x17、技能页翻页钮被拉成 40x22）。要"跟美术一致"就得从图头取。
+pub fn native_size(
+    libs: &mut GameLibraries,
+    name: LibraryName,
+    index: usize,
+) -> Option<(f32, f32)> {
+    let info = libs.0.get_image(name, index)?;
+    let w = info.width.max(0) as f32;
+    let h = info.height.max(0) as f32;
+    if w <= 0.0 || h <= 0.0 {
+        return None;
+    }
+    Some((w, h))
+}
+
+/// 按**美术原生尺寸**铺一张图（`spawn_image` 的"原版语义"版本：不给尺寸，尺寸来自帧）。
+/// 帧缺失/尺寸非法时返回 `None`，调用方不要退化成一个写死的尺寸——那正是要避免的漂移来源。
+pub fn spawn_image_native<'a>(
+    parent: &'a mut ChildSpawnerCommands,
+    libs: &mut GameLibraries,
+    images: &mut Assets<Image>,
+    name: LibraryName,
+    index: usize,
+    x: f32,
+    y: f32,
+    z: i32,
+) -> Option<Entity> {
+    let (w, h) = native_size(libs, name, index)?;
+    let handle = load_lib_image(libs, images, name, index)?;
+    Some(spawn_image(parent, handle, x, y, w, h, z).id())
+}
+
 /// 图按钮交互系统：根据 Interaction 切换三帧
 pub fn image_button_system(mut q: Query<(&Interaction, &ImageButton, &mut ImageNode)>) {
     for (interaction, btn, mut node) in &mut q {
