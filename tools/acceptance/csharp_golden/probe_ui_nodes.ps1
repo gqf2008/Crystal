@@ -47,6 +47,12 @@ param(
     # （`rx = cx - w/2`、`ry = cy - h/2`），窗口没开时关闭钮不存在 ⇒ 返回
     # `{ok:false, error:"close button not found"}`（实测：45 个 kind 一口气问只回 3 个 ok）。
     [string]$RectKinds = 'inventory,character',
+    # 可选：先把这些窗口**开着**再抽点（逗号分隔的 dialog kind，如 'menu'）。
+    # 为什么要这个开关：`-RectKinds` 的逗号表分支只取 `dialog_rect`、**不负责开窗**；`all/sweep`
+    # 分支虽然逐窗开，但结尾会把 `no_close_by_design` 的那几个（menu/minimap/buff/…）也关掉，
+    # 而抽点是在那之后 ⇒ 想对某个窗的**窗内控件**抽点，此前没有任何开关能让它留在屏上
+    # （2026-09-26 实测：没开窗时在菜单按钮的位置上抽点，只会命中别的窗，得到一堆无关节点）。
+    [string]$OpenKinds = '',
     # 角色窗页（0=装备 1=状态 2=State 3=技能）；>=0 时用 `char_page` RPC 开窗并切页
     # （页签只能点、无热键，C# 亦然；见 control.rs 的 char_page）。做窗内控件对表时用它。
     [int]$CharPage = -1,
@@ -201,6 +207,12 @@ try {
     $res = [ordered]@{}
     $res['state'] = $s3
     $res['bag_probe'] = Rpc 'bag_probe'
+    foreach ($k in ($OpenKinds -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ })) {
+        $opened = Rpc 'dialog' @{ kind = $k; action = 'open' }
+        Start-Sleep -Milliseconds 350
+        $res["opened_$k"] = $opened
+        Write-Host ("按 OpenKinds 开窗：{0}（留在屏上供抽点）" -f $k)
+    }
     if ($RectKinds -eq 'all' -or $RectKinds -eq 'sweep') {
         $manifest = Join-Path $Repo 'tools\acceptance\interact_sweep_manifest.json'
         if (-not (Test-Path -LiteralPath $manifest)) { Write-Host "FAIL(2): 缺 $manifest"; exit 2 }

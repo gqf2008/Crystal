@@ -173,6 +173,29 @@ py -3.12 tools/acceptance/csharp_golden/window_rect_table.py `
 > 边界：这是**窗口级**几何。窗内控件（行高、列距、按钮位置）要靠 `ui_nodes_at` 逐点或像素 A/B
 > —— 例如角色窗 14 个装备格已用前者验过（14/14 与 C# 表一致）。
 
+**窗内控件抽点的前置：先开窗（`-OpenKinds`，2026-09-26 补）**
+
+`-RectKinds` 的**逗号表**分支只取 `dialog_rect`、不负责开窗；`all/sweep` 分支虽然逐窗开，
+但结尾会把 `no_close_by_design` 的那几个（menu/minimap/buff/refine/timer/chat_notice）也关掉，
+而抽点在那之后 ⇒ 想对某个窗的窗内控件抽点，此前没有任何开关能让它留在屏上。
+现在加 `-OpenKinds 'menu'`（逗号表）：抽点前逐个 RPC `dialog open` 并**留在屏上**，结果记 `opened_<kind>`。
+
+实测（menu，master `d96dd26bd` 的 e2e 构建位）：
+
+```powershell
+pwsh tools/acceptance/csharp_golden/probe_ui_nodes.ps1 -Repo <wt> -ClientHome <wt> `
+     -OpenKinds menu -RectKinds '' -Points '1007,371;1025,371;1007,618;1025,618' -Out %TEMP%\menu.json
+```
+
+- `(1007,371)` → 顶层节点 rect = **[991.33, 361.33, 32.0, 20.0]** = C# `ExitButton` @(3,12)+面板(988,349)，
+  尺寸 = `Title[633]` 图头 32x20；
+- `(1007,618)` → **[991.33, 608.67, 32.0, 18.0]** = `GuildButton` @(3,259)，尺寸 = `Prguse[1994]` 图头 32x18；
+- `(1025,·)` → **0 个节点**（面板只到 x=1024；修复前按钮写死 38 宽会盖到 1029）。
+
+顺带一条判据：`dialog_rect kind=menu` 返回 `{ok:false, error:"close button not found"}` 是**预期**
+——`dialog_rect` 靠关闭钮反推窗口矩形，而菜单窗在 C# 里就没有关闭钮（`no_close_by_design`）；
+窗内控件抽点不需要 `dialog_rect`。
+
 ### 3.4 窗内控件：`control_size_audit.py`（写死尺寸 ≠ 美术原生尺寸 = 0）
 
 原版大量控件只写 `Index`/`Library`/`Location`，**尺寸就是美术尺寸**；本端若在这些地方写死一个数字，
