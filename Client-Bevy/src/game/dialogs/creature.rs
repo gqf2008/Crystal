@@ -90,9 +90,14 @@ pub struct CreatureClose;
 #[derive(Component)]
 pub struct CreatureRefresh;
 
-/// 改名按钮（C# CreatureRenameButton Title[570-572]）
+    /// 改名按钮（C# CreatureRenameButton Title[570-572]）
 #[derive(Component)]
 struct CreatureRenameBtn;
+
+/// 「宠物帮助」钮（C# `HelpPetButton`）——**只画不接点击**：原版全仓没有它的 `.Click +=`
+/// （只有声明与构造两处），照此保持视觉一致；见 spawn 处注释。
+#[derive(Component)]
+struct CreatureHelpPet;
 
 /// 解散按钮（C# DismissButton Title[580-582]）
 #[derive(Component)]
@@ -331,6 +336,13 @@ const CREATURE_MARKER_OFFSET: f32 = 8.0;
 /// C# `BlackStoneImageBG`（`Prguse2[428]`）@(215,348) 204x17 / `FG`（`Prguse2[420]`）@(242,353) 172x7
 const CREATURE_BLACKSTONE_X: f32 = 215.0;
 const CREATURE_BLACKSTONE_Y: f32 = 348.0;
+
+/// 「宠物帮助」钮（C# `HelpPetButton`）：`Prguse2[257/258/259]` @ `(Size.Width - 48, 3)`
+/// → 452-48 = **(404,3)**，精灵原生 **24x21**（`IntelligentCreatureDialogs.cs:54-65`）。
+/// 原版**没有** `HelpPetButton.Click`（全树只有声明与构造）⇒ 本端只画不接点击。
+const HELP_PET_POS: (f32, f32) = (404.0, 3.0);
+const HELP_PET_FRAMES: (usize, usize, usize) = (257, 258, 259);
+const HELP_PET_SIZE: (f32, f32) = (24.0, 21.0);
 const CREATURE_BLACKSTONE_FG_X: f32 = 242.0;
 const CREATURE_BLACKSTONE_FG_Y: f32 = 353.0;
 const CREATURE_BLACKSTONE_FG_W: f32 = 172.0;
@@ -695,6 +707,32 @@ fn spawn_creature(
         ) {
             spawn_icon_button(p, n, h, pr, 427.0, 3.0, 24.0, 21.0, 10)
                 .insert((CreatureClose, CloseButton));
+        }
+        // 「宠物帮助」钮 C# `HelpPetButton` = `Prguse2[257/258/259]` @(Size.Width-48, 3) = (404,3)，
+        // 精灵原生 24x21。
+        //
+        // **故意不接点击**：C# 全仓 `HelpPetButton` 只有**声明 + 构造**两处，没有任何 `.Click +=`
+        // （2026-09-26 用 `rg -n 'HelpPetButton' Client` 全树确认）⇒ 原版这颗钮就是"画出来、点了没反应"。
+        // 本端照此只画不接，保持视觉一致；真要接帮助页得先确定原版意图（当前无据可依，不猜）。
+        if let (Some(n), Some(h), Some(pr)) = (
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, HELP_PET_FRAMES.0),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, HELP_PET_FRAMES.1),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, HELP_PET_FRAMES.2),
+        ) {
+            spawn_icon_button(
+                p,
+                n,
+                h,
+                pr,
+                HELP_PET_POS.0,
+                HELP_PET_POS.1,
+                HELP_PET_SIZE.0,
+                HELP_PET_SIZE.1,
+                10,
+            )
+            .insert(CreatureHelpPet);
+        } else {
+            tracing::warn!("🐾 宠物窗：HelpPetButton 缺帧（Prguse2[257/258/259]）——右上角会少一颗钮");
         }
         // C# 三行信息（`CreatureInfo`/`CreatureInfo1`/`CreatureInfo2`，@19,161/176/191）
         for (i, y) in [(0u8, 161.0), (1, 176.0), (2, 191.0)] {
@@ -2757,5 +2795,30 @@ mod layout_tests {
         assert_eq!(creature_image_origin((0, 0)), CREATURE_IMAGE_POS);
         // 防漂移：基准 Location 是 C# 的 (50,110)
         assert_eq!(CREATURE_IMAGE_POS, (50.0, 110.0));
+    }
+
+    /// 门禁（金标准逐窗复核 ⑧）：宠物窗右上角那颗「帮助」钮要**画出来**，但**不接点击**。
+    ///
+    /// 依据：C# `IntelligentCreatureDialogs.cs:54-65` 的 `HelpPetButton = new MirButton {
+    /// Index = 257; HoverIndex = 258; PressedIndex = 259; Library = Libraries.Prguse2;
+    /// Location = new Point(Size.Width - 48, 3) }`（452-48 = 404），不设 `Size` ⇒ 美术原生 24x21。
+    /// 而**全树 `rg -n 'HelpPetButton' Client` 只有两处命中**（声明 `:15` + 构造 `:54`），
+    /// **没有任何 `.Click +=`** ⇒ 原版这颗钮是"画出来、点了没反应"。本端此前**完全没画它**。
+    ///
+    /// 阳性对照：把 `HELP_PET_POS` 改成 `(427.0, 3.0)`（关闭钮的位置）→ 第一条断言红。
+    #[test]
+    fn creature_help_button_matches_csharp_but_stays_inert() {
+        assert_eq!(HELP_PET_POS, (404.0, 3.0), "C# Location = (Size.Width-48, 3)");
+        assert_eq!(HELP_PET_FRAMES, (257, 258, 259));
+        assert_eq!(HELP_PET_SIZE, (24.0, 21.0), "Prguse2[257] 图头原生 24x21");
+        // 两钮都是"距右边固定偏移"：帮助 = Size.Width-48、关闭 = Size.Width-25（都 y=3）。
+        // 注意 404+24 = 428 > 427 ⇒ 原版这两颗**本来就重叠 1px**（不是本端的问题，别自作主张改位置）；
+        // 断言写成"距右缘的偏移"而不是"互不重叠"，才是把 C# 的真值钉住。
+        assert_eq!(
+            CREATURE_W - HELP_PET_POS.0,
+            48.0,
+            "帮助钮距右缘 48（C# Size.Width-48）"
+        );
+        assert_eq!(CREATURE_W - 427.0, 25.0, "关闭钮距右缘 25（C# Size.Width-25）");
     }
 }
