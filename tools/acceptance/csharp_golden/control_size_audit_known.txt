@@ -4,33 +4,18 @@
 # 背景：2026-09-26 发现本工具对 if let (Some(n),Some(h),Some(pr)) = (load...,load...,load...)
 #       这种主流写法完全失明（元组里没有 let x = 绑定）=> 一度报 0 命中；补上元组解析与
 #       normal 帧优先配对后浮现出下面这些，逐条核完就删掉对应行。
-Client-Bevy\src\game\dialogs\big_map.rs	Prguse2	197	16	14	# 美术 12x12
-Client-Bevy\src\game\dialogs\big_map.rs	Prguse2	207	16	14	# 美术 12x12
-Client-Bevy\src\game\dialogs\game_shop.rs	Prguse2	197	16	14	# 美术 12x12
-Client-Bevy\src\game\dialogs\game_shop.rs	Prguse2	207	16	14	# 美术 12x12
-Client-Bevy\src\game\dialogs\game_shop.rs	Prguse2	240	16	14	# 美术 16x16
-Client-Bevy\src\game\dialogs\game_shop.rs	Prguse2	243	16	14	# 美术 16x16
-Client-Bevy\src\game\dialogs\game_shop.rs	Prguse	361	24	21	# 美术 16x15
-Client-Bevy\src\game\dialogs\game_shop.rs	Prguse2	240	16	14	# 美术 16x16
-Client-Bevy\src\game\dialogs\game_shop.rs	Prguse2	243	16	14	# 美术 16x16
-Client-Bevy\src\game\dialogs\group.rs	Prguse	114	60	23	# 美术 28x25
-Client-Bevy\src\game\dialogs\group.rs	Title	133	60	23	# 美术 60x25
-Client-Bevy\src\game\dialogs\group.rs	Title	136	44	22	# 美术 60x25
-Client-Bevy\src\game\dialogs\inventory.rs	Prguse2	366	20	20	# 美术 16x15
-Client-Bevy\src\game\dialogs\keyboard_layout.rs	Prguse2	197	16	14	# 美术 12x12
-Client-Bevy\src\game\dialogs\keyboard_layout.rs	Prguse2	207	16	14	# 美术 12x12
-Client-Bevy\src\game\dialogs\keyboard_layout.rs	Title	120	72	25	# 美术 60x25
-Client-Bevy\src\game\dialogs\mentor.rs	Prguse	114	24	22	# 美术 28x25
-Client-Bevy\src\game\dialogs\mentor.rs	Title	213	24	22	# 美术 76x25
-Client-Bevy\src\game\dialogs\mentor.rs	Title	216	24	22	# 美术 76x25
-Client-Bevy\src\game\dialogs\npc_goods.rs	Title	312	76	25	# 美术 80x25
-Client-Bevy\src\game\dialogs\potion_belt.rs	Prguse	1926	16	15	# 美术 16x16
-Client-Bevy\src\game\dialogs\potion_belt.rs	Prguse	1923	16	15	# 美术 16x14
-Client-Bevy\src\game\dialogs\quest_log.rs	Title	193	76	25	# 美术 68x25
-Client-Bevy\src\game\dialogs\quest_log.rs	Title	270	76	25	# 美术 68x25
-Client-Bevy\src\game\dialogs\quest_log.rs	Title	273	76	25	# 美术 68x25
-Client-Bevy\src\game\dialogs\quest_log.rs	Prguse2	197	16	14	# 美术 12x12
-Client-Bevy\src\game\dialogs\quest_log.rs	Prguse2	207	16	14	# 美术 12x12
-Client-Bevy\src\game\dialogs\quest_log.rs	Title	270	76	25	# 美术 68x25
-Client-Bevy\src\game\dialogs\storage.rs	Title	210	70	23	# 美术 76x25
-Client-Bevy\src\game\dialogs\storage.rs	Title	210	70	23	# 美术 76x25
+# 2026-09-26：首轮队列已全部核完并清零（同一 PR 内改尺寸 + 删表行）：
+#   game_shop Prguse[361] 16x15（viewer 关闭）、Prguse2[240]/[243] 16x16（viewer 转身，两处各 2 个）
+#   group Prguse[114] 28x25 / Title[133] 60x25 / Title[136] 60x25
+#   mentor Prguse[114] 28x25 / Title[213] 76x25 / Title[216] 76x25
+#   quest_log Title[193] 68x25 / Title[270] 68x25（两处）/ Title[273] 68x25
+#   storage Title[210] 76x25（两处，MirMessageBox NoButton）
+#   keyboard_layout Title[120] 60x25（C# 显式 Size 被 AutoSize 顶掉）
+#   npc_goods Title[312] 80x25
+# 判定口径：C# `MirButton : MirImageControl` 构造器置 `_autoSize = true`
+# （`Client/MirControls/MirImageControl.cs:165-171`），`Size` getter 在 AutoSize 时直接返回
+# `Library.GetTrueSize(Index)`（同文件 `:142-151`），`DrawControl` 只按 `DisplayLocation`
+# 原尺寸绘制、不按 Size 拉伸（同文件 `:173-193`）⇒ 显式 Size 与写死尺寸都无效，
+# 一律以美术原生（.Lib 图头）为准。
+#
+# 用法：本表是「已知待核」队列，不是白名单。命中不在表内 → FAIL（exit 1）。

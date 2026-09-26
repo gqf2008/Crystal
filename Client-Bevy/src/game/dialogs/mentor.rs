@@ -165,7 +165,8 @@ fn spawn_mentor(
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 116),
         ) {
             // #2775：C# `MentorDialog.cs:60` AllowButton.Hint（允许/拒绝导师请求）
-            spawn_icon_button(p, n, h, pr, 30.0, 178.0, 24.0, 22.0, 10).insert((
+            // `Prguse[114]` 图头 28x25（C# `MentorDialog.cs:51-61` `AllowButton` 无显式 Size）
+            spawn_icon_button(p, n, h, pr, 30.0, 178.0, 28.0, 25.0, 10).insert((
                 MentorAllow,
                 crate::ui::tooltip::UiHint {
                     text: "允许/拒绝导师请求".to_string(),
@@ -178,7 +179,9 @@ fn spawn_mentor(
             load_lib_image(&mut libs, &mut images, LibraryName::Title, 215),
         ) {
             // #2775：C# `MentorDialog.cs:90` AddButton.Hint（添加导师）
-            spawn_icon_button(p, n, h, pr, 60.0, 178.0, 24.0, 22.0, 10).insert((
+            // `Title[213]` 图头 76x25（C# `MentorDialog.cs:81-91` `AddButton` 无显式 Size；
+            // 原写死 24x22 与「允许拜师」钮同值，属复制粘贴错）
+            spawn_icon_button(p, n, h, pr, 60.0, 178.0, 76.0, 25.0, 10).insert((
                 MentorAdd,
                 crate::ui::tooltip::UiHint {
                     text: "添加导师".to_string(),
@@ -191,7 +194,8 @@ fn spawn_mentor(
             load_lib_image(&mut libs, &mut images, LibraryName::Title, 218),
         ) {
             // #2775：C# `MentorDialog.cs:123` RemoveButton.Hint（移除师徒关系）
-            spawn_icon_button(p, n, h, pr, 135.0, 178.0, 24.0, 22.0, 10).insert((
+            // `Title[216]` 图头 76x25（C# `MentorDialog.cs:114-124` `RemoveButton` 无显式 Size）
+            spawn_icon_button(p, n, h, pr, 135.0, 178.0, 76.0, 25.0, 10).insert((
                 MentorRemove,
                 crate::ui::tooltip::UiHint {
                     text: "移除师徒关系".to_string(),

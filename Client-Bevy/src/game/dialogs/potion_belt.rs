@@ -314,7 +314,8 @@ fn spawn_potion_belt(
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 1928),
         ) {
             // #2775：C# `InventoryDialog.cs:637` RotateButton.Hint（旋转）
-            spawn_icon_button(p, n, h, pr, 222.0, 3.0, 16.0, 15.0, 3).insert((
+            // 旋转钮 `Prguse[1926]` 图头 16x16（C# 不设 Size ⇒ 取美术尺寸）
+            spawn_icon_button(p, n, h, pr, 222.0, 3.0, 16.0, 16.0, 3).insert((
                 PotionBeltWidget,
                 PotionBeltRotate,
                 crate::ui::tooltip::UiHint {
@@ -329,7 +330,8 @@ fn spawn_potion_belt(
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 1925),
         ) {
             // #2775：C# `InventoryDialog.cs:650` CloseButton.Hint（关闭 ({Belt 键})）
-            spawn_icon_button(p, n, h, pr, 222.0, 19.0, 16.0, 15.0, 3).insert((
+            // 关闭钮 `Prguse[1923]` 图头 16x14
+            spawn_icon_button(p, n, h, pr, 222.0, 19.0, 16.0, 14.0, 3).insert((
                 PotionBeltWidget,
                 PotionBeltClose,
                 crate::ui::tooltip::UiHint {

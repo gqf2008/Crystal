@@ -1154,14 +1154,15 @@ fn spawn_game_shop(
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 198),
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 199),
         ) {
-            spawn_icon_button(p, n, h, pr, 120.0, 103.0, 16.0, 14.0, 10).insert(GameShopCatUp);
+            // `Prguse2[197]` 图头 12x12（C# 显式 Size 被 AutoSize=true 顶掉）
+            spawn_icon_button(p, n, h, pr, 120.0, 103.0, 12.0, 12.0, 10).insert(GameShopCatUp);
         }
         if let (Some(n), Some(h), Some(pr)) = (
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 207),
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 208),
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 209),
         ) {
-            spawn_icon_button(p, n, h, pr, 120.0, 421.0, 16.0, 14.0, 10).insert(GameShopCatDown);
+            spawn_icon_button(p, n, h, pr, 120.0, 421.0, 12.0, 12.0, 10).insert(GameShopCatDown);
         }
         // 职业筛选六档（C# `ClassFilter`：`Title[751..768]`，`ALL@(539,37)`、其余 `@(568+23i,38)`；
         // 选中态用 hover 帧——`ResetClass` 把 `ALL.Index` 设成 752，本端对应 `ImageButton.pressed`）
@@ -1322,13 +1323,14 @@ fn spawn_game_shop(
                 ));
                 // 数量减/值/加（C# @(55,56) / 20x13 @(74,56) / @(97,56)；Shift=±10）
                 if let (Some(n), Some(h), Some(pr)) = qty_down_frames.clone() {
-                    spawn_icon_button(cp, n, h, pr, 55.0, 56.0, 16.0, 14.0, 2)
+                    // `Prguse2[240]` 图头 16x16
+                    spawn_icon_button(cp, n, h, pr, 55.0, 56.0, 16.0, 16.0, 2)
                         .insert(GameShopCellQtyDown(i));
                 }
                 spawn_label_center(cp, &cjk, "1", 84.0, 56.0, 20.0, 12.0, Color::WHITE, 1)
                     .insert(GameShopCellQty(i));
                 if let (Some(n), Some(h), Some(pr)) = qty_up_frames.clone() {
-                    spawn_icon_button(cp, n, h, pr, 97.0, 56.0, 16.0, 14.0, 2)
+                    spawn_icon_button(cp, n, h, pr, 97.0, 56.0, 16.0, 16.0, 2)
                         .insert(GameShopCellQtyUp(i));
                 }
                 // 购买钮（C# `BuyItem` `Title[778..780]` @(42,122)）
@@ -1358,14 +1360,15 @@ fn spawn_game_shop(
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 241),
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 242),
         ) {
-            spawn_icon_button(p, n, h, pr, 600.0, 448.0, 16.0, 14.0, 10).insert(GameShopPagePrev);
+            // `Prguse2[240]` 图头 16x16（不是 16x14）
+            spawn_icon_button(p, n, h, pr, 600.0, 448.0, 16.0, 16.0, 10).insert(GameShopPagePrev);
         }
         if let (Some(n), Some(h), Some(pr)) = (
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 243),
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 244),
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 245),
         ) {
-            spawn_icon_button(p, n, h, pr, 660.0, 448.0, 16.0, 14.0, 10).insert(GameShopPageNext);
+            spawn_icon_button(p, n, h, pr, 660.0, 448.0, 16.0, 16.0, 10).insert(GameShopPageNext);
         }
         // 搜索（C# Search @(540,69) 140x16；TextInput 31；C# 无文字标签，面板图自带标识）
         spawn_container(p, 540.0, 69.0, 140.0, 16.0, 10)
@@ -1473,7 +1476,8 @@ fn spawn_game_shop(
                         ZIndex(41),
                     ));
                 }
-                // 关闭（`Prguse[361..363]` @(230,8)）
+                // 关闭（`Prguse[361..363]` @(230,8)，图头 16x15；C#
+                // `MirGameShopCell.cs:335-344` `MirButton` 无显式 Size ⇒ AutoSize 取美术尺寸）
                 if let (Some(n), Some(h), Some(pr)) = (
                     load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 361),
                     load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 362),
@@ -1486,13 +1490,14 @@ fn spawn_game_shop(
                         pr,
                         VIEWER_CLOSE_POS.0,
                         VIEWER_CLOSE_POS.1,
-                        24.0,
-                        21.0,
+                        16.0,
+                        15.0,
                         45,
                     )
                     .insert(GameShopViewerClose);
                 }
-                // 左/右转身（`Prguse2[240..242]` @(81,282) / `[243..245]` @(160,282)）
+                // 左/右转身（`Prguse2[240..242]` @(81,282) / `[243..245]` @(160,282)，图头 16x16；
+                // C# `MirGameShopCell.cs:404-438` 两钮均无显式 Size）
                 if let (Some(n), Some(h), Some(pr)) = (
                     load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 240),
                     load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 241),
@@ -1506,7 +1511,7 @@ fn spawn_game_shop(
                         VIEWER_PREV_POS.0,
                         VIEWER_PREV_POS.1,
                         16.0,
-                        14.0,
+                        16.0,
                         45,
                     )
                     .insert(GameShopViewerTurn { right: false });
@@ -1524,7 +1529,7 @@ fn spawn_game_shop(
                         VIEWER_NEXT_POS.0,
                         VIEWER_NEXT_POS.1,
                         16.0,
-                        14.0,
+                        16.0,
                         45,
                     )
                     .insert(GameShopViewerTurn { right: true });

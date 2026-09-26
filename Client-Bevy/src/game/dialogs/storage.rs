@@ -584,7 +584,8 @@ fn spawn_storage_dialog(
                 load_lib_image(&mut libs, &mut images, LibraryName::Title, 211),
                 load_lib_image(&mut libs, &mut images, LibraryName::Title, 212),
             ) {
-                spawn_icon_button(p, n, h, pr, 188.0, 95.0, 70.0, 23.0, 10).insert(StoragePwdClose);
+                // `Title[210]` 图头 76x25（C# `MirMessageBox.cs:87-96` NoButton 无显式 Size）
+                spawn_icon_button(p, n, h, pr, 188.0, 95.0, 76.0, 25.0, 10).insert(StoragePwdClose);
                 spawn_label(p, &cjk, "关闭", 203.0, 99.0, 12.0, Color::WHITE, 11);
             }
         });
@@ -684,7 +685,8 @@ fn spawn_storage_dialog(
                 load_lib_image(&mut libs, &mut images, LibraryName::Title, 211),
                 load_lib_image(&mut libs, &mut images, LibraryName::Title, 212),
             ) {
-                spawn_icon_button(p, n, h, pr, 188.0, 75.0, 70.0, 23.0, 10)
+                // `Title[210]` 图头 76x25（同上）
+                spawn_icon_button(p, n, h, pr, 188.0, 75.0, 76.0, 25.0, 10)
                     .insert(StorageUnlockCancel);
                 spawn_label(p, &cjk, "取消", 203.0, 79.0, 12.0, Color::WHITE, 11);
             }
