@@ -25,6 +25,10 @@ use crate::ui::theme::{
 /// #2892 批B：面板精灵与 C# 原生尺寸（C# `NPCAwakeDialog.Index = 710; Library = Libraries.Title`）
 pub const PANEL: (LibraryName, usize) = (LibraryName::Title, 710);
 pub const PANEL_SIZE: (f32, f32) = (360.0, 420.0);
+/// 主物品格尺寸 = C# `MirItemCell` 構造子里的默认 `Size = new Size(36, 32)`
+/// （`Client/MirControls/MirItemCell.cs:184-186`）。本端此前画 36x28：不仅命中区比原版矮 4px，
+/// `npc_awake_render_system` 还会把物品图**拉伸**到节点尺寸 ⇒ 图标纵向被压扁。
+pub const MAIN_CELL_SIZE: (f32, f32) = (36.0, 32.0);
 
 /// #1356：觉醒面板服务模式（C# PanelType：Awakening/Disassemble/Downgrade/Reset）
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -233,7 +237,16 @@ fn spawn_npc_awake(
             1,
             1,
         ));
-        spawn_image(p, empty, 202.0, 91.0, 36.0, 28.0, 9).insert(NpcAwakeMainIcon);
+        spawn_image(
+            p,
+            empty,
+            202.0,
+            91.0,
+            MAIN_CELL_SIZE.0,
+            MAIN_CELL_SIZE.1,
+            9,
+        )
+        .insert(NpcAwakeMainIcon);
         spawn_label(p, &cjk, "", 202.0, 122.0, 11.0, Color::WHITE, 9).insert(NpcAwakeMainName);
         // 材料需求标签（C# (67,317)/(192,317)）
         for x in [67.0, 192.0] {
@@ -252,6 +265,24 @@ fn spawn_npc_awake(
         )
         .insert(NpcAwakeResultText);
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 门禁（金标准 ⑧ 长尾窗 / 2026-09-27）：主物品格必须是 C# `MirItemCell` 的默认尺寸。
+    /// 阳性对照：把 `MAIN_CELL_SIZE` 改回 `(36.0, 28.0)`（修复前的值）⇒ 本测试 FAILED。
+    #[test]
+    fn main_item_cell_matches_csharp_mir_item_cell_default() {
+        assert_eq!(PANEL, (LibraryName::Title, 710), "C# NPCAwakeDialog.Index = 710");
+        assert_eq!(PANEL_SIZE, (360.0, 420.0), "Title[710] 图头 360x420");
+        assert_eq!(
+            MAIN_CELL_SIZE,
+            (36.0, 32.0),
+            "C# MirItemCell 默认 Size = (36, 32)（MirItemCell.cs:184-186）"
+        );
+    }
 }
 
 #[allow(clippy::too_many_arguments)]

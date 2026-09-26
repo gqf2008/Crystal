@@ -5,7 +5,10 @@
 //   C: MarriageRequest[target dotnet] / MarriageReply[bool] / ChangeMarriage(空)
 //      DivorceRequest[partner dotnet] / DivorceReply[bool]
 //   S: MarriageRequest[lover dotnet] / LoverUpdate[Name dotnet][Date i64][MapName dotnet][MarriedDays i16] / DivorceRequest[lover dotnet]
-// bevy_ui 迁移（批 14）：面板 Prguse[170] @(280,80) 320x262，全节点化；
+// bevy_ui 迁移（批 14）：面板 **`Prguse[583]`**（图头 284x194，C# `Index = 583`、
+//   `Location = Center` → `center_origin(284,194)` = (370,287)），全节点化。
+//   （旧注释写「Prguse[170] @(280,80) 320x262」是错的：`Prguse[170]` 图头 244x207，
+//     且代码里从来没用过它 —— 2026-09-27 长尾窗核对时改正。）
 //   邀请弹窗 = C# MirMessageBox（Prguse[360] 原生 456x190 居中 @(284,289)，
 //   Label(35,35)、Yes Title[206/207/208] (260,157)、No Title[210/211/212] (360,157)）
 // ============================================================================
