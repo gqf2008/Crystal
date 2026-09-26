@@ -18,7 +18,6 @@ use crate::game::dialogs::inventory::{
     inv_slot_at, item_use_sound_id, use_item_core, InvClickState, InvDropConfirm, InvItem,
     InvLockReason, InvLockedSlots, InvUiState, ItemUseFeedback, LockGrid, UseItemCtx, UseOutcome,
 };
-use crate::game::dialogs::text_input::{TextInputDisplay, TextInputField, TextInputRect};
 use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot, NotDraggable};
 use crate::game::player_state::{Inventory, Loadout, StatusFlags};
 use crate::map_renderer::GameLibraries;
@@ -27,7 +26,7 @@ use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
 use crate::ui::sprite_ui::{shared_cjk_font, UiCjkFont, UiFont};
 use crate::ui::theme::{
-    load_lib_image, spawn_container, spawn_icon_button, spawn_image, spawn_item_cell_ui_root,
+    load_lib_image, spawn_icon_button, spawn_image, spawn_item_cell_ui_root,
     spawn_label, spawn_panel, CloseButton, ImageButton, UiItemCell, UiItemCellData, UiItemCellIcon,
 };
 
@@ -96,14 +95,28 @@ pub struct StorageState {
     pub visible: bool,
     /// 当前选中仓库格（原版 C# GameScene.SelectedCell）
     pub selected: Option<usize>,
-    /// 仓库密码面板是否打开
-    pub pwd_panel: bool,
-    /// 仓库密码操作结果提示
-    pub pwd_msg: String,
-    /// 仓库解锁面板是否打开（#200：C# StorageDialog PromptStorageUnlock）
-    pub unlock_panel: bool,
-    /// 仓库解锁结果提示（#200）
-    pub unlock_msg: String,
+    /// C# `UserInformation.RequireStoragePassword`（服务端 `Settings.RequireStoragePassword`，
+    /// C# 默认 true；本端 Rust 服务端登录时置 true，见 `session.rs:798`）
+    pub require_password: bool,
+    /// C# `UserInformation.HasStoragePassword`
+    pub has_password: bool,
+    /// C# `UserInformation.StoragePasswordLastSet`（`DateTime` 秒；0 = 未设过）
+    pub password_last_set: i64,
+    /// C# `StorageDialog._storageUnlocked`（`Hide()` 里复位，见 `NPCDialogs.cs:2997-3001`）
+    pub unlocked: bool,
+    /// 「改密确认框」是否打开（C# `ManageStoragePassword` 里的
+    /// `MirMessageBox(prompt, MirMessageBoxButtons.OKCancel)`，`NPCDialogs.cs:3104`）
+    pub change_confirm: bool,
+    /// 解锁提示是否正开着（`auto/inventory.rs` 的 `--storage-unlock-test` 读它判「解锁框出现」）
+    pub unlock_prompt_open: bool,
+    /// 最近一次解锁/密码操作的错误/结果文案（同上，供自动化判定「错误密码已提示」）
+    pub pwd_last_error: String,
+    /// 流程要求关闭仓库窗（C# `Hide()`；由 `storage_password_cancel` 置位、驱动系统落地，
+    /// 因为取消回调发生在 `input_box` 系统里、拿不到 `DialogManager`）
+    pub close_requested: bool,
+    /// C# `StorageDialog._forcingPasswordSetup`（本端目前只在「取消置 false」与
+    /// 「不一致时是否重来」两处读它；强制设密码闸门本身是下一轮的事）
+    pub forcing_setup: bool,
     /// 当前页（C# `RefreshStorage1`/`RefreshStorage2`）
     pub page: StoragePage,
     /// 是否处于扩容状态（C# `UserInformation.HasExpandedStorage`；第 2 页放行条件）
@@ -254,27 +267,15 @@ pub struct StorageRentConfirmOk;
 #[derive(Component)]
 pub struct StorageRentConfirmCancel;
 
-/// 仓库密码面板
+/// 改密确认框（C# `ManageStoragePassword` 的 `MirMessageBox(prompt, OKCancel)`，含「上次设置」行）
 #[derive(Component)]
-pub struct StoragePwdPanel;
+pub struct StoragePwdChangeConfirm;
 #[derive(Component)]
-pub struct StoragePwdSet;
+pub struct StoragePwdChangeConfirmText;
 #[derive(Component)]
-pub struct StoragePwdRemove;
+pub struct StoragePwdChangeOk;
 #[derive(Component)]
-pub struct StoragePwdClose;
-#[derive(Component)]
-pub struct StoragePwdMsg;
-
-/// 仓库解锁面板（#200）
-#[derive(Component)]
-pub struct StorageUnlockPanel;
-#[derive(Component)]
-pub struct StorageUnlockOk;
-#[derive(Component)]
-pub struct StorageUnlockCancel;
-#[derive(Component)]
-pub struct StorageUnlockMsg;
+pub struct StoragePwdChangeCancel;
 
 /// 仓库格子索引（0..79）
 #[derive(Component, Clone, Copy)]
@@ -285,6 +286,7 @@ pub struct StoragePlugin;
 impl Plugin for StoragePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<StorageState>();
+        app.init_resource::<StoragePwdFlow>();
         app.add_systems(OnEnter(AppState::Game), spawn_storage_dialog);
         app.add_systems(OnExit(AppState::Game), cleanup_storage);
         app.add_systems(
@@ -300,8 +302,7 @@ impl Plugin for StoragePlugin {
                 storage_locked_icon_system,
                 storage_action_system,
                 storage_tooltip_system,
-                storage_pwd_system,
-                storage_unlock_system,
+                storage_pwd_flow_system,
             )
                 .chain()
                 .run_if(in_state(AppState::Game)),
@@ -327,7 +328,6 @@ fn spawn_storage_dialog(
     if !ui_font.0.is_strong() {
         crate::ui::sprite_ui::ensure_ui_font(&mut fonts, &mut ui_font);
     }
-    let font = ui_font.0.clone();
     let cjk = shared_cjk_font(&mut fonts, &mut cjk_font);
 
     // 背景 Prguse[586]（C# StorageDialog.Index=586，实测 388x346 @ (0,0)）
@@ -491,206 +491,44 @@ fn spawn_storage_dialog(
         .insert((StoragePasswordLabel, Visibility::Hidden));
     });
 
-    // 密码面板（根节点覆盖层 300x150 @ (18,360)，GlobalZIndex 45）
-    commands
-        .spawn((
-            Node {
-                position_type: PositionType::Absolute,
-                left: Val::Px(DIALOG_X + 18.0),
-                top: Val::Px(DIALOG_Y + 360.0),
-                width: Val::Px(300.0),
-                height: Val::Px(150.0),
-                ..default()
-            },
-            BackgroundColor(Color::srgba(0.1, 0.1, 0.15, 0.95)),
-            StoragePwdPanel,
+    // #3258：密码/解锁不再是本端自造的「三钮面板」——按 C# 金标准改成
+    //   ① `MirInputBox` 提示序列（`input_box.rs`，OK `Title[200..202]` / Cancel `Title[203..205]`）
+    //   ② 改密前的一次 `MirMessageBox(prompt, OKCancel)` 确认（下面这个框）
+    // 依据：`NPCDialogs.cs:3085-3239`（ManageStoragePassword / BeginSetStoragePassword /
+    // BeginChangeStoragePassword / PromptStorageUnlock / PromptStoragePassword）。
+    // 原来的三钮面板用 `Title[206]`(YES)/`Title[210]`(NO) 当通用按钮，又在上面叠中文标签
+    // ⇒ 艺术图烘的英文词与本端画的中文叠字（owner 反馈项）。整块删除。
+    if let Some(bg) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 360) {
+        let confirm = spawn_panel(&mut commands, bg, 284.0, 289.0, 456.0, 190.0, 48);
+        commands.entity(confirm).insert((
+            StoragePwdChangeConfirm,
             DialogRoot(DialogKind::Storage),
+            crate::game::dialogs::AlwaysVisible,
             NotDraggable,
-            GlobalZIndex(45),
-            Visibility::Hidden,
-        ))
-        .with_children(|p| {
-            for (id, label, y) in [(0usize, "当前密码:", 370.0f32), (1, "新密码:", 400.0)] {
-                spawn_label(p, &cjk, label, 28.0, y - 360.0, 12.0, Color::WHITE, 10);
-                spawn_container(p, 100.0, y - 360.0, 200.0, 20.0, 10)
-                    .insert((
-                        BackgroundColor(Color::srgba(0.2, 0.2, 0.25, 0.9)),
-                        crate::game::dialogs::text_input::TextInputField(id),
-                        // 屏幕系命中框：容器是密码面板（根 @ x+18）的子实体，
-                        // 相对 x=100 → 绝对 x+18+100=118（旧值漏加面板 18 偏移）
-                        crate::game::dialogs::text_input::TextInputRect(
-                            DIALOG_X + 18.0 + 100.0,
-                            y,
-                            200.0,
-                            20.0,
-                        ),
-                    ))
-                    .with_children(|ic| {
-                        ic.spawn((
-                            Node {
-                                position_type: PositionType::Absolute,
-                                left: Val::Px(4.0),
-                                top: Val::Px(2.0),
-                                ..default()
-                            },
-                            Text::new(String::new()),
-                            TextFont {
-                                font: FontSource::Handle(cjk.clone()),
-                                font_size: FontSize::Px(12.0),
-                                ..default()
-                            },
-                            TextColor(Color::WHITE),
-                            ZIndex(11),
-                            crate::game::dialogs::text_input::TextInputDisplay(id),
-                        ));
-                    });
-            }
-            spawn_label(
-                p,
-                &cjk,
-                "",
-                28.0,
-                70.0,
-                12.0,
-                Color::srgb(1.0, 0.9, 0.4),
-                11,
-            )
-            .insert(StoragePwdMsg);
-            // 设置 / 移除 / 关闭
+        ));
+        commands.entity(confirm).with_children(|p| {
+            spawn_label(p, &cjk, "", 35.0, 35.0, 12.0, Color::WHITE, 9)
+                .insert(StoragePwdChangeConfirmText);
+            // `MirMessageBox(OKCancel)`：OK `Title[200..202]` @(260,157)、Cancel `Title[203..205]` @(360,157)
+            // （`MirMessageBox.cs:54-74`）
             if let (Some(n), Some(h), Some(pr)) = (
-                load_lib_image(&mut libs, &mut images, LibraryName::Title, 206),
-                load_lib_image(&mut libs, &mut images, LibraryName::Title, 207),
-                load_lib_image(&mut libs, &mut images, LibraryName::Title, 208),
+                load_lib_image(&mut libs, &mut images, LibraryName::Title, 200),
+                load_lib_image(&mut libs, &mut images, LibraryName::Title, 201),
+                load_lib_image(&mut libs, &mut images, LibraryName::Title, 202),
             ) {
-                spawn_icon_button(
-                    p,
-                    n.clone(),
-                    h.clone(),
-                    pr.clone(),
-                    28.0,
-                    95.0,
-                    70.0,
-                    23.0,
-                    10,
-                )
-                .insert(StoragePwdSet);
-                spawn_label(p, &cjk, "设置", 43.0, 99.0, 12.0, Color::WHITE, 11);
-                spawn_icon_button(p, n, h, pr, 108.0, 95.0, 70.0, 23.0, 10)
-                    .insert(StoragePwdRemove);
-                spawn_label(p, &cjk, "移除", 123.0, 99.0, 12.0, Color::WHITE, 11);
+                spawn_icon_button(p, n, h, pr, 260.0, 157.0, 76.0, 25.0, 10)
+                    .insert(StoragePwdChangeOk);
             }
             if let (Some(n), Some(h), Some(pr)) = (
-                load_lib_image(&mut libs, &mut images, LibraryName::Title, 210),
-                load_lib_image(&mut libs, &mut images, LibraryName::Title, 211),
-                load_lib_image(&mut libs, &mut images, LibraryName::Title, 212),
+                load_lib_image(&mut libs, &mut images, LibraryName::Title, 203),
+                load_lib_image(&mut libs, &mut images, LibraryName::Title, 204),
+                load_lib_image(&mut libs, &mut images, LibraryName::Title, 205),
             ) {
-                // `Title[210]` 图头 76x25（C# `MirMessageBox.cs:87-96` NoButton 无显式 Size）
-                spawn_icon_button(p, n, h, pr, 188.0, 95.0, 76.0, 25.0, 10).insert(StoragePwdClose);
-                spawn_label(p, &cjk, "关闭", 203.0, 99.0, 12.0, Color::WHITE, 11);
+                spawn_icon_button(p, n, h, pr, 360.0, 157.0, 76.0, 25.0, 10)
+                    .insert(StoragePwdChangeCancel);
             }
         });
-
-    // 解锁面板（根节点覆盖层 300x120 @ (18,180)，GlobalZIndex 46）
-    commands
-        .spawn((
-            Node {
-                position_type: PositionType::Absolute,
-                left: Val::Px(DIALOG_X + 18.0),
-                top: Val::Px(DIALOG_Y + 180.0),
-                width: Val::Px(300.0),
-                height: Val::Px(120.0),
-                ..default()
-            },
-            BackgroundColor(Color::srgba(0.1, 0.1, 0.15, 0.95)),
-            StorageUnlockPanel,
-            DialogRoot(DialogKind::Storage),
-            NotDraggable,
-            GlobalZIndex(46),
-            Visibility::Hidden,
-        ))
-        .with_children(|p| {
-            spawn_label(
-                p,
-                &cjk,
-                "请输入仓库密码",
-                28.0,
-                10.0,
-                12.0,
-                Color::WHITE,
-                10,
-            );
-            spawn_container(p, 100.0, 15.0, 200.0, 20.0, 10)
-                .insert((
-                    BackgroundColor(Color::srgba(0.2, 0.2, 0.25, 0.9)),
-                    crate::game::dialogs::text_input::TextInputField(2),
-                    // 同上：解锁面板根 @ x+18，容器相对 x=100 → 绝对 118
-                    crate::game::dialogs::text_input::TextInputRect(
-                        DIALOG_X + 18.0 + 100.0,
-                        DIALOG_Y + 195.0,
-                        200.0,
-                        20.0,
-                    ),
-                ))
-                .with_children(|ic| {
-                    ic.spawn((
-                        Node {
-                            position_type: PositionType::Absolute,
-                            left: Val::Px(4.0),
-                            top: Val::Px(2.0),
-                            ..default()
-                        },
-                        Text::new(String::new()),
-                        TextFont {
-                            font: FontSource::Handle(cjk.clone()),
-                            font_size: FontSize::Px(12.0),
-                            ..default()
-                        },
-                        TextColor(Color::WHITE),
-                        ZIndex(11),
-                        crate::game::dialogs::text_input::TextInputDisplay(2),
-                    ));
-                });
-            spawn_label(
-                p,
-                &cjk,
-                "",
-                28.0,
-                45.0,
-                12.0,
-                Color::srgb(1.0, 0.6, 0.4),
-                11,
-            )
-            .insert(StorageUnlockMsg);
-            if let (Some(n), Some(h), Some(pr)) = (
-                load_lib_image(&mut libs, &mut images, LibraryName::Title, 206),
-                load_lib_image(&mut libs, &mut images, LibraryName::Title, 207),
-                load_lib_image(&mut libs, &mut images, LibraryName::Title, 208),
-            ) {
-                spawn_icon_button(
-                    p,
-                    n.clone(),
-                    h.clone(),
-                    pr.clone(),
-                    100.0,
-                    75.0,
-                    70.0,
-                    23.0,
-                    10,
-                )
-                .insert(StorageUnlockOk);
-                spawn_label(p, &cjk, "确定", 115.0, 79.0, 12.0, Color::WHITE, 11);
-            }
-            if let (Some(n), Some(h), Some(pr)) = (
-                load_lib_image(&mut libs, &mut images, LibraryName::Title, 210),
-                load_lib_image(&mut libs, &mut images, LibraryName::Title, 211),
-                load_lib_image(&mut libs, &mut images, LibraryName::Title, 212),
-            ) {
-                // `Title[210]` 图头 76x25（同上）
-                spawn_icon_button(p, n, h, pr, 188.0, 75.0, 76.0, 25.0, 10)
-                    .insert(StorageUnlockCancel);
-                spawn_label(p, &cjk, "取消", 203.0, 79.0, 12.0, Color::WHITE, 11);
-            }
-        });
+    }
 
     // 格子底板不在此预生成：#281 由 storage_grid_sync_system 动态生成
 
@@ -1024,6 +862,8 @@ fn storage_ui_system(
             // #2956：双闸门同步清——只 mgr.close 会留 (visible=true, mgr=closed)
             // 失配态，此后 RPC `dialog storage toggle` 永远无法再开窗
             state.visible = false;
+            // #3258：同上，C# `Hide()` 复位解锁态
+            state.unlocked = false;
             mgr.close(DialogKind::Storage);
         }
     }
@@ -1268,6 +1108,11 @@ fn storage_server_events(
     >,
     mut inv_q: Query<&mut Inventory, With<LocalPlayer>>,
     mut locked: ResMut<InvLockedSlots>,
+    // #3258：密码流程的落点（弹输入框 / 系统提示）都在这个系统里
+    mut pwd_flow: ResMut<StoragePwdFlow>,
+    mut input_box_state: ResMut<crate::game::dialogs::input_box::InputBoxState>,
+    mut text_input_state: ResMut<crate::game::dialogs::text_input::TextInputState>,
+    mut chat: ResMut<crate::game::chat::ChatState>,
 ) {
     use crate::network::server_event::ServerEvent;
     for ev in events.read() {
@@ -1315,6 +1160,8 @@ fn storage_server_events(
                 // 否则 (visible=false, mgr=open) 失配，RPC `dialog storage toggle`
                 // 在 (false,open)↔(true,closed) 间振荡、永远到不了 (true,true)
                 mgr.close(DialogKind::Storage);
+                // #3258：C# `Hide()`（`NPCDialogs.cs:2997-3001`）里 `_storageUnlocked = false`
+                storage.unlocked = false;
             }
         }
         if let ServerEvent::StorageOpened { .. } = ev {
@@ -1345,24 +1192,66 @@ fn storage_server_events(
         }
         // P3-3：背包/装备名（`UserInformation`）也进同一张表——原版那张 `ItemInfoList`
         // 是全局的，仓库格名字能从里面直接取到，省一次往返。
-        if let ServerEvent::UserInformation { item_names, .. } = ev {
+        if let ServerEvent::UserInformation {
+            item_names,
+            has_storage_password,
+            require_storage_password,
+            storage_password_last_set,
+            ..
+        } = ev
+        {
             for (idx, name) in item_names {
                 crate::game::item_names::remember_item_name(&mut storage.item_names, *idx, name);
             }
+            // C# `GameScene.User.HasStoragePassword / RequireStoragePassword / StoragePasswordLastSet`
+            // （`UserInformation` 逐字段赋值）—— 密码流程的三个判据源
+            storage.has_password = *has_storage_password;
+            storage.require_password = *require_storage_password;
+            storage.password_last_set = *storage_password_last_set;
         }
         if let ServerEvent::StoragePasswordResult { result } = ev {
-            // C# result：4=成功 2=当前密码错误 5=未设置密码
-            storage.pwd_msg = match *result {
-                4 => "仓库密码已保存".to_string(),
-                2 => "当前密码错误".to_string(),
-                5 => "未设置仓库密码".to_string(),
-                _ => "仓库密码操作失败".to_string(),
+            // C# `HandleStoragePasswordResult`（`NPCDialogs.cs:3027-3078`）：
+            // 4=成功 2=当前密码错误 5=未设置密码 1/3=格式不可接受 0=不可用
+            let had_password = storage.has_password;
+            storage.pwd_last_error.clear();
+            let msg = match *result {
+                4 => {
+                    storage.has_password = true;
+                    if had_password {
+                        TEXT_PWD_CHANGE_SUCCESS
+                    } else {
+                        TEXT_PWD_SET_SUCCESS
+                    }
+                }
+                1 | 3 => {
+                    storage.pwd_last_error = TEXT_PWD_NOT_ACCEPTABLE.to_string();
+                    TEXT_PWD_NOT_ACCEPTABLE
+                }
+                2 => {
+                    storage.pwd_last_error = TEXT_PWD_WRONG.to_string();
+                    TEXT_PWD_WRONG
+                }
+                5 => {
+                    storage.pwd_last_error = TEXT_PWD_NO_PASSWORD.to_string();
+                    TEXT_PWD_NO_PASSWORD
+                }
+                _ => {
+                    storage.pwd_last_error = TEXT_PWD_UNAVAILABLE.to_string();
+                    TEXT_PWD_UNAVAILABLE
+                }
             };
+            // C# `SendStorageSystemMessage`：走聊天窗的系统频道
+            chat.add_line(
+                msg,
+                crate::game::chat::chat_color(mir2_shared::enums::ChatType::System),
+                crate::game::chat::ChatChannel::System,
+            );
+            tracing::info!("🔒 仓库密码结果 result={}：{msg}", result);
         }
         if let ServerEvent::StoragePrompt = ev {
-            // #200：NPCStorage —— 有密码的仓库先弹解锁框（C# StorageDialog.Show → PromptStorageUnlock）
-            storage.unlock_panel = true;
-            storage.unlock_msg.clear();
+            // C# `S.NPCStorage` → `StorageDialog.Show()` → 有密码且未解锁 → `PromptStorageUnlock()`
+            // （`NPCDialogs.cs:2982-2988`）。服务端只在**有密码**时发这个包（`npc.rs:781`）。
+            start_unlock_prompt(&mut input_box_state, &mut text_input_state, &mut storage, &mut pwd_flow);
         }
         if let ServerEvent::StorageResized {
             size,
@@ -1385,17 +1274,34 @@ fn storage_server_events(
             has_password,
         } = ev
         {
-            // C# result：0=成功 1=格式错 2=密码错 3=不可用 4=无密码直接解锁
-            let _ = has_password;
+            // C# `HandleStorageUnlockResult`（`NPCDialogs.cs:3003-3025`）：
+            // 0/4 = 成功 → `_storageUnlocked = true` + `Show()`；1/2/3 → 系统提示（解锁框留着）
+            storage.has_password = *has_password;
+            storage.pwd_last_error.clear();
             match *result {
                 0 | 4 => {
-                    storage.unlock_panel = false;
-                    storage.unlock_msg.clear();
+                    storage.unlocked = true;
+                    storage.unlock_prompt_open = false;
                 }
-                1 => storage.unlock_msg = "仓库密码格式不正确".to_string(),
-                2 => storage.unlock_msg = "仓库密码错误".to_string(),
-                3 => storage.unlock_msg = "无法使用仓库".to_string(),
-                _ => storage.unlock_msg = "仓库解锁失败".to_string(),
+                1 => {
+                    storage.pwd_last_error = TEXT_PWD_NOT_ACCEPTABLE.to_string();
+                }
+                2 => {
+                    storage.pwd_last_error = TEXT_PWD_WRONG.to_string();
+                }
+                3 => {
+                    storage.pwd_last_error = TEXT_PWD_UNAVAILABLE.to_string();
+                }
+                _ => {
+                    storage.pwd_last_error = TEXT_PWD_UNAVAILABLE.to_string();
+                }
+            }
+            if !storage.pwd_last_error.is_empty() {
+                chat.add_line(
+                    storage.pwd_last_error.clone(),
+                    crate::game::chat::chat_color(mir2_shared::enums::ChatType::System),
+                    crate::game::chat::ChatChannel::System,
+                );
             }
         }
         if let ServerEvent::ItemStored { from, to, success } = ev {
@@ -1489,89 +1395,355 @@ fn storage_tooltip_system(
     tooltip.update(3, true, title, lines, cursor.x, cursor.y);
 }
 
-/// 仓库密码面板：按钮开关 + 设置/移除/关闭 + 结果提示
-fn storage_pwd_system(
-    mut storage: ResMut<StorageState>,
-    net: Res<NetConnection>,
-    mut input: ResMut<crate::game::dialogs::text_input::TextInputState>,
-    pwd_btn: Query<(Entity, &Interaction), With<StoragePwdBtn>>,
-    set_btn: Query<(Entity, &Interaction), With<StoragePwdSet>>,
-    remove_btn: Query<(Entity, &Interaction), With<StoragePwdRemove>>,
-    close_btn: Query<(Entity, &Interaction), With<StoragePwdClose>>,
-    mut panel: Query<&mut Visibility, (With<StoragePwdPanel>, Without<StoragePwdBtn>)>,
-    mut msg: Query<&mut Text, With<StoragePwdMsg>>,
-    mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
+// ============================================================================
+// #3258 仓库密码流程：按 C# 金标准（`NPCDialogs.cs:3085-3239`）重做
+//
+// C# 用**嵌套闭包回调**表达这个状态机：
+//   ManageStoragePassword()（:3085）
+//     ├─ !HasStoragePassword → BeginSetStoragePassword()（:3123）
+//     │      Prompt(new) → Prompt(confirm) → `C.SetStoragePassword{"", new}`；
+//     │      不一致 → 系统提示 + （force 时重来 / 否则原地重输）
+//     └─ HasStoragePassword  → MirMessageBox(changePrompt, OKCancel)（:3104）
+//                              OK → BeginChangeStoragePassword()（:3159）
+//                                   Prompt(current) → Prompt(new) → Prompt(confirm)
+//                                   → `C.SetStoragePassword{current, new}`
+//   PromptStorageUnlock()（:3192）：Prompt(password) → `C.UnlockStorage{password}`；Cancel → Hide()
+// 每一步都走 `PromptStoragePassword`（:3206）：`MirInputBox(prompt + "\n" + rules)`、
+// `InputTextBox.Password = true`、空输入时 OK 无效。
+//
+// 原实现是一个自造的「设置 / 移除 / 关闭」三钮面板，用的还是 `Title[206]`(YES)/`Title[210]`(NO)
+// 这套「艺术图里烘了英文」的按钮，又在上面叠中文标签 ⇒ 叠字（owner 反馈项）。整块删除。
+// ============================================================================
+
+/// `Globals.MinPasswordLength` / `MaxPasswordLength`（`Shared/Globals.cs:10`；服务端同值）
+pub const MIN_PASSWORD_LEN: usize = 5;
+pub const MAX_PASSWORD_LEN: usize = 15;
+
+/// C# `ClientTextKeys.*`（英文默认值见 `Shared/Language.cs:2693-2709`；中文词条不在本机可见的
+/// `Client/Localization/Chinese.json` 里——原始安装也没有 Localization 目录，C# 运行时会回落到
+/// 那份英文默认。本端按同一模板给出中文措辞，语义逐条对应。）
+pub const TEXT_PWD_PROMPT: &str = "请输入仓库密码。";
+pub const TEXT_PWD_NEW: &str = "请输入新的仓库密码。";
+pub const TEXT_PWD_CONFIRM: &str = "请再次输入新的仓库密码。";
+pub const TEXT_PWD_CURRENT: &str = "请输入当前仓库密码。";
+pub const TEXT_PWD_CHANGE_PROMPT: &str = "是否修改仓库密码？";
+pub const TEXT_PWD_LAST_SET_PREFIX: &str = "上次设置：";
+pub const TEXT_PWD_MISMATCH: &str = "两次输入的密码不一致。";
+pub const TEXT_PWD_SET_SUCCESS: &str = "仓库密码已设置。";
+pub const TEXT_PWD_CHANGE_SUCCESS: &str = "仓库密码已修改。";
+pub const TEXT_PWD_WRONG: &str = "仓库密码错误。";
+pub const TEXT_PWD_NOT_ACCEPTABLE: &str = "密码不符合要求。";
+pub const TEXT_PWD_UNAVAILABLE: &str = "仓库不可用。";
+pub const TEXT_PWD_NO_PASSWORD: &str = "未设置仓库密码。";
+
+/// `StoragePasswordRules`（`Shared/Language.cs:2707`）：提示的第二行
+pub fn storage_password_rules() -> String {
+    format!(
+        "密码长度必须为 {}-{} 个字符，只能用字母和数字。",
+        MIN_PASSWORD_LEN, MAX_PASSWORD_LEN
+    )
+}
+
+/// 流程当前步（对应 C# 里嵌套到哪一层闭包）
+#[derive(Default, Clone, PartialEq, Eq, Debug)]
+pub enum StoragePwdStep {
+    #[default]
+    None,
+    /// `PromptStoragePassword(StoragePasswordNewPrompt)`（`:3125`）
+    SetNew,
+    /// 已收到新密码，等确认（`:3138`）
+    SetConfirm { new: String },
+    /// `PromptStoragePassword(StoragePasswordCurrentPrompt)`（`:3161`）
+    ChangeCurrent,
+    /// 已收到当前密码，等新密码（`:3168`）
+    ChangeNew { current: String },
+    /// 已收到新密码，等确认（`:3175`）
+    ChangeConfirm { current: String, new: String },
+    /// `PromptStoragePassword(StoragePasswordPrompt)`（`:3194`）
+    Unlock,
+}
+
+/// 密码流程资源（C# 里那些闭包的现场）
+#[derive(Resource, Default)]
+pub struct StoragePwdFlow {
+    pub step: StoragePwdStep,
+    /// C# `PromptStorageUnlock(..., () => Hide())` 与 `BeginSetStoragePassword(onCancel=…)`：
+    /// 取消时是否**连仓库窗一起关**；改密路径不传 onCancel ⇒ 只关输入框
+    pub cancel_hides_storage: bool,
+}
+
+/// 要发的包（原版只有这两个：`SetStoragePassword` / `UnlockStorage`）
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub enum PwdPacket {
+    Set { current: String, new: String },
+    Unlock { password: String },
+}
+
+/// 一步输入的判定结果（纯数据，便于单测；副作用由 `input_box.rs` 执行）
+#[derive(Default, Clone, PartialEq, Eq, Debug)]
+pub struct PwdStepResult {
+    /// 输入框是否保持打开（空输入 = C# `return false`；不一致时 C# 也 `return false`）
+    pub keep_open: bool,
+    pub packet: Option<PwdPacket>,
+    /// 要回显到系统频道的文案（C# `SendStorageSystemMessage`）
+    pub message: Option<String>,
+    /// 前进到下一问（调用方用 `open_pwd_prompt` 打开）
+    pub next: Option<(StoragePwdStep, &'static str)>,
+    /// C# `:3145-3147`：强制设密码且两次不一致 → 从第一步**重来**
+    pub restart_set: bool,
+}
+
+/// 打开一步「仓库密码」输入框（C# `PromptStoragePassword`，`:3206-3239`）：
+/// 标题 = `prompt + 换行 + rules`，输入框走密码遮罩（`TextInputState.masked`）。
+pub fn open_pwd_prompt(
+    ib: &mut crate::game::dialogs::input_box::InputBoxState,
+    input: &mut crate::game::dialogs::text_input::TextInputState,
+    flow: &mut StoragePwdFlow,
+    step: StoragePwdStep,
+    prompt: &str,
 ) {
-    fn edge(
-        e: Entity,
-        inter: &Interaction,
-        prev: &mut std::collections::HashMap<Entity, Interaction>,
-    ) -> bool {
-        let was = prev.insert(e, *inter);
-        *inter == Interaction::Pressed && was != Some(Interaction::Pressed)
+    let title = format!("{prompt}\n{}", storage_password_rules());
+    crate::game::dialogs::input_box::open_input_box(
+        ib,
+        input,
+        crate::game::dialogs::input_box::InputPurpose::StoragePassword,
+        &title,
+    );
+    input.set_masked(crate::game::dialogs::input_box::INPUT_FIELD_ID, true);
+    flow.step = step;
+}
+
+/// 开始「设置密码」流程（C# `BeginSetStoragePassword`，`:3123`）
+pub fn start_set_password_flow(
+    ib: &mut crate::game::dialogs::input_box::InputBoxState,
+    input: &mut crate::game::dialogs::text_input::TextInputState,
+    flow: &mut StoragePwdFlow,
+) {
+    flow.cancel_hides_storage = true; // C# `BeginSetStoragePassword(onCancel=…)`
+    open_pwd_prompt(ib, input, flow, StoragePwdStep::SetNew, TEXT_PWD_NEW);
+    tracing::info!("🔒 仓库密码：开始设置流程");
+}
+
+/// 开始「修改密码」流程（C# `BeginChangeStoragePassword`，`:3159`）
+pub fn start_change_password_flow(
+    ib: &mut crate::game::dialogs::input_box::InputBoxState,
+    input: &mut crate::game::dialogs::text_input::TextInputState,
+    flow: &mut StoragePwdFlow,
+) {
+    flow.cancel_hides_storage = false; // C# 这条路径不传 onCancel
+    open_pwd_prompt(
+        ib,
+        input,
+        flow,
+        StoragePwdStep::ChangeCurrent,
+        TEXT_PWD_CURRENT,
+    );
+    tracing::info!("🔒 仓库密码：开始修改流程");
+}
+
+/// 解锁提示（C# `PromptStorageUnlock`，`:3192`）
+pub fn start_unlock_prompt(
+    ib: &mut crate::game::dialogs::input_box::InputBoxState,
+    input: &mut crate::game::dialogs::text_input::TextInputState,
+    st: &mut StorageState,
+    flow: &mut StoragePwdFlow,
+) {
+    flow.cancel_hides_storage = true; // C# `() => Hide()`
+    open_pwd_prompt(ib, input, flow, StoragePwdStep::Unlock, TEXT_PWD_PROMPT);
+    st.unlock_prompt_open = true;
+    tracing::info!("🔓 仓库密码：弹解锁输入框");
+}
+
+/// C# `StorageDialog.ManageStoragePassword()`（`:3085-3107`）—— ProtectButton 点击入口
+pub fn manage_storage_password(
+    ib: &mut crate::game::dialogs::input_box::InputBoxState,
+    input: &mut crate::game::dialogs::text_input::TextInputState,
+    st: &mut StorageState,
+    flow: &mut StoragePwdFlow,
+) {
+    if !st.require_password {
+        return; // C# `:3088`
     }
-    let open = storage.pwd_panel;
-    for mut vis in &mut panel {
-        *vis = if open {
-            Visibility::Visible
-        } else {
-            Visibility::Hidden
-        };
+    if !st.has_password {
+        start_set_password_flow(ib, input, flow); // C# `:3090-3093`
+        return;
     }
-    for mut t in &mut msg {
-        if t.0 != storage.pwd_msg {
-            t.0 = storage.pwd_msg.clone();
-        }
-    }
-    for (e, inter) in &pwd_btn {
-        if edge(e, inter, &mut prev_inter) {
-            storage.pwd_panel = !storage.pwd_panel;
-            storage.pwd_msg.clear();
-            if input.texts.len() < 2 {
-                input.texts.resize(2, String::new());
+    st.change_confirm = true; // C# `:3104` MirMessageBox(changePrompt, OKCancel)
+}
+
+/// C# `PromptStoragePassword` 的 `onSubmit`（`:3206-3239`）一步：推进状态机。
+pub fn storage_password_step(
+    text: &str,
+    st: &mut StorageState,
+    flow: &mut StoragePwdFlow,
+) -> PwdStepResult {
+    let mut out = PwdStepResult::default();
+    match flow.step.clone() {
+        StoragePwdStep::None => {}
+        StoragePwdStep::Unlock => {
+            if text.is_empty() {
+                out.keep_open = true;
+                return out;
             }
-            input.active = None;
-        }
-    }
-    for (e, inter) in &set_btn {
-        if edge(e, inter, &mut prev_inter) && open {
-            let current = input.texts.get(0).cloned().unwrap_or_default();
-            let new = input.texts.get(1).cloned().unwrap_or_default();
-            net.send_packet(&mir2_shared::packets::client::storage::SetStoragePassword {
-                current_password: current,
-                new_password: new,
+            out.packet = Some(PwdPacket::Unlock {
+                password: text.to_string(),
             });
-            tracing::info!("🔒 设置仓库密码");
+            flow.step = StoragePwdStep::None;
+            st.unlock_prompt_open = false;
         }
-    }
-    for (e, inter) in &remove_btn {
-        if edge(e, inter, &mut prev_inter) && open {
-            let current = input.texts.get(0).cloned().unwrap_or_default();
-            net.send_packet(
-                &mir2_shared::packets::client::storage::RemoveStoragePassword {
-                    current_password: current,
+        StoragePwdStep::SetNew => {
+            if text.is_empty() {
+                out.keep_open = true;
+                return out;
+            }
+            out.next = Some((
+                StoragePwdStep::SetConfirm {
+                    new: text.to_string(),
                 },
-            );
-            tracing::info!("🔓 移除仓库密码");
+                TEXT_PWD_CONFIRM,
+            ));
+            out.keep_open = true;
+        }
+        StoragePwdStep::SetConfirm { new } => {
+            if text.is_empty() {
+                out.keep_open = true;
+                return out;
+            }
+            if new != text {
+                out.message = Some(TEXT_PWD_MISMATCH.to_string());
+                // C# `:3143-3150`：force 时重来，否则 `return false`（原地重输）
+                if st.forcing_setup {
+                    out.restart_set = true;
+                }
+                out.keep_open = true;
+                return out;
+            }
+            out.packet = Some(PwdPacket::Set {
+                current: String::new(),
+                new,
+            });
+            flow.step = StoragePwdStep::None;
+        }
+        StoragePwdStep::ChangeCurrent => {
+            if text.is_empty() {
+                out.keep_open = true;
+                return out;
+            }
+            out.next = Some((
+                StoragePwdStep::ChangeNew {
+                    current: text.to_string(),
+                },
+                TEXT_PWD_NEW,
+            ));
+            out.keep_open = true;
+        }
+        StoragePwdStep::ChangeNew { current } => {
+            if text.is_empty() {
+                out.keep_open = true;
+                return out;
+            }
+            out.next = Some((
+                StoragePwdStep::ChangeConfirm {
+                    current,
+                    new: text.to_string(),
+                },
+                TEXT_PWD_CONFIRM,
+            ));
+            out.keep_open = true;
+        }
+        StoragePwdStep::ChangeConfirm { current, new } => {
+            if text.is_empty() {
+                out.keep_open = true;
+                return out;
+            }
+            if new != text {
+                out.message = Some(TEXT_PWD_MISMATCH.to_string());
+                out.keep_open = true; // C# `:3177-3181`：提示后 `return false`
+                return out;
+            }
+            out.packet = Some(PwdPacket::Set { current, new });
+            flow.step = StoragePwdStep::None;
         }
     }
-    for (e, inter) in &close_btn {
-        if edge(e, inter, &mut prev_inter) && open {
-            storage.pwd_panel = false;
-            input.active = None;
+    out
+}
+
+/// 发密码流程的包（C# `Network.Enqueue(new C.SetStoragePassword{…} / new C.UnlockStorage{…})`）
+pub fn send_pwd_packet(net: &NetConnection, pkt: &PwdPacket) {
+    match pkt {
+        PwdPacket::Set { current, new } => {
+            net.send_packet(&mir2_shared::packets::client::storage::SetStoragePassword {
+                current_password: current.clone(),
+                new_password: new.clone(),
+            });
+            tracing::info!(
+                "🔒 发送 C.SetStoragePassword（current_len={} new_len={}）",
+                current.chars().count(),
+                new.chars().count()
+            );
+        }
+        PwdPacket::Unlock { password } => {
+            net.send_packet(&mir2_shared::packets::client::storage::UnlockStorage {
+                password: password.clone(),
+            });
+            tracing::info!("🔓 发送 C.UnlockStorage（len={}）", password.chars().count());
         }
     }
 }
 
-/// 仓库解锁面板：输入密码 → C.UnlockStorage；取消关闭（#200，C# PromptStorageUnlock）
-fn storage_unlock_system(
-    mut storage: ResMut<StorageState>,
-    net: Res<NetConnection>,
+/// 输入框 Cancel/Esc（C# `onCancel`）：按 `cancel_hides_storage` 决定是否连仓库窗一起关。
+pub fn storage_password_cancel(st: &mut StorageState, flow: &mut StoragePwdFlow) {
+    flow.step = StoragePwdStep::None;
+    st.unlock_prompt_open = false;
+    if flow.cancel_hides_storage {
+        // C# `CancelStoragePasswordSetup()`（`:3116-3121`）→ `Hide()`
+        st.forcing_setup = false;
+        st.unlocked = false;
+        st.visible = false;
+        st.close_requested = true;
+    }
+    flow.cancel_hides_storage = false;
+}
+
+/// C# `StoragePasswordLastSet.ToString("g")`：本端用同口径的本地时间串（仅作提示行）
+fn format_pwd_last_set(epoch_secs: i64) -> String {
+    let secs = epoch_secs.max(0);
+    let days = secs / 86_400;
+    let rem = secs % 86_400;
+    let (h, m) = (rem / 3600, (rem % 3600) / 60);
+    // 民用历换算（Howard Hinnant days_from_civil 的逆运算）
+    let z = days + 719_468;
+    let era = z / 146_097;
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let y0 = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let mth = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = if mth <= 2 { y0 + 1 } else { y0 };
+    format!("{:04}-{:02}-{:02} {:02}:{:02}", y, mth, d, h, m)
+}
+
+/// 改密确认框（C# `MirMessageBox(prompt, OKCancel)`）+ ProtectButton 入口的驱动系统。
+#[allow(clippy::too_many_arguments)]
+fn storage_pwd_flow_system(
+    mut st: ResMut<StorageState>,
+    mut mgr: ResMut<DialogManager>,
+    mut ib: ResMut<crate::game::dialogs::input_box::InputBoxState>,
     mut input: ResMut<crate::game::dialogs::text_input::TextInputState>,
-    ok_btn: Query<(Entity, &Interaction), With<StorageUnlockOk>>,
-    cancel_btn: Query<(Entity, &Interaction), With<StorageUnlockCancel>>,
-    mut panel: Query<&mut Visibility, With<StorageUnlockPanel>>,
-    mut msg: Query<&mut Text, With<StorageUnlockMsg>>,
+    mut flow: ResMut<StoragePwdFlow>,
+    pwd_btn: Query<(Entity, &Interaction), With<StoragePwdBtn>>,
+    ok_btn: Query<
+        (Entity, &Interaction),
+        (With<StoragePwdChangeOk>, Without<StoragePwdChangeCancel>),
+    >,
+    cancel_btn: Query<
+        (Entity, &Interaction),
+        (With<StoragePwdChangeCancel>, Without<StoragePwdChangeOk>),
+    >,
+    mut panel: Query<&mut Visibility, With<StoragePwdChangeConfirm>>,
+    mut text: Query<&mut Text, With<StoragePwdChangeConfirmText>>,
     mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
 ) {
     fn edge(
@@ -1582,38 +1754,51 @@ fn storage_unlock_system(
         let was = prev.insert(e, *inter);
         *inter == Interaction::Pressed && was != Some(Interaction::Pressed)
     }
-    let open = storage.unlock_panel;
+    // `storage_password_cancel` 只能改状态（它在 `input_box` 系统里被调用、拿不到 DialogManager），
+    // 「关仓窗」这个副作用在这里落地（C# `Hide()`）。
+    if st.close_requested {
+        st.close_requested = false;
+        mgr.close(DialogKind::Storage);
+    }
+    let open = st.change_confirm && st.visible && mgr.is_open(DialogKind::Storage);
     for mut vis in &mut panel {
-        *vis = if open {
+        let want = if open {
             Visibility::Visible
         } else {
             Visibility::Hidden
         };
-    }
-    for mut t in &mut msg {
-        if t.0 != storage.unlock_msg {
-            t.0 = storage.unlock_msg.clone();
+        if *vis != want {
+            *vis = want;
         }
     }
-    if open && input.texts.len() < 3 {
-        input.texts.resize(3, String::new());
+    if open {
+        // C# `:3096-3102`：提示 +（若设过）「上次设置」行
+        let mut want = TEXT_PWD_CHANGE_PROMPT.to_string();
+        if st.password_last_set > 0 {
+            want.push('\n');
+            want.push_str(TEXT_PWD_LAST_SET_PREFIX);
+            want.push_str(&format_pwd_last_set(st.password_last_set));
+        }
+        for mut t in &mut text {
+            if t.0 != want {
+                t.0 = want.clone();
+            }
+        }
+    }
+    for (e, inter) in &pwd_btn {
+        if edge(e, inter, &mut prev_inter) {
+            manage_storage_password(&mut ib, &mut input, &mut st, &mut flow);
+        }
     }
     for (e, inter) in &ok_btn {
         if edge(e, inter, &mut prev_inter) && open {
-            let password = input.texts.get(2).cloned().unwrap_or_default();
-            net.send_packet(&mir2_shared::packets::client::storage::UnlockStorage { password });
-            tracing::info!("🔓 发送仓库解锁请求");
-            if let Some(t) = input.texts.get_mut(2) {
-                t.clear();
-            }
-            input.active = None;
+            st.change_confirm = false;
+            start_change_password_flow(&mut ib, &mut input, &mut flow);
         }
     }
     for (e, inter) in &cancel_btn {
         if edge(e, inter, &mut prev_inter) && open {
-            storage.unlock_panel = false;
-            storage.unlock_msg.clear();
-            input.active = None;
+            st.change_confirm = false; // C# `MirMessageBox` 的 Cancel 只 Dispose
         }
     }
 }
@@ -2267,6 +2452,11 @@ mod tests {
         // P3-3（#782）：storage_server_events 现在还会按需发 `RequestItemInfo` → 需该资源
         app.insert_resource(NetConnection::default());
         app.insert_resource(crate::game::dialogs::inventory::InventoryOrigin(0.0, 0.0));
+        // #3258：storage_server_events 现在还要驱动密码流程（弹输入框 / 系统提示）
+        app.init_resource::<StoragePwdFlow>();
+        app.init_resource::<crate::game::dialogs::input_box::InputBoxState>();
+        app.init_resource::<crate::game::dialogs::text_input::TextInputState>();
+        app.init_resource::<crate::game::chat::ChatState>();
         app.add_systems(Update, storage_server_events);
         app
     }
@@ -2413,6 +2603,240 @@ mod tests {
                 .resource::<DialogManager>()
                 .is_open(DialogKind::Storage),
             "visible=true 事件后 mgr 应 open Storage"
+        );
+    }
+
+    // ========================================================================
+    // #3258 仓库密码流程门禁（对齐 C# `NPCDialogs.cs:3085-3239`）
+    // ========================================================================
+
+    fn flow() -> super::StoragePwdFlow {
+        super::StoragePwdFlow::default()
+    }
+
+    /// 设置流程：new → confirm → `C.SetStoragePassword{"", new}`；
+    /// 两次不一致只提示、不前进（C# `:3138-3155`）。
+    #[test]
+    fn set_password_flow_matches_csharp() {
+        let mut st = super::StorageState::default();
+        let mut f = flow();
+        f.step = super::StoragePwdStep::SetNew;
+
+        let r = super::storage_password_step("", &mut st, &mut f);
+        assert!(r.keep_open && r.packet.is_none(), "空输入：C# `return false`（原地）");
+
+        let r = super::storage_password_step("abc123", &mut st, &mut f);
+        assert!(r.keep_open, "第一步成功后仍要问确认（输入框保持打开）");
+        let (next_step, next_prompt) = r.next.clone().expect("应给出下一问");
+        assert_eq!(next_prompt, super::TEXT_PWD_CONFIRM);
+        f.step = next_step; // 真实调用方（input_box）就是这么接的
+
+        // 不一致 → 提示 + 不前进（非强制路径）
+        let r = super::storage_password_step("xyz999", &mut st, &mut f);
+        assert!(r.keep_open && r.packet.is_none());
+        assert_eq!(r.message.as_deref(), Some(super::TEXT_PWD_MISMATCH));
+        assert!(!r.restart_set, "非强制路径不重来（C# 只在 force 时重来）");
+
+        // 一致 → 发包（current 为空串，C# `:3152`）
+        let r = super::storage_password_step("abc123", &mut st, &mut f);
+        assert!(!r.keep_open, "发完包就该关输入框");
+        assert_eq!(
+            r.packet,
+            Some(super::PwdPacket::Set {
+                current: String::new(),
+                new: "abc123".to_string()
+            })
+        );
+        assert_eq!(f.step, super::StoragePwdStep::None);
+    }
+
+    /// 强制设密码路径下两次不一致 → 从头重来（C# `:3145-3147`）。
+    #[test]
+    fn forced_set_restarts_on_mismatch() {
+        let mut st = super::StorageState {
+            forcing_setup: true,
+            ..Default::default()
+        };
+        let mut f = flow();
+        f.step = super::StoragePwdStep::SetConfirm {
+            new: "abc123".to_string(),
+        };
+        let r = super::storage_password_step("nope", &mut st, &mut f);
+        assert!(r.restart_set, "force 路径必须重来");
+        assert_eq!(r.message.as_deref(), Some(super::TEXT_PWD_MISMATCH));
+    }
+
+    /// 改密流程：current → new → confirm → `C.SetStoragePassword{current, new}`（C# `:3159-3189`）。
+    #[test]
+    fn change_password_flow_matches_csharp() {
+        let mut st = super::StorageState::default();
+        let mut f = flow();
+        f.step = super::StoragePwdStep::ChangeCurrent;
+
+        let r = super::storage_password_step("old123", &mut st, &mut f);
+        let (s1, p1) = r.next.clone().expect("应问新密码");
+        assert_eq!(p1, super::TEXT_PWD_NEW);
+        assert_eq!(
+            s1,
+            super::StoragePwdStep::ChangeNew {
+                current: "old123".to_string()
+            }
+        );
+        f.step = s1;
+        let r = super::storage_password_step("new456", &mut st, &mut f);
+        let (s2, p2) = r.next.clone().expect("应问确认");
+        assert_eq!(p2, super::TEXT_PWD_CONFIRM);
+        assert_eq!(
+            s2,
+            super::StoragePwdStep::ChangeConfirm {
+                current: "old123".to_string(),
+                new: "new456".to_string()
+            }
+        );
+        f.step = s2;
+        let r = super::storage_password_step("new456", &mut st, &mut f);
+        assert_eq!(
+            r.packet,
+            Some(super::PwdPacket::Set {
+                current: "old123".to_string(),
+                new: "new456".to_string()
+            })
+        );
+        assert!(!r.keep_open);
+    }
+
+    /// 解锁：非空才发 `C.UnlockStorage`；空输入原地（C# `:3194-3203` + `:3228`）。
+    #[test]
+    fn unlock_flow_matches_csharp() {
+        let mut st = super::StorageState {
+            unlock_prompt_open: true,
+            ..Default::default()
+        };
+        let mut f = flow();
+        f.step = super::StoragePwdStep::Unlock;
+        let r = super::storage_password_step("", &mut st, &mut f);
+        assert!(r.keep_open && r.packet.is_none());
+        assert!(st.unlock_prompt_open, "空输入时解锁提示还开着");
+
+        let r = super::storage_password_step("secret", &mut st, &mut f);
+        assert_eq!(
+            r.packet,
+            Some(super::PwdPacket::Unlock {
+                password: "secret".to_string()
+            })
+        );
+        assert!(!st.unlock_prompt_open, "发出解锁包后提示关闭");
+    }
+
+    /// 取消语义：解锁/首次设置取消要**连仓库窗一起关**（C# `() => Hide()` / `CancelStoragePasswordSetup`），
+    /// 改密路径取消只关输入框（C# 不传 onCancel）。
+    #[test]
+    fn cancel_semantics_match_csharp() {
+        let mut st = super::StorageState {
+            visible: true,
+            unlocked: true,
+            unlock_prompt_open: true,
+            ..Default::default()
+        };
+        let mut f = flow();
+        f.cancel_hides_storage = true;
+        super::storage_password_cancel(&mut st, &mut f);
+        assert!(!st.visible && st.close_requested && !st.unlocked);
+        assert_eq!(f.step, super::StoragePwdStep::None);
+
+        let mut st2 = super::StorageState {
+            visible: true,
+            unlocked: true,
+            ..Default::default()
+        };
+        let mut f2 = flow();
+        f2.cancel_hides_storage = false;
+        super::storage_password_cancel(&mut st2, &mut f2);
+        assert!(st2.visible && !st2.close_requested, "改密取消不应关仓库窗");
+        assert!(st2.unlocked, "改密取消不改解锁态");
+    }
+
+    /// `ManageStoragePassword` 的三个分支（C# `:3085-3107`）：
+    /// 未启用密码 → 什么都不做；未设过 → 直接进设置流程；已设过 → 弹 OKCancel 确认框。
+    #[test]
+    fn manage_storage_password_branches() {
+        use crate::game::dialogs::input_box::InputBoxState;
+        use crate::game::dialogs::text_input::TextInputState;
+
+        // 未启用（服务端 RequireStoragePassword=false）
+        let mut st = super::StorageState {
+            require_password: false,
+            ..Default::default()
+        };
+        let (mut ib, mut input) = (InputBoxState::default(), TextInputState::default());
+        let mut f = flow();
+        super::manage_storage_password(&mut ib, &mut input, &mut st, &mut f);
+        assert!(!ib.open && !st.change_confirm, "未启用密码时不该弹任何东西");
+
+        // 启用但未设过 → 设置流程（输入框打开、走密码遮罩）
+        let mut st = super::StorageState {
+            require_password: true,
+            has_password: false,
+            ..Default::default()
+        };
+        let (mut ib, mut input) = (InputBoxState::default(), TextInputState::default());
+        let mut f = flow();
+        super::manage_storage_password(&mut ib, &mut input, &mut st, &mut f);
+        assert!(ib.open, "未设密码时必须弹输入框");
+        assert_eq!(f.step, super::StoragePwdStep::SetNew);
+        assert_eq!(ib.purpose, crate::game::dialogs::input_box::InputPurpose::StoragePassword);
+        assert!(
+            input.masked.contains(&crate::game::dialogs::input_box::INPUT_FIELD_ID),
+            "C# `InputTextBox.Password = true` ⇒ 必须遮罩"
+        );
+        assert!(f.cancel_hides_storage, "首次设置取消要连窗一起关");
+
+        // 已设过 → 先确认框（C# `MirMessageBox(changePrompt, OKCancel)`）
+        let mut st = super::StorageState {
+            require_password: true,
+            has_password: true,
+            ..Default::default()
+        };
+        let (mut ib, mut input) = (InputBoxState::default(), TextInputState::default());
+        let mut f = flow();
+        super::manage_storage_password(&mut ib, &mut input, &mut st, &mut f);
+        assert!(st.change_confirm && !ib.open, "已设过先弹确认框、不直接问密码");
+    }
+
+    /// 源码级守卫（owner 反馈项）：密码流程**不得**再回到「自造三钮面板 + 在烘字按钮上叠中文标签」。
+    /// 阳性对照：把「在按钮美术上叠一颗 `设置` 标签」那行加回来 → 本测试立即红。
+    #[test]
+    fn storage_password_ui_has_no_bespoke_buttons_or_stacked_labels() {
+        let src = include_str!("storage.rs");
+        // 名字**拼**出来而不是写全：否则 `include_str!` 会扫到本测试自己的字面量，永远红。
+        let banned: Vec<String> = [
+            ("StoragePwd", "Panel"),
+            ("StoragePwd", "Set"),
+            ("StoragePwd", "Remove"),
+            ("StoragePwd", "Close"),
+            ("StorageUnlock", "Panel"),
+            ("StorageUnlock", "Ok"),
+            ("StorageUnlock", "Cancel"),
+        ]
+        .iter()
+        .map(|(a, b)| format!("{a}{b}"))
+        .collect();
+        for banned in &banned {
+            assert!(
+                !src.contains(banned),
+                "{banned} 是自造面板的残留；密码流程必须走 MirInputBox + MirMessageBox(OKCancel)"
+            );
+        }
+        for stacked in ["\"设置\"", "\"移除\"", "\"关闭\"", "\"确定\"", "\"取消\""] {
+            assert!(
+                !src.contains(&format!("spawn_label(p, &cjk, {stacked},")),
+                "不得在烘了英文的按钮美术上再叠中文标签（{stacked}）"
+            );
+        }
+        // 确认框必须是 `MirMessageBox(OKCancel)` 的 OK/Cancel 两帧组
+        assert!(
+            src.contains("StoragePwdChangeOk") && src.contains("StoragePwdChangeCancel"),
+            "改密确认框应有 OK/Cancel 两颗"
         );
     }
 }

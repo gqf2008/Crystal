@@ -940,6 +940,11 @@ pub enum ServerEvent {
         /// #1342：任务物品格（C# QuestInventory）
         quest_inventory: Vec<Option<InvItem>>,
         item_names: Vec<(i32, String)>,
+        /// #3258：仓库密码三件套（C# `UserInformation.HasStoragePassword /
+        /// RequireStoragePassword / StoragePasswordLastSet`）——仓库密码流程的三个判据源
+        has_storage_password: bool,
+        require_storage_password: bool,
+        storage_password_last_set: i64,
         /// #208：角色面板属性（服务端最终值）
         max_hp: i32,
         max_mp: i32,

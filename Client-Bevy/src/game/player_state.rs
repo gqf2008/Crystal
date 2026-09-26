@@ -1659,6 +1659,10 @@ mod tests {
             },
             quest_inventory: Vec::new(),
             item_names: Vec::new(),
+            // #3258：仓库密码三件套（本用例不涉密码流程）
+            has_storage_password: false,
+            require_storage_password: true,
+            storage_password_last_set: 0,
             max_hp: 5000,
             max_mp: 2000,
             ac: [1, 2],
