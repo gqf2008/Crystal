@@ -51,6 +51,17 @@ pub const BELT_Y: f32 = 618.0;
 pub const BELT_VERT_X: f32 = 0.0;
 pub const BELT_VERT_Y: f32 = 446.0;
 
+/// 旋转钮三帧都是 **16x16**：`Prguse[1926/1927/1928]`（横向）与 `[1938/1939/1940]`（纵向）
+/// 图头实测均 16x16，且 C# `RotateButton` **不设 `Size`** ⇒ 取美术尺寸（`HeroDialogs.cs:270-290`）。
+/// 本端曾写死 16x14 ⇒ 纵向压扁 2px。
+pub const ROTATE_W: f32 = 16.0;
+pub const ROTATE_H: f32 = 16.0;
+/// 关闭钮：横向帧 `Prguse[1923]` 是 **16x14**、纵向帧 `[1935]` 是 **16x16**（图头实测）
+/// ⇒ 高度要**随朝向切换**（C# 也是 `Flip()` 里换 `CloseButton.Index`，尺寸由美术决定）。
+pub const CLOSE_W: f32 = 16.0;
+pub const CLOSE_H_HORIZ: f32 = 14.0;
+pub const CLOSE_H_VERT: f32 = 16.0;
+
 /// 横/纵布局（C# Flip :327-372）
 #[derive(Resource, Default)]
 pub struct HeroBeltVertical(pub bool);
@@ -248,7 +259,7 @@ fn spawn_hero_belt(
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 1928),
         ) {
             // #2775：C# `HeroDialogs.cs:285` RotateButton.Hint（旋转）
-            spawn_icon_button(p, n, h, pr, 82.0, 3.0, 16.0, 14.0, 3).insert((
+            spawn_icon_button(p, n, h, pr, 82.0, 3.0, ROTATE_W, ROTATE_H, 3).insert((
                 HeroBeltWidget,
                 HeroBeltRotate,
                 crate::ui::tooltip::UiHint {
@@ -263,7 +274,7 @@ fn spawn_hero_belt(
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 1925),
         ) {
             // #2775：C# `HeroDialogs.cs:298` CloseButton.Hint（关闭 ({Belt 键})）
-            spawn_icon_button(p, n, h, pr, 82.0, 19.0, 16.0, 14.0, 3).insert((
+            spawn_icon_button(p, n, h, pr, 82.0, 19.0, CLOSE_W, CLOSE_H_HORIZ, 3).insert((
                 HeroBeltWidget,
                 HeroBeltClose,
                 crate::ui::tooltip::UiHint {
@@ -446,6 +457,8 @@ fn hero_belt_ui_system(
             let (x, y) = (x + dx, y + dy);
             node.left = Val::Px(x - px);
             node.top = Val::Px(y - py);
+            // 关闭钮高度随朝向切换（横向帧 1923=16x14、纵向帧 1935=16x16；C# 不设 Size ⇒ 取美术尺寸）
+            node.height = Val::Px(if vert { CLOSE_H_VERT } else { CLOSE_H_HORIZ });
             if let Some(btn) = btn.as_mut() {
                 if vert {
                     swap_btn_frames(btn, &mut libs, &mut images, (1935, 1936, 1937));
@@ -670,5 +683,28 @@ mod tests {
         assert_eq!(v_slot(1), (3.0, 493.0));
         assert_eq!(v_num(0).0, -1.0);
         assert_eq!(v_num(0).1, 457.0);
+    }
+
+    /// 门禁（金标准逐窗复核 ⑧）：英雄腰带两颗按钮的尺寸要等于**该朝向那套帧的美术尺寸**。
+    ///
+    /// 依据（`HeroDialogs.cs:270-300` + `Flip()` `:327-372`）：C# 的 `RotateButton`/`CloseButton`
+    /// **都不设 `Size`** ⇒ 尺寸由当前帧的美术决定。图头实测：
+    ///   - 旋转：`Prguse[1926/1927/1928]`（横向）与 `[1938/1939/1940]`（纵向）**全是 16x16**；
+    ///   - 关闭：横向 `[1923]` = **16x14**，纵向 `[1935]` = **16x16** ⇒ 高度随朝向切换。
+    /// 本端曾两颗都写死 16x14 ⇒ 旋转钮纵向压扁 2px、纵向关闭钮也矮 2px。
+    ///
+    /// 阳性对照：把 `ROTATE_H` 改回 `14.0` → 第一条断言红。
+    #[test]
+    fn belt_button_sizes_match_native_art() {
+        assert_eq!((ROTATE_W, ROTATE_H), (16.0, 16.0), "旋转钮三帧都是 16x16");
+        assert_eq!(
+            (CLOSE_W, CLOSE_H_HORIZ, CLOSE_H_VERT),
+            (16.0, 14.0, 16.0),
+            "关闭钮横向 16x14、纵向 16x16"
+        );
+        assert_ne!(
+            CLOSE_H_VERT, CLOSE_H_HORIZ,
+            "纵向/横向关闭帧尺寸不同 ⇒ 切换朝向时高度必须跟着变（否则其中一档必然压扁）"
+        );
     }
 }
