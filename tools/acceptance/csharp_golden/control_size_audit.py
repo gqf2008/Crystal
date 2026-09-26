@@ -15,11 +15,16 @@
 # 需要按比例裁宽的精灵（C# 用 `Draw(Index, section, …)` 自绘）。工具照报，人工筛。
 #
 # 用法：py -3.12 control_size_audit.py --repo <Rust 仓库根> --data <含 *.Lib 的 Data>
+#
+# **门禁语义**：发现 >0 处即 exit 1（可当常规门禁跑）；`--selftest` 跑正/负对照
+# （正：临时把一处尺寸改坏，必须报出来；负：不改就应 0 命中），二者都通过才 exit 0。
 import argparse
 import os
 import re
+import shutil
 import struct
 import sys
+import tempfile
 
 LIB_FILE = {
     "Title": "Title.Lib", "Prguse": "Prguse.Lib", "Prguse2": "Prguse2.Lib",
@@ -101,8 +106,13 @@ def scan_file(path, data_dir, rows):
         if not art:
             continue
         if (w, h) != (float(art[0]), float(art[1])):
+            # 自证时扫描的是 %TEMP% 下的副本（可能在别的盘符）——`relpath` 跨盘会抛，退回原路径
+            try:
+                rel = os.path.relpath(path)
+            except ValueError:
+                rel = path
             rows.append({
-                "file": os.path.relpath(path),
+                "file": rel,
                 "line": line,
                 "load_line": lline,
                 "lib": lib,
@@ -117,7 +127,12 @@ def main():
     ap.add_argument("--repo", required=True, help="Rust 仓库根（含 Client-Bevy/src）")
     ap.add_argument("--data", required=True, help="含 *.Lib 的数据目录")
     ap.add_argument("--subdir", default=os.path.join("Client-Bevy", "src"))
+    ap.add_argument("--selftest", action="store_true",
+                    help="跑正/负对照：临时改坏一处尺寸必须被报出，未改的副本必须 0 命中")
     a = ap.parse_args()
+
+    if a.selftest:
+        return selftest(a)
 
     rows = []
     root = os.path.join(a.repo, a.subdir)
@@ -131,7 +146,61 @@ def main():
             r["file"], r["line"], r["lib"], r["index"], r["art"][0], r["art"][1],
             r["explicit"][0], r["explicit"][1]))
     print(f"合计 {len(rows)} 处「写死尺寸 ≠ 美术原生尺寸」（含按比例裁宽的进度条等已知故意项，需人工筛）")
+    if rows:
+        print("VERDICT=FAIL：写死尺寸与美术不一致——要么改成按图头取尺寸（spawn_image_native），"
+              "要么人工确认是「按比例裁宽」后加白名单并说明理由")
+        return 1
+    print("VERDICT=PASS：0 处写死尺寸与美术不一致")
     return 0
+
+
+def _scan_root(root, subdir, data_dir):
+    rows = []
+    for dirpath, _dirs, files in os.walk(os.path.join(root, subdir)):
+        for fn in sorted(files):
+            if fn.endswith(".rs"):
+                scan_file(os.path.join(dirpath, fn), data_dir, rows)
+    return rows
+
+
+def selftest(a):
+    """正/负对照：证明这条门禁**真的会红**，而不是恒绿。
+
+    做法：把 `Client-Bevy/src` 复制到临时目录，① 原样扫 → 必须 0 命中（负对照）；
+    ② 把 `group.rs` 里的 `spawn_image_native(… Title, 5 …)` 改回**修复前的写法**
+    （`if let Some(h) = load_lib_image(… Title, 5) { spawn_image(p, h, …, 57.0, 15.0, …) }`，
+    美术是 55x15）→ 必须报出来（正对照）。
+
+    注意这两条也**界定了扫描面**：本工具只认「`load` 的句柄变量名 ↔ 后续 spawn 的同一个变量」
+    这种形式（原版移植里最普遍）；把 `load_lib_image(...)` **内联**当参数传给 spawn 的写法它扫不到
+    （正对照第一次就是按内联写法定制的，结果扫不出来 ⇒ 改成上面这个真实历史形态才成立）。
+    """
+    src = os.path.join(a.repo, a.subdir)
+    ok = True
+    with tempfile.TemporaryDirectory() as tmp:
+        dst = os.path.join(tmp, a.subdir)
+        shutil.copytree(src, dst)
+        neg = _scan_root(tmp, a.subdir, a.data)
+        print(f"[负对照] 原样扫描命中 {len(neg)}（期望 0）")
+        ok &= (len(neg) == 0)
+
+        target = os.path.join(dst, "game", "dialogs", "group.rs")
+        text = open(target, encoding="utf-8").read()
+        old = "let _ = spawn_image_native(p, &mut libs, &mut images, LibraryName::Title, 5, 18.0, 8.0, 9);"
+        new = ("if let Some(h) = load_lib_image(&mut libs, &mut images, LibraryName::Title, 5) {\n"
+               "            spawn_image(p, h, 18.0, 8.0, 57.0, 15.0, 9);\n        }")
+        if old not in text:
+            print("[正对照] 找不到要改坏的锚点 —— 门禁自证失败（锚点漂了，先更新 selftest）")
+            return 1
+        open(target, "w", encoding="utf-8").write(text.replace(old, new))
+        pos = _scan_root(tmp, a.subdir, a.data)
+        hit = [r for r in pos if r["file"].endswith("group.rs")]
+        print(f"[正对照] 改坏一处后命中 {len(hit)} 条（期望 ≥1）："
+              + "; ".join(f"group.rs:{r['line']} {r['lib']}[{r['index']}] 美术={r['art']} 写死={r['explicit']}"
+                          for r in hit))
+        ok &= (len(hit) >= 1)
+    print("VERDICT=" + ("PASS" if ok else "FAIL") + "（正/负对照）")
+    return 0 if ok else 1
 
 
 if __name__ == "__main__":
