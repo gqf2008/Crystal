@@ -238,7 +238,8 @@ pwsh tools/ops/check_process_scope.ps1           # ops/验收脚本不得按进�
 pwsh tools/ops/check_bot_timeouts.ps1            # ops 演练不得有同步无超时的 bot 调用
 pwsh tools/ops/check_doc_tool_refs.ps1           # 文档引用的 tools/** 脚本必须存在且**已入库**
 py -3.12 tools/acceptance/csharp_golden/control_size_audit.py --selftest \
-    --repo . --data Data                          # 窗内控件：写死尺寸必须等于美术原生尺寸（金标准 §3.4）
+    --repo . --data Data                          # 窗内控件：写死尺寸必须等于美术原生尺寸（金标准 §3.4）；
+                                                  # 两条扫描面（字面量配对 + 常量表循环），三条对照（负 + 正①+正②）
 pwsh tools/acceptance/csharp_golden/make_sandbox_selftest.ps1  # 金标准沙箱：端口必须**按段**改写 + 回读校验（诱饵段不许被动）
 ```
 

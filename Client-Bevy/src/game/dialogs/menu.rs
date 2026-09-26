@@ -88,10 +88,16 @@ pub const MENU_Y: f32 = 768.0 - MAIN_DIALOG_H - MENU_H + 15.0; // 349
 /// 按钮相对菜单的 x（C# 所有按钮 Location.X = 3）
 pub const MENU_BTN_DX: f32 = 3.0;
 
-/// 菜单按钮定义（纹理索引 + y 偏移）
-const MENU_BUTTONS: &[(MenuAction, LibraryName, usize, usize, usize, f32)] = &[
-    (MenuAction::Exit, LibraryName::Title, 633, 634, 635, 12.0),
-    (MenuAction::Logout, LibraryName::Title, 636, 637, 638, 31.0),
+/// 菜单按钮定义（纹理索引 + y 偏移 + 美术原生宽高）
+///
+/// 宽高**不是**抄来的：C# `MenuDialog` 的 14 个按钮全是 `MirButton` 且**不写 Size**
+/// ⇒ `MirImageControl.Size` 取 `Library.GetTrueSize(Index)`，实际就是图头尺寸。
+/// `libextract.py` 实测：`Title[633..638]` = **32x20**（退出/下线两颗），
+/// `Prguse[1970..1996]` 与 `Prguse2[431..433]` = **32x18**（其余 12 颗）。
+/// 原实现 14 颗统一写死 38x19 ⇒ 绘制区与命中区都比原版大一圈（左右各多 3px）。
+const MENU_BUTTONS: &[(MenuAction, LibraryName, usize, usize, usize, f32, f32, f32)] = &[
+    (MenuAction::Exit, LibraryName::Title, 633, 634, 635, 12.0, 32.0, 20.0),
+    (MenuAction::Logout, LibraryName::Title, 636, 637, 638, 31.0, 32.0, 20.0),
     (
         MenuAction::Help,
         LibraryName::Prguse,
@@ -99,6 +105,8 @@ const MENU_BUTTONS: &[(MenuAction, LibraryName, usize, usize, usize, f32)] = &[
         1971,
         1972,
         50.0,
+        32.0,
+        18.0,
     ),
     (
         MenuAction::Keyboard,
@@ -107,6 +115,8 @@ const MENU_BUTTONS: &[(MenuAction, LibraryName, usize, usize, usize, f32)] = &[
         1974,
         1975,
         69.0,
+        32.0,
+        18.0,
     ),
     (
         MenuAction::Ranking,
@@ -115,6 +125,8 @@ const MENU_BUTTONS: &[(MenuAction, LibraryName, usize, usize, usize, f32)] = &[
         2001,
         2002,
         88.0,
+        32.0,
+        18.0,
     ),
     (
         MenuAction::Creature,
@@ -123,6 +135,8 @@ const MENU_BUTTONS: &[(MenuAction, LibraryName, usize, usize, usize, f32)] = &[
         432,
         433,
         126.0,
+        32.0,
+        18.0,
     ),
     (
         MenuAction::Mount,
@@ -131,6 +145,8 @@ const MENU_BUTTONS: &[(MenuAction, LibraryName, usize, usize, usize, f32)] = &[
         1977,
         1978,
         145.0,
+        32.0,
+        18.0,
     ),
     (
         MenuAction::Fishing,
@@ -139,6 +155,8 @@ const MENU_BUTTONS: &[(MenuAction, LibraryName, usize, usize, usize, f32)] = &[
         1980,
         1981,
         164.0,
+        32.0,
+        18.0,
     ),
     (
         MenuAction::Friends,
@@ -147,6 +165,8 @@ const MENU_BUTTONS: &[(MenuAction, LibraryName, usize, usize, usize, f32)] = &[
         1983,
         1984,
         183.0,
+        32.0,
+        18.0,
     ),
     (
         MenuAction::Mentor,
@@ -155,6 +175,8 @@ const MENU_BUTTONS: &[(MenuAction, LibraryName, usize, usize, usize, f32)] = &[
         1986,
         1987,
         202.0,
+        32.0,
+        18.0,
     ),
     (
         MenuAction::Relationship,
@@ -163,6 +185,8 @@ const MENU_BUTTONS: &[(MenuAction, LibraryName, usize, usize, usize, f32)] = &[
         1989,
         1990,
         221.0,
+        32.0,
+        18.0,
     ),
     (
         MenuAction::Group,
@@ -171,6 +195,8 @@ const MENU_BUTTONS: &[(MenuAction, LibraryName, usize, usize, usize, f32)] = &[
         1992,
         1993,
         240.0,
+        32.0,
+        18.0,
     ),
     (
         MenuAction::Guild,
@@ -179,6 +205,8 @@ const MENU_BUTTONS: &[(MenuAction, LibraryName, usize, usize, usize, f32)] = &[
         1995,
         1996,
         259.0,
+        32.0,
+        18.0,
     ),
 ];
 
@@ -227,13 +255,14 @@ fn spawn_menu_dialog(
 
     commands.entity(panel).with_children(|p| {
         // 菜单按钮（相对面板 (3, y)）
-        for (action, lib, n, h, pr, y) in MENU_BUTTONS {
+        for (action, lib, n, h, pr, y, bw, bh) in MENU_BUTTONS {
             if let (Some(nh), Some(hh), Some(ph)) = (
                 load_lib_image(&mut libs, &mut images, *lib, *n),
                 load_lib_image(&mut libs, &mut images, *lib, *h),
                 load_lib_image(&mut libs, &mut images, *lib, *pr),
             ) {
-                spawn_icon_button(p, nh, hh, ph, MENU_BTN_DX, *y, 38.0, 19.0, 10).insert((
+                // 尺寸取表格里的美术原生值（见 MENU_BUTTONS 注释），不写死
+                spawn_icon_button(p, nh, hh, ph, MENU_BTN_DX, *y, *bw, *bh, 10).insert((
                     MenuBtn(*action),
                     crate::ui::tooltip::UiHint {
                         text: menu_hint(*action, &kb),
@@ -394,6 +423,44 @@ fn menu_ui_system(
             }
             MenuAction::Group => menu_open_toggle(&mut mgr, DialogKind::Group, "队伍"),
             MenuAction::Guild => menu_open_toggle(&mut mgr, DialogKind::Guild, "行会"),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 门禁（金标准 ⑧「窗内控件」/ 2026-09-26）：菜单按钮尺寸必须等于**该帧美术原生尺寸**。
+    ///
+    /// C# `MenuDialog` 的按钮全是 `MirButton` 且**不写 Size**（`MainDialogs.cs:3034-3258`）
+    /// ⇒ `MirImageControl.Size` 取 `Library.GetTrueSize(Index)`，实际就是图头尺寸。
+    /// `libextract.py` 实测：`Title[633..638]` = 32x20、`Prguse[1970..1996]` 与
+    /// `Prguse2[431..433]` = 32x18。原实现 13 颗统一写死 38x19 ⇒ 命中区比绘制区大一圈
+    /// （左右各多 3px、上下各多 0.5px）。
+    ///
+    /// 这条同时是 `control_size_audit.py` 的补充：那张表的 `load_lib_image(…, *lib, *idx)`
+    /// 是**变量**写法，尺寸审计器只认字面量 lib/idx，扫不到这个循环 ⇒ 用单测把表格钉住。
+    #[test]
+    fn menu_button_sizes_match_native_art() {
+        assert_eq!(
+            MENU_BUTTONS.len(),
+            13,
+            "C# MenuDialog 13 颗可见钮（CraftingButton 在 C# 里 Visible=false，本端同样不画）"
+        );
+        for (action, lib, _n, _h, _pr, _y, bw, bh) in MENU_BUTTONS {
+            let expected = match lib {
+                LibraryName::Title => (32.0, 20.0),
+                LibraryName::Prguse | LibraryName::Prguse2 => (32.0, 18.0),
+                other => panic!(
+                    "{action:?} 用了尚未核对美术尺寸的库 {other:?} —— 先用 libextract.py 量图头再填"
+                ),
+            };
+            assert_eq!(
+                (*bw, *bh),
+                expected,
+                "{action:?} 的按钮尺寸必须等于 libextract 量到的图头尺寸"
+            );
         }
     }
 }
