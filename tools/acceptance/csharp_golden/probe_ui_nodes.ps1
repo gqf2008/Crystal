@@ -65,7 +65,12 @@ param(
     [int]$NearbyRadius = 2000,
     # 挑 NPC 时优先匹配的名字子串（如 'Merchant'）：`[@MAIN]` 不是每个 NPC 脚本都有，
     # 选到传送员（Teleport_Gilbert 之类）会"点了没反应"（实测）。留空 = 取最近的 NPC。
-    [string]$NpcNameLike = 'Merchant'
+    [string]$NpcNameLike = 'Merchant',
+    # 可选：NPC 窗开好后，按 `npc_rows` 给的行中心点一下（行文本或 key 里含该子串即选中）。
+    # 例：'BuySell' 点买卖行 → 开商品窗；'Storage' 点仓库行；'@move' 点传送目标行。
+    # 为什么要用 `npc_rows` 的中心点：那正是**点击分发读的同一份几何**（行 Node 的 left/top），
+    # 自己按行高算会点偏（#3141 那类"点了没反应"多半出在这）。
+    [string]$NpcClickLink = ''
 )
 $ErrorActionPreference = 'Continue'
 . "$PSScriptRoot\..\e2e_lock.ps1"
@@ -176,6 +181,20 @@ try {
                 if ($null -ne $pick) { $npc = $pick }
             }
             Write-Host ("NPC 窗：开窗={0}（试 {1} 次，name={2} object_id={3}）" -f $opened, $try, $npc.name, $npc.object_id)
+            if ($opened -and $NpcClickLink) {
+                $rows2 = Rpc 'npc_rows'
+                $link = @($rows2.links) |
+                    Where-Object { $null -ne $_ -and (("$($_.text)" -like "*$NpcClickLink*") -or ("$($_.key)" -like "*$NpcClickLink*")) } |
+                    Select-Object -First 1
+                if ($null -eq $link) {
+                    Write-Host ("NPC 窗：没找到含 '{0}' 的行（可选行：{1}）" -f `
+                        $NpcClickLink, ((@($rows2.links) | ForEach-Object { "$($_.text)[$($_.key)]" }) -join ' | '))
+                } else {
+                    Write-Host ("NPC 窗：点击行 '{0}' key={1} 中心=({2},{3})" -f $link.text, $link.key, $link.cx, $link.cy)
+                    $null = Rpc 'click' @{ x = [double]$link.cx; y = [double]$link.cy }
+                    Start-Sleep -Seconds 2
+                }
+            }
         }
     }
     Start-Sleep -Seconds 3
