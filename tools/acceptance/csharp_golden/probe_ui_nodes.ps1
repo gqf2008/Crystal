@@ -10,6 +10,21 @@
 # 结论落 `%TEMP%\golden_ab_probe.json`，供人复核。
 #
 # 用法：pwsh tools/acceptance/csharp_golden/probe_ui_nodes.ps1 -ClientHome <带 client_bevy.exe 的 worktree>
+#
+# 2026-09-26 三条**已验证**的使用要点（都踩过）：
+#   1. `-Map/-TileX/-TileY` 的对齐判据是「**位置真的变了**」，不是「map 等于目标」——后者在
+#      同图内换坐标时一进来就成立，命令还没生效就被当成已对齐（曾打印"对齐后 tile=(277,609)"，
+#      实际位移没发生）。位置没变会打 WARN。
+#   2. `nearby` 的 `radius` 是**世界像素不是格**（1 格 = 48px，`control.rs` 的 `Nearby` 直接比
+#      `translation` 像素距）⇒ 按"40 格"找要给 ≈1920；传 12/40 恒为 0（曾误判"商人区没有 NPC"）。
+#      返回体是 `{count, entities:[{kind,name,object_id,x,y,dist,vp}]}` —— 数组字段是 **entities**、
+#      类型字段是 **kind**（写成 `$x.nearby` 时 `@($null)` 恒为 1 个空元素，看着像"只有一个实体、
+#      字段全空"）。
+#   3. `-NpcCallKey` 打开 NPC 窗**仍受阻**：`npc_call` 只发 `CallNPC{object_id,key}` 给服务端，
+#      服务端要求目标在**交互距离内**才响应——实测 `Merchant_Ruben` 在 240px(≈5 格) 外被忽略、
+#      窗口不开；`Teleport_Gilbert`（57px）脚本里没有 `[@MAIN]` 也不响应；按 `nearby.vp` 先
+#      `click` 一次（3s）也不够（多半要先走到跟前）。⇒ 要拿 NPC 窗的实机证据，下一步得
+#      **先 `walk_to` 贴近**再交互/`npc_call`。
 param(
     [string]$Repo = 'E:\Users\gxh\Documents\GitHub\Crystal',
     [string]$ClientHome = 'E:\Users\gxh\Documents\GitHub\Crystal-wt-blend',
@@ -31,11 +46,26 @@ param(
     # 为什么必须逐窗开一次：`dialog_rect` 是从**关闭钮**反推窗口矩形的
     # （`rx = cx - w/2`、`ry = cy - h/2`），窗口没开时关闭钮不存在 ⇒ 返回
     # `{ok:false, error:"close button not found"}`（实测：45 个 kind 一口气问只回 3 个 ok）。
-    [string]$RectKinds = 'inventory,character'
-    ,
+    [string]$RectKinds = 'inventory,character',
     # 角色窗页（0=装备 1=状态 2=State 3=技能）；>=0 时用 `char_page` RPC 开窗并切页
     # （页签只能点、无热键，C# 亦然；见 control.rs 的 char_page）。做窗内控件对表时用它。
-    [int]$CharPage = -1
+    [int]$CharPage = -1,
+    # 对齐目标地图/坐标（默认 = 金标准帧那张：BichonProvince map 0 @ (277,609)）。
+    # 开 NPC 窗时按 NPC 所在地传（商人区 ≈ (288,616)）。
+    [int]$Map = 0,
+    [int]$TileX = 277,
+    [int]$TileY = 609,
+    # 可选：发 `npc_call <key>` 打开 NPC 窗（NPC 窗是状态驱动窗，只能走这条真实路径）。
+    # 形如 '[@MAIN]'；留空则不开。会先从 `nearby` 的 `entities` 里挑最近的 `kind=npc`。
+    [string]$NpcCallKey = ''
+    ,
+    # `npc_call` 前找 NPC 的 `nearby` 半径，单位是**世界像素而不是格**（1 格 = 48px）：
+    # `control.rs` 的 `Nearby` 拿 `translation` 的像素距与 radius 直接比。按 40 格找就得给 ≈1920；
+    # 传 12/40 恒为 0（2026-09-26 实测踩过：以为"商人区没有 NPC"，其实是半径单位错了）。
+    [int]$NearbyRadius = 2000,
+    # 挑 NPC 时优先匹配的名字子串（如 'Merchant'）：`[@MAIN]` 不是每个 NPC 脚本都有，
+    # 选到传送员（Teleport_Gilbert 之类）会"点了没反应"（实测）。留空 = 取最近的 NPC。
+    [string]$NpcNameLike = 'Merchant'
 )
 $ErrorActionPreference = 'Continue'
 . "$PSScriptRoot\..\e2e_lock.ps1"
@@ -68,15 +98,63 @@ try {
     foreach ($i in 1..90) { Start-Sleep 1; $st = Rpc 'state'; if ($null -ne $st.tile_x) { break } }
     if ($null -eq $st -or $null -eq $st.tile_x) { Write-Host 'FAIL: 未进场'; exit 2 }
     Write-Host ("进场 map={0} tile=({1},{2})" -f $st.map, $st.tile_x, $st.tile_y)
-    $null = Rpc 'chat' @{ message = '@mapmove 0 277 609' }
-    foreach ($i in 1..40) { Start-Sleep -Milliseconds 500; $s2 = Rpc 'state'; if ("$($s2.map)" -eq '0') { break } }
-    $s3 = Rpc 'state'; Write-Host ("对齐后 map={0} tile=({1},{2})" -f $s3.map, $s3.tile_x, $s3.tile_y)
+    # 对齐：**按 tile/map 是否真的变了**判，不要按「map 等于目标」判——在目标地图内换坐标时
+    # 后者一进来就成立，循环立刻 break，`@mapmove` 还没生效就被当成"已对齐"
+    # （2026-09-26 实测：`-TileX 288 -TileY 616` 打印"对齐后 tile=(277,609)"，位移压根没发生）。
+    # 同时把坐标写进结论，夹具/人一眼能看出到底动没动。
+    $before = "$($st.map):$($st.tile_x),$($st.tile_y)"
+    $target = "$Map`:$TileX,$TileY"
+    $null = Rpc 'chat' @{ message = "@mapmove $Map $TileX $TileY" }
+    $s3 = $st
+    if ($before -ne $target) {
+        $moved = $false
+        foreach ($i in 1..60) {
+            Start-Sleep -Milliseconds 500
+            $s3 = Rpc 'state'
+            if ("$($s3.map):$($s3.tile_x),$($s3.tile_y)" -ne $before) { $moved = $true; break }
+        }
+        if (-not $moved) {
+            Write-Host ("WARN: @mapmove {0} {1} {2} 后位置没变（仍 {3}）——目标坐标不可走？还是命令没生效？" -f $Map, $TileX, $TileY, $before)
+        }
+    }
+    Write-Host ("对齐后 map={0} tile=({1},{2})（目标 {3}）" -f $s3.map, $s3.tile_x, $s3.tile_y, $target)
     $null = Rpc 'dialog' @{ kind = 'inventory'; action = 'open' }
     if ($CharPage -ge 0) {
         Write-Host ("角色窗切页 char_page={0}（0=装备 1=状态 2=State 3=技能）" -f $CharPage)
         $null = Rpc 'char_page' @{ page = $CharPage }
     } elseif (-not $InventoryOnly) {
         $null = Rpc 'dialog' @{ kind = 'character'; action = 'open' }
+    }
+    if ($NpcCallKey) {
+        # NPC 窗是**状态驱动**窗（不进 `DialogManager.open`），只能走真实路径：站在 NPC 旁 →
+        # `npc_call <object_id> <key>`。`nearby` 的返回是 `{count, entities:[{kind,name,object_id,x,y,dist,…}]}`
+        # ——数组字段名是 **entities**、类型字段名是 **kind**（此前写成 `$near.nearby`，`@($null)` 恒为
+        # 1 个空元素，看起来像"只有 1 个实体且字段全空"，把归因带偏）。
+        $near = Rpc 'nearby' @{ radius = $NearbyRadius }
+        $npcs = @()
+        foreach ($e in @($near.entities)) {
+            if ($null -ne $e -and "$($e.kind)" -eq 'npc') { $npcs += $e }
+        }
+        if ($npcs.Count -eq 0) {
+            Write-Host ("NPC 窗：半径 {1}px 内没找到 kind=npc（返回 count={0}，实体 kind 取值：{1}）" -f `
+                $near.count, (($near.entities | ForEach-Object { $_.kind } | Sort-Object -Unique) -join ','))
+        } else {
+            $pref = @($npcs | Where-Object { $NpcNameLike -and "$($_.name)" -like "*$NpcNameLike*" })
+            $npc = if ($pref.Count -gt 0) { $pref | Sort-Object dist | Select-Object -First 1 }
+                   else { $npcs | Sort-Object dist | Select-Object -First 1 }
+            Write-Host ("NPC 窗：npc_call object_id={0} name={1} dist={2} key={3}" -f `
+                $npc.object_id, $npc.name, $npc.dist, $NpcCallKey)
+            # 先按 `nearby` 给的**视口坐标**点一下这个 NPC（原版左键交互 = 走到/面向并开始对话）。
+            # 为什么必须点：`npc_call` 只发 `CallNPC{object_id,key}` 给服务端，服务端要求**交互距离内**
+            # 才响应；实测 `Merchant_Ruben` 在 240px(≈5 格) 外时 `npc_call` 被忽略、窗口不开。
+            if ($null -ne $npc.vp) {
+                Write-Host ("NPC 窗：先 click 视口 ({0},{1}) 触发交互" -f $npc.vp.x, $npc.vp.y)
+                $null = Rpc 'click' @{ x = [double]$npc.vp.x; y = [double]$npc.vp.y }
+                Start-Sleep -Seconds 3
+            }
+            $null = Rpc 'npc_call' @{ object_id = [int]$npc.object_id; key = $NpcCallKey }
+            Start-Sleep -Seconds 2
+        }
     }
     Start-Sleep -Seconds 3
     $res = [ordered]@{}
