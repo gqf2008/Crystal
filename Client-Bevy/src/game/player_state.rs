@@ -340,17 +340,36 @@ pub(crate) fn apply_user_info_items(
     // **空 Vec**；若无条件覆盖，任何一次属性刷新都会把玩家背包/装备"清空"——
     // 真机 `--refine-test` 的取回步骤正是因此拿到「背包视图 0 格」并报"背包已满"。
     // 判据：空 Vec = 未携带（服务端全量包即便背包全空也会写满 `backpack_size` 个槽位，不会是空 Vec）。
-    if !items.is_empty() {
-        inventory.items = items.clone();
-    }
+    apply_slots(inventory, loadout, Some(items), Some(equipment));
     if !quest_inventory.is_empty() {
         inventory.quest_inventory = quest_inventory.clone();
     }
     // #1544：RefreshStats 重量（max_weight=服务端 bag_weight；weight 由物品重算）
     inventory.max_weight = (*bag_weight).max(0) as u32;
     inventory.refresh_weight();
-    if !equipment.is_empty() {
-        loadout.slots = equipment.clone();
+}
+
+/// 背包/装备两段的**单一写映射**——`S.UserInformation` 与 `S.UserSlotsRefresh`（C# `UserObject.SetSlots`
+/// 的 `Inventory = p.Inventory; Equipment = p.Equipment;`）共用，防止两份替换口径漂移。
+///
+/// 两处的"未携带"表示不同，故入参用 `Option`：`UserInformation` 用**空 Vec** 表示未携带（#2870），
+/// `UserSlotsRefresh` 用 `None` 表示（对应 C# 的 `HasInventory/HasEquipment`）；两者都在 `None`/空时跳过，
+/// 避免把玩家背包/装备"清空"（真机 `--refine-test` 取回步骤踩过这个坑）。
+pub(crate) fn apply_slots(
+    inventory: &mut Inventory,
+    loadout: &mut Loadout,
+    items: Option<&Vec<Option<InvItem>>>,
+    equipment: Option<&Vec<Option<InvItem>>>,
+) {
+    if let Some(items) = items {
+        if !items.is_empty() {
+            inventory.items = items.clone();
+        }
+    }
+    if let Some(equipment) = equipment {
+        if !equipment.is_empty() {
+            loadout.slots = equipment.clone();
+        }
     }
 }
 

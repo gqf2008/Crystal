@@ -1412,10 +1412,29 @@ pub(crate) fn handle_progress(
                 Err(e) => tracing::warn!("⚠️ ObjectHidden 解析失败: {e}"),
             }
         }
-        // #291：C# 服务端包面收尾（UserSlotsRefresh）
+        // C# `GameScene.UserSlotsRefresh` → `UserObject.SetSlots`：**整表替换**背包/装备两段
+        // （`UserObject.cs:125-131`）。2026-09-27：此前只打一行日志、什么都不做（= 未接线）；
+        // 同时 `S.UserSlotsRefresh` 的写侧曾是裸 `write_to`、读侧却用 `read_from_with_info`，
+        // 即便实现了 handler 也会解析失败（写侧已修，见 `user.rs` 的往返门禁）。
         x if x == ServerPacketIds::UserSlotsRefresh as i16 => {
-            if user::UserSlotsRefresh::read_body(&mut cur).is_ok() {
-                tracing::info!("📦 UserSlotsRefresh 解码");
+            match user::UserSlotsRefresh::read_body(&mut cur) {
+                Ok(p) => {
+                    let map_slots = |slots: &Option<Vec<Option<mir2_shared::data::item::UserItem>>>| {
+                        slots
+                            .as_ref()
+                            .map(|v| v.iter().map(|s| s.as_ref().map(super::to_inv_item)).collect())
+                    };
+                    server_events.write(ServerEvent::UserSlotsRefreshed {
+                        inventory: map_slots(&p.inventory),
+                        equipment: map_slots(&p.equipment),
+                    });
+                    tracing::info!(
+                        "📦 UserSlotsRefresh 解码：背包段={} 装备段={}",
+                        p.inventory.is_some(),
+                        p.equipment.is_some()
+                    );
+                }
+                Err(e) => tracing::warn!("⚠️ UserSlotsRefresh 解析失败: {e}"),
             }
         }
 

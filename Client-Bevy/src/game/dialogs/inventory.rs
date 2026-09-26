@@ -494,6 +494,24 @@ pub(crate) fn inventory_events(
                 locked.unlock_all(InvLockReason::Split);
                 locked.unlock_all(InvLockReason::Socket);
             }
+            // C# `UserObject.SetSlots`（`UserObject.cs:125-131`）：`Inventory = p.Inventory;
+            // Equipment = p.Equipment;` + `BindAllItems()` + `RefreshStats()`。
+            // 本端等价物 = 整表替换两段（`apply_slots` 与 UserInformation 同一条映射）+
+            // 让「单发等待回包」的锁失效（同 UserInformation 口径）；属性/重量刷新由既有路径负责。
+            ServerEvent::UserSlotsRefreshed {
+                inventory: items,
+                equipment,
+            } => {
+                crate::game::player_state::apply_slots(
+                    &mut inv,
+                    &mut loadout,
+                    items.as_ref(),
+                    equipment.as_ref(),
+                );
+                locked.unlock_all(InvLockReason::Equip);
+                locked.unlock_all(InvLockReason::Split);
+                locked.unlock_all(InvLockReason::Socket);
+            }
             // #2742：`S.EquipSlotItem` / `S.SplitItem1` 回包解锁对应来源（C# 同点）
             ServerEvent::EquipSlotItemResult { .. } => {
                 locked.unlock_all(InvLockReason::Socket);
@@ -2779,6 +2797,99 @@ mod tests {
             locked.color_at(LockGrid::Storage, 9),
             LOCKED_ITEM_COLOR,
             "仓库锁定格同样按 DimGray × 0.8 灰化"
+        );
+    }
+
+    /// 门禁（2026-09-27）：`S.UserSlotsRefresh` 必须按 C# `UserObject.SetSlots`
+    /// （`UserObject.cs:125-131`）**整表替换**背包/装备两段，并让「单发等待回包」的锁失效。
+    ///
+    /// 阳性对照（落地时实做）：把 `inventory_events` 里的 `UserSlotsRefreshed` 臂删掉（退回"只打日志"）
+    /// → 本测试立即红（背包/装备仍是旧内容）。
+    #[test]
+    fn user_slots_refreshed_replaces_bag_and_equipment() {
+        use crate::game::dialogs::inventory::InvItem;
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_message::<crate::network::server_event::ServerEvent>();
+        app.init_resource::<InvLockedSlots>();
+        app.add_systems(Update, inventory_events);
+        let e = app
+            .world_mut()
+            .spawn((LocalPlayer, Inventory::default(), Loadout::default()))
+            .id();
+        app.update(); // 初始化消息缓冲/系统状态
+
+        // 旧内容：背包格 0 = A，装备格 1 = B；再给两个来源上锁，验证"权威刷新 = 解锁"
+        {
+            let mut inv = app.world_mut().get_mut::<Inventory>(e).unwrap();
+            // `Inventory::default()` 的 items 是**空 Vec**（真实长度由 UserInformation/扩容决定），
+            // 所以先按服务端背包尺寸铺满空槽再放东西。
+            inv.items = vec![None; 40];
+            inv.items[0] = Some(InvItem {
+                name: "旧背包".into(),
+                item_index: 1001,
+                ..Default::default()
+            });
+            let mut lo = app.world_mut().get_mut::<Loadout>(e).unwrap();
+            lo.slots[1] = Some(InvItem {
+                name: "旧装备".into(),
+                item_index: 1268,
+                ..Default::default()
+            });
+            let mut locks = app.world_mut().resource_mut::<InvLockedSlots>();
+            locks.lock(InvLockReason::Equip, 0);
+            locks.lock(InvLockReason::Split, 0);
+        }
+
+        app.world_mut().write_message(
+            crate::network::server_event::ServerEvent::UserSlotsRefreshed {
+                inventory: Some(vec![
+                    Some(InvItem {
+                        name: "新背包".into(),
+                        item_index: 953,
+                        ..Default::default()
+                    }),
+                    None,
+                ]),
+                equipment: Some(vec![
+                    None,
+                    Some(InvItem {
+                        name: "新装备".into(),
+                        item_index: 1270,
+                        ..Default::default()
+                    }),
+                ]),
+            },
+        );
+        app.update();
+
+        {
+            let inv = app.world().get::<Inventory>(e).unwrap();
+            assert_eq!(inv.items.len(), 2, "整表替换：段长度以服务端为准");
+            assert_eq!(inv.items[0].as_ref().unwrap().name, "新背包");
+            assert!(inv.items[1].is_none());
+            let lo = app.world().get::<Loadout>(e).unwrap();
+            assert_eq!(lo.slots[1].as_ref().unwrap().name, "新装备");
+            let locks = app.world().resource::<InvLockedSlots>();
+            assert!(
+                !locks.is_locked(0),
+                "权威全量刷新（C# SetSlots）后装备/拆分锁应失效"
+            );
+        }
+
+        // `None` = 该段未携带（C# `HasInventory/HasEquipment`）：不许把已有内容清空
+        app.world_mut().write_message(
+            crate::network::server_event::ServerEvent::UserSlotsRefreshed {
+                inventory: None,
+                equipment: None,
+            },
+        );
+        app.update();
+        let inv = app.world().get::<Inventory>(e).unwrap();
+        assert_eq!(
+            inv.items[0].as_ref().unwrap().name,
+            "新背包",
+            "未携带的段不许覆盖（#2870 同款守卫）"
         );
     }
 
