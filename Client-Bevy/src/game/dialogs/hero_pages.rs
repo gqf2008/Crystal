@@ -97,6 +97,17 @@ pub const HERO_TABS: [(HeroPage, usize, usize, f32); 4] = [
 ];
 pub const HERO_TAB_Y: f32 = 70.0;
 pub const HERO_TAB_SIZE: (f32, f32) = (64.0, 20.0);
+
+/// `HeroPage` → 页签下标（顺序与 [`HERO_TABS`] 一致：装备 0 / 状态 1 / State 2 / 技能 3）
+/// —— 与角色窗的 `CharPage.0` 同口径，便于共用 [`crate::game::dialogs::character::char_tab_visible`]。
+pub fn hero_page_index(page: HeroPage) -> usize {
+    match page {
+        HeroPage::Equipment => 0,
+        HeroPage::Status => 1,
+        HeroPage::State => 2,
+        HeroPage::Skill => 3,
+    }
+}
 /// 页区原点（C# `Location = new Point(8, 90)`）
 pub const HERO_PAGE_X: f32 = 8.0;
 pub const HERO_PAGE_Y: f32 = 90.0;
@@ -285,6 +296,10 @@ pub fn hero_pages_system(
     mut pages: ResMut<HeroPageState>,
     hero: Res<crate::game::dialogs::hero::HeroState>,
     tabs: Query<(Entity, &Interaction, &HeroTabBtn)>,
+    // 页签显隐（与点击查询分开：一个读 `Interaction`、一个写 `Visibility`，同一系统里两条查询各自只碰自己的分量）
+    // `Without<HeroPageRoot>`：页签与页根是两类实体，加这个过滤后两条查询**可证不相交**
+    // （否则都写 `Visibility` → Bevy B0001，实测 `cargo test` 会直接报冲突）。
+    mut tabs_vis: Query<(&mut Visibility, &HeroTabBtn), Without<HeroPageRoot>>,
     mut roots: Query<(&HeroPageRoot, &mut Visibility)>,
     mut labels: Query<(&HeroStatLabel, &mut Text)>,
     mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
@@ -304,6 +319,23 @@ pub fn hero_pages_system(
 
     // 页根显隐：#2892 批58 起四页同属一个英雄窗 → 只显示 `HeroPageState.page` 对应的页
     let page = pages.page;
+    // 页签显隐：只有当前页那颗画。依据同角色窗——C# `CharacterDialog.Show*Page()` 把选中那颗设成
+    // 自己的帧、其余三颗设 `Index = -1`（**未选中态的 4 个页签已烘在底图 `Title[504]` 里**）。
+    // 本端曾 4 颗都用高亮帧常显 ⇒ 英雄窗上出现 4 颗高亮页签。
+    let hero_open = mgr.is_open(DialogKind::HeroEquipment);
+    for (mut vis, tab) in &mut tabs_vis {
+        let want = if hero_open && crate::game::dialogs::character::char_tab_visible(
+            hero_page_index(page),
+            hero_page_index(tab.0),
+        ) {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
+        if *vis != want {
+            *vis = want;
+        }
+    }
     for (root, mut vis) in &mut roots {
         let want = if root.0 == page {
             Visibility::Visible
