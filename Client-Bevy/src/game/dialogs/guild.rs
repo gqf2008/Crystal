@@ -252,14 +252,24 @@ pub const NOTICE_ROW_DY: f32 = 16.0;
 #[derive(Component)]
 pub struct GuildNoticeText;
 
-/// C# `NoticeUpButton`/`NoticeDownButton` 的滚动语义：`NoticeScrollIndex` 为首行下标，
-/// 上到 0 停、下到 `len-1` 停（等价于对 `0..=len-1` 做 clamp）。
+/// C# `NoticeUpButton`/`NoticeDownButton` 的滚动语义（`GuildDialog.cs:270-300`）：
+/// `NoticeScrollIndex` = **首行下标**。
+///
+/// - 上：`if (NoticeScrollIndex == 0) return; NoticeScrollIndex--;` → 0 停。
+/// - 下：`if (NoticeScrollIndex == len - 1) return;`
+///   `if (NoticeScrollIndex >= len - 25) NoticeScrollIndex--;`
+///   `NoticeScrollIndex++;`
+///   —— 后半段那对 `--`/`++` 合起来是**净零**，所以"下"实际停在 `len - 25`（末屏保持完整 25 行），
+///   **不是** `len - 1`。公告短于 25 行时 `len-25 <= 0` ⇒ 下按钮恒定不动。
+///
+/// 本端旧实现按 `0..=len-1` 钳位 ⇒ 公告很长时能一路翻到"只剩最后一行"，而且与同一文件里
+/// `notice_bar_y` / `notice_wheel_scroll` 用的 `len-25` **自相矛盾**（那两处本来就对）。
 pub fn notice_next_scroll(current: usize, delta: i32, len: usize) -> usize {
     if len == 0 {
         return 0;
     }
-    let last = (len - 1) as i64;
-    (current as i64 + delta as i64).clamp(0, last) as usize
+    let max = len.saturating_sub(NOTICE_BAR_ROWS) as i64; // 见上：是 len-25，不是 len-1
+    (current as i64 + delta as i64).clamp(0, max) as usize
 }
 /// 公告翻页钮（C# `NoticeUpButton`/`NoticeDownButton` @(337,1)/(337,318)）
 #[derive(Component)]
@@ -3346,16 +3356,26 @@ mod tests {
         st.members[0].rank_index = 9;
         assert_eq!(guild_my_options(&st, Some("bob")), None);
     }
-    /// #2892 批B 单元11：公告滚动（C# `NoticeScrollIndex`：首行下标，0..=len-1 钳位）。
+    /// #2892 批B 单元11 / 金标准逐窗复核 ⑧：公告滚动钳位 —— 上是 0、**下是 `len-25`**。
     ///
-    /// 阳性对照：把下钳位去掉（只 `+1` 不 clamp）→ 本测试的「到底再加不动」断言 FAILED。
+    /// C# 下按钮是 `if (idx >= len-25) idx--; idx++;`（`GuildDialog.cs:292-297`），那对 `--`/`++`
+    /// 净零 ⇒ 实际停在 `len-25`，末屏保持完整 25 行。旧实现（连同本条测试）按 `0..=len-1` 钳位，
+    /// 与 C# 以及同文件 `notice_bar_y`/`notice_wheel_scroll` 的 `len-25` 都不一致。
+    ///
+    /// 阳性对照：把 `max` 改回 `len-1` → 「len=100 时 75 再加不动」立即红（会变成 76）。
     #[test]
     fn notice_scroll_clamps_like_csharp() {
-        assert_eq!(notice_next_scroll(0, -1, 5), 0, "到顶再加不动");
-        assert_eq!(notice_next_scroll(0, 1, 5), 1);
-        assert_eq!(notice_next_scroll(3, 1, 5), 4);
-        assert_eq!(notice_next_scroll(4, 1, 5), 4, "到底再加不动");
-        assert_eq!(notice_next_scroll(4, -1, 5), 3);
+        assert_eq!(notice_next_scroll(0, -1, 5), 0, "到顶不动");
+        // 短于 25 行：一屏放得下 ⇒ 下按钮恒定不动（C# `len-25 <= 0`）
+        assert_eq!(notice_next_scroll(0, 1, 5), 0, "不足 25 行时下按钮不动");
+        assert_eq!(notice_next_scroll(4, 1, 5), 0, "不足 25 行时越界下标收敛到 0");
+        // 长公告：下到 len-25 停（100-25=75），不是 len-1
+        assert_eq!(notice_next_scroll(0, 1, 100), 1);
+        assert_eq!(notice_next_scroll(74, 1, 100), 75);
+        assert_eq!(notice_next_scroll(75, 1, 100), 75, "到 len-25 再加不动");
+        assert_eq!(notice_next_scroll(90, 0, 100), 75, "越界（公告变短）也收敛到 len-25");
+        assert_eq!(notice_next_scroll(75, -1, 100), 74);
+        assert_eq!(notice_next_scroll(1, -1, 100), 0);
         // 空公告：恒 0（C# `Notice.MultiText.Length - 1` 会是 -1，本端取 0 避免下溢）
         assert_eq!(notice_next_scroll(3, -1, 0), 0);
         assert_eq!(notice_next_scroll(3, 1, 0), 0);
