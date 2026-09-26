@@ -204,6 +204,18 @@ py -3.12 tools/acceptance/csharp_golden/control_size_audit.py `
   结果扫不出来；改成真实历史形态才成立）。所以它**不是**"所有尺寸问题都能抓"，是"这一类最常见的形态能抓"；
 - 已登记进 `docs/DELIVERY.md` 的"离线对账/卫生门禁"清单（第 6 条）。
 
+**2026-09-26 补：修掉一处**严重漏报**，并引入"已知待核表"**
+
+- **漏报根因**：判据原先按「`load` 的句柄变量名 ↔ spawn 同名变量」配对，而仓库里**最主流的写法**
+  是 `if let (Some(n), Some(h), Some(pr)) = (load…, load…, load…) { spawn_icon_button(p, n, h, pr, …) }`
+  —— 元组里**没有 `let x =` 绑定**，配对直接跳过整组 ⇒ 工具长期报"0 命中"却是**假绿灯**
+  （实测：`big_map` 滚屏箭头把 `Prguse2[197]`(12x12) 写成 16x14 就是这样漏掉的）。
+  现在补上元组解析，并**优先取 normal 帧**（控件尺寸按 C# `MirImageControl.Size` = `GetTrueSize(Index)`，
+  取的是当前 `Index` 即 normal 帧；拿 hover 帧比会造假 FAIL）。
+- **由此浮现 30 处**（跨 game_shop/group/inventory/keyboard_layout/mentor/npc_goods/potion_belt/
+  quest_log/storage/big_map 等），已登记进 `control_size_audit_known.txt` 作为**待办队列**
+  （不是"白名单通过"）：清单内只提示，**新增命中才 FAIL**，`--selftest` 的负对照也按"新增 0"判。
+
 ## 4. 存档导出（dbtool）
 
 `dbtool` 用原版 `Server.Library.dll` 读 `Server.MirDB`（游戏数据）与 `Server.MirADB`（账号/角色），
