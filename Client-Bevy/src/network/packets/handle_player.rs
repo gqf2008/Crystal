@@ -199,6 +199,10 @@ pub(crate) fn handle_player(
                         equipment,
                         quest_inventory,
                         item_names,
+                        // #3258：仓库密码三件套（C# `UserInformation.*`）→ 密码流程判据
+                        has_storage_password: p.has_storage_password,
+                        require_storage_password: p.require_storage_password,
+                        storage_password_last_set: p.storage_password_last_set,
                         max_hp: p.max_hp,
                         max_mp: p.max_mp,
                         ac: p.ac,

@@ -53,6 +53,10 @@ param(
     # 而抽点是在那之后 ⇒ 想对某个窗的**窗内控件**抽点，此前没有任何开关能让它留在屏上
     # （2026-09-26 实测：没开窗时在菜单按钮的位置上抽点，只会命中别的窗，得到一堆无关节点）。
     [string]$OpenKinds = '',
+    # 可选：开窗后按这些屏幕坐标**点一下**（逗号分隔单串 `x,y;x,y`），再抽点。
+    # 用途：验「点某个窗内控件之后的界面变化」——例如 #3258 点仓库 `ProtectButton` 后，
+    # 屏幕中央应出现 `MirInputBox`（`Prguse[660]` 288x156 @(368,306)）而不是本端旧的自造密码面板。
+    [string]$ClickPoints = '',
     # 角色窗页（0=装备 1=状态 2=State 3=技能）；>=0 时用 `char_page` RPC 开窗并切页
     # （页签只能点、无热键，C# 亦然；见 control.rs 的 char_page）。做窗内控件对表时用它。
     [int]$CharPage = -1,
@@ -212,6 +216,13 @@ try {
         Start-Sleep -Milliseconds 350
         $res["opened_$k"] = $opened
         Write-Host ("按 OpenKinds 开窗：{0}（留在屏上供抽点）" -f $k)
+    }
+    foreach ($p in ($ClickPoints -split ';' | Where-Object { $_.Trim() })) {
+        $xy = $p.Trim().Split(',')
+        if ($xy.Count -ne 2) { Write-Host "跳过非法 ClickPoints '$p'（要 x,y）"; continue }
+        $null = Rpc 'click' @{ x = [double]$xy[0]; y = [double]$xy[1] }
+        Start-Sleep -Milliseconds 350
+        Write-Host ("点击：{0},{1}" -f $xy[0], $xy[1])
     }
     if ($RectKinds -eq 'all' -or $RectKinds -eq 'sweep') {
         $manifest = Join-Path $Repo 'tools\acceptance\interact_sweep_manifest.json'

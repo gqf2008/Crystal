@@ -77,6 +77,10 @@ pub enum InputPurpose {
     /// OK 回调分别是 `MailComposeLetterDialog.ComposeMail(name)` 与
     /// `MailComposeParcelDialog.ComposeMail(name)`；`parcel` 区分两者）
     MailRecipient { parcel: bool },
+    /// #3258：仓库密码提示序列（C# `NPCDialogs.cs:3206-3239` `PromptStoragePassword`）。
+    /// 「下一问 / 发包 / 报错重问」都由 `storage::storage_password_step` 决定
+    /// —— C# 用闭包回调，本端用 `storage::StoragePwdFlow` 表达同一状态机。
+    StoragePassword,
 }
 
 /// 输入框状态（C# 每次 `new MirInputBox(message)` 一个新窗口；本端复用同一实体）
@@ -222,6 +226,8 @@ pub fn open_input_box(
     }
     input.texts[INPUT_FIELD_ID].clear();
     input.active = Some(INPUT_FIELD_ID);
+    // 非密码用途：清掉遮罩（`storage.rs` 的密码流程会随后自己打开）
+    input.set_masked(INPUT_FIELD_ID, false);
     tracing::info!("⌨️ [INPUTBOX] 打开输入框（客户端发起）：{title}");
 }
 
@@ -260,6 +266,7 @@ fn input_box_open_system(
         }
         input.texts[INPUT_FIELD_ID].clear();
         input.active = Some(INPUT_FIELD_ID);
+        input.set_masked(INPUT_FIELD_ID, false);
         tracing::info!("⌨️ [INPUTBOX] 打开输入框：{title}");
     }
 }
@@ -269,12 +276,15 @@ fn input_box_open_system(
 fn input_box_ui_system(
     mut mgr: ResMut<DialogManager>,
     mut state: ResMut<InputBoxState>,
-    input: Res<TextInputState>,
+    mut input: ResMut<TextInputState>,
     net: Res<NetConnection>,
     mut npc_input: ResMut<crate::game::dialogs::npc::NpcInputState>,
+    mut storage: ResMut<crate::game::dialogs::storage::StorageState>,
+    mut storage_flow: ResMut<crate::game::dialogs::storage::StoragePwdFlow>,
+    mut chat: ResMut<crate::game::chat::ChatState>,
     mut keys: MessageReader<KeyboardInput>,
     ok: Query<&Interaction, (With<InputBoxOk>, Without<InputBoxCancel>)>,
-    cancel: Query<&Interaction, (With<InputBoxCancel>, Without<InputBoxOk>)>,
+    cancel_btn: Query<&Interaction, (With<InputBoxCancel>, Without<InputBoxOk>)>,
     mut captions: Query<&mut Text, With<InputBoxCaption>>,
     mut roots: Query<&mut Visibility, With<InputBoxRoot>>,
     mut submits: MessageReader<TextInputSubmit>,
@@ -305,15 +315,15 @@ fn input_box_ui_system(
     }
 
     let mut confirm = false;
-    let mut dismiss = false;
+    let mut cancel = false;
     for inter in &ok {
         if *inter == Interaction::Pressed {
             confirm = true;
         }
     }
-    for inter in &cancel {
+    for inter in &cancel_btn {
         if *inter == Interaction::Pressed {
-            dismiss = true;
+            cancel = true;
         }
     }
     let _ = &mut prev_inter;
@@ -324,7 +334,7 @@ fn input_box_ui_system(
         }
         match &ev.logical_key {
             Key::Enter => confirm = true,
-            Key::Escape => dismiss = true,
+            Key::Escape => cancel = true,
             _ => {}
         }
     }
@@ -334,6 +344,8 @@ fn input_box_ui_system(
         }
     }
 
+    // #3258：密码流程里「保持打开」= C# `onSubmit` 返回 false（空输入 / 两次不一致）
+    let mut keep_open = false;
     if confirm {
         let body: String = input
             .texts
@@ -385,17 +397,58 @@ fn input_box_ui_system(
                 });
                 tracing::info!("✉️ [INPUTBOX] 写邮件收件人={body} parcel={parcel}");
             }
+            InputPurpose::StoragePassword => {
+                // C# `PromptStoragePassword` 的 `onSubmit`（`NPCDialogs.cs:3225-3237`）：
+                // 返回 false 就 `SetFocus()` 留在原地，返回 true 才 `Dispose()`。
+                let r = crate::game::dialogs::storage::storage_password_step(
+                    &body,
+                    &mut storage,
+                    &mut storage_flow,
+                );
+                if let Some(pkt) = r.packet.clone() {
+                    crate::game::dialogs::storage::send_pwd_packet(&net, &pkt);
+                }
+                if let Some(msg) = r.message.clone() {
+                    chat.add_line(
+                        msg,
+                        crate::game::chat::chat_color(mir2_shared::enums::ChatType::System),
+                        crate::game::chat::ChatChannel::System,
+                    );
+                }
+                if let Some((step, prompt)) = r.next {
+                    crate::game::dialogs::storage::open_pwd_prompt(
+                        &mut state,
+                        &mut input,
+                        &mut storage_flow,
+                        step,
+                        prompt,
+                    );
+                }
+                if r.restart_set {
+                    // C# `:3145-3147`：强制设密码且两次不一致 → 从第一步重来
+                    crate::game::dialogs::storage::start_set_password_flow(
+                        &mut state,
+                        &mut input,
+                        &mut storage_flow,
+                    );
+                }
+                keep_open = r.keep_open;
+            }
             InputPurpose::None => {}
         }
-        dismiss = true;
     }
-    if dismiss {
+    if cancel && matches!(state.purpose, InputPurpose::StoragePassword) {
+        // C# `onCancel`（解锁/首次设置会连仓库窗一起关，见 `StoragePwdFlow.cancel_hides_storage`）
+        crate::game::dialogs::storage::storage_password_cancel(&mut storage, &mut storage_flow);
+    }
+    if (confirm && !keep_open) || cancel {
         // NPC 输入请求已了结（确认或取消），复位探针状态
         if matches!(state.purpose, InputPurpose::NpcConfirm { .. }) {
             npc_input.active = false;
         }
         state.open = false;
         state.purpose = InputPurpose::None;
+        input.set_masked(INPUT_FIELD_ID, false);
         sync_dialog_state(&mut mgr, DialogKind::InputBox, false);
     }
 }
@@ -432,6 +485,10 @@ mod tests {
         app.init_resource::<InputBoxState>();
         app.init_resource::<TextInputState>();
         app.init_resource::<crate::game::dialogs::npc::NpcInputState>();
+        // #3258：密码流程的落点（`StoragePassword` 用途会读写这两个资源 + 系统频道）
+        app.init_resource::<crate::game::dialogs::storage::StorageState>();
+        app.init_resource::<crate::game::dialogs::storage::StoragePwdFlow>();
+        app.init_resource::<crate::game::chat::ChatState>();
         app.insert_resource(NetConnection::default());
         app.add_message::<KeyboardInput>();
         app.add_message::<TextInputSubmit>();

@@ -19,6 +19,29 @@ use crate::ui::pinyin_ime::{ImeFocus, PinyinIme};
 pub struct TextInputState {
     pub texts: Vec<String>,
     pub active: Option<usize>,
+    /// 需要遮罩显示的输入框 id（C# `MirTextBox.Password = true`：按字符数画 `*`）。
+    /// 2026-09-26：仓库密码提示序列（`storage.rs`）是本端第一个用它的调用方。
+    pub masked: std::collections::HashSet<usize>,
+}
+
+impl TextInputState {
+    /// 设置/取消某个输入框的遮罩显示（C# `MirTextBox.Password`）。
+    pub fn set_masked(&mut self, id: usize, masked: bool) {
+        if masked {
+            self.masked.insert(id);
+        } else {
+            self.masked.remove(&id);
+        }
+    }
+}
+
+/// 显示文本：密码框按字符数画 `*`（C# `MirTextBox` 的 `Password` 分支）。
+pub fn masked_display(raw: &str, masked: bool) -> String {
+    if masked {
+        "*".repeat(raw.chars().count())
+    } else {
+        raw.to_string()
+    }
 }
 
 /// 输入框 id 标记
@@ -189,14 +212,16 @@ fn text_input_system(
 
     // 显示同步（变化才更新，避免每帧重排文本，#31）
     for (mut text, disp) in &mut displays {
-        let new = state.texts.get(disp.0).cloned().unwrap_or_default();
+        let raw = state.texts.get(disp.0).cloned().unwrap_or_default();
+        let new = masked_display(&raw, state.masked.contains(&disp.0));
         if text.0 != new {
             text.0 = new;
         }
     }
     // bevy_ui 显示同步（Node 内 Text）
     for (mut text, disp) in &mut bevy_displays {
-        let new = state.texts.get(disp.0).cloned().unwrap_or_default();
+        let raw = state.texts.get(disp.0).cloned().unwrap_or_default();
+        let new = masked_display(&raw, state.masked.contains(&disp.0));
         if text.0 != new {
             text.0 = new;
         }
@@ -354,5 +379,15 @@ mod tests {
         let (multi_text, multi_submits) = run(true);
         assert_eq!(multi_text, "abc\n", "多行框 Enter 插入换行");
         assert_eq!(multi_submits, 0, "多行框 Enter 不发提交消息");
+    }
+
+    /// #3258：密码框遮罩（C# `MirTextBox.Password = true`）—— 显示按**字符数**画 `*`，
+    /// 非遮罩框逐字原样；中文字符也算一个 `*`（按 `chars()` 计数而不是字节数）。
+    #[test]
+    fn masked_display_counts_chars_not_bytes() {
+        assert_eq!(masked_display("abc", true), "***");
+        assert_eq!(masked_display("密码1", true), "***", "中文按字符计数");
+        assert_eq!(masked_display("abc", false), "abc");
+        assert_eq!(masked_display("", true), "");
     }
 }

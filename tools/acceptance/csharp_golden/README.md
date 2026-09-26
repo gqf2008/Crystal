@@ -196,6 +196,21 @@ pwsh tools/acceptance/csharp_golden/probe_ui_nodes.ps1 -Repo <wt> -ClientHome <w
 ——`dialog_rect` 靠关闭钮反推窗口矩形，而菜单窗在 C# 里就没有关闭钮（`no_close_by_design`）；
 窗内控件抽点不需要 `dialog_rect`。
 
+**点完再看变化：`-ClickPoints`（2026-09-26 补）**
+
+有些判据是「点一下某控件之后屏上该出现/不该出现什么」——例如 #3258「仓库 `ProtectButton` 点下去
+必须弹 `MirInputBox`（`Prguse[660]` 288x156 @(368,306)），而不是本端旧的自造密码面板」。
+`-ClickPoints 'x,y;x,y'` 在 `-OpenKinds` 之后、抽点之前逐个 `click`，就能直接抓这个变化：
+
+```powershell
+pwsh tools/acceptance/csharp_golden/probe_ui_nodes.ps1 -Repo <wt> -ClientHome <wt> `
+     -RectKinds '' -OpenKinds storage -ClickPoints '352,46' `
+     -Points '512,384;61,459;512,330' -Out %TEMP%\storage_pwd.json
+```
+
+实测（PR #3258 的本端构建位）：点仓库保护钮后 `(512,384)` 命中 **`[368,306,288,156]`**（= `MirInputBox`），
+旧自造面板的按钮位置 `(61,459)` 命中 **0 个节点**，`(512,330)` 命中输入框与它的输入区容器。
+
 ### 3.4 窗内控件：`control_size_audit.py`（写死尺寸 ≠ 美术原生尺寸 = 0）
 
 原版大量控件只写 `Index`/`Library`/`Location`，**尺寸就是美术尺寸**；本端若在这些地方写死一个数字，

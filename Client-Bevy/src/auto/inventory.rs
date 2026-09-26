@@ -273,7 +273,7 @@ pub(crate) fn auto_storage_test(
                 return;
             }
             // #200/#283：mock 默认有仓库密码——先解锁再存取
-            if storage.unlock_panel {
+            if storage.unlock_prompt_open {
                 net.send_packet(&mir2_shared::packets::client::storage::UnlockStorage {
                     password: "123456".to_string(),
                 });
@@ -399,7 +399,7 @@ pub(crate) fn auto_storage_equip_test(
             if *t < 2.0 {
                 return;
             }
-            if storage.unlock_panel {
+            if storage.unlock_prompt_open {
                 net.send_packet(&mir2_shared::packets::client::storage::UnlockStorage {
                     password: "123456".to_string(),
                 });
@@ -1671,7 +1671,7 @@ pub(crate) fn auto_storage_unlock_test(
             if *t < 1.5 {
                 return;
             }
-            if storage.unlock_panel && !storage.visible {
+            if storage.unlock_prompt_open && !storage.visible {
                 tracing::info!("[UNLOCK] ✅ 解锁框出现（仓库未打开）");
                 net.send_packet(&mir2_shared::packets::client::storage::UnlockStorage {
                     password: "wrong".to_string(),
@@ -1681,7 +1681,7 @@ pub(crate) fn auto_storage_unlock_test(
             } else {
                 tracing::warn!(
                     "[UNLOCK] ❌ 解锁框未出现（panel={} visible={}）",
-                    storage.unlock_panel,
+                    storage.unlock_prompt_open,
                     storage.visible
                 );
                 *stage = 9;
@@ -1691,8 +1691,8 @@ pub(crate) fn auto_storage_unlock_test(
             if *t < 1.0 {
                 return;
             }
-            if !storage.unlock_msg.is_empty() && storage.unlock_panel {
-                tracing::info!("[UNLOCK] ✅ 错误密码提示: {}", storage.unlock_msg);
+            if !storage.pwd_last_error.is_empty() && storage.unlock_prompt_open {
+                tracing::info!("[UNLOCK] ✅ 错误密码提示: {}", storage.pwd_last_error);
                 net.send_packet(&mir2_shared::packets::client::storage::UnlockStorage {
                     password: "123456".to_string(),
                 });
@@ -1701,8 +1701,8 @@ pub(crate) fn auto_storage_unlock_test(
             } else {
                 tracing::warn!(
                     "[UNLOCK] ❌ 错误密码未提示（msg={} panel={}）",
-                    storage.unlock_msg,
-                    storage.unlock_panel
+                    storage.pwd_last_error,
+                    storage.unlock_prompt_open
                 );
                 *stage = 9;
             }
@@ -1711,13 +1711,13 @@ pub(crate) fn auto_storage_unlock_test(
             if *t < 1.5 {
                 return;
             }
-            if storage.visible && !storage.unlock_panel {
+            if storage.visible && !storage.unlock_prompt_open {
                 tracing::info!("[UNLOCK] ✅ PASS 仓库解锁并打开");
             } else {
                 tracing::error!(
                     "[UNLOCK] ❌ FAIL visible={} panel={}",
                     storage.visible,
-                    storage.unlock_panel
+                    storage.unlock_prompt_open
                 );
             }
             *stage = 9;
