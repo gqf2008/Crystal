@@ -144,16 +144,38 @@ try {
                    else { $npcs | Sort-Object dist | Select-Object -First 1 }
             Write-Host ("NPC 窗：npc_call object_id={0} name={1} dist={2} key={3}" -f `
                 $npc.object_id, $npc.name, $npc.dist, $NpcCallKey)
-            # 先按 `nearby` 给的**视口坐标**点一下这个 NPC（原版左键交互 = 走到/面向并开始对话）。
-            # 为什么必须点：`npc_call` 只发 `CallNPC{object_id,key}` 给服务端，服务端要求**交互距离内**
-            # 才响应；实测 `Merchant_Ruben` 在 240px(≈5 格) 外时 `npc_call` 被忽略、窗口不开。
-            if ($null -ne $npc.vp) {
-                Write-Host ("NPC 窗：先 click 视口 ({0},{1}) 触发交互" -f $npc.vp.x, $npc.vp.y)
-                $null = Rpc 'click' @{ x = [double]$npc.vp.x; y = [double]$npc.vp.y }
-                Start-Sleep -Seconds 3
+            # **先走过去**再 call：`npc_call` 只发 `CallNPC{object_id,key}` 给服务端，服务端要求
+            # **交互距离内**才响应——实测 `Merchant_Ruben` 在 240px(≈5 格) 外时被忽略、窗口不开；
+            # 光 `click` 一次（3s，人还在原地）也不够。
+            # `walk_to` 接受**世界坐标** `{x,y}`（也接受 `{tx,ty}`，但瓦片→世界要过
+            # `movement::tile_to_world`，别自己算），而 `nearby.entities[]` 给的正是世界 `x/y`，
+            # 直接喂进去最省事、也不会踩"两套瓦片换算"的坑。
+            Write-Host ("NPC 窗：walk_to 世界坐标 ({0},{1})（{2}）" -f $npc.x, $npc.y, $npc.name)
+            $null = Rpc 'walk_to' @{ x = [double]$npc.x; y = [double]$npc.y }
+            $near2 = $null
+            foreach ($i in 1..40) {
+                Start-Sleep -Milliseconds 500
+                $near2 = Rpc 'nearby' @{ radius = $NearbyRadius }
+                $me = @($near2.entities) | Where-Object { $null -ne $_ -and "$($_.object_id)" -eq "$($npc.object_id)" } | Select-Object -First 1
+                if ($null -ne $me -and [int]$me.dist -lt 60) { $npc = $me; break }
             }
-            $null = Rpc 'npc_call' @{ object_id = [int]$npc.object_id; key = $NpcCallKey }
-            Start-Sleep -Seconds 2
+            Write-Host ("NPC 窗：走近后 dist={0}（目标 <60px）" -f (@($me)[0].dist))
+            # 开窗要**轮询 + 重试**：`l5e` 的实测经验是「object_id 会随地图重建变化」，未开窗时
+            # 重新按名字定位再发一次；成功信号取 `npc_rows` 有行（NPC 窗是状态驱动窗，不进 dialogs）。
+            $opened = $false
+            foreach ($try in 1..8) {
+                $null = Rpc 'npc_call' @{ object_id = [int]$npc.object_id; key = $NpcCallKey }
+                Start-Sleep -Milliseconds 800
+                $rows = Rpc 'npc_rows'
+                if (@($rows.links).Count -gt 0 -or [int]$rows.count -gt 0) { $opened = $true; break }
+                # 没开就重新定位（按名字优先，回退最近）
+                $near3 = Rpc 'nearby' @{ radius = $NearbyRadius }
+                $cand = @($near3.entities) | Where-Object { $null -ne $_ -and "$($_.kind)" -eq 'npc' }
+                $pref3 = @($cand | Where-Object { $NpcNameLike -and "$($_.name)" -like "*$NpcNameLike*" })
+                $pick = if ($pref3.Count -gt 0) { $pref3 | Sort-Object dist | Select-Object -First 1 } else { $cand | Sort-Object dist | Select-Object -First 1 }
+                if ($null -ne $pick) { $npc = $pick }
+            }
+            Write-Host ("NPC 窗：开窗={0}（试 {1} 次，name={2} object_id={3}）" -f $opened, $try, $npc.name, $npc.object_id)
         }
     }
     Start-Sleep -Seconds 3
