@@ -32,6 +32,10 @@ param(
     # （`rx = cx - w/2`、`ry = cy - h/2`），窗口没开时关闭钮不存在 ⇒ 返回
     # `{ok:false, error:"close button not found"}`（实测：45 个 kind 一口气问只回 3 个 ok）。
     [string]$RectKinds = 'inventory,character'
+    ,
+    # 角色窗页（0=装备 1=状态 2=State 3=技能）；>=0 时用 `char_page` RPC 开窗并切页
+    # （页签只能点、无热键，C# 亦然；见 control.rs 的 char_page）。做窗内控件对表时用它。
+    [int]$CharPage = -1
 )
 $ErrorActionPreference = 'Continue'
 . "$PSScriptRoot\..\e2e_lock.ps1"
@@ -68,7 +72,12 @@ try {
     foreach ($i in 1..40) { Start-Sleep -Milliseconds 500; $s2 = Rpc 'state'; if ("$($s2.map)" -eq '0') { break } }
     $s3 = Rpc 'state'; Write-Host ("对齐后 map={0} tile=({1},{2})" -f $s3.map, $s3.tile_x, $s3.tile_y)
     $null = Rpc 'dialog' @{ kind = 'inventory'; action = 'open' }
-    if (-not $InventoryOnly) { $null = Rpc 'dialog' @{ kind = 'character'; action = 'open' } }
+    if ($CharPage -ge 0) {
+        Write-Host ("角色窗切页 char_page={0}（0=装备 1=状态 2=State 3=技能）" -f $CharPage)
+        $null = Rpc 'char_page' @{ page = $CharPage }
+    } elseif (-not $InventoryOnly) {
+        $null = Rpc 'dialog' @{ kind = 'character'; action = 'open' }
+    }
     Start-Sleep -Seconds 3
     $res = [ordered]@{}
     $res['state'] = $s3

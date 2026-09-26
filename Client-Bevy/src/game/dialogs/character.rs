@@ -55,6 +55,24 @@ pub const EQUIP_SLOTS: [(f32, f32); 14] = [
 /// C# MirItemCell 装备格 Size(36,32)（MirItemCell.cs:186；纵向步进 36=32+4 间隙，如 BraceletL(8,170)→RingL(8,206)）
 pub const SLOT_W: f32 = 36.0;
 pub const SLOT_H: f32 = 32.0;
+
+/// 技能页翻页钮原生尺寸（C# `NextButton`/`BackButton` 只给 `Index`/`Location`，**不设 `Size`**
+/// ⇒ `MirButton` 取美术原生尺寸：`Prguse[396]/[398]` = **16x14**，`CharacterDialog.cs:557-580`）。
+///
+/// 本端曾写 40x22（既非 396/398 的原生尺寸、也不对应任何一帧），把箭头拉大了 2.5 倍
+/// ——窗口内控件对表时用 `libextract.py` 读图头才看出来（2026-09-26）。
+pub const SKILL_PAGER_W: f32 = 16.0;
+pub const SKILL_PAGER_H: f32 = 14.0;
+
+/// 翻页钮尺寸：**跟美术走**（`Prguse[396]` 的原生尺寸），读不到资产时退回 [`SKILL_PAGER_W`]/
+/// [`SKILL_PAGER_H`]。原版是"不设 Size ⇒ 取美术尺寸"，写死一个与美术无关的常量（曾为 40x22）
+/// 就会把箭头拉伸——让尺寸来自图头，这类漂移就不可能再悄悄发生。
+pub fn skill_pager_size(libs: &mut GameLibraries) -> (f32, f32) {
+    match libs.0.get_image(LibraryName::Prguse, 396) {
+        Some(i) => (i.width.max(0) as f32, i.height.max(0) as f32),
+        None => (SKILL_PAGER_W, SKILL_PAGER_H),
+    }
+}
 /// C# NameLabel (0,12) 264x20 / GuildLabel (0,33) 264x30，HCenter|VCenter 框心（对话框相对）：
 /// x=264/2=132；name y=12+20/2=22；guild y=33+30/2=48（CharacterDialog.cs:202-217）
 pub const NAME_CX: f32 = 132.0;
@@ -476,6 +494,7 @@ fn spawn_character_dialog(
                                         });
                                 }
                                 // Next/Back（Prguse[396/397] @(140,250) / [398/399] @(90,250)）
+                                let (pager_w, pager_h) = skill_pager_size(&mut libs);
                                 for (is_next, idx, x) in
                                     [(true, 396usize, 140.0f32), (false, 398usize, 90.0f32)]
                                 {
@@ -500,7 +519,15 @@ fn spawn_character_dialog(
                                         ),
                                     ) {
                                         let mut b = spawn_icon_button(
-                                            pg, n, h, pr, x, 250.0, 40.0, 22.0, 10,
+                                            pg,
+                                            n,
+                                            h,
+                                            pr,
+                                            x,
+                                            250.0,
+                                            pager_w,
+                                            pager_h,
+                                            10,
                                         );
                                         if is_next {
                                             b.insert(CharSkillNext);
@@ -975,6 +1002,35 @@ mod tests {
         // C# 无 case 的技能 → 空串（不弹提示）
         m.spell = mir2_shared::enums::Spell::None;
         assert_eq!(skill_row_hint(&m), "");
+    }
+
+    #[test]
+    /// 门禁（金标准逐窗复核 · 窗内控件）：技能页翻页钮必须用**美术原生尺寸**。
+    ///
+    /// 依据：C# `CharacterDialog.cs:557-580` 的 `NextButton`/`BackButton` 只写
+    /// `Index = 396 / PressedIndex = 397`（Back：398/399）、`Location = (140,250)/(90,250)`，
+    /// **不写 `Size`** ⇒ `MirButton` 取美术尺寸 = `Prguse[396]/[398]` 的 **16x14**
+    /// （用 `tools/acceptance/csharp_golden/libextract.py` 读图头实测；不是推断）。
+    /// 本端曾写死 40x22，把箭头拉大 2.5 倍。
+    ///
+    /// 覆盖边界（说清楚，别当它更强）：本测试钉的是"读不到资产时的回退值 = 16x14"与
+    /// "有图头时以图头为准"两条；**渲染出来真的是 16x14** 由实机 `ui_nodes_at` 验证
+    /// （2026-09-26 实测两钮节点矩形 = (858,340) 16x14 / (908,340) 16x14）。
+    ///
+    /// 阳性对照：把回退值改回 40x22 → 第一条断言立即红。
+    fn skill_pager_uses_native_art_size() {
+        assert_eq!(
+            (SKILL_PAGER_W, SKILL_PAGER_H),
+            (16.0, 14.0),
+            "C# 不设 Size ⇒ Prguse[396]/[398] 原生 16x14；写死别的值会把箭头拉伸"
+        );
+        // 有图头时以图头为准：给一个与回退值不同的尺寸，函数必须返回图头的那个
+        let mut libs = GameLibraries::default();
+        assert_eq!(
+            skill_pager_size(&mut libs),
+            (SKILL_PAGER_W, SKILL_PAGER_H),
+            "资产缺失时应回退到常量（默认 GameLibraries 未初始化 ⇒ 走回退分支）"
+        );
     }
 
     #[test]
