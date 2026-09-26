@@ -300,6 +300,16 @@ enum ControlCommand {
     StorageProbe {
         reply: Sender<String>,
     },
+    /// 只读**物品租赁窗**探针（2026-09-27，P3-3/#782 队列②最后一处）：
+    /// 暴露 `ItemRentalState` 的角色/对方名/双方物品（含**名字与索引**）/费用期限/锁定与确认。
+    ///
+    /// 存在理由：`S.UpdateRentalItem` 是**裸 `write_to`**（不带 ItemInfo，见
+    /// `SharedRust/src/packets/server/rental_system.rs:230`），而租客侧对方物品窗的格子就直接由它填充
+    /// （`item_rental.rs:958` 的 `RentalItemUpdate`）。「租赁窗里的物品名会不会退化成 `#id`」只能靠
+    /// 状态读数判定；`ui_nodes_at` 只给节点矩形、拿不到格子上的**文本**，日志也只打「物品就位」。
+    RentalProbe {
+        reply: Sender<String>,
+    },
     /// 只读法术特效探针（2026-09-25）：当前存活的**渲染侧**特效实体读数
     /// （施法帧动画 `SpellFxAnim` + 施法/远程弹道 `SpellMissileAnim`）。
     ///
@@ -854,6 +864,10 @@ struct ControlQueries<'w, 's> {
     /// #3265：掷骰窗同样是**状态驱动**（`RollState.visible` + 相位机），RPC 只切 mgr 时根仍 Hidden；
     /// 抽点要能开它就得连状态一起切（同 ChatNotice 口径）
     roll: ResMut<'w, crate::game::dialogs::roll::RollState>,
+    /// `rental_probe` 用：物品租赁窗状态（角色/对方名/双方物品/费用期限/锁定确认）。
+    /// `S.UpdateRentalItem` 不带 ItemInfo，租客侧对方物品窗又直接由它填充 ⇒ 「窗里名字会不会
+    /// 退化成 `#id`」只能靠状态读数判定（节点矩形拿不到格子上的文本）。
+    rental: Res<'w, crate::game::dialogs::item_rental::ItemRentalState>,
     map_cameras: Query<
         'w,
         's,
@@ -1247,6 +1261,17 @@ fn handle_conn(mut stream: std::net::TcpStream, tx: Sender<ControlCommand>) {
                     .send(ControlCommand::StorageProbe { reply: reply_tx })
                     .is_ok()
                 {
+                    let s = reply_rx
+                        .recv_timeout(std::time::Duration::from_secs(2))
+                        .unwrap_or_else(|_| "{}".to_string());
+                    serde_json::from_str::<Value>(&s).unwrap_or_else(|_| json!({}))
+                } else {
+                    json!({"error": "control channel closed"})
+                }
+            }
+            "rental_probe" => {
+                let (reply_tx, reply_rx) = bounded::<String>(1);
+                if tx.send(ControlCommand::RentalProbe { reply: reply_tx }).is_ok() {
                     let s = reply_rx
                         .recv_timeout(std::time::Duration::from_secs(2))
                         .unwrap_or_else(|_| "{}".to_string());
@@ -2234,7 +2259,8 @@ fn control_reply(cmd: &ControlCommand) -> Option<&Sender<String>> {
         | ControlCommand::NewCharProbe { reply }
         | ControlCommand::DialogRect { reply, .. }
         | ControlCommand::GetScroll { reply }
-        | ControlCommand::ShopProbe { reply } => Some(reply),
+        | ControlCommand::ShopProbe { reply }
+        | ControlCommand::RentalProbe { reply } => Some(reply),
         _ => None,
     }
 }
@@ -3410,6 +3436,46 @@ fn apply_control_commands(
                         .collect::<Vec<_>>(),
                 });
                 tracing::info!("🎮 control storage_probe: {payload}");
+                let _ = reply.send(payload.to_string());
+            }
+            ControlCommand::RentalProbe { reply } => {
+                // P3-3/#782 租赁窗半段：`S.UpdateRentalItem` 是裸 `write_to`（不带 ItemInfo），
+                // 租客侧「对方物品窗」的格子直接由它填充 ⇒ 这里把双方物品的**名字与索引**读出来，
+                // 并明确标出「这个名字是不是 `#id` 占位」，让夹具判「玩家所见是不是内部 ID」。
+                let item_json = |it: &crate::game::dialogs::inventory::InvItem| {
+                    json!({
+                        "name": it.name,
+                        "item_index": it.item_index,
+                        "unique_id": it.unique_id,
+                        "count": it.count,
+                        "placeholder": crate::game::item_names::is_placeholder_item_name(
+                            &it.name,
+                            it.item_index,
+                        ),
+                    })
+                };
+                let payload = json!({
+                    "ok": true,
+                    "request_received": q.rental.request_received,
+                    "role": format!("{:?}", q.rental.role),
+                    "name": q.rental.name,
+                    "partner_name": q.rental.partner_name,
+                    "has_item": q.rental.has_item,
+                    "fee": q.rental.fee,
+                    "period": q.rental.period,
+                    "can_confirm": q.rental.can_confirm,
+                    "confirmed": q.rental.confirmed,
+                    "item_locked": q.rental.item_locked,
+                    "fee_locked": q.rental.fee_locked,
+                    "partner_item_locked": q.rental.partner_item_locked,
+                    "partner_fee_locked": q.rental.partner_fee_locked,
+                    "partner_fee": q.rental.partner_fee,
+                    "partner_period": q.rental.partner_period,
+                    "deposit_item": q.rental.deposit_item.as_ref().map(item_json),
+                    "partner_item": q.rental.partner_item.as_ref().map(item_json),
+                    "message": q.rental.message,
+                });
+                tracing::info!("🎮 control rental_probe: {payload}");
                 let _ = reply.send(payload.to_string());
             }
             ControlCommand::NpcRows { reply } => {
