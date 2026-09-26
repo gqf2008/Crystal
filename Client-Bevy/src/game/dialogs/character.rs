@@ -92,6 +92,18 @@ pub struct CharPage(pub usize);
 #[derive(Component)]
 pub struct CharTab(pub usize);
 
+/// 页签是否**画出来**：只有当前页那颗画，其余不画。
+///
+/// 依据：`CharacterDialog.Show*Page()`（`CharacterDialog.cs:608-655`）每次切页都把**选中那颗**设成
+/// 自己的帧（`CharacterButton.Index = 500`、`StatusButton.Index = 501` …），其余三颗一律 `Index = -1`。
+/// 之所以能这么干：**窗口底图 `Title[504]` 里已经烘进了 4 个"未选中态"页签**
+/// （导出 `Title[504]` 在 y≈70 处能直接看到 `CHAR | STATS I | STATS II | SPELLS` 的暗色药丸），
+/// 按钮只在上面盖一颗**高亮态**（`Title[500]` 就是亮色 CHAR 药丸）。
+/// 本端曾把 4 颗**都用高亮帧**常显 ⇒ 窗口上出现 4 颗高亮页签（原版只有 1 亮 + 3 暗）。
+pub fn char_tab_visible(page: usize, tab: usize) -> bool {
+    page == tab
+}
+
 #[derive(Component)]
 pub struct CharPageBg(pub usize);
 
@@ -561,8 +573,15 @@ fn character_ui_system(
     mut page: ResMut<CharPage>,
     mut widgets: Query<&mut Visibility, (With<CharDialogWidget>, Without<CharPageBg>)>,
     tabs: Query<(Entity, &Interaction, &CharTab)>,
+    // 页签显隐（与点击查询分开：`&Interaction` 只读、这里要 `&mut Visibility`，同一实体不能在一个系统里重复取可变）
+    // `Without<CharDialogWidget>`：与上面的 widgets 显隐查询**可证不相交**（页签实体不带该标记），
+    // 否则两条查询都写 `Visibility` → 触发 Bevy B0001（实测：不加这个过滤，`cargo test` 直接报
+    // `accesses component(s) Visibility in a way that conflicts`）。
+    mut tabs_vis: Query<(&Node, &mut Visibility, &CharTab), Without<CharDialogWidget>>,
     close: Query<(Entity, &Interaction), (With<CharClose>, Without<CharTab>)>,
-    mut page_bgs: Query<(&mut Visibility, &CharPageBg), Without<CharDialogWidget>>,
+    // `Without<CharTab>`：页底图与页签是两类实体，加过滤后本条与 `tabs_vis`（带 `&CharTab`）
+    // **可证不相交**——两条都写 `Visibility`，不给判别过滤就是 Bevy B0001（实测）。
+    mut page_bgs: Query<(&mut Visibility, &CharPageBg), (Without<CharDialogWidget>, Without<CharTab>)>,
     mut name_texts: Query<
         &mut Text,
         (
@@ -619,6 +638,14 @@ fn character_ui_system(
     }
     for (mut vis, bg) in &mut page_bgs {
         *vis = if open && bg.0 == page.0 {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
+    }
+    // 页签显隐：只有当前页那颗画（C# `Show*Page` 里其余三颗 `Index = -1`；未选中态由底图 Title[504] 提供）
+    for (_, mut vis, tab) in &mut tabs_vis {
+        *vis = if open && char_tab_visible(page.0, tab.0) {
             Visibility::Visible
         } else {
             Visibility::Hidden
@@ -1243,5 +1270,30 @@ mod tests {
             Some(&Visibility::Hidden),
             "与技能行无关的按钮不得被技能系统压 Hidden"
         );
+    }
+
+    /// 门禁（金标准逐窗复核 ⑧）：角色窗/英雄窗的页签**只画当前页那一颗**。
+    ///
+    /// 依据：`CharacterDialog.Show*Page()`（`CharacterDialog.cs:608-655`）切页时把**选中那颗**设成
+    /// 自己的帧（500/501/502/503），其余三颗一律 `Index = -1`（什么都不画）。之所以能这么干：
+    /// 窗口底图 **`Title[504]` 里已经烘进了 4 个「未选中态」页签**
+    /// （导出 `Title[504]` 在 y≈70 能看到 `CHAR | STATS I | STATS II | SPELLS` 的暗色药丸），
+    /// 而 `Title[500]` 是**亮色高亮**的 CHAR 药丸 —— 按钮只负责盖那一颗亮的上层。
+    ///
+    /// 本端曾把 4 颗**都用高亮帧 500..503** 常显 ⇒ 窗口上出现 4 颗高亮页签（原版 1 亮 + 3 暗）。
+    ///
+    /// 阳性对照：把 `char_tab_visible` 改成恒 `true` → 后两条断言立即红。
+    #[test]
+    fn char_tab_visible_only_current_page() {
+        assert!(char_tab_visible(0, 0), "当前页那颗要画");
+        assert!(!char_tab_visible(0, 1), "非当前页不画（C# Index = -1）");
+        assert!(!char_tab_visible(0, 2));
+        assert!(!char_tab_visible(0, 3));
+        assert!(char_tab_visible(3, 3), "技能页选中时画第 4 颗");
+        // 任意页：恰好一颗可见
+        for page in 0..4usize {
+            let visible = (0..4).filter(|t| char_tab_visible(page, *t)).count();
+            assert_eq!(visible, 1, "第 {page} 页只能有 1 颗页签被画");
+        }
     }
 }
