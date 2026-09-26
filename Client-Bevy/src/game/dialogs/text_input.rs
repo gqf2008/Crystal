@@ -150,7 +150,12 @@ fn text_input_system(
             }
             if clicked.is_some() {
                 state.active = clicked;
-                tracing::info!("⌨️ [TEXTINPUT] 点击聚焦 id={:?} cursor=({:.0},{:.0})", clicked, cursor.x, cursor.y);
+                tracing::info!(
+                    "⌨️ [TEXTINPUT] 点击聚焦 id={:?} cursor=({:.0},{:.0})",
+                    clicked,
+                    cursor.x,
+                    cursor.y
+                );
             }
         }
     }
@@ -445,13 +450,13 @@ mod tests {
         world
             .resource_mut::<bevy::ecs::message::Messages<KeyboardInput>>()
             .write(KeyboardInput {
-            key_code: KeyCode::Enter,
-            logical_key: Key::Enter,
-            state: ButtonState::Pressed,
-            text: Some("\r".into()),
-            repeat: false,
-            window: Entity::PLACEHOLDER,
-        });
+                key_code: KeyCode::Enter,
+                logical_key: Key::Enter,
+                state: ButtonState::Pressed,
+                text: Some("\r".into()),
+                repeat: false,
+                window: Entity::PLACEHOLDER,
+            });
         world
             .run_system_once(text_input_system)
             .expect("text_input_system 应成功");

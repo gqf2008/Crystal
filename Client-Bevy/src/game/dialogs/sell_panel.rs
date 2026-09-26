@@ -191,18 +191,8 @@ fn spawn_sell_panel(
             load_lib_image(&mut libs, &mut images, LibraryName::Title, HOLD_FRAMES.1),
             load_lib_image(&mut libs, &mut images, LibraryName::Title, HOLD_FRAMES.2),
         ) {
-            spawn_icon_button(
-                p,
-                n,
-                h,
-                pr,
-                HOLD_BTN_POS.0,
-                HOLD_BTN_POS.1,
-                48.0,
-                25.0,
-                10,
-            )
-            .insert(SellPanelHold);
+            spawn_icon_button(p, n, h, pr, HOLD_BTN_POS.0, HOLD_BTN_POS.1, 48.0, 25.0, 10)
+                .insert(SellPanelHold);
             let on = load_lib_image(&mut libs, &mut images, LibraryName::Title, HOLD_FRAMES.2);
             if let Some(on) = on {
                 spawn_image(p, on, HOLD_BTN_POS.0, HOLD_BTN_POS.1, 48.0, 25.0, 11)
@@ -431,51 +421,51 @@ fn sell_panel_action_system(
         state.auto_confirm = false;
         if let Some(item) = state.target.take() {
             match state.mode {
-            Some(PanelType::Sell) => {
-                // 原版 C# Confirm：C.SellItem{UniqueID, Count=TargetItem.Count}（卖整叠）
-                net.send_packet(&mir2_shared::packets::client::npc::SellItem {
-                    unique_id: item.unique_id,
-                    count: item.count.max(1),
-                });
-                tracing::info!(
-                    "💰 面板出售 {} (uid={}) x{}",
-                    item.name,
-                    item.unique_id,
-                    item.count
-                );
-            }
-            Some(PanelType::Repair) | Some(PanelType::SpecialRepair) => {
-                net.send_packet(&mir2_shared::packets::client::npc::RepairItem {
-                    unique_id: item.unique_id,
-                });
-                tracing::info!("🔧 面板修理 {} (uid={})", item.name, item.unique_id);
-            }
-            // C# Confirm（NPCDialogs.cs:1606）：`C.RefineItem{UniqueID}`；
-            // Rust 服务端语义为「先存入武器(to=0)再按 uid 发起」，交给 refine 模块两步执行
-            Some(PanelType::Refine) => {
-                let slot = inv_q.single().ok().and_then(|inv| {
-                    inv.items
-                        .iter()
-                        .position(|s| s.as_ref().is_some_and(|it| it.unique_id == item.unique_id))
-                });
-                match slot {
-                    Some(inv_slot) => {
-                        weapon_req.write(RefineWeaponRequest {
-                            unique_id: item.unique_id,
-                            inv_slot,
-                        });
-                        tracing::info!("🔨 面板精炼 {} (uid={})", item.name, item.unique_id);
-                    }
-                    None => tracing::warn!("🔨 精炼目标已不在背包 uid={}", item.unique_id),
+                Some(PanelType::Sell) => {
+                    // 原版 C# Confirm：C.SellItem{UniqueID, Count=TargetItem.Count}（卖整叠）
+                    net.send_packet(&mir2_shared::packets::client::npc::SellItem {
+                        unique_id: item.unique_id,
+                        count: item.count.max(1),
+                    });
+                    tracing::info!(
+                        "💰 面板出售 {} (uid={}) x{}",
+                        item.name,
+                        item.unique_id,
+                        item.count
+                    );
                 }
-            }
-            // C# CheckRefine：`C.CheckRefine{UniqueID}`（NPCDialogs.cs:1624）
-            Some(PanelType::CheckRefine) => {
-                net.send_packet(&crate::network::RefineCheckWire {
-                    unique_id: item.unique_id,
-                });
-                tracing::info!("🔨 面板查看精炼 {} (uid={})", item.name, item.unique_id);
-            }
+                Some(PanelType::Repair) | Some(PanelType::SpecialRepair) => {
+                    net.send_packet(&mir2_shared::packets::client::npc::RepairItem {
+                        unique_id: item.unique_id,
+                    });
+                    tracing::info!("🔧 面板修理 {} (uid={})", item.name, item.unique_id);
+                }
+                // C# Confirm（NPCDialogs.cs:1606）：`C.RefineItem{UniqueID}`；
+                // Rust 服务端语义为「先存入武器(to=0)再按 uid 发起」，交给 refine 模块两步执行
+                Some(PanelType::Refine) => {
+                    let slot = inv_q.single().ok().and_then(|inv| {
+                        inv.items.iter().position(|s| {
+                            s.as_ref().is_some_and(|it| it.unique_id == item.unique_id)
+                        })
+                    });
+                    match slot {
+                        Some(inv_slot) => {
+                            weapon_req.write(RefineWeaponRequest {
+                                unique_id: item.unique_id,
+                                inv_slot,
+                            });
+                            tracing::info!("🔨 面板精炼 {} (uid={})", item.name, item.unique_id);
+                        }
+                        None => tracing::warn!("🔨 精炼目标已不在背包 uid={}", item.unique_id),
+                    }
+                }
+                // C# CheckRefine：`C.CheckRefine{UniqueID}`（NPCDialogs.cs:1624）
+                Some(PanelType::CheckRefine) => {
+                    net.send_packet(&crate::network::RefineCheckWire {
+                        unique_id: item.unique_id,
+                    });
+                    tracing::info!("🔨 面板查看精炼 {} (uid={})", item.name, item.unique_id);
+                }
                 _ => {}
             }
         }

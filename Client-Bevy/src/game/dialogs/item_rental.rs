@@ -973,14 +973,14 @@ fn rental_server_events(
                         inv.item_index,
                     );
                     inv.name = name;
-                    if need && inv.item_index > 0 && rental.requested_item_info.insert(inv.item_index) {
+                    if need
+                        && inv.item_index > 0
+                        && rental.requested_item_info.insert(inv.item_index)
+                    {
                         net.send_packet(&mir2_shared::packets::client::info::RequestItemInfo {
                             item_index: inv.item_index,
                         });
-                        tracing::info!(
-                            "🛏️ 租赁窗缺物品名，请求 ItemInfo: idx={}",
-                            inv.item_index
-                        );
+                        tracing::info!("🛏️ 租赁窗缺物品名，请求 ItemInfo: idx={}", inv.item_index);
                     }
                 }
                 rental.has_item = resolved.is_some();

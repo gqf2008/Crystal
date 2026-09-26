@@ -1419,11 +1419,14 @@ pub(crate) fn handle_progress(
         x if x == ServerPacketIds::UserSlotsRefresh as i16 => {
             match user::UserSlotsRefresh::read_body(&mut cur) {
                 Ok(p) => {
-                    let map_slots = |slots: &Option<Vec<Option<mir2_shared::data::item::UserItem>>>| {
-                        slots
-                            .as_ref()
-                            .map(|v| v.iter().map(|s| s.as_ref().map(super::to_inv_item)).collect())
-                    };
+                    let map_slots =
+                        |slots: &Option<Vec<Option<mir2_shared::data::item::UserItem>>>| {
+                            slots.as_ref().map(|v| {
+                                v.iter()
+                                    .map(|s| s.as_ref().map(super::to_inv_item))
+                                    .collect()
+                            })
+                        };
                     server_events.write(ServerEvent::UserSlotsRefreshed {
                         inventory: map_slots(&p.inventory),
                         equipment: map_slots(&p.equipment),

@@ -271,16 +271,8 @@ fn spawn_npc_awake(
             1,
             1,
         ));
-        spawn_image(
-            p,
-            empty,
-            202.0,
-            91.0,
-            MAIN_CELL_SIZE.0,
-            MAIN_CELL_SIZE.1,
-            9,
-        )
-        .insert(NpcAwakeMainIcon);
+        spawn_image(p, empty, 202.0, 91.0, MAIN_CELL_SIZE.0, MAIN_CELL_SIZE.1, 9)
+            .insert(NpcAwakeMainIcon);
         spawn_label(p, &cjk, "", 202.0, 122.0, 11.0, Color::WHITE, 9).insert(NpcAwakeMainName);
         // 只读材料格 + 需求文案（C# `ItemCells[1]/[2]` @(31,316)/(155,316) 36x32、
         // `NeedItemLabel1/2` @(67,317)/(192,317)，`NPCDialogs.cs:1947-1968` / `:2165-2193`）
@@ -308,21 +300,21 @@ fn spawn_npc_awake(
                 ZIndex(9),
                 NpcAwakeNeedCell(i),
             ))
-                .with_children(|c| {
-                    c.spawn((
-                        Node {
-                            position_type: PositionType::Absolute,
-                            left: Val::Px(1.0),
-                            top: Val::Px(1.0),
-                            width: Val::Px(MAIN_CELL_SIZE.0 - 2.0),
-                            height: Val::Px(MAIN_CELL_SIZE.1 - 2.0),
-                            ..default()
-                        },
-                        ImageNode::new(cell_bg),
-                        ZIndex(1),
-                        NpcAwakeNeedIcon(i),
-                    ));
-                });
+            .with_children(|c| {
+                c.spawn((
+                    Node {
+                        position_type: PositionType::Absolute,
+                        left: Val::Px(1.0),
+                        top: Val::Px(1.0),
+                        width: Val::Px(MAIN_CELL_SIZE.0 - 2.0),
+                        height: Val::Px(MAIN_CELL_SIZE.1 - 2.0),
+                        ..default()
+                    },
+                    ImageNode::new(cell_bg),
+                    ZIndex(1),
+                    NpcAwakeNeedIcon(i),
+                ));
+            });
             let (lx, ly) = NEED_LABEL_POS[i];
             spawn_label(p, &cjk, "", lx, ly, 11.0, Color::WHITE, 9).insert(NpcAwakeMaterialText(i));
         }
@@ -349,7 +341,11 @@ mod tests {
     /// 阳性对照：把 `MAIN_CELL_SIZE` 改回 `(36.0, 28.0)`（修复前的值）⇒ 本测试 FAILED。
     #[test]
     fn main_item_cell_matches_csharp_mir_item_cell_default() {
-        assert_eq!(PANEL, (LibraryName::Title, 710), "C# NPCAwakeDialog.Index = 710");
+        assert_eq!(
+            PANEL,
+            (LibraryName::Title, 710),
+            "C# NPCAwakeDialog.Index = 710"
+        );
         assert_eq!(PANEL_SIZE, (360.0, 420.0), "Title[710] 图头 360x420");
         assert_eq!(
             MAIN_CELL_SIZE,
@@ -373,7 +369,11 @@ mod tests {
             [(67.0, 317.0), (192.0, 317.0)],
             "C# NeedItemLabel1/2 @(67,317)/(192,317)"
         );
-        assert_eq!(NEED_CELL_BORDER, Color::srgb(0.0, 1.0, 0.0), "C# BorderColour = Color.Lime");
+        assert_eq!(
+            NEED_CELL_BORDER,
+            Color::srgb(0.0, 1.0, 0.0),
+            "C# BorderColour = Color.Lime"
+        );
         // `count == 0` → 空文案（C# `if (MaterialsCount[i] != 0) … else NeedItemLabel.Text = ""`）
         assert_eq!(need_item_text("勇气印记", 0), "");
         assert_eq!(need_item_text("勇气印记", 3), "需要 勇气印记 ×3");

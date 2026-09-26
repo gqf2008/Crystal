@@ -211,15 +211,17 @@ mod tests {
         world.init_resource::<ItemInfoCache>();
         world
             .resource_mut::<Messages<crate::network::server_event::ServerEvent>>()
-            .write(crate::network::server_event::ServerEvent::ItemInfoReceived {
-                index: 1042,
-                name: "勇气印记".to_string(),
-                item_type: 35,
-                shape: 100,
-                required_gender: 0,
-                bind: 0,
-                image: 3210,
-            });
+            .write(
+                crate::network::server_event::ServerEvent::ItemInfoReceived {
+                    index: 1042,
+                    name: "勇气印记".to_string(),
+                    item_type: 35,
+                    shape: 100,
+                    required_gender: 0,
+                    bind: 0,
+                    image: 3210,
+                },
+            );
         world
             .run_system_once(item_info_cache_system)
             .expect("item_info_cache_system 应成功");

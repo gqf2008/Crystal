@@ -1271,7 +1271,10 @@ fn handle_conn(mut stream: std::net::TcpStream, tx: Sender<ControlCommand>) {
             }
             "rental_probe" => {
                 let (reply_tx, reply_rx) = bounded::<String>(1);
-                if tx.send(ControlCommand::RentalProbe { reply: reply_tx }).is_ok() {
+                if tx
+                    .send(ControlCommand::RentalProbe { reply: reply_tx })
+                    .is_ok()
+                {
                     let s = reply_rx
                         .recv_timeout(std::time::Duration::from_secs(2))
                         .unwrap_or_else(|_| "{}".to_string());
