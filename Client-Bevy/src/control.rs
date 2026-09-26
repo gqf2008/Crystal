@@ -851,6 +851,9 @@ struct ControlQueries<'w, 's> {
     /// #3261：顶部公告横幅是**状态驱动**窗（`ChatNoticeState.visible` + 10s 计时），
     /// RPC 开/关要切状态（与 Storage/HeroManage/InputBox 同款），否则根恒 Hidden
     chat_notice: ResMut<'w, crate::game::dialogs::chat_notice::ChatNoticeState>,
+    /// #3265：掷骰窗同样是**状态驱动**（`RollState.visible` + 相位机），RPC 只切 mgr 时根仍 Hidden；
+    /// 抽点要能开它就得连状态一起切（同 ChatNotice 口径）
+    roll: ResMut<'w, crate::game::dialogs::roll::RollState>,
     map_cameras: Query<
         'w,
         's,
@@ -2488,6 +2491,28 @@ fn apply_control_commands(
                         }
                         DialogAction::Close => q.input_box.open = false,
                         DialogAction::Toggle => q.input_box.open = !q.input_box.open,
+                    }
+                } else if kind == DialogKind::Roll {
+                    // #3265：掷骰窗状态驱动（`RollState.visible`）⇒ RPC 连状态一起切，
+                    // 否则 `roll_ui_system` 的 `sync_dialog_state(..., state.visible)` 会立刻把它关回去。
+                    // type 默认 0（骰子）——抽点只需静态几何；真实掷骰仍走服务端 `S.Roll`。
+                    match action {
+                        DialogAction::Open => {
+                            q.roll.visible = true;
+                            mgr.open(kind);
+                        }
+                        DialogAction::Close => {
+                            q.roll.visible = false;
+                            mgr.close(kind);
+                        }
+                        DialogAction::Toggle => {
+                            q.roll.visible = !q.roll.visible;
+                            if q.roll.visible {
+                                mgr.open(kind);
+                            } else {
+                                mgr.close(kind);
+                            }
+                        }
                     }
                 } else if kind == DialogKind::ChatNotice {
                     // #3261：横幅由 `ChatNoticeState.visible` 驱动（10s 计时）⇒ RPC 直接切状态；
