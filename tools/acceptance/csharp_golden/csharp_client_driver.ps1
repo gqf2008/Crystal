@@ -120,17 +120,31 @@ function Key-Cs([byte]$vk,[int]$holdMs=90) {
 function Shot-Cs([string]$label) {
   $h = $global:csHwnd
   $dir = "$script:CS\Client\Screenshots"
-  $before = @(Get-ChildItem $dir -Filter *.png -ErrorAction SilentlyContinue).Count
+  # 原版截图目录与我们的落盘目录都**先建**：`Copy-Item` 到不存在的 `shots\` 会让后面
+  # `Image::FromFile` 抛 `InvalidOperation`（"shots/ 根本没建"就是实测踩到的那个坑）。
+  if (-not (Test-Path -LiteralPath $dir)) { New-Item -ItemType Directory -Force -Path $dir | Out-Null }
+  $shots = "$script:CS\shots"
+  if (-not (Test-Path -LiteralPath $shots)) { New-Item -ItemType Directory -Force -Path $shots | Out-Null }
+  $beforeNames = @(Get-ChildItem $dir -Filter *.png -ErrorAction SilentlyContinue | ForEach-Object Name)
   $lp = [IntPtr]1
   [void][CsUi]::SendMessage($h, 0x0100, [IntPtr]0x2C, $lp)
   Start-Sleep -Milliseconds 90
   [void][CsUi]::SendMessage($h, 0x0101, [IntPtr]0x2C, [IntPtr]0xC0000001)
-  Start-Sleep -Milliseconds 1800
-  $files = Get-ChildItem $dir -Filter *.png -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending
-  if (-not $files) { return 'no screenshot produced' }
-  $newest = $files[0]
-  $out = "$script:CS\shots\orig_$label.png"
-  Copy-Item $newest.FullName $out -Force
+  # **断言源图已落盘**：D3D 的 F12 落盘有延迟，旧实现只看"最新一个 png"，会在新图还没写出来时
+  # 把上一张当成这一张（或读到半截文件）。改判据为「**按文件名新增**的那一张，且长度 > 0」，
+  # 最多等 ~4s；等不到就明确 FAIL，别返回一个看起来成功的旧图。
+  $newest = $null
+  foreach ($try in 1..10) {
+    Start-Sleep -Milliseconds 400
+    $newest = Get-ChildItem $dir -Filter *.png -ErrorAction SilentlyContinue |
+      Where-Object { $beforeNames -notcontains $_.Name -and $_.Length -gt 0 } |
+      Sort-Object LastWriteTime -Descending | Select-Object -First 1
+    if ($newest) { break }
+  }
+  if (-not $newest) { return "FAIL: 4s 内未出现新截图（$dir）——原版 F12 未生效或落盘更慢" }
+  $out = Join-Path $shots "orig_$label.png"
+  Copy-Item -LiteralPath $newest.FullName -Destination $out -Force
+  if (-not (Test-Path -LiteralPath $out)) { return "FAIL: 复制后 $out 不存在" }
   $img=[System.Drawing.Image]::FromFile($out); $dim="$($img.Width)x$($img.Height)"; $img.Dispose()
   return "$out ($dim, from $($newest.Name))"
 }
