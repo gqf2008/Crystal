@@ -268,6 +268,42 @@ py -3.12 tools/acceptance/csharp_golden/control_size_audit.py `
 - **首轮 30 条待核队列已全部核完并清零**（`control_size_audit_known.txt` 现为空队列，只剩判定口径注释）：
   17 处按图头改尺寸（PR #3255）+ 菜单 13 颗钮（PR #3256）。
 
+### 3.5 窗口触发：`dialog_trigger_audit.py`（「窗口存在 ≠ 功能存在」）
+
+**为什么需要**：2026-09-27 逐窗核长尾窗时发现 `chat_notice`（顶部公告横幅）——窗、面板、
+`dialog chat_notice open` 的 RPC、自检夹具**都齐**，但 `ChatNoticeState.visible` 全仓
+**没有任何 `= true` 写入方**（只有计时归零写 `false`）⇒ 实机上横幅永远不出现。
+尺寸审计、几何对表、交互门禁都看不见这类缺陷——它们只回答"窗能开吗、控件几何对不对"，
+不回答"**谁把它打开**"。
+
+```powershell
+py -3.12 tools/acceptance/csharp_golden/dialog_trigger_audit.py --repo <Rust 仓库根>
+py -3.12 tools/acceptance/csharp_golden/dialog_trigger_audit.py --repo . --selftest   # 正/负对照
+py -3.12 tools/acceptance/csharp_golden/dialog_trigger_audit.py --repo . --openers    # 附：打开方报表
+```
+
+**判据（启发式，输出人工过一眼）**：找 `pub struct <X>State` 里 `visible/open/managing/shown/composing`
+这些**开语义的 bool 字段**，要求至少有一个 `.<field> = true` 写入方，来源三选一：
+① `impl <X>State` 内的 `self.<field> = true`（状态自带 `show()/open()`）；
+② 取到该 state 可变引用（`ResMut<…XState>` / `&mut XState`）的函数体；
+③ 提到该 state 类型的文件（兜住类型推断的局部变量，如 `npc.visible = true`）。
+
+**关键口径：`control.rs`（RPC 探针）与 `auto/*`（自检夹具）不算触发**——"只有探针能开"
+正是这条门禁要抓的反模式；把探针算进去会让它永远绿。
+
+**已知待核表** `dialog_trigger_audit_known.txt`（`State<TAB>field`）：清单内只提示、新增才 FAIL。
+处置二选一：补真实触发，或确认是死字段并删掉（首个实例 `RankingState.visible` 就是无人写、
+读取处还 `|| mgr.is_open` 的冗余位，已按"删死字段"收口）。
+
+**门禁语义与自证**：命中 >0 且不在表内 → `VERDICT=FAIL` 且 exit 1；`--selftest` 跑负对照
+（原样 0 新增）+ 正对照（**把 `ChatNoticeState::show` 里的 `self.visible = true;` 摘掉** ⇒
+必须报出 `ChatNoticeState.visible`）；已登记进 `docs/DELIVERY.md` 的离线门禁清单（第 8 条）。
+
+**边界**：`--openers`（每个 `DialogKind` 的玩法侧 `mgr.open/toggle` 入口）是**报表不是门禁**
+——状态驱动窗（Storage/InputBox/HeroManage/ChatNotice…）不走 `mgr.open`，只看它会全部误判。
+另外它只查"有没有入口调用"，判"该不该有入口"仍要读 C#（例如 `report` 的入口
+`ReportButton` 在 C# 里构造即 `Visible=false` 且全树无处置 true ⇒ 本端不做入口才是对的）。
+
 ## 4. 存档导出（dbtool）
 
 `dbtool` 用原版 `Server.Library.dll` 读 `Server.MirDB`（游戏数据）与 `Server.MirADB`（账号/角色），

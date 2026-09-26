@@ -6,7 +6,7 @@
 // 结果通过系统聊天消息返回
 // bevy_ui：C# ReportDialog 360x244 @ Center；Prguse[1633] 缺失时深色兜底
 //   - 关闭 Prguse2[360/361/362] @(300,3)
-//   - 状态行 3 + 类型下拉（bevy_ui UiDropDown）+ 描述输入（TextInput 12）+ 提交 Title[206/207/208]
+//   - 状态行 3 + 类型下拉（bevy_ui UiDropDown）+ 描述输入（TextInput 12）+ 提交 Title[607/608/609]
 // ============================================================================
 
 use bevy::prelude::*;

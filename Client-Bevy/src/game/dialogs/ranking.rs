@@ -205,7 +205,6 @@ pub struct RankEntry {
 
 #[derive(Resource, Default)]
 pub struct RankingState {
-    pub visible: bool,
     /// 当前窗口（服务端按 `RankIndex` 取回，最多 20 行；行号是榜内全局名次）
     pub entries: Vec<RankEntry>,
     /// 该榜总条数（C# `RankCount` = `S.Rankings.Count`）——滚动上限 `total - 20` 只能由它给出
@@ -591,7 +590,10 @@ fn ranking_ui_system(
     mut scroll: Query<&mut crate::ui::theme::UiScrollList, With<RankingWidget>>,
     mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
 ) {
-    let open = ranking.visible || mgr.is_open(DialogKind::Ranking);
+    // 窗的开关**只看 `DialogManager`**：`RankingState` 曾有个 `visible` 字段，全仓无人写 true
+    // （`dialog_trigger_audit.py` 的 `RankingState.visible` 命中就是这个）——死字段已删，
+    // 与 C# `RankingDialog.Visible`（WinForms 自身 Visible）等价的门控就是 mgr 这一份状态。
+    let open = mgr.is_open(DialogKind::Ranking);
     for mut vis in widgets.iter_mut() {
         *vis = if open {
             Visibility::Visible
@@ -723,7 +725,7 @@ fn ranking_row_click_system(
     time: Res<Time>,
     mut inspect_cooldown_until: Local<f64>,
 ) {
-    if !(ranking.visible || mgr.is_open(DialogKind::Ranking)) {
+    if !mgr.is_open(DialogKind::Ranking) {
         return;
     }
     for (e, inter, line) in &rows {
@@ -770,7 +772,7 @@ fn ranking_request_system(
     mut requested: Local<bool>,
     mut last_key: Local<(u8, bool)>,
 ) {
-    let open = ranking.visible || mgr.is_open(DialogKind::Ranking);
+    let open = mgr.is_open(DialogKind::Ranking);
     if !open {
         *requested = false;
         return;
@@ -962,10 +964,11 @@ mod tests {
         app.insert_resource(NetConnection::default());
         app.add_systems(Update, ranking_row_click_system);
         // 本页窗口（起点 10 → 第 11..22 名）第 1 行 = 第 12 名（player_id=120，id 递增便于断言）
-        let mut ranking = RankingState {
-            visible: true,
-            ..Default::default()
-        };
+        // 窗开着 = `DialogManager` 里有 Ranking（原来这里置 `visible: true`，那个字段已删）
+        app.world_mut()
+            .resource_mut::<DialogManager>()
+            .open(DialogKind::Ranking);
+        let mut ranking = RankingState::default();
         ranking.entries = (11..=22)
             .map(|i| RankEntry {
                 player_id: i as u32 * 10,

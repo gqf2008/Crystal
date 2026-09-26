@@ -229,7 +229,7 @@ cd Client-Bevy && cargo test                     # 816 lib + 7 bin + 2 + 53
 
 三侧 `cargo fmt -- --check` 均须 0 差异。
 
-另有七条**离线的对账/卫生门禁**（秒级，不起客户端）：
+另有八条**离线的对账/卫生门禁**（秒级，不起客户端）：
 
 ```bash
 pwsh tools/acceptance/e2e_lock_selftest.ps1      # 实机资源锁自证（§5.4）
@@ -240,6 +240,8 @@ pwsh tools/ops/check_doc_tool_refs.ps1           # 文档引用的 tools/** 脚�
 py -3.12 tools/acceptance/csharp_golden/control_size_audit.py --selftest \
     --repo . --data Data                          # 窗内控件：写死尺寸必须等于美术原生尺寸（金标准 §3.4）；
                                                   # 两条扫描面（字面量配对 + 常量表循环），三条对照（负 + 正①+正②）
+py -3.12 tools/acceptance/csharp_golden/dialog_trigger_audit.py --selftest \
+    --repo .                                      # 状态驱动窗：开字段必须有 `= true` 写入方（金标准 §3.5）
 pwsh tools/acceptance/csharp_golden/make_sandbox_selftest.ps1  # 金标准沙箱：端口必须**按段**改写 + 回读校验（诱饵段不许被动）
 ```
 
