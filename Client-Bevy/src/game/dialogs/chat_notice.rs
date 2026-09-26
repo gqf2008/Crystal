@@ -206,7 +206,11 @@ mod tests {
     #[test]
     fn chat_notice_geometry_matches_csharp() {
         assert_eq!(PANEL, (LibraryName::Prguse, 1361), "C# Index = 1361");
-        assert_eq!(LAYOUT, (LibraryName::Prguse, 1360), "C# Layout.Index = 1360");
+        assert_eq!(
+            LAYOUT,
+            (LibraryName::Prguse, 1360),
+            "C# Layout.Index = 1360"
+        );
         assert_eq!(PANEL_SIZE, (660.0, 25.0), "Prguse[1361] 图头 660x25");
         assert_eq!(VIEW_TIME_SECS, 10.0, "C# ViewTime = 10000ms");
         assert_eq!(PANEL_OPACITY, 0.7, "C# Opacity = 0.7F");

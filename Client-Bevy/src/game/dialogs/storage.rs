@@ -2952,7 +2952,10 @@ mod tests {
             st.pending_open_after_set && st.forcing_setup,
             "闸门必须置「设完自动开」+「强制设密码」"
         );
-        assert!(!st.visible, "设密码期间不显示仓库（C# 连 Visible=true 都没设）");
+        assert!(
+            !st.visible,
+            "设密码期间不显示仓库（C# 连 Visible=true 都没设）"
+        );
         assert!(
             !app.world()
                 .resource::<DialogManager>()
@@ -3039,7 +3042,10 @@ mod tests {
 
         let st = app.world().resource::<StorageState>();
         assert!(st.has_password && st.unlocked, "成功回包要更新两个判据");
-        assert!(!st.pending_open_after_set && !st.forcing_setup, "一次性标记要清掉");
+        assert!(
+            !st.pending_open_after_set && !st.forcing_setup,
+            "一次性标记要清掉"
+        );
         assert!(st.visible, "设完密码应自动把仓库窗打开");
         assert!(
             app.world()

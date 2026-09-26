@@ -1731,7 +1731,9 @@ pub(crate) fn auto_storage_unlock_test(
                         key: "[@Storage]".to_string(),
                     });
                 }
-                tracing::info!("[UNLOCK] 闸门已过（密码已设）；关窗复位解锁态 → 再点 [@Storage] 走解锁路径");
+                tracing::info!(
+                    "[UNLOCK] 闸门已过（密码已设）；关窗复位解锁态 → 再点 [@Storage] 走解锁路径"
+                );
                 *t = 0.0;
                 return;
             }
