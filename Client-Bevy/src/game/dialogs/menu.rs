@@ -96,8 +96,26 @@ pub const MENU_BTN_DX: f32 = 3.0;
 /// `Prguse[1970..1996]` 与 `Prguse2[431..433]` = **32x18**（其余 12 颗）。
 /// 原实现 14 颗统一写死 38x19 ⇒ 绘制区与命中区都比原版大一圈（左右各多 3px）。
 const MENU_BUTTONS: &[(MenuAction, LibraryName, usize, usize, usize, f32, f32, f32)] = &[
-    (MenuAction::Exit, LibraryName::Title, 633, 634, 635, 12.0, 32.0, 20.0),
-    (MenuAction::Logout, LibraryName::Title, 636, 637, 638, 31.0, 32.0, 20.0),
+    (
+        MenuAction::Exit,
+        LibraryName::Title,
+        633,
+        634,
+        635,
+        12.0,
+        32.0,
+        20.0,
+    ),
+    (
+        MenuAction::Logout,
+        LibraryName::Title,
+        636,
+        637,
+        638,
+        31.0,
+        32.0,
+        20.0,
+    ),
     (
         MenuAction::Help,
         LibraryName::Prguse,

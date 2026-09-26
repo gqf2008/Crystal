@@ -51,9 +51,9 @@ use std::io::{BufRead, BufReader, Write};
 use std::net::TcpListener;
 
 use bevy::ecs::system::SystemParam;
+use bevy::input::keyboard::{Key, KeyboardInput};
 use bevy::input::mouse::MouseButtonInput;
 use bevy::input::mouse::{MouseScrollUnit, MouseWheel};
-use bevy::input::keyboard::{Key, KeyboardInput};
 use bevy::input::touch::TouchPhase;
 use bevy::input::ButtonState;
 use bevy::picking::hover::HoverMap;
@@ -525,15 +525,23 @@ enum ControlCommand {
     /// 合成键盘**文本**输入（2026-09-26）：把字符按 `KeyboardInput{text: Some(ch)}` 投递，
     /// 等效于"输入法已提交这些字符"。用来驱动真实文本框路径（如建角名字框），
     /// 而不是绕过去直接改状态——否则"能不能打字"这条永远不会被测到。
-    TypeText { text: String, reply: Sender<String> },
+    TypeText {
+        text: String,
+        reply: Sender<String>,
+    },
     /// 合成**功能键**（2026-09-26）：`{"key":"enter|escape|backspace|tab"}`。
     /// `type_text` 只管"字符"，而打开聊天输入行（Enter）、取消（Escape）、删字（Backspace）
     /// 这些**非字符键**同样要能被夹具驱动——否则"键盘路径"只测得了一半。
-    Key { key: String, reply: Sender<String> },
+    Key {
+        key: String,
+        reply: Sender<String>,
+    },
     /// 只读探针：建角对话框状态（可见性/名字/焦点/职业/性别/名字是否合法）。
     /// 为什么需要：建角发生在 **Select 态**（"非 Game"），`state` RPC 只回 `not in game`，
     /// 夹具此前无法知道"名字到底打进去了没有、窗口到底开没开"——判据只能靠猜。
-    NewCharProbe { reply: Sender<String> },
+    NewCharProbe {
+        reply: Sender<String>,
+    },
     /// 返回指定对话框根面板的屏幕矩形（逻辑坐标），供 click 计算点击点
     DialogRect {
         kind: DialogKind,
@@ -2160,13 +2168,16 @@ fn drain_control_outside_game(
                         "gender": format!("{:?}", nc.gender),
                         "hero_mode": nc.hero_mode,
                     }),
-                    None => json!({"ok": false, "error": "no NewCharState (NewCharacterPlugin 未安装)"}),
+                    None => {
+                        json!({"ok": false, "error": "no NewCharState (NewCharacterPlugin 未安装)"})
+                    }
                 };
                 let _ = reply.try_send(s.to_string());
             }
             other => {
                 if let Some(reply) = control_reply(&other) {
-                    let _ = reply.try_send(json!({"ok": false, "error": "not in game"}).to_string());
+                    let _ =
+                        reply.try_send(json!({"ok": false, "error": "not in game"}).to_string());
                 }
             }
         }
@@ -4126,9 +4137,16 @@ mod tests {
             assert_eq!(short, "unknown", "full 是 unknown 时 short 也必须 unknown");
             return;
         }
-        assert_eq!(full.len(), 40, "CRYSTAL_BUILD_COMMIT 应是 40 位完整哈希：{full}");
+        assert_eq!(
+            full.len(),
+            40,
+            "CRYSTAL_BUILD_COMMIT 应是 40 位完整哈希：{full}"
+        );
         assert!(short.len() >= 7, "短哈希太短：{short}");
-        assert!(full.starts_with(short), "短哈希应是完整哈希前缀：{short} / {full}");
+        assert!(
+            full.starts_with(short),
+            "短哈希应是完整哈希前缀：{short} / {full}"
+        );
         assert!(dirty == "0" || dirty == "1", "dirty 只能是 0/1：{dirty}");
     }
 

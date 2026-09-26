@@ -2031,8 +2031,7 @@ fn inv_add_del_buttons_system(
     // C# 的 `openLevel = (Inventory.Length - 46) / 4`，`openLevel < 10` ⟺ `Length < 86`
     // ⟺ 本端口径 `items.len() < 80`。写成 86 时 `items.len()`（被 `resize` 夹在 80）永远
     // 小于它 ⇒ 满格也照画 BUY（点了会被服务端拒），是条死守卫。
-    let can_expand =
-        mgr.is_open(DialogKind::Inventory) && inv_ui.page == 1 && len < MAX_INV_SLOTS;
+    let can_expand = mgr.is_open(DialogKind::Inventory) && inv_ui.page == 1 && len < MAX_INV_SLOTS;
     for mut vis in &mut add_vis {
         *vis = if can_expand {
             Visibility::Visible

@@ -224,7 +224,7 @@ cargo run --bin client_bevy                  # 或用发布包 client_bevy.exe
 cd SharedRust  && cargo test                     # 187 lib + 11（另有 2 个 ignored）
 cd ServerRust  && cargo test                     # 849 lib + 19 integration（gate_hardening 11 / no_blocking 2 / protocol_conformance 6；另有 3 个 ignored）
 cd ServerRust  && cargo clippy --lib -- -D warnings   # 0 warning（CI 同口径）
-cd Client-Bevy && cargo test                     # 794 lib + 7 bin + 2 + 53
+cd Client-Bevy && cargo test                     # 816 lib + 7 bin + 2 + 53
 ```
 
 三侧 `cargo fmt -- --check` 均须 0 差异。
@@ -262,11 +262,14 @@ bot 调用"（端口不一致时会静默挂死）。两条都自带阳性对照
 而门禁脚本里其实没跑它，门禁都会红（两条阳性对照均已实做：注入假开关 → C3 红；桶标记改成
 `gate` 但脚本没跑 → C5 红）。
 
-（数字为 **2026-09-25 晚 master `45e378aa` 实测基线**，随批次增长；以 CI 与本地复跑为准。
+（数字为 **2026-09-26 晚 master `09f110da` 实测基线**，随批次增长；以 CI 与本地复跑为准。
 该次复跑逐条实跑：SharedRust `187 lib + 11`（2 ignored）、ServerRust `849 lib + 19 integration`、
-ServerRust `clippy --lib -- -D warnings` 0 warning、Client-Bevy `794 lib + 7 bin + 2 + 53`，
+ServerRust `clippy --lib -- -D warnings` 0 warning、Client-Bevy `816 lib + 7 bin + 2 + 53`，
 三侧 `cargo fmt -- --check` 均 0 差异。ServerRust lib 从 `7cf7f770` 时的 845 涨到 849，
-增量来自任务数据根修复（#3165）新增的 3 条单测与同期其它批次。）
+增量来自任务数据根修复（#3165）新增的 3 条单测与同期其它批次。Client-Bevy lib 由 794 → 816
+（金标准逐窗复核批次：控件尺寸/菜单门禁 + 仓库密码流程 8 条）；此前那句「三侧 fmt 0 差异」与现状
+**不符**（Client-Bevy 有 42 处存量漂移、SharedRust/ServerRust 一直是 0），已在本批 `cargo fmt`
+清掉 —— 文档写着的判据必须是**真跑得过**的判据。）
 
 **ServerRust 测试并行度被刻意压到 2**（`ServerRust/.cargo/config.toml` 的 `[env] RUST_TEST_THREADS = "2"`）：
 该 crate 的 e2e 用例每个都自带多线程 runtime + gate/world/social/account 全体 actor，

@@ -324,10 +324,11 @@ pub fn hero_pages_system(
     // 本端曾 4 颗都用高亮帧常显 ⇒ 英雄窗上出现 4 颗高亮页签。
     let hero_open = mgr.is_open(DialogKind::HeroEquipment);
     for (mut vis, tab) in &mut tabs_vis {
-        let want = if hero_open && crate::game::dialogs::character::char_tab_visible(
-            hero_page_index(page),
-            hero_page_index(tab.0),
-        ) {
+        let want = if hero_open
+            && crate::game::dialogs::character::char_tab_visible(
+                hero_page_index(page),
+                hero_page_index(tab.0),
+            ) {
             Visibility::Visible
         } else {
             Visibility::Hidden

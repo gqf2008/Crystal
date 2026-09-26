@@ -90,7 +90,7 @@ pub struct CreatureClose;
 #[derive(Component)]
 pub struct CreatureRefresh;
 
-    /// 改名按钮（C# CreatureRenameButton Title[570-572]）
+/// 改名按钮（C# CreatureRenameButton Title[570-572]）
 #[derive(Component)]
 struct CreatureRenameBtn;
 
@@ -715,9 +715,24 @@ fn spawn_creature(
         // （2026-09-26 用 `rg -n 'HelpPetButton' Client` 全树确认）⇒ 原版这颗钮就是"画出来、点了没反应"。
         // 本端照此只画不接，保持视觉一致；真要接帮助页得先确定原版意图（当前无据可依，不猜）。
         if let (Some(n), Some(h), Some(pr)) = (
-            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, HELP_PET_FRAMES.0),
-            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, HELP_PET_FRAMES.1),
-            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, HELP_PET_FRAMES.2),
+            load_lib_image(
+                &mut libs,
+                &mut images,
+                LibraryName::Prguse2,
+                HELP_PET_FRAMES.0,
+            ),
+            load_lib_image(
+                &mut libs,
+                &mut images,
+                LibraryName::Prguse2,
+                HELP_PET_FRAMES.1,
+            ),
+            load_lib_image(
+                &mut libs,
+                &mut images,
+                LibraryName::Prguse2,
+                HELP_PET_FRAMES.2,
+            ),
         ) {
             spawn_icon_button(
                 p,
@@ -732,7 +747,9 @@ fn spawn_creature(
             )
             .insert(CreatureHelpPet);
         } else {
-            tracing::warn!("🐾 宠物窗：HelpPetButton 缺帧（Prguse2[257/258/259]）——右上角会少一颗钮");
+            tracing::warn!(
+                "🐾 宠物窗：HelpPetButton 缺帧（Prguse2[257/258/259]）——右上角会少一颗钮"
+            );
         }
         // C# 三行信息（`CreatureInfo`/`CreatureInfo1`/`CreatureInfo2`，@19,161/176/191）
         for (i, y) in [(0u8, 161.0), (1, 176.0), (2, 191.0)] {
@@ -2808,7 +2825,11 @@ mod layout_tests {
     /// 阳性对照：把 `HELP_PET_POS` 改成 `(427.0, 3.0)`（关闭钮的位置）→ 第一条断言红。
     #[test]
     fn creature_help_button_matches_csharp_but_stays_inert() {
-        assert_eq!(HELP_PET_POS, (404.0, 3.0), "C# Location = (Size.Width-48, 3)");
+        assert_eq!(
+            HELP_PET_POS,
+            (404.0, 3.0),
+            "C# Location = (Size.Width-48, 3)"
+        );
         assert_eq!(HELP_PET_FRAMES, (257, 258, 259));
         assert_eq!(HELP_PET_SIZE, (24.0, 21.0), "Prguse2[257] 图头原生 24x21");
         // 两钮都是"距右边固定偏移"：帮助 = Size.Width-48、关闭 = Size.Width-25（都 y=3）。
@@ -2819,6 +2840,10 @@ mod layout_tests {
             48.0,
             "帮助钮距右缘 48（C# Size.Width-48）"
         );
-        assert_eq!(CREATURE_W - 427.0, 25.0, "关闭钮距右缘 25（C# Size.Width-25）");
+        assert_eq!(
+            CREATURE_W - 427.0,
+            25.0,
+            "关闭钮距右缘 25（C# Size.Width-25）"
+        );
     }
 }

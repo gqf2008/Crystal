@@ -256,7 +256,10 @@ fn spawn_npc_dialog(
         } else {
             tracing::warn!(
                 "🖱 NPC 窗：上翻箭头缺帧（{}[{}/{}/{}]）——控件不会出现，别静默跳过",
-                "Prguse2", NPC_UP_FRAMES.0, NPC_UP_FRAMES.1, NPC_UP_FRAMES.2
+                "Prguse2",
+                NPC_UP_FRAMES.0,
+                NPC_UP_FRAMES.1,
+                NPC_UP_FRAMES.2
             );
         }
         if let (Some(n), Some(h), Some(pr)) = (
@@ -279,7 +282,10 @@ fn spawn_npc_dialog(
         } else {
             tracing::warn!(
                 "🖱 NPC 窗：下翻箭头缺帧（{}[{}/{}/{}]）——控件不会出现，别静默跳过",
-                "Prguse2", NPC_DOWN_FRAMES.0, NPC_DOWN_FRAMES.1, NPC_DOWN_FRAMES.2
+                "Prguse2",
+                NPC_DOWN_FRAMES.0,
+                NPC_DOWN_FRAMES.1,
+                NPC_DOWN_FRAMES.2
             );
         }
         // 关闭按钮 Prguse2[360-362] @ (413,3)
@@ -1433,7 +1439,11 @@ mod tests {
         assert_eq!(npc_scroll_up(0), 0, "到顶不动（C# `_index <= 0 return`）");
         assert_eq!(npc_scroll_up(3), 2);
         // 10 行、可见 8 行：offset 2 已到底（2+8 >= 10）⇒ 下不动
-        assert_eq!(npc_scroll_down(2, 10, 8), 2, "到底不动（C# `_index + MaximumLines >= 行数`）");
+        assert_eq!(
+            npc_scroll_down(2, 10, 8),
+            2,
+            "到底不动（C# `_index + MaximumLines >= 行数`）"
+        );
         assert_eq!(npc_scroll_down(1, 10, 8), 2);
         assert_eq!(npc_scroll_down(0, 8, 8), 0, "刚好一屏时不滚");
         assert_eq!(npc_scroll_down(0, 1, 8), 0, "只有一行时不滚");

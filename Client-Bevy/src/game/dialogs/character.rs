@@ -531,15 +531,7 @@ fn spawn_character_dialog(
                                         ),
                                     ) {
                                         let mut b = spawn_icon_button(
-                                            pg,
-                                            n,
-                                            h,
-                                            pr,
-                                            x,
-                                            250.0,
-                                            pager_w,
-                                            pager_h,
-                                            10,
+                                            pg, n, h, pr, x, 250.0, pager_w, pager_h, 10,
                                         );
                                         if is_next {
                                             b.insert(CharSkillNext);
@@ -581,7 +573,10 @@ fn character_ui_system(
     close: Query<(Entity, &Interaction), (With<CharClose>, Without<CharTab>)>,
     // `Without<CharTab>`：页底图与页签是两类实体，加过滤后本条与 `tabs_vis`（带 `&CharTab`）
     // **可证不相交**——两条都写 `Visibility`，不给判别过滤就是 Bevy B0001（实测）。
-    mut page_bgs: Query<(&mut Visibility, &CharPageBg), (Without<CharDialogWidget>, Without<CharTab>)>,
+    mut page_bgs: Query<
+        (&mut Visibility, &CharPageBg),
+        (Without<CharDialogWidget>, Without<CharTab>),
+    >,
     mut name_texts: Query<
         &mut Text,
         (
