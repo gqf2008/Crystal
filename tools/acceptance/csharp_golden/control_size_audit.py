@@ -11,6 +11,12 @@
 #      两者的 w/h 是**数字字面量**时，与第 1 步那帧的美术尺寸比；
 #   3. 不相等 → 报一行（file:line, lib[idx], 美术尺寸, 写死尺寸）。
 #
+# 2026-09-26 补**第二种扫描面**：常量表 + `for` 循环（`const TBL: &[(…, LibraryName::X, n, h, pr, y, w, h)]`
+#   + `for (…, bw, bh) in TBL { load(…, *lib, *n) … spawn_icon_button(…, *bw, *bh, …) }`）。
+#   这种写法的 lib/idx 是**变量**，只认字面量的配对逻辑整组看不见 ⇒ 实测 `menu.rs` 13 颗钮
+#   统一写死 38x19（图头 Title[633/636]=32x20、其余 Prguse/Prguse2=32x18）被漏掉。
+#   现在逐**表行**比：表行尺寸列 ≠ 该行 normal 帧图头 → 报一行（`--selftest` 里有对应正/负对照）。
+#
 # 已知**故意**不等的情况（原版就是按内容裁剪/拉伸，不要当缺陷改）：负重条/进度条/经验条这类
 # 需要按比例裁宽的精灵（C# 用 `Draw(Index, section, …)` 自绘）。工具照报，人工筛。
 #
@@ -64,11 +70,151 @@ LOAD = re.compile(
 )
 SPAWN = re.compile(r"spawn_(icon_button|image)\(([^;]*?)\)", re.S)
 NUM = re.compile(r"^\s*(\d+(?:\.\d+)?)\s*(?:f32|f64)?\s*$")
+# 表驱动循环形态：`const TBL: &[(…)] = &[ (…LibraryName::X, n, h, pr, y, w, h), … ];`
+#   + `for (a, lib, n, h, pr, y, bw, bh) in TBL {`
+#   + 循环体里 `load_lib_image(&mut libs, &mut images, *lib, *n)`（**变量** lib/idx）
+#   + `spawn_icon_button(p, nh, hh, ph, x, *y, *bw, *bh, z)`（尺寸来自表行）
+# 2026-09-26 发现：这种写法此前**整组扫不到**（LOAD 正则要求字面量 lib/idx），
+# 实测 menu.rs 13 颗钮统一写死 38x19（图头 32x20 / 32x18）就是这样漏掉的。
+TABLE_DECL = re.compile(r"const\s+(\w+)\s*:[^=]*?=\s*&\[(.*?)\n\];", re.S)
+FOR_LOOP = re.compile(r"for\s*\(([^()]*)\)\s*in\s*(\w+)(?:\.iter\(\))?\s*\{")
+DYN_LOAD = re.compile(
+    r"(?:load_lib_image|ui_image)\(\s*&mut libs,\s*&mut images,\s*\*(\w+),\s*\*(\w+)\s*\)"
+)
+# 循环体里的三元组绑定：`if let (Some(nh), Some(hh), Some(ph)) = (load…, load…, load…)`
+DYN_TUPLE = re.compile(r"if\s+let\s*\((.*?)\)\s*=\s*\(", re.S)
+
+
+def _dyn_handles(body):
+    r"""循环体里 `Some(handle) = (load(…*lib,*idx), …)` 的 句柄 → (lib 变量, idx 变量) 映射。
+
+    注意不能写成 `Some\((\w+)\)\s*=\s*load` —— 元组写法里 `=` 后面还有一个 `(`，
+    实测正则会一条都匹配不到（这正是本工具第二次"报了绿却看不见"的现场）。
+    """
+    out = {}
+    for tm in DYN_TUPLE.finditer(body):
+        names = re.findall(r"Some\(\s*(\w+)\s*\)", tm.group(1))
+        if not names:
+            continue
+        rest = body[tm.end():tm.end() + 400]
+        pairs = [(m.group(1), m.group(2)) for m in DYN_LOAD.finditer(rest)][:len(names)]
+        for n, pair in zip(names, pairs):
+            out[n] = pair
+    return out
+
+
+def _block_end(text, open_brace):
+    """返回 `open_brace`（指向 `{`）所在块的闭合 `}` 的下标。"""
+    depth = 0
+    j = open_brace
+    while j < len(text):
+        if text[j] == "{":
+            depth += 1
+        elif text[j] == "}":
+            depth -= 1
+            if depth == 0:
+                return j
+        j += 1
+    return len(text) - 1
+
+
+def scan_table_loops(text, data_dir, rows, path):
+    """扫「常量表 + for 循环」形态（见 TABLE_DECL 注释）：
+    表行里的**尺寸列**（循环体 spawn 的第 7/8 个实参 = `*bw, *bh`）必须等于该行**normal 帧**的
+    美术原生尺寸。逐行比 ⇒ 一张表里的三角尺寸不一致也能被抓到。"""
+    decls = {m.group(1): m.group(2) for m in TABLE_DECL.finditer(text)}
+    if not decls:
+        return
+    for lm in FOR_LOOP.finditer(text):
+        table_name = lm.group(2)
+        tbl = decls.get(table_name)
+        if tbl is None:
+            continue
+        loop_vars = [v.strip() for v in lm.group(1).split(",")]
+        if not loop_vars or loop_vars[0].startswith("_"):
+            pass  # 仍要继续：`_` 只影响通配符语义，字段顺序照旧
+        open_brace = text.index("{", lm.end() - 1)
+        body = text[open_brace:_block_end(text, open_brace)]
+        handles = _dyn_handles(body)
+        if not handles:
+            continue
+        # 表行：`(a, LibraryName::X, n, h, pr, y, 32.0, 18.0),`
+        table_rows = []
+        for rm in re.finditer(r"\(([^()]*)\)", tbl):
+            fields = [f.strip() for f in rm.group(1).split(",")]
+            lib_pos = next((k for k, f in enumerate(fields) if f.startswith("LibraryName::")), None)
+            if lib_pos is None:
+                continue
+            lib = fields[lib_pos].split("::", 1)[1]
+            idx_pos = next((k for k in range(lib_pos + 1, len(fields)) if fields[k].isdigit()), None)
+            if idx_pos is None:
+                continue
+            table_rows.append((fields, lib, int(fields[idx_pos])))
+        if not table_rows:
+            continue
+
+        def resolve(arg, fields):
+            """`*bw` → 该行对应列的字面量；`32.0` → 字面量本身；其余（表达式）→ None。"""
+            a = arg.strip()
+            if a.startswith("*"):
+                name = a.lstrip("*").strip()
+                if name in loop_vars:
+                    k = loop_vars.index(name)
+                    if k < len(fields):
+                        m = NUM.match(fields[k])
+                        return float(m.group(1)) if m else None
+                return None
+            m = NUM.match(a)
+            return float(m.group(1)) if m else None
+
+        for sm in SPAWN.finditer(body):
+            args = [a.strip() for a in sm.group(2).split(",")]
+            pos = (6, 7) if sm.group(1) == "icon_button" else (4, 5)
+            if len(args) <= pos[1] or len(args) < 2:
+                continue
+            # 第 2 个实参是 normal 帧句柄：找到它对应的 (lib 列, idx 列)
+            hname = args[1].lstrip("*").strip()
+            field_vars = handles.get(hname)
+            if field_vars is None:
+                continue
+            lib_var, idx_var = field_vars
+            if lib_var not in loop_vars or idx_var not in loop_vars:
+                continue
+            lib_k, idx_k = loop_vars.index(lib_var), loop_vars.index(idx_var)
+            line = text[:open_brace + sm.start()].count("\n") + 1
+            for fields, _lib, _idx in table_rows:
+                if len(fields) <= max(lib_k, idx_k) or not fields[idx_k].isdigit():
+                    continue
+                lib = fields[lib_k].split("::")[-1]
+                idx = int(fields[idx_k])
+                art = art_size(data_dir, lib, idx)
+                if not art:
+                    continue
+                wv, hv = resolve(args[pos[0]], fields), resolve(args[pos[1]], fields)
+                if wv is None or hv is None:
+                    continue
+                if (wv, hv) != (float(art[0]), float(art[1])):
+                    try:
+                        rel = os.path.relpath(path)
+                    except ValueError:
+                        rel = path
+                    rows.append({
+                        "file": rel,
+                        "line": line,
+                        "load_line": line,
+                        "lib": lib,
+                        "index": idx,
+                        "art": art,
+                        "explicit": (wv, hv),
+                        "via": f"表 {table_name}",
+                    })
 
 
 def scan_file(path, data_dir, rows):
     text = open(path, encoding="utf-8", errors="replace").read()
     lines = text.split("\n")
+    # 表驱动循环形态先扫（它用的是变量 lib/idx，下面的字面量配对逻辑看不见）
+    scan_table_loops(text, data_dir, rows, path)
     loads = [(text[:m.start()].count("\n") + 1, m.group(1) or "", m.group(2), int(m.group(3)),
               m.start(), None)
              for m in LOAD.finditer(text)]
@@ -204,9 +350,9 @@ def main():
         r["known"] = key in known
         if not r["known"]:
             new_rows.append(r)
-        print("%-52s:%-5d %s[%d] 美术=%sx%s 写死=%gx%g" % (
+        print("%-52s:%-5d %s[%d] 美术=%sx%s 写死=%gx%g%s" % (
             r["file"], r["line"], r["lib"], r["index"], r["art"][0], r["art"][1],
-            r["explicit"][0], r["explicit"][1]))
+            r["explicit"][0], r["explicit"][1], ("（来自" + r["via"] + "）") if r.get("via") else ""))
     print(f"合计 {len(rows)} 处「写死尺寸 ≠ 美术原生尺寸」，其中已知待核 {len(rows) - len(new_rows)}、"
           f"**新增 {len(new_rows)}**")
     if new_rows:
@@ -294,6 +440,22 @@ def selftest(a):
               + "; ".join(f"group.rs:{r['line']} {r['lib']}[{r['index']}] 美术={r['art']} 写死={r['explicit']}"
                           for r in hit))
         ok &= (len(hit) >= 1)
+
+        # 正对照②（2026-09-26 补）：**表驱动循环**那条扫描面的自证。
+        # 把 `menu.rs` 的 `*bw, *bh` 换回写死的 38x19（修复前的真实形态）→ 13 行表项必须全报。
+        menu = os.path.join(dst, "game", "dialogs", "menu.rs")
+        mtext = open(menu, encoding="utf-8").read()
+        m_new = mtext.replace("*bw, *bh, 10", "38.0, 19.0, 10")
+        if m_new == mtext:
+            print("[正对照②] 找不到要改坏的锚点 `*bw, *bh, 10` —— 门禁自证失败（锚点漂了）")
+            return 1
+        open(menu, "w", encoding="utf-8").write(m_new)
+        pos2 = [r for r in _scan_root(tmp, a.subdir, a.data)
+                if r["file"].endswith("menu.rs") and rel_key(r) not in known]
+        print(f"[正对照②] 表驱动循环写死 38x19 后命中 {len(pos2)} 条（期望 ≥1）："
+              + "; ".join(f"menu.rs:{r['line']} {r['lib']}[{r['index']}] 美术={r['art']} 写死={r['explicit']}"
+                          for r in pos2[:3]))
+        ok &= (len(pos2) >= 1)
     print("VERDICT=" + ("PASS" if ok else "FAIL") + "（正/负对照）")
     return 0 if ok else 1
 
