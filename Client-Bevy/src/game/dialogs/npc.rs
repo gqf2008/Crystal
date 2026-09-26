@@ -44,9 +44,15 @@ pub const PANEL_H: f32 = 224.0;
 /// 尺寸审计都看不出来，只有把图导出来比才看得见（384 的框线更细、正文区里多一条横向分隔线）。
 pub const NPC_PANEL: (LibraryName, usize) = (LibraryName::Prguse, 995);
 
-/// 翻页箭头：`UpButton` = `Prguse[197/198/199]` @(417,34)、`DownButton` = `[207/208/209]` @(417,175)，
+/// 翻页箭头：`UpButton` = **`Prguse2`**[197/198/199] @(417,34)、`DownButton` = [207/208/209] @(417,175)，
 /// 两颗都显式 `Size = new Size(16, 14)`（`NPCDialogs.cs:78-108`）。
 /// 本端此前**没有画这两颗钮**，只用滚轮滚动——原版是"滚轮 + 箭头 + 可拖的 PositionBar"三件套。
+///
+/// ⚠️ **库名必须是 `Prguse2`**：2026-09-26 第一次补这两颗钮时写成了 `Prguse`，而 `Prguse[197]/[207]`
+/// 是**空图（0x0）**——`load_lib_image` 直接返回 `None`，`if let (Some, Some, Some)` 静默跳过，
+/// 于是"补了控件"在实机上等于**没补**，而只查位置/索引/尺寸的门禁完全看不出来。
+/// 教训：跨库的精灵必须把**库名**也钉进常量与门禁里。
+pub const NPC_ARROW_LIB: LibraryName = LibraryName::Prguse2;
 pub const NPC_UP_POS: (f32, f32) = (417.0, 34.0);
 pub const NPC_DOWN_POS: (f32, f32) = (417.0, 175.0);
 pub const NPC_ARROW_SIZE: (f32, f32) = (16.0, 14.0);
@@ -231,9 +237,9 @@ fn spawn_npc_dialog(
         spawn_scroll_bar_ui(p, (420.0, 34.0, 4.0, 144.0), 8);
         // 翻页箭头（C# UpButton/DownButton；`NPCDialogs.cs:78-108`）
         if let (Some(n), Some(h), Some(pr)) = (
-            load_lib_image(&mut libs, &mut images, LibraryName::Prguse, NPC_UP_FRAMES.0),
-            load_lib_image(&mut libs, &mut images, LibraryName::Prguse, NPC_UP_FRAMES.1),
-            load_lib_image(&mut libs, &mut images, LibraryName::Prguse, NPC_UP_FRAMES.2),
+            load_lib_image(&mut libs, &mut images, NPC_ARROW_LIB, NPC_UP_FRAMES.0),
+            load_lib_image(&mut libs, &mut images, NPC_ARROW_LIB, NPC_UP_FRAMES.1),
+            load_lib_image(&mut libs, &mut images, NPC_ARROW_LIB, NPC_UP_FRAMES.2),
         ) {
             spawn_icon_button(
                 p,
@@ -247,11 +253,16 @@ fn spawn_npc_dialog(
                 9,
             )
             .insert((NpcScrollUp, NpcDialogWidget));
+        } else {
+            tracing::warn!(
+                "🖱 NPC 窗：上翻箭头缺帧（{}[{}/{}/{}]）——控件不会出现，别静默跳过",
+                "Prguse2", NPC_UP_FRAMES.0, NPC_UP_FRAMES.1, NPC_UP_FRAMES.2
+            );
         }
         if let (Some(n), Some(h), Some(pr)) = (
-            load_lib_image(&mut libs, &mut images, LibraryName::Prguse, NPC_DOWN_FRAMES.0),
-            load_lib_image(&mut libs, &mut images, LibraryName::Prguse, NPC_DOWN_FRAMES.1),
-            load_lib_image(&mut libs, &mut images, LibraryName::Prguse, NPC_DOWN_FRAMES.2),
+            load_lib_image(&mut libs, &mut images, NPC_ARROW_LIB, NPC_DOWN_FRAMES.0),
+            load_lib_image(&mut libs, &mut images, NPC_ARROW_LIB, NPC_DOWN_FRAMES.1),
+            load_lib_image(&mut libs, &mut images, NPC_ARROW_LIB, NPC_DOWN_FRAMES.2),
         ) {
             spawn_icon_button(
                 p,
@@ -265,6 +276,11 @@ fn spawn_npc_dialog(
                 9,
             )
             .insert((NpcScrollDown, NpcDialogWidget));
+        } else {
+            tracing::warn!(
+                "🖱 NPC 窗：下翻箭头缺帧（{}[{}/{}/{}]）——控件不会出现，别静默跳过",
+                "Prguse2", NPC_DOWN_FRAMES.0, NPC_DOWN_FRAMES.1, NPC_DOWN_FRAMES.2
+            );
         }
         // 关闭按钮 Prguse2[360-362] @ (413,3)
         if let Some(mut btn) =
@@ -1390,6 +1406,14 @@ mod tests {
     /// 改成 `(0,1,2)` → 本测试红。
     #[test]
     fn npc_scroll_arrows_match_csharp() {
+        // **库名是最容易漏的一项**：写成 `Prguse` 时 `Prguse[197]/[207]` 是空图（0x0）⇒
+        // `load_lib_image` 返回 None、`if let (Some,Some,Some)` 静默跳过 ⇒ 实机上"补了等于没补"，
+        // 而只查位置/索引/尺寸的门禁看不出来（2026-09-26 实测：实机 ui_nodes_at 在 (425,41) 只有面板根）。
+        assert_eq!(
+            NPC_ARROW_LIB,
+            LibraryName::Prguse2,
+            "C# `UpButton`/`DownButton` 的 Library 是 Prguse2（NPCDialogs.cs:80/83、101/104）"
+        );
         assert_eq!(NPC_UP_POS, (417.0, 34.0));
         assert_eq!(NPC_DOWN_POS, (417.0, 175.0));
         assert_eq!(NPC_ARROW_SIZE, (16.0, 14.0));
