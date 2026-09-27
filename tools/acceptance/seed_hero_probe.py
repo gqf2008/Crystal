@@ -27,6 +27,7 @@ def main() -> int:
     ap.add_argument("--level", type=int, default=100)
     ap.add_argument("--name", default="ProbeHero")
     ap.add_argument("--stale-max-exp", type=int, default=100)
+    ap.add_argument("--experience", type=int, default=0)
     ap.add_argument("--cleanup", action="store_true", help="删除探针英雄并把 characters.hero_index 归 0")
     args = ap.parse_args()
 
@@ -55,9 +56,9 @@ def main() -> int:
             INSERT INTO heroes
                 (character_name, hero_index, name, level, class, gender,
                  dead, sealed, autopot, experience, max_experience, hp, mp)
-            VALUES (?, 1, ?, ?, 0, 0, 0, 0, 0, 0, ?, -1, -1)
+            VALUES (?, 1, ?, ?, 0, 0, 0, 0, 0, ?, ?, -1, -1)
             """,
-            (args.character, args.name, args.level, args.stale_max_exp),
+            (args.character, args.name, args.level, args.experience, args.stale_max_exp),
         )
         cur.execute(
             "UPDATE characters SET hero_index = 1 WHERE name = ?",

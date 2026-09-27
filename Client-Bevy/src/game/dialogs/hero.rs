@@ -70,6 +70,9 @@ pub struct HeroState {
     pub hero_max_hp: i32,
     pub hero_max_mp: i32,
     pub hero_exp: i64,
+    /// 英雄当前等级（`S.HeroInformation.level` / `S.HeroLevelChanged.level`）——
+    /// 英雄经验曲线门禁要用它算 `Level<等级>` 的期望值（2026-09-27）。
+    pub hero_level: u16,
     pub hero_max_exp: i64,
     pub auto_pot: bool,
     pub hp_item_index: i32,
@@ -105,6 +108,7 @@ impl Default for HeroState {
             hero_max_hp: 0,
             hero_max_mp: 0,
             hero_exp: 0,
+            hero_level: 0,
             hero_max_exp: 0,
             auto_pot: false,
             hp_item_index: -1,
@@ -759,6 +763,7 @@ fn hero_server_events(
             } => {
                 // #1135：英雄升级（C# S.HeroLevelChanged）——同步面板与列表等级
                 hero.hero_exp = *exp;
+                hero.hero_level = *level;
                 hero.hero_max_exp = *max_exp;
                 hero.message = format!("英雄升级 Lv.{}", level);
                 if let Some(cur) = hero.current.as_mut() {
@@ -781,6 +786,7 @@ fn hero_server_events(
                 max_hp,
                 max_mp,
                 exp,
+                level,
                 max_exp,
                 auto_pot,
                 auto_hp_percent,
@@ -800,6 +806,7 @@ fn hero_server_events(
                 hero.hero_max_hp = *max_hp;
                 hero.hero_max_mp = *max_mp;
                 hero.hero_exp = *exp;
+                hero.hero_level = *level;
                 hero.hero_max_exp = *max_exp;
                 hero.auto_pot = *auto_pot;
                 if *auto_hp_percent > 0 {
