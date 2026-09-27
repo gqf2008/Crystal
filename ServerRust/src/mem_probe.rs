@@ -145,6 +145,9 @@ pub fn report_tags(mut emit: impl FnMut(&'static str, usize, i64)) -> (usize, us
 
 #[inline]
 fn track_tag(tag: usize, size: usize, add: bool) {
+    if probe_disabled("track") {
+        return;
+    }
     if tag >= TAG_N {
         return;
     }
@@ -168,6 +171,9 @@ static FOCUS_PREV_COUNT: [AtomicUsize; EXACT_MAX + 1] =
 
 #[inline]
 fn track_focus(tag: usize, size: usize, add: bool) {
+    if probe_disabled("track") {
+        return;
+    }
     if tag != TAG_FOCUS_SIZE || size == 0 || size > EXACT_MAX {
         return;
     }
@@ -267,6 +273,9 @@ fn reg_hash(ptr: usize) -> usize {
 
 #[inline]
 fn reg_insert(ptr: usize, size: usize, tag: usize) {
+    if probe_disabled("reg") {
+        return;
+    }
     if size < REG_MIN || size > u32::MAX as usize || ptr == 0 {
         return;
     }
@@ -288,17 +297,114 @@ fn reg_insert(ptr: usize, size: usize, tag: usize) {
 
 #[inline]
 fn reg_remove(ptr: usize) {
+    if probe_disabled("reg") {
+        return;
+    }
     let base = reg_hash(ptr);
     for i in 0..REG_PROBE {
         let slot = (base + i) & (REG_SLOTS - 1);
-        let cur = REG_PTR[slot].load(Ordering::Acquire);
-        if cur == ptr {
-            REG_PTR[slot].store(0, Ordering::Release);
+        // ⚠️ 这里**不能**「遇到空槽就返回」（2026-09-27 修，40 会话档稳定段错误 `0xC0000005` 的根因之一）：
+        // 开放寻址表里，`insert` 会把冲突的记录往后探测落位；一旦前面那条被别人删掉变成空槽，
+        // 「遇空即返」的删除就再也走不到后面的记录 —— 那条记录**永久孤儿**，而孤儿就是悬垂指针：
+        // 它指向的块早已 `System.dealloc`，idle 普查却照读它的内容（见 `registry_report`）。
+        // Windows 堆对 ≥512KB 的块走 VirtualAlloc，释放即 decommit ⇒ 读它就是访问违例。
+        // 同哈希冲突的两条记录（P1 落在 base，P2 落在 base+1）只要先删 P1，就能稳定造出孤儿。
+        // 正确做法：在自己那段探测窗口里**逐槽 CAS 清除**，找不到就是真的不在表里。
+        if REG_PTR[slot]
+            .compare_exchange(ptr, 0, Ordering::AcqRel, Ordering::Acquire)
+            .is_ok()
+        {
             return;
         }
-        if cur == 0 {
-            return; // 空槽 ⇒ 这条记录不存在（或早已被删）
+    }
+}
+
+// ---- 读「活块内容」前的可读性守卫（仅探针构建）----
+// 为什么需要：登记表按 ptr 记名，而 `reg_remove` 是在**真正 `System.dealloc` 之前**清记录的，
+// 所以报告线程可能正好卡在「读到 ptr」与「拷贝内容」之间，等它回来时块已经还给系统了。
+// Windows 堆对 ≥512KB 的块走 VirtualAlloc，释放即 decommit ⇒ 读它是 `0xC0000005`。
+// 实测：40 会话档 probe 构建每轮 idle 普查都可能崩在这里（plain release 同场景 6 轮全过）。
+// 这道守卫把「读悬垂指针」变成「跳过这条记录」；孤儿记录本身由 `reg_remove` 修掉（两道防线）。
+#[cfg(windows)]
+mod readable {
+    use core::ffi::c_void;
+
+    /// Windows `MEMORY_BASIC_INFORMATION`（x64）。
+    /// 字段偏移与 `PartitionId` 存在与否无关：老 SDK 没有该字段，但它的位置只是 `RegionSize` 前的
+    /// 4 字节填充，所以两种布局下我们用到的 `BaseAddress/RegionSize/State/Protect` 偏移一致。
+    #[repr(C)]
+    struct MemoryBasicInformation {
+        base_address: *mut c_void,
+        allocation_base: *mut c_void,
+        allocation_protect: u32,
+        partition_id: u16,
+        _pad0: u16,
+        region_size: usize,
+        state: u32,
+        protect: u32,
+        ty: u32,
+        _pad1: u32,
+    }
+
+    const MEM_COMMIT: u32 = 0x1000;
+    const PAGE_NOACCESS: u32 = 0x01;
+    const PAGE_GUARD: u32 = 0x100;
+    /// 所有「可读」保护位的并集：RO|RW|WRITECOPY|EXECUTE_READ|EXECUTE_RW|EXECUTE_WRITECOPY。
+    const PAGE_READABLE_MASK: u32 = 0x02 | 0x04 | 0x08 | 0x20 | 0x40 | 0x80;
+
+    extern "system" {
+        fn VirtualQuery(
+            lp_address: *const c_void,
+            buffer: *mut MemoryBasicInformation,
+            length: usize,
+        ) -> usize;
+    }
+
+    /// `[ptr, ptr+len)` **整段**落在同一段「已提交且可读」的页里才返回 true。
+    /// 这是尽力而为（查询与拷贝之间理论上仍有窗口），但对探针足够：它把"稳定读已释放的大块"
+    /// 消除掉，只剩纳秒级竞态。
+    pub fn range_is_readable(ptr: usize, len: usize) -> bool {
+        if ptr == 0 || len == 0 {
+            return false;
         }
+        let mut mbi = MemoryBasicInformation {
+            base_address: core::ptr::null_mut(),
+            allocation_base: core::ptr::null_mut(),
+            allocation_protect: 0,
+            partition_id: 0,
+            _pad0: 0,
+            region_size: 0,
+            state: 0,
+            protect: 0,
+            ty: 0,
+            _pad1: 0,
+        };
+        let written = unsafe {
+            VirtualQuery(
+                ptr as *const c_void,
+                &mut mbi,
+                core::mem::size_of::<MemoryBasicInformation>(),
+            )
+        };
+        if written == 0 || mbi.state != MEM_COMMIT {
+            return false;
+        }
+        if mbi.protect & (PAGE_NOACCESS | PAGE_GUARD) != 0 || mbi.protect & PAGE_READABLE_MASK == 0
+        {
+            return false;
+        }
+        let start = mbi.base_address as usize;
+        let end = start.saturating_add(mbi.region_size);
+        ptr >= start && ptr.saturating_add(len) <= end
+    }
+}
+
+/// 非 Windows：`malloc` 很少把整页还给内核，读已释放内存基本不会触发异常；
+/// 这里退化成「不拦截」，行为与加守卫之前一致（CI 跑 Linux，必须能编译）。
+#[cfg(not(windows))]
+mod readable {
+    pub fn range_is_readable(_ptr: usize, _len: usize) -> bool {
+        true
     }
 }
 
@@ -318,6 +424,7 @@ pub fn registry_report(
     let mut live_entries = 0usize;
     let mut live_bytes = 0usize;
     let mut emitted = 0usize;
+    let mut unreadable = 0usize;
     let mut buf = [0u8; 48];
     for slot in 0..REG_SLOTS {
         let ptr = REG_PTR[slot].load(Ordering::Acquire);
@@ -325,6 +432,11 @@ pub fn registry_report(
             continue;
         }
         let meta = REG_META[slot].load(Ordering::Acquire);
+        // 复读一次 ptr：`insert` 是「CAS 占槽 → 再写 meta」，若这一刻槽已被别的块复用，
+        // 读到的 meta 属于**下一个**占用者，size/tag 会张冠李戴。
+        if REG_PTR[slot].load(Ordering::Acquire) != ptr {
+            continue;
+        }
         let size = (meta & 0xffff_ffff) as usize;
         let tag = ((meta >> 32) & 0xff) as usize;
         live_entries += 1;
@@ -334,6 +446,10 @@ pub fn registry_report(
             continue;
         }
         let n = size.min(buf.len());
+        if !readable::range_is_readable(ptr, n) {
+            unreadable += 1;
+            continue;
+        }
         // 竞态下的"尽力读取"：读到的是这块内存当时的字节
         unsafe {
             ptr::copy_nonoverlapping(ptr as *const u8, buf.as_mut_ptr(), n);
@@ -342,6 +458,10 @@ pub fn registry_report(
         emit(size, tag, ptr, &buf[..n]);
     }
     REG_GEN.fetch_add(1, Ordering::Relaxed);
+    if unreadable != 0 {
+        // 打计数而不是静默跳过：它同时是「表里还有悬垂记录」的告警。
+        eprintln!("MEM_PROBE_REG_UNREADABLE count={unreadable}");
+    }
     (
         live_entries,
         live_bytes,
@@ -366,6 +486,9 @@ pub fn tag_live(tag: usize) -> usize {
 /// 不做精确记账；真出现回绕，打印出来的绝对值会明显荒谬，不会被误读成小增量。
 #[inline]
 fn track(size: usize, add: bool) {
+    if probe_disabled("track") {
+        return;
+    }
     if size == 0 || size > EXACT_MAX {
         return;
     }
@@ -537,6 +660,34 @@ fn bucket(size: usize) -> &'static AtomicUsize {
         &LIVE_MID
     } else {
         &LIVE_BIG
+    }
+}
+
+// ---- 二分定位开关（2026-09-27）：只影响诊断，默认（都不设）行为完全不变 ----
+// 40 会话档下 probe 构建会以 `0xC0000005` 静默段错误（plain release 同场景 6 轮全过），
+// 用这两个开关把「无锁登记表」与「按尺寸/标签直方图」两组记账分别关掉跑同一场景。
+// ⚠️ **绝不能在分配器里读环境变量**：`std::env::var` 自己会分配 ⇒ 递归进同一个记账路径，
+// 实测直接把服务端卡在启动（`server not ready` / exit 9）。所以开关用 AtomicBool，
+// 由 `init_bisect_flags()` 在 main 里**尽早调一次**（那时分配已完全正常）。
+static SKIP_REG: AtomicBool = AtomicBool::new(false);
+static SKIP_TRACK: AtomicBool = AtomicBool::new(false);
+
+/// 二分开关初始化：在 main 最前面调用一次（见上面 ⚠️）。
+pub fn init_bisect_flags() {
+    if std::env::var("MEM_PROBE_NO_REG").is_ok() {
+        SKIP_REG.store(true, Ordering::Relaxed);
+    }
+    if std::env::var("MEM_PROBE_NO_TRACK").is_ok() {
+        SKIP_TRACK.store(true, Ordering::Relaxed);
+    }
+}
+
+#[inline]
+fn probe_disabled(name: &str) -> bool {
+    match name {
+        "reg" => SKIP_REG.load(Ordering::Relaxed),
+        "track" => SKIP_TRACK.load(Ordering::Relaxed),
+        _ => false,
     }
 }
 
