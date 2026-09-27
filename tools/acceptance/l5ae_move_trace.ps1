@@ -53,7 +53,16 @@ foreach ($i in 1..60) { Start-Sleep 1; $st = Rpc 'state'; if ($null -ne $st.tile
 if ($null -eq $st.tile_x) { Write-Host 'FAIL(前置): 客户端未进场'; exit 2 }
 Write-Host ("[前置] map={0} start=({1},{2}) server=({3},{4}) in_sync={5}" -f `
     $st.map, $st.tile_x, $st.tile_y, $st.server_tile_x, $st.server_tile_y, $st.in_sync)
-Rpc 'click' @{ x = [int]$st.tile_x + 150; y = [int]$st.tile_y; button = 'right' } | Out-Null
+# 落到**已知开阔**的图上再走：角色可能停在副本里一格被封死的点上（实测 D003(351,233) 四周无可行路径），
+# 那种点是「没路可走」而不是「被拉回」，会把判据 A 变成假红。
+Rpc 'chat' @{ message = '@mapmove 1 330 48' } | Out-Null
+Start-Sleep -Seconds 4
+$st = Rpc 'state'
+Write-Host ("[前置] mapmove 后 map={0} start=({1},{2}) server=({3},{4}) in_sync={5}" -f `
+    $st.map, $st.tile_x, $st.tile_y, $st.server_tile_x, $st.server_tile_y, $st.in_sync)
+# `walk_to` 与右键寻路走的是**同一条**本地寻路管线（LocalMove）；被拉回的机制在 `apply_self_position`，
+# 与输入方式无关。
+Rpc 'walk_to' @{ tx = [int]$st.tile_x + 8; ty = [int]$st.tile_y; run = $true } | Out-Null
 $trail = @(); $anyOut = $false
 foreach ($i in 1..$Samples) {
     Start-Sleep -Milliseconds $SampleMs
