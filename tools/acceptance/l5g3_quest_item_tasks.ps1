@@ -87,12 +87,28 @@ $exe = Join-Path (Split-Path -Parent $exe) 'l5g3_client.exe'
 $questDir = 'E:\Users\gxh\Documents\GitHub\Crystal\ServerRust\Daneo1989\Envir\Quests'
 
 function Rpc([string]$m, [hashtable]$q = @{}) {
-    $c = New-Object Net.Sockets.TcpClient; $c.Connect('127.0.0.1', 9000); $s = $c.GetStream()
-    $b = [Text.Encoding]::UTF8.GetBytes((@{ jsonrpc='2.0'; id=1; method=$m; params=$q } | ConvertTo-Json -Compress) + "`n")
-    $s.Write($b, 0, $b.Length); $s.Flush()
-    $r = New-Object IO.StreamReader($s); $l = $r.ReadLine(); $c.Close(); ($l | ConvertFrom-Json).result
+    # 2026-09-27：**必须容忍瞬时断连**——实测跑满 13 分钟后在收尾窗口里 RPC 抛
+    # 「Unable to read data from the transport connection：远程主机强迫关闭了一个现有的连接」，
+    # 直接把整轮打断、连 VERDICT 都没来得及打印（等于白跑一轮且看不出是环境还是产品）。
+    # 与 l5e/l5r/l5s 同口径：连接/读超时 + try/catch 返回 $null，让调用方自己判空。
+    try {
+        $c = New-Object Net.Sockets.TcpClient
+        $c.ReceiveTimeout = 5000; $c.SendTimeout = 5000
+        $c.Connect('127.0.0.1', 9000)
+        $s = $c.GetStream(); $s.ReadTimeout = 5000
+        $b = [Text.Encoding]::UTF8.GetBytes((@{ jsonrpc='2.0'; id=1; method=$m; params=$q } | ConvertTo-Json -Compress) + "`n")
+        $s.Write($b, 0, $b.Length); $s.Flush()
+        $r = New-Object IO.StreamReader($s); $l = $r.ReadLine(); $c.Close()
+        if (-not $l) { return $null }
+        ($l | ConvertFrom-Json).result
+    } catch { return $null }
 }
-function Taken { @((Rpc 'quest_probe').taken | ForEach-Object { [int]$_.id }) }
+function Taken {
+    # 瞬时断连时 `Rpc` 返回 $null（见上面的 try/catch）——这里显式兜底，别让 null 继续往下传
+    $p = Rpc 'quest_probe'
+    if ($null -eq $p) { return @() }
+    @($p.taken | ForEach-Object { [int]$_.id })
+}
 function QuestCount([string]$name) {
     $b = Rpc 'bag_probe'
     $sum = 0
