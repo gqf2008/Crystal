@@ -423,6 +423,19 @@ pub fn chat_bar_top(size: usize) -> f32 {
     CHAT_BAR_Y - CHAT_SIZE_STEP * size.min(2) as f32
 }
 
+/// 控制栏按钮的**屏幕 y**（左上原点、y 向下）：栏顶 + 1。
+///
+/// 为什么单列一个函数：按钮的**绘制位置**（`Transform`，世界 y 向上）与**命中矩形**
+/// （`UiButton.rect`，屏幕坐标 y 向下）是两套坐标，但必须是**同一个几何源**。
+/// 原版 `SizeButton.Click`（`MainDialogs.cs:1279` → `ChatDialog.ChangeSize()`）升/降档时会把
+/// 整条控制栏连同按钮一起上移/下移（`:1221` 底边固定、向上长高）；本端 `chat_size_system`
+/// 此前只挪 `Transform`、**没同步 `UiButton.rect`**，而点击命中的唯一来源就是 `rect`
+/// （`sprite_ui::ui_button_clicked` 只读它）⇒ 升档后「看得见的按钮点不动、点旧位置的空气才生效」，
+/// 用户看到的就是 owner 反馈的「对话框展开后收不回来了」。绘制与命中共用本函数即可杜绝漂移。
+pub fn chat_bar_button_y(size: usize) -> f32 {
+    chat_bar_top(size) + 1.0
+}
+
 /// 控制栏按钮表（C# `MainDialogs.cs:1265-1451`）：(动作, 常态帧, 悬停帧, 按下帧, 相对 x)
 const CHAT_BAR_BUTTONS: &[(ChatBarAction, usize, usize, usize, f32)] = &[
     (ChatBarAction::All, 2036, 2037, 2038, 12.0),
@@ -881,7 +894,8 @@ fn spawn_chat_control_bar(
             *h,
             *p,
             CHAT_BAR_X + x,
-            CHAT_BAR_Y + 1.0,
+            // 与 `chat_size_system` 的 rect 重设共用同一几何源（见 `chat_bar_button_y`）
+            chat_bar_button_y(0),
             2.5,
             w,
             bh_btn,
@@ -999,7 +1013,7 @@ fn chat_size_system(
         ),
     >,
     mut bar_btns: Query<
-        &mut Transform,
+        (&mut Transform, &mut crate::ui::sprite_ui::UiButton),
         (
             With<ChatBarButton>,
             Without<ChatLine>,
@@ -1064,8 +1078,14 @@ fn chat_size_system(
     for mut tf in &mut bar_bg {
         tf.translation.y -= dy;
     }
-    for mut tf in &mut bar_btns {
+    for (mut tf, mut btn) in &mut bar_btns {
         tf.translation.y -= dy;
+        // 命中矩形必须跟绘制一起走：`ui_button_clicked` 只读 `UiButton.rect`，
+        // 不同步就会出现「升档后点可见按钮无效、点旧位置才生效」（owner「收不回来」）。
+        let want_y = chat_bar_button_y(size);
+        if btn.rect.1 != want_y {
+            btn.rect.1 = want_y;
+        }
     }
     // 滚动条轨道换图（C# `CountBar.Index = 2012/2013/2014`；轨道高度随之变化）
     for (mut sp, handles) in &mut track {
@@ -2644,10 +2664,10 @@ mod chat_scroll_tests {
 #[cfg(test)]
 mod whisper_partner_tests {
     use super::{
-        chat_bar_hint, chat_bar_prefix, chat_bar_system, chat_bar_top, chat_panel_top,
-        chat_scroll_knob_y, chat_size_lines, chat_size_system, whisper_partner, ChatBarAction,
-        ChatBarBg, ChatBarButton, ChatBarFrames, ChatLine, ChatPanelBg, ChatScrollBtn,
-        ChatSizeImages, ChatState, KeyScroll,
+        chat_bar_button_y, chat_bar_hint, chat_bar_prefix, chat_bar_system, chat_bar_top,
+        chat_panel_top, chat_scroll_knob_y, chat_size_lines, chat_size_system, whisper_partner,
+        ChatBarAction, ChatBarBg, ChatBarButton, ChatBarFrames, ChatLine, ChatPanelBg,
+        ChatScrollBtn, ChatSizeImages, ChatState, KeyScroll, CHAT_BAR_X,
     };
     use crate::ui::sprite_ui::UiButton;
     use bevy::prelude::{
@@ -2850,6 +2870,22 @@ mod whisper_partner_tests {
         let bar = world
             .spawn((ChatBarBg, Transform::from_xyz(230.0, -656.0, 2.4)))
             .id();
+        // 控制栏按钮（owner「展开后收不回来」的当事元件）：绘制在 (804, -657)，命中矩形同源
+        let size_btn = world
+            .spawn((
+                ChatBarButton(ChatBarAction::Size),
+                crate::ui::sprite_ui::UiButton {
+                    rect: (
+                        CHAT_BAR_X + 574.0,
+                        chat_bar_button_y(0),
+                        20.0,
+                        16.0,
+                    ),
+                    clicked: false,
+                },
+                Transform::from_xyz(CHAT_BAR_X + 574.0, -chat_bar_button_y(0), 2.5),
+            ))
+            .id();
         world
             .run_system_once(chat_size_system)
             .expect("尺寸系统应成功");
@@ -2899,6 +2935,28 @@ mod whisper_partner_tests {
             world.entity(lines[7]).get::<Visibility>().unwrap(),
             &Visibility::Hidden,
             "7 行档位下第 8 行起隐藏"
+        );
+        // 控制栏按钮：**绘制与命中必须一起走**（此前只挪 Transform、rect 不动 ⇒ 升档后
+        // 看得见的按钮点不动、点旧位置的空气才生效 = owner「对话框展开后收不回来了」）
+        assert_eq!(
+            world
+                .entity(size_btn)
+                .get::<Transform>()
+                .unwrap()
+                .translation
+                .y,
+            -chat_bar_button_y(1),
+            "1 档按钮绘制位置必须随控制栏上移"
+        );
+        assert_eq!(
+            world
+                .entity(size_btn)
+                .get::<crate::ui::sprite_ui::UiButton>()
+                .unwrap()
+                .rect
+                .1,
+            chat_bar_button_y(1),
+            "1 档按钮命中矩形必须与绘制同源（否则点不到 → 收不回来）"
         );
         // Home 随顶边上移（623+1）
         assert_eq!(
