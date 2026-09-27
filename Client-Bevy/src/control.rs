@@ -3366,6 +3366,10 @@ fn apply_control_commands(
                         "cast_alpha": q.effects_state.spell_fx_alpha,
                         "missile_add": q.effects_state.spell_missile_add,
                         "missile_alpha": q.effects_state.spell_missile_alpha,
+                        // 占位弹道：玩家侧抑制数（= 原版没有弹道的已知法术，不该再画方块）
+                        // 与仍画占位的次数（怪物弹道/未知法术 id）
+                        "fallback_player_suppressed": q.effects_state.fallback_player_suppressed,
+                        "fallback_placeholder": q.effects_state.fallback_placeholder,
                     },
                 });
                 tracing::info!("🎮 control spell_fx_probe: count={}", payload["count"]);

@@ -17,11 +17,17 @@ use crate::ui::sprite_ui::{ui_array_image, ui_image, UiImageCache};
 /// 待生成特效（网络事件 → 渲染，按 target object_id 定位）
 #[derive(Message, Debug, Clone, Copy)]
 pub enum PendingEffect {
-    /// 魔法弹道：从玩家飞向目标。`fx` 有值时按原版帧表播（远程攻击的箭矢），否则退回染色方块。
+    /// 魔法弹道：从玩家飞向目标。`fx` 有值时按原版帧表播（远程攻击的箭矢），
+    /// 否则按 `spell` 的**已知性**决定：已知法术（原版表已完备，见 `SPELL_MISSILE` 的
+    /// 23 条 == `PlayerObject.cs` 的 `CreateProjectile` 调用数）不再画占位方块 —— 原版对这类
+    /// 法术**根本没有弹道**（如 `IceThrust` 只在身前放一个地图帧 Effect）；
+    /// 未知法术 id 才保留占位（没有表可依，至少给一个反馈）。
     Projectile {
         target_id: u32,
         color: [f32; 3],
         fx: Option<crate::game::spell_effects::MissileFx>,
+        /// 该次弹道对应的法术 id（0 = 普通弓射/无技能）
+        spell: u8,
     },
     /// 命中爆炸：在目标位置扩散
     Burst { target_id: u32, color: [f32; 3] },
@@ -31,6 +37,8 @@ pub enum PendingEffect {
         destination_id: u32,
         color: [f32; 3],
         fx: Option<crate::game::spell_effects::MissileFx>,
+        /// 该次弹道对应的法术 id（0 = 普通弓射/无技能）
+        spell: u8,
     },
     /// 地图坐标特效：在指定世界坐标生成爆炸（#230 MapEffect）
     BurstAt { x: f32, y: f32, color: [f32; 3] },
@@ -86,7 +94,18 @@ pub fn range_attack_projectile(target_id: u32, spell: u8) -> PendingEffect {
         target_id,
         color: spell_color(spell),
         fx: crate::game::spell_effects::range_missile(spell),
+        spell,
     }
+}
+
+/// 该 id 是否是本端/原版都认识的**已知法术**。
+///
+/// 用途：占位弹道的抑制判据。玩家侧的原版弹道表是**完备**的
+/// （`SPELL_MISSILE` 14 条 + `RANGE_MISSILE` 9 条 = 23 = `PlayerObject.cs` 里
+/// `CreateProjectile(...)` 的调用数，逐条机械生成），所以「已知法术 + 表里没有」
+/// ⟹ 原版对这个法术**根本没有弹道**，本端不该再飞一个占位方块。
+pub(crate) fn spell_is_known(spell: u8) -> bool {
+    mir2_shared::enums::Spell::try_from(spell).is_ok()
 }
 
 /// `S.ObjectRangeAttack`（其他玩家/怪物远程攻击）→ 弹道特效（同上，单一出口）
@@ -100,6 +119,7 @@ pub fn object_range_attack_projectile(
         destination_id,
         color: spell_color(spell),
         fx: crate::game::spell_effects::range_missile(spell),
+        spell,
     }
 }
 
@@ -133,6 +153,13 @@ pub struct EffectsState {
     pub spell_fx_alpha: u64,
     pub spell_missile_add: u64,
     pub spell_missile_alpha: u64,
+    /// **占位弹道**的两个计数（owner 反馈「有些魔法是个黄色方框」）：
+    /// - `fallback_player_suppressed`：玩家施放、原版表里**没有**弹道的已知法术 ⇒ 按原版语义
+    ///   抑制掉占位方块（该抑制就是这一条判据的实机证据，只增不减）；
+    /// - `fallback_placeholder`：仍画了占位方块（怪物弹道——原版走 `MonsterObject.cs:3792`
+    ///   的独立表，本端未移植；或未知法术 id）。
+    pub fallback_player_suppressed: u64,
+    pub fallback_placeholder: u64,
     /// `SpellEffect.DelayedExplosion` 的 stage 记账：C# 只在 `stage > 已存在.stage` 时替换
     /// （`GameScene.cs:4867-4878`），重复 stage 的包不再重启动画。
     pub delayed_stage: std::collections::HashMap<u32, u32>,
@@ -264,6 +291,7 @@ fn spawn_pending_effects(
                 target_id,
                 color,
                 fx,
+                spell,
             } => {
                 let Some((_, tf, _)) = actors.iter().find(|(id, _, _)| id.0 == target_id) else {
                     continue;
@@ -288,7 +316,20 @@ fn spawn_pending_effects(
                 if frame_missile_spawned {
                     state.spell_missile_add += 1;
                 }
+                // 表里没有该法术 ⇒ 若它是个**已知法术**（原版表完备），说明原版对它
+                // 根本没有弹道（例如 `IceThrust` 只在身前放一个地图帧 Effect）——
+                // 占位染色方块是 M38 时代的遗留，owner 反馈的「黄色方框」就是它，别再画。
+                // （本臂的施放方恒为本地玩家：`S.RangeAttack` 与已删除的 `S.MagicCast` 本地猜测
+                //   都只在这里落地，故不需要再判 `player_ids`。）
+                if !frame_missile_spawned && spell_is_known(spell) {
+                    state.fallback_player_suppressed += 1;
+                    debug!(
+                        "弹道占位已按原版语义抑制：spell={spell}（该法术原版无 CreateProjectile）"
+                    );
+                    continue;
+                }
                 if !frame_missile_spawned {
+                    state.fallback_placeholder += 1;
                     commands.spawn((
                         Sprite {
                             image: white.clone(),
@@ -311,6 +352,7 @@ fn spawn_pending_effects(
                 destination_id,
                 color,
                 fx,
+                spell,
             } => {
                 let mut from = None;
                 let mut to = None;
@@ -344,7 +386,22 @@ fn spawn_pending_effects(
                 if frame_missile_spawned {
                     state.spell_missile_add += 1;
                 }
+                // 同 `Projectile` 臂：**玩家**施放的已知法术、且原版表里没有弹道 ⇒ 原版就没有弹道，
+                // 不再飞占位方块。怪物施放的法术不在这里抑制 —— 原版走的是
+                // `MonsterObject.cs:3792` 那张**独立**的 CreateProjectile 表（本端尚未移植），
+                // 在补齐那张表之前，占位块至少保留"有东西飞过去"的反馈（差异已在 PR 里记档）。
+                if !frame_missile_spawned
+                    && spell_is_known(spell)
+                    && player_ids.iter().any(|id| id.0 == source_id)
+                {
+                    state.fallback_player_suppressed += 1;
+                    debug!(
+                        "弹道占位已按原版语义抑制：spell={spell}（玩家施放，原版无 CreateProjectile）"
+                    );
+                    continue;
+                }
                 if !frame_missile_spawned {
+                    state.fallback_placeholder += 1;
                     commands.spawn((
                         Sprite {
                             image: white.clone(),
@@ -1355,6 +1412,97 @@ mod tests {
                 "远程攻击箭矢都在 Magic3 库"
             );
         }
+    }
+
+    /// 门禁：**玩家**施放的「已知法术 + 原版无弹道」不再画占位色块（owner 反馈「有些魔法是个
+    /// 黄色方框」的根因）。
+    ///
+    /// 判据依据：玩家侧弹道表**完备**（`SPELL_MISSILE` 14 + `RANGE_MISSILE` 9 = 23 =
+    /// `PlayerObject.cs` 里 `CreateProjectile(...)` 调用数，逐条机械生成）⇒「该 id 是已知法术
+    /// 且表里没有」等价于「原版对这个法术根本没有弹道」（例：`Spell.IceThrust` 在 C# 里只在身前
+    /// 放一个 `Magic2[1790 + 方向*10]` 的地图帧 Effect，没有任何 CreateProjectile）。
+    /// 怪物施放的同名法术**不抑制**：原版走 `MonsterObject.cs:3792` 那张独立表，本端尚未移植，
+    /// 补齐前保留占位块（差异已记档）。
+    ///
+    /// 阳性对照（落地时实做）：把 `player_ids.iter().any(..)` 这个条件去掉（两类都不抑制）
+    /// → 本测试立即红（玩家那条也会生成占位实体、计数为 2/0）。
+    #[test]
+    fn player_cast_spell_without_projectile_draws_no_placeholder() {
+        use bevy::ecs::system::RunSystemOnce;
+        if !crate::resources::libraries::data_assets_present() {
+            eprintln!(
+                "skip player_cast_spell_without_projectile_draws_no_placeholder: 无 Data 资产"
+            );
+            return;
+        }
+        let mut world = bevy::prelude::World::new();
+        world.insert_resource(crate::map_renderer::GameLibraries(
+            crate::resources::libraries::Libraries::new(
+                crate::resources::libraries::resolve_data_path(),
+            ),
+        ));
+        world.insert_resource(bevy::prelude::Assets::<bevy::prelude::Image>::default());
+        world.insert_resource(bevy::prelude::Assets::<bevy::prelude::Mesh>::default());
+        world.insert_resource(bevy::prelude::Assets::<
+            crate::game::object_fx_material::ObjectFxBlendMaterial,
+        >::default());
+        world.insert_resource(crate::game::object_fx_material::ObjectFxQuad::default());
+        world.insert_resource(crate::ui::sprite_ui::UiImageCache::default());
+        world.insert_resource(crate::game::dialogs::option::OptionState {
+            effect: true,
+            ..Default::default()
+        });
+        world.insert_resource(EffectsState::default());
+        world.insert_resource(bevy::prelude::Time::<()>::default());
+        world
+            .resource_mut::<crate::map_renderer::GameLibraries>()
+            .0
+            .ensure_initialized();
+        world.insert_resource(bevy::prelude::Messages::<PendingEffect>::default());
+        // 5001 = 玩家（释放方）；5002 = 怪物（同一法术，但原版走另一张表）；5003 = 目标
+        world.spawn((
+            NetObjectId(5001),
+            Player,
+            bevy::prelude::Transform::from_xyz(100.0, 100.0, 0.0),
+        ));
+        world.spawn((
+            NetObjectId(5002),
+            bevy::prelude::Transform::from_xyz(400.0, 100.0, 0.0),
+        ));
+        world.spawn((
+            NetObjectId(5003),
+            bevy::prelude::Transform::from_xyz(500.0, 100.0, 0.0),
+        ));
+        {
+            let mut msgs = world.resource_mut::<bevy::prelude::Messages<PendingEffect>>();
+            for source in [5001u32, 5002u32] {
+                msgs.write(PendingEffect::ProjectileFromTo {
+                    source_id: source,
+                    destination_id: 5003,
+                    color: [1.0, 1.0, 0.4], // spell_color 的兜底黄
+                    fx: None,
+                    spell: mir2_shared::enums::Spell::IceThrust as u8,
+                });
+            }
+        }
+        world
+            .run_system_once(spawn_pending_effects)
+            .expect("spawn_pending_effects 应能运行");
+        let mut pq = world.query::<&Projectile>();
+        assert_eq!(
+            pq.iter(&world).count(),
+            1,
+            "只应保留怪物那一条占位弹道；玩家施放的 IceThrust 必须被抑制（不画黄色方块）"
+        );
+        let st = world.resource::<EffectsState>();
+        assert_eq!(
+            st.fallback_player_suppressed, 1,
+            "玩家那条应计入抑制计数（实机探针据此取证）"
+        );
+        assert_eq!(
+            st.fallback_placeholder, 1,
+            "怪物那条仍应是占位（原版怪物表未移植）"
+        );
     }
 
     /// B0001 接线门禁（P0，实机启动即崩挖出）：插件注册的五条特效系统放进同一调度

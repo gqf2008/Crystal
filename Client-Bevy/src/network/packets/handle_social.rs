@@ -642,14 +642,13 @@ pub(crate) fn handle_social(
                         dir: session.self_position.map(|(_, _, d)| d).unwrap_or(0),
                     });
                 }
-                // M38：有选中目标 → 生成魔法弹道特效
-                if let Some(tid) = control.attack_target {
-                    effects.write(PendingEffect::Projectile {
-                        target_id: tid,
-                        color: [1.0, 0.6, 0.2],
-                        fx: None,
-                    });
-                }
+                // 2026-09-27：这里**不再**生成占位弹道。原版 `GameScene.MagicCast` 只做一件事
+                // ——`User.GetMagic(p.Spell).CastTime = CMain.Time`；玩家自己的施法表现（施法帧动画
+                // + 弹道）全部由服务端广播的 `S.ObjectMagic` 驱动（`SelfBroadcast`，见
+                // `GameScene.ObjectMagic`）。实测（l5v 实机日志）每次施法都有配对的
+                // `🔮 对象施法: id=<自己> … target=<怪>` ⇒ 本端这条本地猜测是**重复且会画错**的：
+                // 有表项的技能叠出两个弹道、没表项的（如 IceThrust）飞一个黄色方块 —— 后者就是
+                // owner 反馈的「有些魔法是个黄色方框」。
             }
         }
 
@@ -686,6 +685,7 @@ pub(crate) fn handle_social(
                             destination_id: p.target_id,
                             color,
                             fx: None,
+                            spell: p.spell as u8,
                         });
                     }
                 } else {
@@ -727,11 +727,18 @@ pub(crate) fn handle_social(
         }
         x if x == ServerPacketIds::ObjectProjectile as i16 => {
             if let Ok(p) = magic_combat::ObjectProjectile::read_body(&mut cur) {
+                // 2026-09-27：这里原本硬写 `fx: None`（= 恒画占位色块）。原版对服务端告知的
+                // 投射物是按法术画 `CreateProjectile` 帧（`GameScene.ObjectProjectile` 的
+                // 逐法术分支，如 FireBounce → Magic[410]）⇒ 先查本端弹道表，命中就播真帧。
+                let spell = p.spell as u8;
                 effects.write(PendingEffect::ProjectileFromTo {
                     source_id: p.source,
                     destination_id: p.destination,
-                    color: crate::game::effects::spell_color(p.spell as u8),
-                    fx: None,
+                    color: crate::game::effects::spell_color(spell),
+                    fx: mir2_shared::enums::Spell::try_from(spell)
+                        .ok()
+                        .and_then(crate::game::spell_effects::spell_missile),
+                    spell,
                 });
                 tracing::info!(
                     "🎯 对象投射物: spell={:?} src={} dst={}",
