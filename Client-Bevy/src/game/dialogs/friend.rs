@@ -28,6 +28,64 @@ pub const PANEL_SIZE: (f32, f32) = (264.0, 272.0);
 /// 曾错作 (206,3) → 偏左 31px
 pub const CLOSE_POS: (f32, f32) = (237.0, 3.0);
 
+// ---------------------------------------------------------------------------
+// 好友列表 = **12 行 × 2 列**（C# `FriendDialog.Rows = new FriendRow[12]`，
+// `UpdateDisplay` 里 `Location = new Point((i % 2) * 115 + 16, 55 + (i / 2) * 22)`，
+// `FriendRow.Size = new Size(115, 17)`）——本端此前是**单列 10 行 @(18, 40+20i)**，
+// 且没有翻页条；金标准逐窗 A/B 里 Friends 那 25.6% 的差异主要就是这一行 `◀ 1/1 ▶`
+// 缺失（见 `tools/acceptance/csharp_golden/README.md` §3.2f）。
+// ---------------------------------------------------------------------------
+/// C# `Rows.Length` = 12（2 列 × 6 行）
+pub const FRIEND_ROW_COUNT: usize = 12;
+/// C# `FriendRow.Size`
+pub const FRIEND_ROW_SIZE: (f32, f32) = (115.0, 17.0);
+/// 第 `i` 行的面板内位置（C# `(i % 2) * 115 + 16, 55 + (i / 2) * 22`）
+pub fn friend_row_pos(i: usize) -> (f32, f32) {
+    (
+        (i % 2) as f32 * 115.0 + 16.0,
+        55.0 + (i / 2) as f32 * 22.0,
+    )
+}
+
+/// 翻页条（C# `FriendDialog.cs:70-118`）：`PageNumberLabel` @(87,216) 83x17 居中、
+/// 上一页 `Prguse2[240/241/242]` @(70,218) 16x16、下一页 `Prguse2[243/244/245]` @(171,218) 16x16
+pub const FRIEND_PAGE_LABEL_POS: (f32, f32) = (87.0, 216.0);
+pub const FRIEND_PAGE_LABEL_SIZE: (f32, f32) = (83.0, 17.0);
+pub const FRIEND_PREV_POS: (f32, f32) = (70.0, 218.0);
+pub const FRIEND_NEXT_POS: (f32, f32) = (171.0, 218.0);
+pub const FRIEND_PAGE_BTN_SIZE: (f32, f32) = (16.0, 16.0);
+/// C# 翻页按钮帧（`Prguse2`）：上一页 240/241/242、下一页 243/244/245
+pub const FRIEND_PREV_FRAMES: [usize; 3] = [240, 241, 242];
+pub const FRIEND_NEXT_FRAMES: [usize; 3] = [243, 244, 245];
+
+/// C# `int maxPage = filteredFriends.Count / Rows.Length + 1; if (maxPage < 1) maxPage = 1;`
+pub fn friend_page_max(count: usize) -> usize {
+    (count / FRIEND_ROW_COUNT + 1).max(1)
+}
+
+/// C# `StartIndex = Rows.Length * Page;`
+pub fn friend_page_start(page: usize) -> usize {
+    FRIEND_ROW_COUNT * page
+}
+
+/// C# `PreviousButton`（`Page--` 且 `if (Page < 0) Page = 0`）与
+/// `NextButton`（`Page++` 且 `if (Page > Count / Rows.Length) Page = Count / Rows.Length`）——
+/// 注意 Next 的上界是 `Count / Rows.Length`（**不是** `maxPage - 1`，两者在整除时不同）。
+pub fn friend_page_after(delta: i64, page: usize, count: usize) -> usize {
+    let page = page as i64 + delta;
+    page.clamp(0, (count / FRIEND_ROW_COUNT) as i64) as usize
+}
+
+/// 页签切换/列表变短后的夹紧（C# `UpdateDisplay` 里对 `StartIndex` 的夹紧等价物）
+pub fn friend_page_clamped(page: usize, count: usize) -> usize {
+    page.min(count / FRIEND_ROW_COUNT)
+}
+
+/// 当前页的列表切片起点对应的下标（行 `i` 显示 `filtered[start + i]`）
+pub fn friend_row_index(start: usize, i: usize) -> usize {
+    start + i
+}
+
 /// 好友条目
 #[derive(Debug, Clone, Default)]
 pub struct FriendEntry {
@@ -55,6 +113,8 @@ pub struct FriendState {
     pub pending: Option<FriendPending>,
     /// 当前页签（false=好友 true=黑名单，C# _blockedTab）
     pub blocked_tab: bool,
+    /// 当前页码（C# `FriendDialog.Page`，0 起；列表按 12 行/页翻）
+    pub page: usize,
     /// #2892 批D：「添加好友」请求（`Some(blocked)` = 当前页签是否黑名单），
     /// 由 `friend_add_open_system` 消费 → 打开 C# `MirInputBox`（`FriendDialog.cs:143-160`）
     pub add_request: Option<bool>,
@@ -98,12 +158,23 @@ pub struct FriendLine(usize);
 #[derive(Component)]
 pub struct FriendLineText(usize);
 
+/// 上一页按钮（C# `PreviousButton`）
+#[derive(Component)]
+pub struct FriendPagePrev;
+
+/// 下一页按钮（C# `NextButton`）
+#[derive(Component)]
+pub struct FriendPageNext;
+
+/// 页码标签（C# `PageNumberLabel`，"N / M"）
+#[derive(Component)]
+pub struct FriendPageLabel;
+
 /// friend_ui_system 的 Local 状态（合并以控制 Bevy 系统参数数 ≤16）
 #[derive(Default)]
 struct FriendLocal {
     prev_inter: std::collections::HashMap<Entity, Interaction>,
     requested: bool,
-    offset: usize,
     /// 上一帧好友窗是否开着：**只在「刚关」那一次**清文本焦点。
     /// 修 #3260 暴露的真缺陷：原实现 `if !open { input.active = None; }` 是**每帧**执行的，
     /// 于是好友窗没开时会把**别的窗**的输入焦点一起清掉（实测：仓库密码 `MirInputBox` 弹出后
@@ -134,6 +205,14 @@ impl Plugin for FriendPlugin {
         app.add_systems(OnEnter(AppState::Game), spawn_friend);
         app.add_systems(OnExit(AppState::Game), cleanup_friend);
         app.add_systems(Update, friend_ui_system.run_if(in_state(AppState::Game)));
+        // 页码标签（C# `PageNumberLabel.Text = (Page + 1) + " / " + maxPage`）单列一个小系统：
+        // `friend_ui_system` 的参数已接近 Bevy 上限，再塞一个 `&mut Text` 查询不划算
+        app.add_systems(
+            Update,
+            friend_page_label_system
+                .after(friend_ui_system)
+                .run_if(in_state(AppState::Game)),
+        );
         app.add_systems(
             Update,
             friend_memo_open_system
@@ -239,9 +318,10 @@ fn spawn_friend(
             spawn_icon_button(p, h.clone(), h.clone(), h, 128.0, 34.0, 124.0, 24.0, 10)
                 .insert((Button, FriendTabBlock));
         }
-        // 好友列表（10 行，可点击 Button + 文本子节点）
-        for i in 0..10usize {
-            spawn_container(p, 18.0, 40.0 + i as f32 * 20.0, 190.0, 18.0, 9)
+        // 好友列表：**12 行 × 2 列**（C# `FriendRow[12]` + `UpdateDisplay` 的格子位置）
+        for i in 0..FRIEND_ROW_COUNT {
+            let (rx, ry) = friend_row_pos(i);
+            spawn_container(p, rx, ry, FRIEND_ROW_SIZE.0, FRIEND_ROW_SIZE.1, 9)
                 .insert((Button, FriendLine(i)))
                 .with_children(|rc| {
                     rc.spawn((
@@ -263,6 +343,73 @@ fn spawn_friend(
                     ));
                 });
         }
+        // 翻页条（C# `PageNumberLabel` + `PreviousButton`/`NextButton`）
+        spawn_container(
+            p,
+            FRIEND_PAGE_LABEL_POS.0,
+            FRIEND_PAGE_LABEL_POS.1,
+            FRIEND_PAGE_LABEL_SIZE.0,
+            FRIEND_PAGE_LABEL_SIZE.1,
+            9,
+        )
+        .insert(FriendPageLabel)
+        .with_children(|lc| {
+            lc.spawn((
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: Val::Px(0.0),
+                    top: Val::Px(0.0),
+                    width: Val::Px(FRIEND_PAGE_LABEL_SIZE.0),
+                    ..default()
+                },
+                Text::new("1 / 1"),
+                TextFont {
+                    font: FontSource::Handle(font.clone()),
+                    font_size: FontSize::Px(12.0),
+                    ..default()
+                },
+                TextColor(Color::WHITE),
+                TextLayout::justify(Justify::Center),
+                ZIndex(10),
+            ));
+        });
+        for (frames, x, y, is_prev) in [
+            (
+                FRIEND_PREV_FRAMES,
+                FRIEND_PREV_POS.0,
+                FRIEND_PREV_POS.1,
+                true,
+            ),
+            (
+                FRIEND_NEXT_FRAMES,
+                FRIEND_NEXT_POS.0,
+                FRIEND_NEXT_POS.1,
+                false,
+            ),
+        ] {
+            if let (Some(n), Some(h), Some(pr)) = (
+                load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, frames[0]),
+                load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, frames[1]),
+                load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, frames[2]),
+            ) {
+                let mut btn = spawn_icon_button(
+                    p,
+                    n,
+                    h,
+                    pr,
+                    x,
+                    y,
+                    FRIEND_PAGE_BTN_SIZE.0,
+                    FRIEND_PAGE_BTN_SIZE.1,
+                    10,
+                );
+                if is_prev {
+                    btn.insert(FriendPagePrev);
+                } else {
+                    btn.insert(FriendPageNext);
+                }
+            }
+        }
     });
 }
 
@@ -279,6 +426,16 @@ fn friend_ui_system(
     actions: Query<(Entity, &Interaction, &FriendAction)>,
     tabs: Query<(Entity, &Interaction, Has<FriendTabBlock>)>,
     rows: Query<(Entity, &Interaction, &FriendLine), Without<FriendLineText>>,
+    // 翻页条两个按钮（C# PreviousButton / NextButton）
+    pager: Query<
+        (
+            Entity,
+            &Interaction,
+            Option<&FriendPagePrev>,
+            Option<&FriendPageNext>,
+        ),
+        (Without<FriendLine>, Without<FriendClose>),
+    >,
     mut line_texts: Query<(&mut Text, &mut TextColor, &FriendLineText)>,
     mut input: ResMut<crate::game::dialogs::text_input::TextInputState>,
     mut widgets: Query<&mut Visibility, (With<FriendWidget>, Without<FriendLineText>)>,
@@ -310,7 +467,7 @@ fn friend_ui_system(
             input.active = None;
             local.was_open = false;
         }
-        local.offset = 0;
+        friend.page = 0;
         return;
     }
     local.was_open = true;
@@ -326,23 +483,15 @@ fn friend_ui_system(
     }
     // 当前页签的显示列表
     let list = filter_friends(&friend.friends, friend.blocked_tab);
-    let max_offset = list.len().saturating_sub(10);
-    // 滚轮滚动
-    let mut scroll_y = 0.0f32;
+    // C# 好友列表是**翻页**（12 行/页），不是滚轮滚动 ⇒ 本端去掉滚轮分支，改按 `Page` 取切片。
     for ev in wheels.read() {
-        scroll_y += match ev.unit {
-            bevy::input::mouse::MouseScrollUnit::Line => ev.y,
-            bevy::input::mouse::MouseScrollUnit::Pixel => ev.y / 20.0,
-        };
+        let _ = ev; // 读掉滚轮消息，避免它在别的列表里被当成"这一帧还有残留输入"
     }
-    if scroll_y.abs() > 0.0 {
-        local.offset =
-            ((local.offset as i32) - (scroll_y * 3.0) as i32).clamp(0, max_offset as i32) as usize;
-    }
-    local.offset = (local.offset).min(max_offset);
+    friend.page = friend_page_clamped(friend.page, list.len());
+    let start = friend_page_start(friend.page);
     // 列表文本（含在线标记/备注/选中高亮）
     for (mut text, mut color, line) in &mut line_texts {
-        let idx = local.offset + line.0;
+        let idx = friend_row_index(start, line.0);
         let selected = friend.selected == Some(idx);
         text.0 = match list.get(idx) {
             Some(f) => {
@@ -369,13 +518,28 @@ fn friend_ui_system(
     // 行点击选中（#130）
     for (e, inter, line) in &rows {
         if edge(e, inter, &mut local.prev_inter) {
-            let idx = local.offset + line.0;
+            let idx = friend_row_index(start, line.0);
             friend.selected = if friend.selected == Some(idx) {
                 None
             } else {
                 Some(idx)
             };
         }
+    }
+    // 翻页（C# PreviousButton / NextButton）
+    for (e, inter, prev, next) in &pager {
+        if !edge(e, inter, &mut local.prev_inter) {
+            continue;
+        }
+        let delta = if prev.is_some() {
+            -1
+        } else if next.is_some() {
+            1
+        } else {
+            continue;
+        };
+        friend.page = friend_page_after(delta, friend.page, list.len());
+        friend.selected = None;
     }
     // 动作按钮 + 页签
     for (e, inter, act) in &actions {
@@ -434,8 +598,27 @@ fn friend_ui_system(
             if friend.blocked_tab != target {
                 friend.blocked_tab = target;
                 friend.selected = None;
-                local.offset = 0;
+                friend.page = 0;
             }
+        }
+    }
+}
+
+/// 页码标签同步（C# `PageNumberLabel.Text = (Page + 1) + " / " + maxPage`）。
+/// 计数取**当前页签过滤后**的列表长度（与 C# `UpdateDisplay` 同口径）。
+fn friend_page_label_system(
+    friend: Res<FriendState>,
+    mut labels: Query<&mut Text, With<FriendPageLabel>>,
+) {
+    let count = filter_friends(&friend.friends, friend.blocked_tab).len();
+    let want = format!(
+        "{} / {}",
+        friend.page.min(friend_page_max(count).saturating_sub(1)) + 1,
+        friend_page_max(count)
+    );
+    for mut t in &mut labels {
+        if t.0 != want {
+            t.0 = want.clone();
         }
     }
 }
@@ -533,6 +716,54 @@ pub fn friend_whisper_command(name: &str, online: bool) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 门禁（金标准 §3.2f）：好友列表必须是 **12 行 × 2 列**的格子 + 翻页条，逐项对齐 C#：
+    /// `FriendDialog.Rows = new FriendRow[12]`、`FriendRow.Size = (115,17)`、
+    /// `UpdateDisplay` 里 `Location = ((i%2)*115 + 16, 55 + (i/2)*22)`、
+    /// `PageNumberLabel` @(87,216) 83x17、`PreviousButton`/`NextButton` @(70,218)/(171,218) 16x16。
+    ///
+    /// **阳性对照**：把 `FRIEND_ROW_COUNT` 改回 10、或把 `friend_row_pos` 改回旧的单列公式
+    /// （`18, 40 + 20i`）→ 本测试立刻红（这正是金标准 A/B 抓到的那个缺陷）。
+    #[test]
+    fn friend_rows_match_csharp_grid() {
+        assert_eq!(FRIEND_ROW_COUNT, 12, "C# FriendDialog.Rows 是 12 行");
+        assert_eq!(FRIEND_ROW_SIZE, (115.0, 17.0), "C# FriendRow.Size");
+        assert_eq!(friend_row_pos(0), (16.0, 55.0));
+        assert_eq!(friend_row_pos(1), (131.0, 55.0), "第 2 列 x = 16 + 115");
+        assert_eq!(friend_row_pos(2), (16.0, 77.0), "第 2 行 y = 55 + 22");
+        // i=11 → i/2 = 5 → y = 55 + 5*22 = 165（第 6 行、第 2 列）
+        assert_eq!(friend_row_pos(11), (131.0, 165.0), "最后一格（11 = 第 6 行第 2 列）");
+    }
+
+    /// 门禁：翻页条的位置/尺寸 + 翻页算式，逐项对齐 C#（`FriendDialog.cs:70-118`、`UpdateDisplay`）。
+    #[test]
+    fn friend_pager_matches_csharp() {
+        assert_eq!(FRIEND_PAGE_LABEL_POS, (87.0, 216.0));
+        assert_eq!(FRIEND_PAGE_LABEL_SIZE, (83.0, 17.0));
+        assert_eq!(FRIEND_PREV_POS, (70.0, 218.0));
+        assert_eq!(FRIEND_NEXT_POS, (171.0, 218.0));
+        assert_eq!(FRIEND_PAGE_BTN_SIZE, (16.0, 16.0));
+        assert_eq!(FRIEND_PREV_FRAMES, [240, 241, 242]);
+        assert_eq!(FRIEND_NEXT_FRAMES, [243, 244, 245]);
+
+        // C# `maxPage = count / Rows.Length + 1`（min 1）；`StartIndex = Rows.Length * Page`
+        assert_eq!(friend_page_max(0), 1);
+        assert_eq!(friend_page_max(1), 1);
+        assert_eq!(friend_page_max(12), 2);
+        assert_eq!(friend_page_max(13), 2);
+        assert_eq!(friend_page_max(24), 3);
+        assert_eq!(friend_page_start(0), 0);
+        assert_eq!(friend_page_start(2), 24);
+        assert_eq!(friend_row_index(24, 11), 35);
+
+        // C# Previous：`Page--` 且夹到 0；Next：`Page++` 且夹到 `Count / Rows.Length`
+        // （注意上界**不是** maxPage-1：整除时 `maxPage` 比它大 1）
+        assert_eq!(friend_page_after(-1, 0, 30), 0, "第 0 页再按上一页仍是 0");
+        assert_eq!(friend_page_after(1, 0, 30), 1);
+        assert_eq!(friend_page_after(1, 2, 30), 2, "30/12 = 2 是上界");
+        assert_eq!(friend_page_after(1, 2, 25), 2, "25/12 = 2");
+        assert_eq!(friend_page_clamped(9, 5), 0, "列表只剩 5 条 ⇒ 只能停在第 0 页");
+    }
 
     /// #2985 A1：好友面板文本必须用**自带 CJK 字形**的主字体。此前整面板走 Arial，
     /// 实机截图整片豆腐（标签 `□□`/`□□□`、行内 `bevy2char□□□□`）；列表行是动态写入
