@@ -521,6 +521,13 @@ enum ControlCommand {
         clear: bool,
         reply: Sender<String>,
     },
+    /// 只读小地图探针（2026-09-28）：小地图图区画的是**哪一块**（`ImageNode.rect`）在实机里
+    /// 读不到，导致"本端图区与 `mmap[mini_map]` 的 C# 期望裁剪只对上 79.7%"只能靠推断
+    /// （见 walgit 线程 `crystal-minimap-art-align`）。本探针把绘制侧的真值暴露出来：
+    /// `index / rect / visible / 档位 / 节点几何 / 地图尺寸 / 美术尺寸`。
+    MiniMapProbe {
+        reply: Sender<String>,
+    },
     /// 采集/剥皮（2026-09-24）：照 `C.Harvest` 发方向；可采集怪（HarvestMonster）的尸体必须走这条路
     /// 才能拿到产出——④ ItemTasks 的 Q 物品在可采集怪身上就靠它交付（详见 combat.rs `roll_harvest_drops`）。
     /// `direction = None` → 用客户端当前朝向。
@@ -1021,6 +1028,15 @@ struct ControlQueries<'w, 's> {
     /// `state` RPC：HP/死亡标志（复活闭环判据）
     vitals: Query<'w, 's, &'static crate::game::player_state::Vitals, With<LocalPlayer>>,
     state_flags: Query<'w, 's, &'static crate::game::player_state::StatusFlags, With<LocalPlayer>>,
+    /// `minimap_probe` 用：小地图**图区**实体（画的是缩略图的哪一块 = `ImageNode.rect`）
+    minimap_area: Query<
+        'w,
+        's,
+        (&'static ImageNode, &'static Node, &'static Visibility),
+        With<crate::game::dialogs::minimap::MiniMapMapArea>,
+    >,
+    /// `minimap_probe` 用：小地图大/小档位（C# `MiniMapDialog.Index != 2090` 即小档）
+    minimap_mode: Res<'w, crate::game::dialogs::minimap::MiniMapMode>,
 }
 
 /// `dialog_rect`(`fallback="root"`) 的选择规则：候选里挑**第一个可见且 kind 匹配**的根面板矩形。
@@ -1287,6 +1303,18 @@ fn handle_conn(mut stream: std::net::TcpStream, tx: Sender<ControlCommand>) {
                 let clear = params.get("action").and_then(|v| v.as_str()) == Some("close");
                 let (reply_tx, reply_rx) = bounded::<String>(1);
                 if tx.send(ControlCommand::NoticeProbe { clear, reply: reply_tx }).is_ok() {
+                    let s = reply_rx
+                        .recv_timeout(std::time::Duration::from_secs(2))
+                        .unwrap_or_else(|_| "{}".to_string());
+                    serde_json::from_str::<Value>(&s).unwrap_or_else(|_| json!({}))
+                } else {
+                    json!({"error": "control channel closed"})
+                }
+            }
+            // 只读小地图探针（见 `ControlCommand::MiniMapProbe` 注释）
+            "minimap_probe" => {
+                let (reply_tx, reply_rx) = bounded::<String>(1);
+                if tx.send(ControlCommand::MiniMapProbe { reply: reply_tx }).is_ok() {
                     let s = reply_rx
                         .recv_timeout(std::time::Duration::from_secs(2))
                         .unwrap_or_else(|_| "{}".to_string());
@@ -3321,6 +3349,50 @@ fn apply_control_commands(
                     q.guard.notice.text = None;
                 }
                 let _ = reply.try_send(json!({"ok": true, "text": q.guard.notice.text}).to_string());
+            }
+            ControlCommand::MiniMapProbe { reply } => {
+                // 绘制侧真值（只读）：判定"裁错"还是"画错"只需要这几项
+                //   rect  —— 图像子矩形（= 画的是缩略图的哪一块；None = 没设子矩形，整图拉伸）
+                //   node  —— 图区节点几何（C# `viewRect` 画在面板内 (3,22) 120x108）
+                //   art   —— `mmap.Lib[index]` 的真实尺寸（C# `Libraries.MiniMap.GetSize(index)`）
+                //   map   —— 当前地图瓦片数（C# `MapControl.Width/Height`，缩放比的分母）
+                let idx = game_data.minimap_index as usize;
+                let art = libs
+                    .0
+                    .get_image(crate::resources::libraries::LibraryName::MiniMap, idx)
+                    .map(|i| json!([i.width, i.height]));
+                let map_wh = game_data
+                    .map
+                    .as_ref()
+                    .map(|m| json!([m.width, m.height]));
+                let px = |v: Val| match v {
+                    Val::Px(x) => json!(x),
+                    other => json!(format!("{other:?}")),
+                };
+                let area = match q.minimap_area.single() {
+                    Ok((img, node, vis)) => json!({
+                        "visible": format!("{vis:?}"),
+                        "rect": img.rect.map(|r| json!([r.min.x, r.min.y, r.max.x, r.max.y])),
+                        "node": {
+                            "left": px(node.left),
+                            "top": px(node.top),
+                            "w": px(node.width),
+                            "h": px(node.height),
+                        },
+                    }),
+                    Err(e) => json!({"error": format!("{e:?}")}),
+                };
+                let payload = json!({
+                    "ok": true,
+                    "index": game_data.minimap_index,
+                    "map": game_data.desired_map.clone().unwrap_or_default(),
+                    "open": mgr.is_open(DialogKind::Minimap),
+                    "mode_big": q.minimap_mode.big,
+                    "art_wh": art,
+                    "map_wh": map_wh,
+                    "area": area,
+                });
+                let _ = reply.try_send(payload.to_string());
             }
             ControlCommand::ChatProbe { limit, reply } => {
                 // 只读：直接读 ChatState 里最近 limit 行（最新在末尾）

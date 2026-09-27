@@ -407,6 +407,55 @@ public override void Show() { var map = GameScene.Scene.MapControl;
 实机判据（`D002`，`big_map=0`）：`dialog open big_map` 后 `dialogs=[Minimap]`、
 `notice_probe` 的 `text=null` ⇒ 窗口没开、也没弹提示，与 C# 的静默 `return` 一致。
 
+### 3.2i 小地图缩略图「根本没画」——一条查询空转了三天的根因（2026-09-28）
+
+§3.2c–§3.2h 的 A/B 表里，`Minimap` 是最后一扇没定性的窗（91.3%）。它不是"背景地图不同源"
+——数值化拆分后是**本端什么都没画**：
+
+- 同一屏「小地图开 vs 关」在同一区域比：**上带 2747/2772、下带 2905/3024 不同**（面板在），
+  但 **图区（120x108）只差 31/12960** ⇒ 那块是**透的**，能看见世界；
+- 本端图区只有 98 个颜色、均值 (121.7,104.7,78.1)（= 世界地形），原版同区 1893 个颜色。
+
+**根因（不是错值，是查询空转）**：`minimap_map_image_system` 的查询是
+`(&mut ImageNode, &mut Node, &mut BackgroundColor, &mut Visibility) With<MiniMapMapArea>`，
+而 spawn 处只插了 `MiniMapMapArea + BackgroundColor + Visibility::Hidden` —— **没有 `ImageNode`**
+⇒ 查询一条都匹配不到、循环体**永不执行**、图区永远停在 `Hidden`。自 #7cc68c7af
+（"小地图补上 MMap 缩略图"，2026-09-25）起就没生效过：那次提交把缩略图拆成独立系统时
+加了 `&mut ImageNode` 要求，却没给实体补这个组件。**没有任何告警**——这正是它活了三天没人发现的原因。
+
+定位靠**先加只读探针把绘制侧真值暴露出来**，而不是继续看图猜：
+
+```
+minimap_probe → {"index":101,"art_wh":[1052,700],"map_wh":[700,700],"mode_big":true,"open":true,
+                 "area":{"error":"NoEntities(...MiniMapMapArea...)"}}      ← 修复前：实体查不到
+                 "area":{"rect":[372,562,492,670],"visible":"Visible","node":{...}}  ← 修复后
+```
+
+（当时那条探针自己也带 `&ImageNode`，所以同样查不到它；`ui_nodes_at(960,76)` 命中了图区节点
+`vis=Hidden`，两者一对就锁定了"实体在但没组件/没显隐"。）
+
+**判据（不依赖原版，`--view mini`）**：
+
+```powershell
+py -3.12 tools/acceptance/csharp_golden/bigmap_viewport_check.py --view mini `
+    --shot %TEMP%\minimap_probe_shot.png --mmap Data/mmap.Lib `
+    --index 101 --tile 288 616 --map 700 700
+```
+
+`--view mini` 按 C# `MiniMapDialog` 的口径算裁剪窗（`scale = mmap尺寸/地图瓦片数`、窗口 120x108
+以玩家为中心、先贴右/下再钳 0、**1:1 裁剪不缩放**），画在面板 `Prguse[2090]` 内 (3,22)。
+实测（BichonProvince 700x700、玩家 (288,616)、`mmap[101]` 1052x700）：
+
+| 场景 | 一致率 | 判定 |
+|---|---|---|
+| 修复后本端帧 | **0.998** | PASS（裁剪窗 = C# 期望 (372,562,120,108)） |
+| 负对照：拿 `mmap[135]` 比同一帧 | 0.255 | FAIL |
+
+**离线门禁（防再犯）**：`Client-Bevy/src/game/dialogs/interact_gate.rs::minimap_map_area_is_paintable`
+——用**与画图系统同一套过滤器**（`With<MiniMapMapArea> + ImageNode + Node + BackgroundColor + Visibility`）
+去匹配合成资产下的图区实体，匹配不到即红。**阳性对照实做**：把 spawn 里的
+`ImageNode::new(white.clone())` 去掉 ⇒ 立刻红（`left: 0, right: 1`）。
+
 ## 3.3 逐窗几何对表（不需要原版交互，2026-09-26 起）
 
 §3.1 把"驱动原版点开某个窗口"这条路堵掉之后，**窗口几何**仍可验：原版每扇窗的矩形是纯常量

@@ -661,3 +661,49 @@ fn mail_panels_have_native_background_sprites() {
     }
     eprintln!("ui 邮件窗结构门禁：{checked:?}");
 }
+
+/// 小地图缩略图结构门禁（2026-09-28）。
+///
+/// 病象：右上角小地图那块**透**——看得见世界、看不到缩略图，而且**没有任何告警**。
+/// 根因不是一个错值，而是**查询空转**：`minimap_map_image_system` 的查询是
+/// `(&mut ImageNode, &mut Node, &mut BackgroundColor, &mut Visibility) With<MiniMapMapArea>`，
+/// 而 spawn 处只插了 `MiniMapMapArea + BackgroundColor + Visibility::Hidden`——**没插 `ImageNode`**
+/// ⇒ 查询一条都匹配不到、循环体永不执行 ⇒ 图区永远停在 `Hidden`（自 #7cc68c7af「小地图补上
+/// MMap 缩略图」起就没生效过）。
+///
+/// 判据刻意**复用画图系统要求的那套组件**（而不是断言自己写的常量）：少给任何一个组件就红。
+/// **阳性对照**（实做记录）：把 spawn 里的 `ImageNode::new(white.clone())` 去掉 → 本用例立刻红。
+#[test]
+fn minimap_map_area_is_paintable() {
+    use crate::game::dialogs::minimap::MiniMapMapArea;
+    use crate::game::dialogs::{DialogKind, DialogManager};
+    use bevy::ui::widget::ImageNode;
+
+    let mut app = sweep_app();
+    app.world_mut()
+        .resource_mut::<DialogManager>()
+        .open(DialogKind::Minimap);
+    app.update();
+
+    let world = app.world_mut();
+    // 与 `minimap_map_image_system` 的过滤器同构：ImageNode + Node + BackgroundColor + Visibility
+    let mut paint_q = world.query_filtered::<Entity, (
+        With<MiniMapMapArea>,
+        With<ImageNode>,
+        With<Node>,
+        With<BackgroundColor>,
+        With<Visibility>,
+    )>();
+    let paintable: Vec<Entity> = paint_q.iter(world).collect();
+    assert_eq!(
+        paintable.len(),
+        1,
+        "小地图图区必须正好有一个能被 `minimap_map_image_system` 画到的实体\
+         （缺 ImageNode 会让那条查询静默空转、缩略图永不出现）"
+    );
+
+    // 反向：`MiniMapMapArea` 实体本身也得在（否则上面的断言会因为 0 个而红，
+    // 但错因不同——分开报更省排查时间）
+    let mut area_q = world.query_filtered::<Entity, With<MiniMapMapArea>>();
+    assert_eq!(area_q.iter(world).count(), 1, "小地图图区实体缺失");
+}
