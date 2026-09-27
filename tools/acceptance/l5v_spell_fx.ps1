@@ -27,6 +27,17 @@
   夹具用 `--spell-verify`（`src/auto/combat.rs::auto_spell_verify`）自动走到怪旁循环施法，
   再轮询探针收集实际出现的 (kind, library, base, frames)。
 
+  混合通道断言（2026-09-27 补，owner 反馈「魔法特效应该用混合的吧，现在看上去效果不好」）：
+  施法帧动画与弹道在原版都走 **加法混合**（`Effect.Blend` 默认 true，`Effect.cs:23`；
+  玩家 `CreateProjectile` 第 3 参全传 true ⇒ `Missile.Draw` 走 `DrawBlend` ⇒
+  `DXManager.SetBlend(true)` = SrcAlpha/One）。本端此前一律画普通 `Sprite`（只有 alpha over），
+  发光帧图按 alpha 叠会发灰。夹具据此断言：**所有 `cast|*` / `missile|*` 行的 `blend` 必须是 `add`**。
+  另外读探针的**累计生成计数** `spawned.cast_add / cast_alpha`（只增不减）：这两类实体寿命极短，
+  按 100ms 轮询「存活实体」可能采样漏掉，计数与采样时刻无关，是这条判据的主判据。
+
+  阳性对照（落地时实做）：把 `effects.rs` 的两条 spawn 路径改回 `Sprite`
+  （去掉 `Mesh2d` + 加法材质）→ 本夹具必然 FAIL(1)（blend=alpha）。
+
   仪器自检：施法开始前连读两次探针，两次读数必须一致（静默期应为 0）——
   沿用仓库既有「判据区静态性自检」口径。
 
@@ -145,18 +156,27 @@ if ($null -eq $p0 -or $null -eq $p0.count) {
 $self_ok = ($p0.count -eq $p1.count)
 Write-Host ("仪器自检：连读两次 count = {0} / {1}（{2}）" -f $p0.count, $p1.count, $(if ($self_ok) { '一致' } else { '不一致' }))
 
-# ---- 收集：轮询探针，记录 (kind|library|base|frames) ----
+# ---- 收集：轮询探针，记录 (kind|library|base|frames) + 混合通道 ----
 $observed = @{}
+$blend_of = @{}
+$bad_blend = @{}
+$spawned_seen = $null
 $sw = [Diagnostics.Stopwatch]::StartNew()
 while ($sw.Elapsed.TotalSeconds -lt $TimeoutSec) {
     $p = Rpc 'spell_fx_probe'
+    if ($null -ne $p -and $null -ne $p.spawned) { $spawned_seen = $p.spawned }
     if ($null -ne $p -and $null -ne $p.active) {
         foreach ($a in $p.active) {
             $k = "{0}|{1}|{2}|{3}" -f $a.kind, $a.library, $a.base, $a.frames
             if (-not $observed.ContainsKey($k)) {
                 $observed[$k] = 1
-                Write-Host ("观察到特效: " + $k)
+                Write-Host ("观察到特效: {0} blend={1}" -f $k, $a.blend)
             } else { $observed[$k]++ }
+            $blend_of[$k] = $a.blend
+            # 施法帧动画与弹道必须是加法混合（原版 Effect.Blend 默认 true）；其它 kind 不在此断言
+            if (($a.kind -eq 'cast' -or $a.kind -eq 'missile') -and $a.blend -ne 'add') {
+                $bad_blend[$k] = ("{0}" -f $a.blend)
+            }
         }
     }
     Start-Sleep -Milliseconds 200
@@ -175,12 +195,35 @@ $also_record = @(
 )
 $fail = @()
 foreach ($e in $expect) { if (-not $observed.ContainsKey($e.key)) { $fail += $e.desc } }
+# 混合通道判据：见到 cast/missile 但通道不是 add ⇒ 明确 FAIL（不是"没跑到"）
+foreach ($k in $bad_blend.Keys) {
+    $fail += ("混合通道错: {0} blend={1}（原版 Effect.Blend 默认 true = 加法）" -f $k, $bad_blend[$k])
+}
+# 累计计数判据（与采样时刻无关）：施法帧动画必须**只**走过加法通道
+$cast_add = if ($null -ne $spawned_seen) { $spawned_seen.cast_add } else { $null }
+$cast_alpha = if ($null -ne $spawned_seen) { $spawned_seen.cast_alpha } else { $null }
+$missile_add_n = if ($null -ne $spawned_seen) { $spawned_seen.missile_add } else { $null }
+$missile_alpha_n = if ($null -ne $spawned_seen) { $spawned_seen.missile_alpha } else { $null }
+if ($null -eq $cast_add) {
+    $fail += '施法帧动画通道计数读不到（探针未返回 spawned 字段）'
+} elseif ($cast_add -lt 1) {
+    $fail += ("施法帧动画通道计数 cast_add={0} < 1" -f $cast_add)
+} elseif ($cast_alpha -ne 0) {
+    $fail += ("施法帧动画走了普通 alpha 通道 cast_alpha={0}（原版 Effect.Blend 默认 true）" -f $cast_alpha)
+}
+if ($null -ne $missile_alpha_n -and $missile_alpha_n -ne 0) {
+    $fail += ("弹道走了普通 alpha 通道 missile_alpha={0}（原版 Missile.Draw 的 Blend = true）" -f $missile_alpha_n)
+}
 
 $result = [ordered]@{
     ok            = ($fail.Count -eq 0 -and $observed.Count -gt 0)
     probe_selfcheck = $self_ok
     probe_first_two = @($p0.count, $p1.count)
     observed      = @($observed.Keys)
+    blend_of      = $blend_of
+    bad_blend     = @($bad_blend.Keys)
+    spawned_counters = $spawned_seen
+    missile_add   = $missile_add_n
     missing       = $fail
     also_record   = $also_record
     mp            = $mp
@@ -188,6 +231,9 @@ $result = [ordered]@{
 $result | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $json -Encoding UTF8
 
 Write-Host ("观察到的特效条目数 = {0}；缺条目 = {1}" -f $observed.Count, ($fail -join '; '))
+if ($blend_of.Count -gt 0) {
+    Write-Host ("混合通道读数：" + (($blend_of.GetEnumerator() | Sort-Object Name | ForEach-Object { "{0}={1}" -f $_.Name, $_.Value }) -join '; '))
+}
 Write-Host ("结论 JSON: " + $json)
 # 前置判据②：`--spell-verify` 必须**真的施放过**（它要先走到怪旁；没施放 = 前置不成立，不是 FAIL）
 $castLines = @(Select-String -Path $err -Pattern '\[SPELL\].*施放' -EA SilentlyContinue)
@@ -200,6 +246,14 @@ if ($observed.Count -eq 0) {
     Write-Host 'FAIL(3): 整轮没有观察到任何特效实体——前置不成立（未施法/未学技能/无怪物）'
     Exit-E2eLock
     exit 3
+}
+# 弹道半段（**证据项，不作 FAIL**）：`attack_target` 是客户端给"自己的弹道"定位用的字段，
+# 而它会被攻击流程随帧清掉——实测 `MagicCast` 回包到达时该字段已为 None（200s/600s 两轮
+# 都是 `missile_add=0`，同轮 cast 通道正常）。弹道的加法通道由单测
+# `spell_fx_and_missile_use_additive_blend_channel` 钉住；实机上一旦出现 missile 行，
+# 上面的 `bad_blend` 判据会立刻把它判红。这里只把读数记进 JSON，供后续排查 `attack_target` 时序用。
+if ($null -ne $missile_add_n -and $missile_add_n -eq 0) {
+    Write-Host ("WARN: 本轮未生成过任何法术弹道（missile_add=0；attack_target 时序问题，非通道缺陷——记录不判 FAIL）")
 }
 if ($fail.Count -gt 0) {
     Write-Host ('FAIL(1): 缺原版条目 - ' + ($fail -join '; '))
