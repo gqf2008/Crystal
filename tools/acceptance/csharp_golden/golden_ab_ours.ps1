@@ -129,6 +129,10 @@ foreach ($r in $manifest) {
         Rpc 'dialog' @{ kind = $k; action = 'close' } | Out-Null
     }
     Start-Sleep -Milliseconds 700
+    # 清场：上一扇窗若被 Show() 守卫拦下，提示框会**留在屏幕上**，污染后面每一张截图
+    # （本轮实测：Guilds 之后 Ranking/Help/…/Skillbar 全部带着"你不在任何公会中。" ⇒ 假差异）。
+    Rpc 'notice_probe' @{ action = 'close' } | Out-Null
+    Start-Sleep -Milliseconds 200
     $open = Rpc 'dialog' @{ kind = $kind; action = 'open' }
     $png = Join-Path $shots ("ours_win_{0}.png" -f $r.action)
     if (Test-Path -LiteralPath $png) { Remove-Item -LiteralPath $png -Force }
@@ -142,16 +146,27 @@ foreach ($r in $manifest) {
         $diff = Frame-Diff $basePng $png
         if ($null -ne $diff -and $diff -ge 0.5) { break }
     }
+    # 「我方这次到底开没开窗」不能看 `dialog open` 的 `ok`（那只是 RPC 送达）。判据取两件只读事实：
+    #   ① `dialog_rect(kind)` 有根（`fallback=root`）⇒ 窗真的开着；
+    #   ② `notice_probe().text` ⇒ 若被 C# `Show()` 守卫拦下（宠物/行会/坐骑/钓鱼在状态不具备时），
+    #      原版行为是"弹提示框且不开窗"，文本就是那一刻的原版文案。
+    $rect = Rpc 'dialog_rect' @{ kind = $kind; fallback = 'root' }
+    $np = Rpc 'notice_probe'
     $rows += [pscustomobject]@{
         action = $r.action; kind = $kind; key = $r.key
         orig = $r.png; ours = $png
-        open_ok = [bool]$open.ok
+        rpc_ok = [bool]$open.ok
+        # `dialog_rect` 的回复是**扁平**字段（rx/ry/rw/rh），不是嵌套 rect —— 第一版按 `$rect.rect`
+        # 判空 ⇒ 20 扇全部误报"窗开=False"。
+        window_open = ($null -ne $rect.rx -and [double]$rect.rw -gt 0)
+        notice = $np.text
         exists = (Test-Path -LiteralPath $png)
         diff_vs_baseline = $diff
         no_effect = ($null -eq $diff -or $diff -lt 0.5)
     }
-    Write-Host ("{0,-14} kind={1,-12} open_ok={2} 与基线差={3} {4}" -f `
-        $r.action, $kind, $open.ok, $diff, $(if ($null -eq $diff -or $diff -lt 0.5) { '<-- 窗口没开出来？' } else { '' }))
+    Write-Host ("{0,-14} kind={1,-12} 窗开={2,-5} 提示={3,-14} 与基线差={4} {5}" -f `
+        $r.action, $kind, ($null -ne $rect.rx -and [double]$rect.rw -gt 0), $np.text, $diff, `
+        $(if ($null -eq $diff -or $diff -lt 0.5) { '<-- 窗口没开出来？' } else { '' }))
 }
 $out = Join-Path $shots 'ab_windows.json'
 [IO.File]::WriteAllText($out, ($rows | ConvertTo-Json -Depth 4))

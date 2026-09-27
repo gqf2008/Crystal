@@ -1,0 +1,369 @@
+// ============================================================================
+// 统一信息提示框（C# `MirMessageBox` + `MirMessageBoxButtons.OK`）+ 各窗 `Show()` 前置守卫
+// ============================================================================
+// 为什么要有这个模块（2026-09-28，金标准逐窗像素 A/B 捞出来的）：
+//   原版有 4 扇窗在**状态不具备**时不开窗，而是弹一个只带 OKAY 的 `MirMessageBox`
+//   （守卫写在各自对话框的 `Show()` 覆写里 ⇒ 键盘路径与程序化开窗都必须走）：
+//     · 宠物 `IntelligentCreatureDialogs.cs:832-841`：`!User.IntelligentCreatures.Any()` → NoCreatures
+//     · 行会 `GuildDialog.cs:2156-2166`：`User.GuildName == ""`            → NotInGuild
+//     · 坐骑 `MountDialog.cs:240-251`：`User.MountType < 0`                → NoMount
+//     · 钓鱼 `FishingDialog.cs:135-147`：`!User.HasFishingRod`             → NoFishingRod
+//   本端此前这 4 扇窗照开空窗（还带大片黑底）。这里把「提示框」与「守卫判定」收敛成**唯一入口**，
+//   供键盘热键（`keyboard_layout::dialog_hotkey_system`）与 RPC/控制路径
+//   （`control::apply_control_commands` 的 `Dialog` 分支）共用，避免再复制第三份。
+//
+// 布局与文案来源（都对原版）：
+//   · 面板 `Prguse[360]` 456x190，居中 @(284,289)（`MirMessageBox.cs:23-26`）
+//   · 文本 `(35,35)` 尺寸 `390x110`（`MirMessageBox.cs:29-37`）
+//   · OKAY 按钮 `Title[200/201/202]` @(360,157)（`MirMessageBox.cs:42-52`，原生 69x25）
+//   · 文案取原版中文包：`Client/Localization/Chinese.json` 的
+//     NoCreatures/NotInGuild/NoMount/NoFishingRod
+// ============================================================================
+
+use bevy::ecs::system::SystemParam;
+use bevy::prelude::*;
+
+use crate::game::dialogs::{DialogKind, DialogManager};
+use crate::map_renderer::GameLibraries;
+use crate::resources::libraries::LibraryName;
+use crate::scenes::AppState;
+use crate::ui::sprite_ui::UiCjkFont;
+use crate::ui::sprite_ui::{shared_cjk_font, UiFont};
+use crate::ui::theme::{load_lib_image, spawn_icon_button, spawn_label, spawn_panel};
+
+/// 面板精灵（C# `MirMessageBox.Index = 360; Library = Libraries.Prguse`）
+pub const PANEL: (LibraryName, usize) = (LibraryName::Prguse, 360);
+/// C# 图头尺寸 456x190
+pub const PANEL_SIZE: (f32, f32) = (456.0, 190.0);
+/// C# `Location = ((ScreenWidth - W)/2, (ScreenHeight - H)/2)`（1024x768 ⇒ (284,289)）
+pub const PANEL_POS: (f32, f32) = ((1024.0 - PANEL_SIZE.0) / 2.0, (768.0 - PANEL_SIZE.1) / 2.0);
+/// C# `Label`：`Location = (35,35)`、`Size = (390,110)`
+pub const LABEL_POS: (f32, f32) = (35.0, 35.0);
+pub const LABEL_SIZE: (f32, f32) = (390.0, 110.0);
+pub const LABEL_FONT_SIZE: f32 = 12.0;
+/// C# `OKButton`：`Title[200/201/202]` @(360,157)。
+/// **原生尺寸 76x25**（`libextract.py Title.Lib 200` 实测；第一版按截图目测写成 69x25，
+/// 结果按钮被横向压扁 8%、逐窗 A/B 的按钮区差异 81%——面板 456x190 同法实测无误）。
+pub const OK_POS: (f32, f32) = (360.0, 157.0);
+pub const OK_SIZE: (f32, f32) = (76.0, 25.0);
+
+/// 要显示的信息提示（`Some` = 显示；同一时刻只有一个，C# `MirMessageBox` 是模态单例）。
+#[derive(Resource, Default)]
+pub struct NoticeBox {
+    pub text: Option<String>,
+}
+
+impl NoticeBox {
+    pub fn show(&mut self, text: impl Into<String>) {
+        self.text = Some(text.into());
+    }
+}
+
+#[derive(Component)]
+pub struct NoticeBoxPanel;
+
+#[derive(Component)]
+pub struct NoticeBoxText;
+
+#[derive(Component)]
+pub struct NoticeOkButton;
+
+pub struct NoticeBoxPlugin;
+
+impl Plugin for NoticeBoxPlugin {
+    fn build(&self, app: &mut App) {
+        app.init_resource::<NoticeBox>();
+        app.add_systems(OnEnter(AppState::Game), spawn_notice_box);
+        app.add_systems(OnExit(AppState::Game), cleanup_notice_box);
+        app.add_systems(Update, notice_box_system.run_if(in_state(AppState::Game)));
+    }
+}
+
+fn cleanup_notice_box(mut commands: Commands, roots: Query<Entity, With<NoticeBoxPanel>>) {
+    for e in roots.iter() {
+        commands.entity(e).despawn();
+    }
+}
+
+fn spawn_notice_box(
+    mut commands: Commands,
+    mut libs: ResMut<GameLibraries>,
+    mut images: ResMut<Assets<Image>>,
+    mut fonts: ResMut<Assets<Font>>,
+    mut ui_font: ResMut<UiFont>,
+    mut cjk_font: ResMut<UiCjkFont>,
+) {
+    libs.0.ensure_initialized();
+    if !ui_font.0.is_strong() {
+        crate::ui::sprite_ui::ensure_ui_font(&mut fonts, &mut ui_font);
+    }
+    let font = shared_cjk_font(&mut fonts, &mut cjk_font);
+    let Some(bg) = load_lib_image(&mut libs, &mut images, PANEL.0, PANEL.1) else {
+        return;
+    };
+    let panel = spawn_panel(
+        &mut commands,
+        bg,
+        PANEL_POS.0,
+        PANEL_POS.1,
+        PANEL_SIZE.0,
+        PANEL_SIZE.1,
+        60,
+    );
+    commands
+        .entity(panel)
+        .insert((NoticeBoxPanel, Visibility::Hidden));
+    commands.entity(panel).with_children(|p| {
+        spawn_label(
+            p,
+            &font,
+            "",
+            LABEL_POS.0,
+            LABEL_POS.1,
+            LABEL_FONT_SIZE,
+            Color::WHITE,
+            9,
+        )
+        .insert(NoticeBoxText);
+        if let (Some(n), Some(h), Some(pr)) = (
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 200),
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 201),
+            load_lib_image(&mut libs, &mut images, LibraryName::Title, 202),
+        ) {
+            spawn_icon_button(p, n, h, pr, OK_POS.0, OK_POS.1, OK_SIZE.0, OK_SIZE.1, 10)
+                .insert(NoticeOkButton);
+        }
+    });
+}
+
+/// 显隐 + 文案同步；OKAY 点击 / 回车 / ESC 关闭（C# `MirMessageBox.HandleKeyPress`：回车 = 按 OK）。
+fn notice_box_system(
+    mut notice: ResMut<NoticeBox>,
+    keys: Res<ButtonInput<KeyCode>>,
+    mut panels: Query<&mut Visibility, (With<NoticeBoxPanel>, Without<NoticeBoxText>)>,
+    mut texts: Query<&mut Text, With<NoticeBoxText>>,
+    mut ok: Query<&Interaction, (With<NoticeOkButton>, Changed<Interaction>)>,
+) {
+    let mut close = false;
+    for inter in &mut ok {
+        if *inter == Interaction::Pressed {
+            close = true;
+        }
+    }
+    if keys.just_pressed(KeyCode::Enter) || keys.just_pressed(KeyCode::Escape) {
+        close = true;
+    }
+    if close {
+        notice.text = None;
+    }
+    let visible = notice.text.is_some();
+    for mut vis in &mut panels {
+        *vis = if visible {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
+    }
+    if let Some(text) = &notice.text {
+        for mut t in &mut texts {
+            if t.0 != *text {
+                t.0 = text.clone();
+            }
+        }
+    }
+}
+
+/// 四扇窗 `Show()` 守卫需要的状态（都由本端已有状态推导）。
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ShowGuardState {
+    /// 是否有宠物：`CreatureState.creatures` 非空（C# `User.IntelligentCreatures.Any()`）
+    pub has_creatures: bool,
+    /// 是否在行会：`GuildState.in_guild`（C# `User.GuildName != ""`）
+    pub in_guild: bool,
+    /// 是否骑乘/拥有坐骑：本地玩家有 `MountState` 组件（C# `User.MountType >= 0`）
+    pub has_mount: bool,
+    /// 是否装备钓鱼竿：武器槽 shape ∈ `Globals.n`（C# `HasFishingRod = Globals.FishingRodShapes.Contains(Weapon)`，
+    /// `Shared/Globals.cs`：`n = {49, 50}`）
+    pub has_fishing_rod: bool,
+}
+
+/// 钓鱼竿判定用的武器 shape 白名单（C# `Shared/Globals.cs`：`n = new int[] { 49, 50 }`）
+pub const FISHING_ROD_SHAPES: [i16; 2] = [49, 50];
+
+/// C# 各对话框 `Show()` 的前置守卫。
+///
+/// 返回 `Some(文案)` = 原版会弹 `MirMessageBox(OK)` 且**不开窗**；`None` = 正常开窗。
+pub fn show_guard(kind: DialogKind, st: &ShowGuardState) -> Option<&'static str> {
+    match kind {
+        DialogKind::Creature if !st.has_creatures => Some("你没有任何宠物。"),
+        DialogKind::Guild if !st.in_guild => Some("你不在任何公会中。"),
+        DialogKind::Mount if !st.has_mount => Some("你没有坐骑。"),
+        DialogKind::Fishing if !st.has_fishing_rod => Some("你没有拿着鱼竿。"),
+        _ => None,
+    }
+}
+
+/// 守卫所需的查询/资源打包（键盘热键系统与 `ControlQueries` 共用同一份实现）。
+#[derive(SystemParam)]
+pub struct ShowGuardParams<'w, 's> {
+    guild: Res<'w, crate::game::dialogs::guild::GuildState>,
+    creatures: Res<'w, crate::game::dialogs::creature::CreatureState>,
+    mounts:
+        Query<'w, 's, Option<&'static crate::actor::MountState>, With<crate::actor::LocalPlayer>>,
+    loadout:
+        Query<'w, 's, &'static crate::game::player_state::Loadout, With<crate::actor::LocalPlayer>>,
+    pub notice: ResMut<'w, NoticeBox>,
+}
+
+impl ShowGuardParams<'_, '_> {
+    pub fn state(&self) -> ShowGuardState {
+        let has_mount = self.mounts.iter().any(|m| m.is_some());
+        let has_fishing_rod = self
+            .loadout
+            .iter()
+            .next()
+            .and_then(|l| l.slots.first())
+            .and_then(|s| s.as_ref())
+            .map(|w| FISHING_ROD_SHAPES.contains(&w.shape))
+            .unwrap_or(false);
+        ShowGuardState {
+            has_creatures: !self.creatures.creatures.is_empty(),
+            in_guild: self.guild.in_guild,
+            has_mount,
+            has_fishing_rod,
+        }
+    }
+
+    /// `true` = 被守卫拦下：已把原版文案写进提示框，调用方**不要再 open 那扇窗**。
+    pub fn blocked(&mut self, kind: DialogKind) -> bool {
+        match show_guard(kind, &self.state()) {
+            Some(text) => {
+                self.notice.show(text);
+                tracing::info!("🛡️ {kind:?} 前置不成立 → 只弹提示框：{text}");
+                true
+            }
+            None => false,
+        }
+    }
+}
+
+/// 打开/切换对话框，并施加 C# 的 `Show()` 守卫（被拦下时返回 `true`）。
+pub fn guarded_toggle(
+    kind: DialogKind,
+    mgr: &mut DialogManager,
+    guard: &mut ShowGuardParams,
+) -> bool {
+    if guard.blocked(kind) {
+        return true;
+    }
+    mgr.toggle(kind);
+    false
+}
+
+/// 打开对话框（Open 语义），并施加 C# 的 `Show()` 守卫。
+pub fn guarded_open(
+    kind: DialogKind,
+    mgr: &mut DialogManager,
+    guard: &mut ShowGuardParams,
+) -> bool {
+    if guard.blocked(kind) {
+        return true;
+    }
+    mgr.open(kind);
+    false
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn full() -> ShowGuardState {
+        ShowGuardState {
+            has_creatures: true,
+            in_guild: true,
+            has_mount: true,
+            has_fishing_rod: true,
+        }
+    }
+
+    /// 守卫的判据：状态缺失 ⇒ 有文案；状态具备 ⇒ 放行。
+    /// **阳性对照**：把 `show_guard` 里任一分支去掉，本用例立刻红。
+    #[test]
+    fn show_guard_blocks_only_when_state_missing() {
+        let ok = full();
+        for k in [
+            DialogKind::Creature,
+            DialogKind::Guild,
+            DialogKind::Mount,
+            DialogKind::Fishing,
+            DialogKind::Inventory,
+        ] {
+            assert_eq!(show_guard(k, &ok), None, "{k:?} 状态具备时不该拦");
+        }
+
+        assert_eq!(
+            show_guard(
+                DialogKind::Creature,
+                &ShowGuardState {
+                    has_creatures: false,
+                    ..ok
+                }
+            ),
+            Some("你没有任何宠物。")
+        );
+        assert_eq!(
+            show_guard(
+                DialogKind::Guild,
+                &ShowGuardState {
+                    in_guild: false,
+                    ..ok
+                }
+            ),
+            Some("你不在任何公会中。")
+        );
+        assert_eq!(
+            show_guard(
+                DialogKind::Mount,
+                &ShowGuardState {
+                    has_mount: false,
+                    ..ok
+                }
+            ),
+            Some("你没有坐骑。")
+        );
+        assert_eq!(
+            show_guard(
+                DialogKind::Fishing,
+                &ShowGuardState {
+                    has_fishing_rod: false,
+                    ..ok
+                }
+            ),
+            Some("你没有拿着鱼竿。")
+        );
+        // 无守卫的窗不受影响
+        assert_eq!(
+            show_guard(DialogKind::Inventory, &ShowGuardState::default()),
+            None
+        );
+    }
+
+    /// 文案与原版中文包逐字一致（`Client/Localization/Chinese.json`）。
+    #[test]
+    fn guard_texts_match_csharp_chinese_localization() {
+        let st = ShowGuardState::default();
+        assert_eq!(
+            show_guard(DialogKind::Creature, &st),
+            Some("你没有任何宠物。")
+        );
+        assert_eq!(
+            show_guard(DialogKind::Guild, &st),
+            Some("你不在任何公会中。")
+        );
+        assert_eq!(show_guard(DialogKind::Mount, &st), Some("你没有坐骑。"));
+        assert_eq!(
+            show_guard(DialogKind::Fishing, &st),
+            Some("你没有拿着鱼竿。")
+        );
+    }
+}

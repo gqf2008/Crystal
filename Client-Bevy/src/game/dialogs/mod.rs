@@ -44,6 +44,7 @@ pub mod menu;
 pub mod minimap;
 pub mod mount;
 pub mod notice;
+pub mod notice_box;
 pub mod npc;
 pub mod npc_awake;
 pub mod npc_goods;
@@ -1554,6 +1555,8 @@ impl Plugin for DialogsPlugin {
         app.init_resource::<crate::ui::sprite_ui::UiImageCache>();
         app.add_plugins(hero_equipment::HeroEquipmentPlugin);
         app.add_plugins(hero_skills::HeroSkillPlugin);
+        // 统一信息提示框（C# MirMessageBox OK）+ 各窗 `Show()` 前置守卫（宠物/行会/坐骑/钓鱼）
+        app.add_plugins(notice_box::NoticeBoxPlugin);
         // 先置顶再开始拖动：点击重叠窗口时，先让被点窗口到最前，再由 drag 选中它。
         // 通用对话框可见性兜底：PostUpdate（所有 Update 对话框 ui_system 之后）强制隐藏
         // 未 open 的挂 DialogRoot 实体，消除控件泄漏叠加（清理"一堆 UI 堆屏幕"）。

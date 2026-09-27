@@ -511,6 +511,16 @@ enum ControlCommand {
         limit: usize,
         reply: Sender<String>,
     },
+    /// 只读提示框探针（2026-09-28）：返回当前 `NoticeBox.text`。
+    /// 存在理由：宠物/行会/坐骑/钓鱼四窗的 C# `Show()` 守卫在**状态不具备时只弹提示框、不开窗**，
+    /// 而"窗没开"这件事本身就是判据 ⇒ 逐窗 A/B 需要可机器读的"这次是弹框还是开窗"证据
+    /// （见 `tools/acceptance/csharp_golden/README.md` §3.2d 与 `notice_box.rs`）。
+    NoticeProbe {
+        /// `true` = 顺手把提示框关掉（逐窗 A/B 每扇窗开窗前先清场：否则上一扇的提示框会留在
+        /// 后续截图里，把后面的窗比出假差异——本轮实测踩到）。
+        clear: bool,
+        reply: Sender<String>,
+    },
     /// 采集/剥皮（2026-09-24）：照 `C.Harvest` 发方向；可采集怪（HarvestMonster）的尸体必须走这条路
     /// 才能拿到产出——④ ItemTasks 的 Q 物品在可采集怪身上就靠它交付（详见 combat.rs `roll_harvest_drops`）。
     /// `direction = None` → 用客户端当前朝向。
@@ -747,6 +757,10 @@ struct ControlQueries<'w, 's> {
     /// 放在 `ControlQueries` 里而不是 `apply_control_commands` 的参数表上——
     /// 那台系统已经是 16 个 SystemParam 的上限，多加一个会因 `ObserverSystem` 实现上限而编译失败。
     applied: Res<'w, crate::game::combat::RealHitProbe>,
+    /// 2026-09-28：`Dialog` 分支的 C# `Show()` 前置守卫（宠物/行会/坐骑/钓鱼）。
+    /// 与键盘热键路径共用同一份 `ShowGuardParams` 实现；挂在 `ControlQueries` 里是因为
+    /// `apply_control_commands` 的参数表已到 16 个 SystemParam 上限。
+    guard: crate::game::dialogs::notice_box::ShowGuardParams<'w, 's>,
     players: Query<
         'w,
         's,
@@ -1259,6 +1273,20 @@ fn handle_conn(mut stream: std::net::TcpStream, tx: Sender<ControlCommand>) {
                     .send(ControlCommand::CombatProbe { reply: reply_tx })
                     .is_ok()
                 {
+                    let s = reply_rx
+                        .recv_timeout(std::time::Duration::from_secs(2))
+                        .unwrap_or_else(|_| "{}".to_string());
+                    serde_json::from_str::<Value>(&s).unwrap_or_else(|_| json!({}))
+                } else {
+                    json!({"error": "control channel closed"})
+                }
+            }
+            // 只读提示框探针（2026-09-28）：宠物/行会/坐骑/钓鱼四窗的 Show() 守卫在状态不具备时
+            // 只弹提示框、不开窗 —— 逐窗 A/B 需要"这次是弹框还是开窗"的机器可读证据。
+            "notice_probe" => {
+                let clear = params.get("action").and_then(|v| v.as_str()) == Some("close");
+                let (reply_tx, reply_rx) = bounded::<String>(1);
+                if tx.send(ControlCommand::NoticeProbe { clear, reply: reply_tx }).is_ok() {
                     let s = reply_rx
                         .recv_timeout(std::time::Duration::from_secs(2))
                         .unwrap_or_else(|_| "{}".to_string());
@@ -2775,6 +2803,12 @@ fn apply_control_commands(
                         }
                     }
                 } else {
+                    // 2026-09-28：C# 各对话框 `Show()` 的前置守卫——宠物/行会/坐骑/钓鱼在状态不
+                    // 具备时**不开窗**，只弹 `MirMessageBox(OK)`（原版行号见 notice_box.rs）。
+                    // Close 不受守卫影响（已开的窗永远关得掉）。
+                    if !matches!(action, DialogAction::Close) && q.guard.blocked(kind) {
+                        continue;
+                    }
                     match action {
                         DialogAction::Open => mgr.open(kind),
                         DialogAction::Close => mgr.close(kind),
@@ -3280,6 +3314,13 @@ fn apply_control_commands(
                     control_state.combat_log.len()
                 );
                 let _ = reply.send(payload.to_string());
+            }
+            // 只读提示框探针（2026-09-28）：返回当前提示框文案（None = 没弹）。
+            ControlCommand::NoticeProbe { clear, reply } => {
+                if clear {
+                    q.guard.notice.text = None;
+                }
+                let _ = reply.try_send(json!({"ok": true, "text": q.guard.notice.text}).to_string());
             }
             ControlCommand::ChatProbe { limit, reply } => {
                 // 只读：直接读 ChatState 里最近 limit 行（最新在末尾）
