@@ -35,6 +35,12 @@
   另外读探针的**累计生成计数** `spawned.cast_add / cast_alpha`（只增不减）：这两类实体寿命极短，
   按 100ms 轮询「存活实体」可能采样漏掉，计数与采样时刻无关，是这条判据的主判据。
 
+  占位弹道判据（2026-09-27 补，owner 反馈「有些魔法是个黄色方框」）：
+  玩家侧原版弹道表是**完备**的（`SPELL_MISSILE` 14 + `RANGE_MISSILE` 9 = 23 =
+  `PlayerObject.cs` 的 `CreateProjectile` 调用数）⇒「已知法术 + 表里没有」= 原版对该法术
+  根本没有弹道（如 `IceThrust`）。夹具断言 `spawned.fallback_player_suppressed >= 1`
+  （本轮至少抑制过一条玩家占位弹道），并记录 `fallback_placeholder`（怪物弹道，未移植其表）。
+
   阳性对照（落地时实做）：把 `effects.rs` 的两条 spawn 路径改回 `Sprite`
   （去掉 `Mesh2d` + 加法材质）→ 本夹具必然 FAIL(1)（blend=alpha）。
 
@@ -214,6 +220,14 @@ if ($null -eq $cast_add) {
 if ($null -ne $missile_alpha_n -and $missile_alpha_n -ne 0) {
     $fail += ("弹道走了普通 alpha 通道 missile_alpha={0}（原版 Missile.Draw 的 Blend = true）" -f $missile_alpha_n)
 }
+# 占位弹道抑制（owner「黄色方框」）：玩家施放的已知法术、原版无弹道 ⇒ 必须抑制而不是画方块
+$suppressed_n = if ($null -ne $spawned_seen) { $spawned_seen.fallback_player_suppressed } else { $null }
+$placeholder_n = if ($null -ne $spawned_seen) { $spawned_seen.fallback_placeholder } else { $null }
+if ($null -eq $suppressed_n) {
+    $fail += '占位弹道抑制计数读不到（探针未返回 spawned.fallback_player_suppressed）'
+} elseif ($suppressed_n -lt 1) {
+    $fail += ("本轮没有抑制过任何玩家占位弹道（fallback_player_suppressed={0} < 1）：要么没施放无弹道法术，要么抑制没生效（黄色方块还在）" -f $suppressed_n)
+}
 
 $result = [ordered]@{
     ok            = ($fail.Count -eq 0 -and $observed.Count -gt 0)
@@ -224,6 +238,8 @@ $result = [ordered]@{
     bad_blend     = @($bad_blend.Keys)
     spawned_counters = $spawned_seen
     missile_add   = $missile_add_n
+    fallback_player_suppressed = $suppressed_n
+    fallback_placeholder = $placeholder_n
     missing       = $fail
     also_record   = $also_record
     mp            = $mp
