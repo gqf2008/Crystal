@@ -50,6 +50,12 @@ param(
     # 修完后 live_bytes 斜率 ≈0（±0.05MB/轮），RSS 仍偶尔 >0.5。
     [double]$MaxLiveSlopePerCycleMb = 0.1,
     [string]$OutFile = '',
+    # bot 的**单会话**登录超时（秒）。0 = 自适应：`max(10, Sessions/2 + 10)`。
+    # 为什么必须显式传：bot.py 的 `--timeout` 同时是 socket 超时与登录回执 deadline，
+    # 默认 10s。30 会话档里第 5 轮起，服务端日志显示 30 个账号**全部登录成功**
+    # （`Login result ... true`），而 bot 侧 30/30 全超时 ⇒ J0 假红。
+    # 会话越多、一轮里登录越挤，10s 越不够——超时随会话数放大；成功率仍由 J0 把着。
+    [int]$BotLoginTimeoutSec = 0,
     # 每轮连登连退 bot 的超时（秒）：超时按本轮失败处理并**立刻**返回（2026-09-25 修）
     [int]$BotTimeoutSec = 180,
     # debug 构建没有显式确认时拒绝出结论（J4 阈值是按 release 标定的，见下方守卫）
@@ -125,13 +131,17 @@ function Sample([string]$tag) {
         tasks_running  = if ($health) { [int]$health.tasks.running } else { -1 }
     }
 }
+# 单会话登录超时：显式给了就用，否则按会话数自适应（见 param 处注释）
+$loginTimeout = if ($BotLoginTimeoutSec -gt 0) { $BotLoginTimeoutSec } else { [Math]::Max(10, [int]($Sessions / 2) + 10) }
+
 function RunCycle([int]$n) {
     # 2026-09-25：改走带超时的共用 helper（原先 `& python bot.py …` 同步无超时）
     # 账号用**显式 1-based 列表**（`<prefix>1..N`）：bot.py 的 `--account-prefix` 是从 0 起编号，
     # 而 seed_load_accounts.py 播的是 1..N；用 prefix 会在 N 较小时撞上不存在的账号（见文件头 J0b）。
     $r = Invoke-BotJson -OpsDir $ops -BotArgs @('--host', '127.0.0.1', '--port', "$Port",
         '--accounts', ((1..$Sessions | ForEach-Object { "$AccountPrefix$_" }) -join ','),
-        '--hold', "$HoldSec", '--password', '123456') `
+        '--hold', "$HoldSec", '--password', '123456',
+        '--timeout', "$loginTimeout") `
         -TimeoutSec $BotTimeoutSec -Tag "leak_plateau_cycle$n"
     if ($r.timedOut) {
         Write-Host ("WARN: 连登连退 bot 超过 {0}s 未退出（port={1}）——本轮按失败处理，见 {2}" -f `
