@@ -315,6 +315,15 @@ enum ControlCommand {
     AwakeProbe {
         reply: Sender<String>,
     },
+    /// 只读**英雄**探针（2026-09-27）：英雄运行时读数（对象 id / 经验 / 下一级所需）+ 英雄管理列表。
+    ///
+    /// 存在理由：英雄经验曲线刚修过两个静默缺陷（`u32` 截断 412/500 条 + 登录不按曲线重算），
+    /// 而"运行时到底用了哪个值"此前**没有任何状态读数**——`S.HeroInformation` 只打到日志/窗口，
+    /// `S.ManageHeroes` 的列表又只含 name/level。夹具要判「英雄 max_exp 等于曲线 Level<英雄等级>」
+    /// 就必须能读到 `HeroState.hero_exp/hero_max_exp`（与 HUD 同源的那两个字段）。
+    HeroProbe {
+        reply: Sender<String>,
+    },
     /// **夹具仪器**（2026-09-27）：把背包选中格置为指定格——写的是 `InvClickState.selected`，
     /// 与**点背包格**写的是**同一个字段**。
     ///
@@ -1399,6 +1408,20 @@ fn handle_conn(mut stream: std::net::TcpStream, tx: Sender<ControlCommand>) {
                     json!({"error": "control channel closed"})
                 }
             }
+            "hero_probe" => {
+                let (reply_tx, reply_rx) = bounded::<String>(1);
+                if tx
+                    .send(ControlCommand::HeroProbe { reply: reply_tx })
+                    .is_ok()
+                {
+                    let s = reply_rx
+                        .recv_timeout(std::time::Duration::from_secs(2))
+                        .unwrap_or_else(|_| "{}".to_string());
+                    serde_json::from_str::<Value>(&s).unwrap_or_else(|_| json!({}))
+                } else {
+                    json!({"error": "control channel closed"})
+                }
+            }
             "npc_rows" => {
                 // NPC 窗每行文本 + 行内链接的精确命中矩形（含建议点击点 cx/cy）
                 let (reply_tx, reply_rx) = bounded::<String>(1);
@@ -2380,6 +2403,7 @@ fn control_reply(cmd: &ControlCommand) -> Option<&Sender<String>> {
         | ControlCommand::GetScroll { reply }
         | ControlCommand::ShopProbe { reply }
         | ControlCommand::RentalProbe { reply }
+        | ControlCommand::HeroProbe { reply }
         | ControlCommand::AwakeProbe { reply } => Some(reply),
         ControlCommand::InvSelect { reply, .. } => Some(reply),
         _ => None,
@@ -3673,6 +3697,30 @@ fn apply_control_commands(
                     "message": q.rental.message,
                 });
                 tracing::info!("🎮 control rental_probe: {payload}");
+                let _ = reply.send(payload.to_string());
+            }
+            ControlCommand::HeroProbe { reply } => {
+                // 只读：英雄运行时读数（与 HUD 同源的 `HeroState` 字段）+ 英雄管理列表。
+                // 判据用「运行时 `hero_max_exp` == 配置曲线 `Level<英雄等级>`」，同时能证明
+                // >u32::MAX 的曲线值没有被截断（原版 Level100=5_400_000_000）。
+                let list: Vec<serde_json::Value> = q
+                    .hero
+                    .heroes
+                    .iter()
+                    .map(|h| json!({"index": h.index, "name": h.name, "level": h.level}))
+                    .collect();
+                let payload = json!({
+                    "ok": true,
+                    "hero_index": q.hero.hero_index,
+                    "object_id": q.hero.object_id,
+                    "hero_exp": q.hero.hero_exp,
+                    "hero_max_exp": q.hero.hero_max_exp,
+                    "hero_hp": q.hero.hero_hp,
+                    "hero_max_hp": q.hero.hero_max_hp,
+                    "managing": q.hero.managing,
+                    "list": list,
+                });
+                tracing::info!("🎮 control hero_probe: {payload}");
                 let _ = reply.send(payload.to_string());
             }
             ControlCommand::NpcRows { reply } => {
