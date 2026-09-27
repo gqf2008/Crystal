@@ -286,6 +286,17 @@ pwsh tools\acceptance\csharp_golden\golden_ab_ours.ps1 -SandboxRoot $env:TEMP\go
 否则上一扇的提示框会留在后续截图里（本轮实测：Guilds 之后的 Ranking/Help/…/Skillbar 全部带着
 "你不在任何公会中。"，凭空多出 17%~60% 的假差异）。
 
+### 3.2f 仍待定性的窗（逐张目检的中间结论，2026-09-28）
+
+§3.2d 里还剩几行没定性（`Friends 25.6% / Relationship 22.2% / Ranking 10.6% / GameShop 29.6% / Bigmap 63.3%`）。
+本轮把 **Friends** 定性完，其余留给后续（判据与配方同 §3.2c/§3.2d）：
+
+| 窗口 | 差异 | 定性 |
+|---|---|---|
+| **Friends** | 25.6% | **真缺口：本端好友窗缺翻页条**。原版 `Client/MirScenes/Dialogs/FriendDialog.cs:70-118` 有三件：`PageNumberLabel` (87,216) 83x17 居中、"上一页" `Prguse2[240/241/242]` @(70,218) 16x16、"下一页" `Prguse2[243/244/245]` @(171,218) 16x16（两钮各带 `Page--/Page++` + 夹紧逻辑）。本端 `Client-Bevy/src/game/dialogs/friend.rs` 全文件搜 `page/arrow/翻页` **零命中** ⇒ 截图里原版有 `◀ 1/1 ▶` 那一行、我方没有。 |
+| Help / Keybind | 87.6% / 26.6% | 非缺陷：键位表**语言与条目**不同（我方中文动态生成 vs 原版英文固定清单），窗口矩形/控件位置一致（§3.2c 已记）。 |
+| Relationship / Ranking / GameShop / Bigmap | 22.2% / 10.6% / 29.6% / 63.3% | **待逐条定性**（注意 `RankingDialog.cs` 与 `GameshopDialog.cs` 也都有 `PageNumberLabel` 一类的翻页控件，`TrustMerchantDialog.cs`/`HelpDialog.cs`/`MailDialogs.cs`/`IntelligentCreatureDialogs.cs`/`CharacterDialog.cs` 同理——**排查时先按这条线核"本端有没有翻页条"**，Friends 就是这么捞出来的）。 |
+
 ## 3.3 逐窗几何对表（不需要原版交互，2026-09-26 起）
 
 §3.1 把"驱动原版点开某个窗口"这条路堵掉之后，**窗口几何**仍可验：原版每扇窗的矩形是纯常量
