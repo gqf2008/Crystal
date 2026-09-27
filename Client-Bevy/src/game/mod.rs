@@ -24,6 +24,7 @@ pub mod sets;
 pub mod skills;
 pub mod sound;
 pub mod spell_effects;
+pub mod monster_projectiles;
 pub mod time_format;
 pub mod weather;
 

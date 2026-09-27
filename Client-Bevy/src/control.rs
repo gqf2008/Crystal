@@ -3429,7 +3429,7 @@ fn apply_control_commands(
                 for (m, mat, sprite) in q.spell_missiles.iter() {
                     rows.push((
                         "missile".to_string(),
-                        format!("{:?}", m.library),
+                        format!("{:?}", m.source),
                         m.base as u64,
                         0,
                         m.frames,
@@ -3491,6 +3491,7 @@ fn apply_control_commands(
                         // 与仍画占位的次数（怪物弹道/未知法术 id）
                         "fallback_player_suppressed": q.effects_state.fallback_player_suppressed,
                         "fallback_placeholder": q.effects_state.fallback_placeholder,
+                        "monster_missile_add": q.effects_state.monster_missile_add,
                     },
                 });
                 tracing::info!("🎮 control spell_fx_probe: count={}", payload["count"]);
