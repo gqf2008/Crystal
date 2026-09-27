@@ -3713,6 +3713,7 @@ fn apply_control_commands(
                     "ok": true,
                     "hero_index": q.hero.hero_index,
                     "object_id": q.hero.object_id,
+                    "hero_level": q.hero.hero_level,
                     "hero_exp": q.hero.hero_exp,
                     "hero_max_exp": q.hero.hero_max_exp,
                     "hero_hp": q.hero.hero_hp,
