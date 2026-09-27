@@ -66,9 +66,12 @@ try {
 
     $exeSrc = "$ClientHome\Client-Bevy\target\debug\client_bevy.exe"
     $exe = Join-Path (Split-Path -Parent $exeSrc) 'l5ac_client.exe'
-. "$PSScriptRoot\build_stamp.ps1"   # 构建戳前置：不许对着旧产物下结论（见 LESSON_运行目标分支e2e前需重建二进制）
-Assert-ClientBuildStamp -Exe $exe -ScriptName 'l5ac_newchar_create'
     if (-not (Test-Path $exeSrc)) { Write-Host "FAIL(9): 找不到客户端 $exeSrc"; exit 9 }
+. "$PSScriptRoot\build_stamp.ps1"   # 构建戳前置：不许对着旧产物下结论（见 LESSON_运行目标分支e2e前需重建二进制）
+# 2026-09-27 修（与 l5ad 同一条）：断言**规范 exe**（`$exeSrc`），不能断言 `$exe`——后者是下面
+# `Start-Client` 里才创建的硬链接副本，断言时它**还是上一次运行留下的旧产物**，于是夹具会报
+# 「被测 exe 里没有构建戳（旧产物）」而永远跑不起来（实测：l5ac_client.exe 无戳、报 FAIL(2)）。
+Assert-ClientBuildStamp -Exe $exeSrc -ScriptName 'l5ac_newchar_create'
 
     function Start-Client([string]$logTag) {
         Get-CimInstance Win32_Process -Filter "Name='l5ac_client.exe'" -EA SilentlyContinue |

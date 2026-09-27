@@ -25,7 +25,10 @@
 param(
     [string]$User = 'test',
     [string]$Pass = '123456',
-    [string]$ClientHome = '',
+    # 2026-09-27 修：默认改指 **e2e 构建位**（与 l5ac/l5ad 一致）。原先默认 `$PSScriptRoot\..\..`
+    # = 主检出，而主检出里的 `client_bevy.exe` 往往是很久以前的构建 ⇒ 夹具直接报「陈旧二进制 FAIL(2)」，
+    # 让人误以为是对着 master 跑出来的结论。
+    [string]$ClientHome = 'E:\Users\gxh\Documents\GitHub\Crystal-wt-blend',
     [int]$Port = 9099,
     [int]$Lines = 40
 )
@@ -48,7 +51,9 @@ if (-not $ClientHome) { $ClientHome = (Resolve-Path "$PSScriptRoot\..\..").Path 
 $srcExe = "$ClientHome\Client-Bevy\target\debug\client_bevy.exe"
 $exe = "$ClientHome\Client-Bevy\target\debug\client_bevy_l5t.exe"
 . "$PSScriptRoot\build_stamp.ps1"   # 构建戳前置：不许对着旧产物下结论（见 LESSON_运行目标分支e2e前需重建二进制）
-Assert-ClientBuildStamp -Exe $exe -ScriptName 'l5t_chat_dialog4'
+# 2026-09-27 修：断言**规范 exe**（`$srcExe`），不要断言 `$exe`——后者是本脚本后面才 `Copy-Item`
+# 出来的副本，断言时它还是上一次运行留下的旧产物 ⇒ 夹具永远报「旧产物」跑不起来（实测踩到）。
+Assert-ClientBuildStamp -Exe $srcExe -ScriptName 'l5t_chat_dialog4'
 $err = "$PSScriptRoot\l5t_client.err.log"
 $shotA = "$PSScriptRoot\l5t_shot_a.png"
 $shotB = "$PSScriptRoot\l5t_shot_b.png"

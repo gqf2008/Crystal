@@ -19,7 +19,9 @@
   实机资源（客户端 + e2e 账号）必须走 `e2e_lock.ps1` 串行。
 #>
 param(
-    [string]$ClientHome = '',
+    # 2026-09-27 修：默认改指 **e2e 构建位**（与 l5ac/l5ad/l5t 一致）。原先默认 `$PSScriptRoot\..\..`
+    # = 主检出的旧 `client_bevy.exe` ⇒ 夹具报「陈旧二进制 FAIL(2)」，与 master 无关。
+    [string]$ClientHome = 'E:\Users\gxh\Documents\GitHub\Crystal-wt-blend',
     [int]$ControlPort = 9052,
     [string]$User = 'test',
     [string]$Pass = '123456',
