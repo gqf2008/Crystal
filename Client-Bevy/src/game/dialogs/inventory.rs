@@ -223,11 +223,15 @@ pub fn inv_tab_art_index(page: usize, tab: usize, slots: usize) -> Option<usize>
 
 /// 未扩容背包的格数 —— **本端口径**（把腰带排除在外）。
 ///
-/// C# 的 `User.Inventory` 是 `UserItem[46]`：`0..5` 是腰带、`6..45` 才是背包
-/// （`InventoryDialog` 里 `Grid[idx].ItemSlot = 6 + idx` 就是这条映射）。本端
-/// [`Inventory::items`] 只存背包那一段（所以 `MAX_INV_SLOTS = 80` 对应 C# 的 Grid 8x10），
-/// 因此"C# 的 `Length == 46`（未扩容）"在本端口径下是 **40**。
-pub const INV_BASE_BAG_SLOTS: usize = GRID_COLS * GRID_ROWS;
+/// **就是这个 46**（不是 `GRID_COLS * GRID_ROWS = 40`）：C# 判据写的是
+/// `if (GameScene.User.Inventory.Length == 46) ItemButton2.Index = 169;`
+/// （`InventoryDialog.cs:259-262/346-349`），而本端 `Inventory::items` 的长度
+/// **就是服务端 `S.UserInformation` 里那一段**——2026-09-28 实测（README §3.2j）：
+/// 全新 1 级角色 `bag_probe` 回 `{"total":46,"quest_total":40}`，
+/// 服务端常量 `ServerRust/src/actors/inventory.rs:61 BACKPACK_SIZE = 46`。
+/// 旧写法按"本端只存背包（40 格）"的假设写成 40 ⇒ 判据永不成立、ITEMS II 永远画 `738`
+/// 而原版画灰掉的 `169`（金标准 A/B 里那一格 72x24 的差异）。
+pub const INV_BASE_BAG_SLOTS: usize = 46;
 
 /// 扩容钮层（与基础层同层，靠生成顺序压在其他基础元素上）
 pub const INV_ADD_Z: i32 = INV_CHILD_Z;
@@ -702,18 +706,36 @@ fn spawn_inventory_dialog(
             // DialogWidget：inventory_ui_system 的 buttons/money/all_vis 查询域
             // 门槛（批49 迁移遗漏 → 页签/关闭/金币负重全部失效）
             if let Some(h) = load_lib_image(&mut libs, &mut images, LibraryName::Title, initial) {
+                // C# `ItemButton` 等声明 `Size = (72, 23)`，而 `Title[197/737/738/739/168/169/198]`
+                // 图头是 **72x24** ⇒ 原版 `MirImageControl.Draw` 走
+                // `DXManager.Draw(Image, new Rectangle(Point.Empty, Size), …)`，
+                // 即取**源矩形 (0,0,72,23)** = 裁掉最后一行的**裁剪**，不是缩放。
+                // 2026-09-28 实测（README §3.2j）：本端按节点尺寸 72x23 让 Bevy 把 24 行
+                // 线性重采样成 23 行 ⇒ 三张页签整块与美术对不上（均值差 26~29），
+                // 而原版帧逐行与美术 1:1（差 8~10，差值就是背景透出）。
+                // 故这里显式钉住 `ImageNode.rect` 做裁剪（`image_button_system` 只改 `image`，
+                // 不会清掉 rect ⇒ 逐帧换图后裁剪仍生效）。
                 spawn_icon_button(
                     p,
                     h.clone(),
                     h.clone(),
-                    h,
+                    h.clone(),
                     INV_TAB_X[idx],
                     7.0,
                     72.0,
                     23.0,
                     INV_CHILD_Z,
                 )
-                .insert((InvTab(idx), DialogWidget));
+                .insert((
+                    InvTab(idx),
+                    DialogWidget,
+                    // 覆盖 spawn 里那个 ImageNode：同一张图 + 源矩形 (0,0,72,23)（见上注）
+                    ImageNode {
+                        image: h,
+                        rect: Some(bevy::math::Rect::new(0.0, 0.0, 72.0, 23.0)),
+                        ..default()
+                    },
+                ));
             }
         }
         // 关闭按钮（Prguse2 360/361/362）@(289,3)

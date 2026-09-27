@@ -22,7 +22,7 @@ use crate::ui::sprite_ui::UiFont;
 use crate::ui::sprite_ui::{shared_cjk_font, UiCjkFont};
 use crate::ui::theme::{
     load_lib_image, spawn_close_button, spawn_container, spawn_icon_button, spawn_image,
-    spawn_image_native, spawn_label, spawn_panel,
+    spawn_image_native, spawn_label, spawn_panel, ImageButton,
 };
 use bevy::prelude::*;
 
@@ -68,6 +68,47 @@ fn center_origin(w: f32, h: f32) -> (f32, f32) {
 /// 只给玩家名，不带界面上的 `★`/「（离线）」装饰；越界行给空串）
 fn member_row_hint(members: &[GroupMember], i: usize) -> String {
     members.get(i).map(|m| m.name.clone()).unwrap_or_default()
+}
+
+// ---------------------------------------------------------------------------
+// C# `GroupPanel_BeforeDraw`（`Client/MirScenes/Dialogs/GroupDialog.cs:114-150`）
+// 的三条状态语义——都是**逐帧**决定的，不是 spawn 时定死的。
+// 2026-09-28 金标准 A/B（README §3.2j）实测：本端 Add/Del 两钮**整块不画**
+// （画的是面板底），因为旧写法把"空组"判成了"非队长"。
+// ---------------------------------------------------------------------------
+
+/// `AddButton.Visible` / `DelButton.Visible`：
+/// C# `if (GroupList.Count > 0 && GroupList[0] != MapObject.User.Name) { 两者 false } else { 两者 true }`
+/// ⇒ **空组时两钮是可见的**（走 else 分支）。
+///
+/// 旧写法（`members.first().map(|m| m.name == self_name).unwrap_or(false)`）在空组时得 `false`
+/// ⇒ 两钮都被藏起来；A/B 里那两块 60x25 的差异就是"我们没画按钮"。
+#[must_use]
+pub fn add_del_visible(members: &[GroupMember], self_name: &str) -> bool {
+    match members.first() {
+        None => true,
+        Some(m) => m.name == self_name,
+    }
+}
+
+/// `AddButton` 的三帧：**空组** `130/131/132`，非空 `133/134/135`（`GroupDialog.cs:116-127`）。
+#[must_use]
+pub fn add_btn_frames(empty: bool) -> [usize; 3] {
+    if empty {
+        [130, 131, 132]
+    } else {
+        [133, 134, 135]
+    }
+}
+
+/// `SwitchButton` 的三帧：`AllowGroup` → `117/118/119`，否则 `114/115/116`（`GroupDialog.cs:139-150`）。
+#[must_use]
+pub fn switch_btn_frames(allow_group: bool) -> [usize; 3] {
+    if allow_group {
+        [117, 118, 119]
+    } else {
+        [114, 115, 116]
+    }
 }
 
 /// 窗口原点 = 屏幕中心（C# GroupDialog.cs:27 `Location = Center`；W/H = 背景真实尺寸）
@@ -149,6 +190,9 @@ impl Plugin for GroupPlugin {
                 group_invite_player_system,
                 group_del_system,
                 group_add_system,
+                // #3326：C# `GroupPanel_BeforeDraw` 的两处**逐帧换图**（空组 130/131/132、
+                // AllowGroup 117/118/119）。放在两个 visible/系统之后——它们只管显隐与点击。
+                group_button_art_system,
             )
                 .chain()
                 .run_if(in_state(AppState::Game)),
@@ -511,6 +555,45 @@ fn group_invite_system(
     }
 }
 
+/// C# `GroupPanel_BeforeDraw` 的两处**逐帧换图**（`GroupDialog.cs:116-150`）：
+/// - `AddButton`：空组 `130/131/132`，非空 `133/134/135`；
+/// - `SwitchButton`：`AllowGroup` → `117/118/119`，否则 `114/115/116`。
+///
+/// 换图方式沿用仓内既有写法（同 `dura_status.rs` 的切换钮）：改写 `ImageButton` 三帧，
+/// 由 `image_button_system` 按交互态取 `normal/hover/pressed` 落到 `ImageNode.image`。
+fn group_button_art_system(
+    group: Res<GroupState>,
+    mut libs: ResMut<GameLibraries>,
+    mut images: ResMut<Assets<Image>>,
+    mut add: Query<&mut ImageButton, (With<GroupAddBtn>, Without<GroupSwitch>)>,
+    mut switch: Query<&mut ImageButton, (With<GroupSwitch>, Without<GroupAddBtn>)>,
+) {
+    let add_frames = add_btn_frames(group.members.is_empty());
+    let switch_frames = switch_btn_frames(group.allow_group);
+    let mut apply = |btn: &mut ImageButton, frames: [usize; 3], lib: LibraryName| {
+        let Some(n) = load_lib_image(&mut libs, &mut images, lib, frames[0]) else {
+            return;
+        };
+        let Some(h) = load_lib_image(&mut libs, &mut images, lib, frames[1]) else {
+            return;
+        };
+        let Some(p) = load_lib_image(&mut libs, &mut images, lib, frames[2]) else {
+            return;
+        };
+        if btn.normal != n || btn.hover != h || btn.pressed != p {
+            btn.normal = n;
+            btn.hover = h;
+            btn.pressed = p;
+        }
+    };
+    for mut btn in &mut add {
+        apply(&mut btn, add_frames, LibraryName::Title);
+    }
+    for mut btn in &mut switch {
+        apply(&mut btn, switch_frames, LibraryName::Prguse);
+    }
+}
+
 /// 允许组队开关 → C.SwitchGroup{allow_group}
 fn group_switch_system(
     mut group: ResMut<GroupState>,
@@ -632,12 +715,10 @@ fn group_del_system(
         .single()
         .map(|n| n.0.clone())
         .unwrap_or_default();
-    let is_leader = group
-        .members
-        .first()
-        .map(|m| m.name == self_name)
-        .unwrap_or(false);
-    // 非队长隐藏移除按钮（C# GroupPanel_BeforeDraw：非队长 Add/Del 不可见）
+    // C# `GroupPanel_BeforeDraw:128-137`：**只有"非空组且第一个成员不是自己"**才隐藏 Add/Del。
+    // 空组是可见的（旧写法用 `unwrap_or(false)` 把空组当非队长 ⇒ 两钮全藏，A/B 实证）。
+    let is_leader = add_del_visible(&group.members, &self_name);
+    // 非队长隐藏移除按钮
     for mut vis in del_btn_vis.iter_mut() {
         *vis = if is_leader {
             Visibility::Visible
@@ -755,12 +836,9 @@ fn group_add_system(
         .single()
         .map(|n| n.0.clone())
         .unwrap_or_default();
-    let is_leader = group
-        .members
-        .first()
-        .map(|m| m.name == self_name)
-        .unwrap_or(false);
-    // 非队长隐藏邀请按钮（C# GroupPanel_BeforeDraw：非队长 Add/Del 不可见）
+    // 同 `group_del_system`：空组时邀请钮也要可见（C# `GroupPanel_BeforeDraw:128-137`）
+    let is_leader = add_del_visible(&group.members, &self_name);
+    // 非队长隐藏邀请按钮
     for mut vis in add_btn_vis.iter_mut() {
         *vis = if is_leader {
             Visibility::Visible
@@ -856,6 +934,35 @@ fn group_server_events(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 2026-09-28 金标准 A/B（README §3.2j）捞出的三处 `GroupPanel_BeforeDraw` 缺口。
+    /// **阳性对照**：把 `add_del_visible` 改回 `unwrap_or(false)`、或把两个 frames 函数写死，
+    /// 本用例立刻红。
+    #[test]
+    fn group_button_state_matches_csharp_panel_before_draw() {
+        let leader = |name: &str| GroupMember {
+            name: name.to_string(),
+            is_leader: true,
+            online: true,
+        };
+        // ① 空组：C# 走 else 分支 ⇒ Add/Del **可见**（旧写法在这里判 false ⇒ 两钮整块不画，
+        //    A/B 里就是那两块 60x25 的差异）
+        assert!(
+            add_del_visible(&[], "我"),
+            "空组时 Add/Del 必须可见（C# `GroupList.Count > 0 && ...` 的 else 分支）"
+        );
+        // ② 队长是自己 ⇒ 可见；队长是别人 ⇒ 隐藏
+        assert!(add_del_visible(&[leader("我"), leader("他")], "我"));
+        assert!(!add_del_visible(&[leader("他"), leader("我")], "我"));
+
+        // ③ Add 三帧：空组 130/131/132，非空 133/134/135
+        assert_eq!(add_btn_frames(true), [130, 131, 132]);
+        assert_eq!(add_btn_frames(false), [133, 134, 135]);
+
+        // ④ Switch 三帧：AllowGroup 117/118/119，否则 114/115/116
+        assert_eq!(switch_btn_frames(true), [117, 118, 119]);
+        assert_eq!(switch_btn_frames(false), [114, 115, 116]);
+    }
 
     /// #2775：成员行 Hint = 玩家名（C# `GroupDialog.cs:161`），越界行为空
     #[test]

@@ -456,6 +456,53 @@ py -3.12 tools/acceptance/csharp_golden/bigmap_viewport_check.py --view mini `
 去匹配合成资产下的图区实体，匹配不到即红。**阳性对照实做**：把 spawn 里的
 `ImageNode::new(white.clone())` 去掉 ⇒ 立刻红（`left: 0, right: 1`）。
 
+### 3.2j A/B 表剩余低差异窗逐窗收口（2026-09-28）：Group 归零、Inventory/Quests 显著下降
+
+§3.2c 起一直挂着「Inventory 7.1% / Equipment 6.3% / Quests 7.9% / Options 6.2% / Group 5.2%」
+这五行，只写了"chrome 与控件一致，差在内容"。本轮把它们逐个拆开——手法还是**数值化**：
+8x8 差异块图 → 对差异块做 **1px 掩码** → 再拿候选精灵（`Title/Prguse/Prguse2` 的相关帧）
+去**反查"这一块到底是哪张图"**（哪一侧画了它、画的是哪一帧）。后一步是这轮的关键：
+它能把"内容不同"（两边都画了、只是数据不同）与"画错了/没画"直接分开。
+
+| 窗口 | 改前 | 改后 | 驱动 |
+|---|---|---|---|
+| **Group** | 5.2% | **0.0%** | **三处真缺口**（见下）——修完全窗 0 差异 |
+| **Inventory** | 7.1% | **2.9%** | 页签**裁剪口径** + ITEMS II 换帧条件（见下）；残余＝物品内容/金币文本值/面板透明边 |
+| **Quests** | 7.9% | **6.6%** | 删掉一枚**自造**的「放弃」钮（见下）；残余＝任务列表文本内容 |
+| Equipment | 6.3% | 6.3% | 非缺陷：纸娃娃/装备格内容（两侧角色装备不同）+ 面板底部透明行透出世界 |
+| Options | 6.2% | 6.2% | 非缺陷：`Settings` 值不同（音量为 100 vs 0，§3.2c 已记） |
+
+**三处真缺口（本轮修复）**
+
+1. **Group：空组时 Add/Del 被整块藏起来**。C# `GroupPanel_BeforeDraw:128-137` 是
+   `if (GroupList.Count > 0 && GroupList[0] != User.Name) { 两者 false } else { 两者 true }`
+   ——**空组可见**；本端旧写法 `members.first().map(|m| m.name == self).unwrap_or(false)`
+   把空组判成"非队长" ⇒ 两钮全 `Hidden`。A/B 里那两块 **60x25 的实心差异**就是"我们没画按钮"
+   （反查：原版那两块分别是 `Title[130]`、`Title[136]`，**逐像素 0 差异**；本端那块是面板底）。
+2. **Group：AddButton 换帧**。C# 空组 `130/131/132`、非空 `133/134/135`；本端恒 `133..135`。
+3. **Group：SwitchButton 换帧**。C# `AllowGroup` → `117/118/119`，否则 `114..116`；本端恒 `114..116`。
+   2/3 由新系统 `group_button_art_system` 逐帧改写 `ImageButton` 三帧（同 `dura_status` 的写法）。
+4. **Inventory：页签是"裁剪"不是"缩放"**。C# `ItemButton` 声明 `Size=(72,23)` 而图头是 **72x24**
+   ⇒ `MirImageControl.Draw` 传的是**源矩形** `(0,0,72,23)`（裁掉最后一行）；本端按节点 72x23 让
+   Bevy 把 24 行**线性重采样**成 23 行。实测：改前本端页签与美术差 **26~29**（原版 8~10），
+   改后本端 **7.4/8.3/7.8**，与原版**逐值相同**。修法＝给页签 `ImageNode.rect` 钉 `(0,0,72,23)`。
+5. **Inventory：ITEMS II 的 `169` 帧永不出现**。C# 判据是 `User.Inventory.Length == 46`；
+   本端 `INV_BASE_BAG_SLOTS` 按"本端只存背包（40 格）"的假设写成 `8*5=40` ⇒ 判据永不成立。
+   实测（本端自己的 `bag_probe`，全新 1 级角色）：`{"total":46,"quest_total":40}`——`items` 的
+   长度**就是**服务端那 46，与 C# 同口径 ⇒ 常量改为 46，页签随原版换成灰掉的 `169`。
+6. **Quests：删掉自造的「放弃」钮**。本端在日记窗 `(200,285) 76x25` 常显一枚
+   `Title[206..208]` 的钮，而 C# `QuestDiaryDialog` 构造里**没有**这个控件（只有标题 `Title[15]`、
+   底部 `_closeButton Title[193..195]@(200,436)`、关闭 `Prguse2[360..362]@(289,3)`）。
+   原版的「放弃任务」走**任务详情窗** `_cancelButton`（`QuestDialogs.cs:581-601`：`Title[203..205]@(200,436)`
+   → YesNo 询问框 → `C.AbandonQuest`），本端该路径已实现（`confirm_cancel`）⇒ 删除不减能力。
+   （顺带把 `Title[206..208]` 还给了它真正的归属：婚姻邀请框的 Yes 钮。）
+
+**顺带记：`control_size_audit.py` 的第 4 个盲点**——它在 Inventory 页签这条**没报**：
+`for (idx, &(inactive, active)) in INV_TAB_ART.iter().enumerate() { … load(…, initial) … spawn(…, 72.0, 23.0) }`
+里帧号是**变量**（表里只有帧号、尺寸是 spawn 处的字面量），它既不是"常量表带尺寸列"那一型，
+也不是"load 与 spawn 相邻且帧号字面量"那一型 ⇒ 静默漏掉（实测 `--data` 跑仍是 0 命中）。
+待办：把扫描面扩到"帧号来自循环变量"的表驱动形态（或至少在表驱动分支里按**尺寸列缺失**告警）。
+
 ## 3.3 逐窗几何对表（不需要原版交互，2026-09-26 起）
 
 §3.1 把"驱动原版点开某个窗口"这条路堵掉之后，**窗口几何**仍可验：原版每扇窗的矩形是纯常量
