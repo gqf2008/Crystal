@@ -139,12 +139,16 @@ py -3.12 tools/acceptance/csharp_golden/window_rect_table.py `
 ```
 
 **结果（2026-09-26，master f6a43efdc 上跑）：31 个可比窗口全部一致，0 处几何差异。**
+
+**2026-09-27 复核（master `c02f90d38`）**：`dialog_rect` 加了 `fallback:"root"` 之后，无标准关闭钮的 `menu`/`minimap` 也进了对表（其余 4 扇 `buff/refine/timer/chat_notice` 不在本表的 C# 映射里）；顺带修掉解析器把**解不出的符号名当 0** 的假 DIFF（`MenuDialog` 的 y 原被算成 15，真值 349 = `(768 - Prguse[1]高152) - 282 + 15`）——现为 `不一致：0`（可比 32 窗）。
 例外三类，各有据：
 
 1. **无关闭钮的窗**（`menu/minimap/buff/refine/timer/chat_notice`，即 manifest 的
-   `no_close_by_design`）取不到——`dialog_rect` 是**从关闭钮反推**窗口矩形的
-   （`rx = cx - w/2`），没关闭钮就没有 `cx/cy`，返回 `{ok:false,error:"close button not found"}`。
-   想让这 6 扇窗也进对表，得给 `dialog_rect` 加一条"直接从面板 Node 取矩形"的路径（未做）。
+   `no_close_by_design`）：`dialog_rect` 默认仍**从关闭钮反推**窗口矩形，没钮就返回
+   `{ok:false,error:"close button not found"}`（交互巡回靠这个 `ok:false` 判别「无钮设计窗」，
+   所以默认语义不能改）。**2026-09-27 补**：加了一条可选路径 `dialog_rect {kind, fallback:"root"}`
+   —— 没钮时直接取该 kind 的**可见根面板**矩形（`source:"root"`，`cx/cy` 给矩形中心），
+   探针在逐窗分支已默认带上，这 6 扇窗从此**也进对表**。
 2. `trade` 未取到：它在 manifest 的 `excluded` 里（单开不可达，需要对手方/服务端状态）。
 3. **按状态换图的窗**：`MountDialog` 面板随坐骑孔数在 `Prguse[167]`(324x377)/`Prguse[160]`(272x378)
    之间切（C# `SwitchType`），拿哪一张取决于角色状态——工具里登记为"任一命中即 OK"，

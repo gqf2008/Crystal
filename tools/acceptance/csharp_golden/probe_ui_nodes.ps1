@@ -234,7 +234,9 @@ try {
         foreach ($k in $kinds) {
             $openOk = (Rpc 'dialog' @{ kind = $k; action = 'open' })
             Start-Sleep -Milliseconds 350
-            $res["rect_$k"] = Rpc 'dialog_rect' @{ kind = $k }
+            # fallback='root'：无标准关闭钮的窗（menu/minimap/buff/refine/timer/chat_notice）
+            # 也返回**可见根面板**矩形，否则它们在逐窗几何对表里只能 SKIP。
+            $res["rect_$k"] = Rpc 'dialog_rect' @{ kind = $k; fallback = 'root' }
             $res["open_$k"] = $openOk
             if ($noClose -notcontains $k) {
                 $null = Rpc 'dialog' @{ kind = $k; action = 'close' }
@@ -245,7 +247,7 @@ try {
         foreach ($k in ($kinds | Where-Object { $noClose -contains $_ })) { $null = Rpc 'dialog' @{ kind = $k; action = 'close' } }
     } else {
         foreach ($k in ($RectKinds -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ })) {
-            $res["rect_$k"] = Rpc 'dialog_rect' @{ kind = $k }
+            $res["rect_$k"] = Rpc 'dialog_rect' @{ kind = $k; fallback = 'root' }
         }
     }
     $nodes = [ordered]@{}
