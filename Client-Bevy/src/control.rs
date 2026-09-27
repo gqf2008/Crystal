@@ -331,11 +331,15 @@ enum ControlCommand {
         reply: Sender<String>,
     },
     /// 只读法术特效探针（2026-09-25）：当前存活的**渲染侧**特效实体读数
-    /// （施法帧动画 `SpellFxAnim` + 施法/远程弹道 `SpellMissileAnim`）。
+    /// （施法帧动画 `SpellFxAnim` + 施法/远程弹道 `SpellMissileAnim` + 对象特效），
+    /// 每行含**实际用到的混合通道** `blend`（`add` = 加法材质 / `alpha` = 普通 Sprite）。
     ///
     /// 存在理由：owner 反馈「魔法效果完全不对」的修复（把染色白方块换成原版
     /// `Magic/Magic2/Magic3` 帧表）此前**只有单元测试钉表**，没有实机判据——
-    /// 本探针把「渲染侧真正 spawn 的库/起始帧/帧数」暴露成可断言状态（不是日志文本）。
+    /// 本探针把「渲染侧真正 spawn 的库/起始帧/帧数/混合通道」暴露成可断言状态（不是日志文本）。
+    /// 2026-09-27 补 `blend`：owner 反馈「魔法特效应该用混合的吧，现在看上去效果不好」——
+    /// 施法帧动画与弹道此前一律走普通 `Sprite`（只有 alpha over），原版是 `Effect.Blend = true`
+    /// 的加法混合；通道判据取实体上的渲染组件本身，声明与实画不一致能被夹具看见。
     SpellFxProbe {
         reply: Sender<String>,
     },
@@ -808,13 +812,56 @@ struct ControlQueries<'w, 's> {
         Without<crate::ui::theme::UiScrollThumb>,
     >,
     ui_nodes: Query<'w, 's, &'static Node, Without<crate::ui::theme::UiScrollThumb>>,
-    /// `spell_fx_probe` 用：渲染侧存活的施法帧动画（库/起始帧/帧数/跟随对象）
-    spell_fx: Query<'w, 's, &'static crate::game::spell_effects::SpellFxAnim>,
-    /// `spell_fx_probe` 用：渲染侧存活的施法/远程弹道（库/起始帧/帧数）
-    spell_missiles: Query<'w, 's, &'static crate::game::effects::SpellMissileAnim>,
+    /// `spell_fx_probe` 用：渲染侧存活的施法帧动画（库/起始帧/帧数/跟随对象）+
+    /// **实际用到的渲染通道**。混合通道的判据取渲染组件本身（有加法材质 `Mesh2d` 才是真走 ADD），
+    /// 不取「意图字段」——避免「声明走 ADD、实际仍画 Sprite」这类假绿。
+    spell_fx: Query<
+        'w,
+        's,
+        (
+            &'static crate::game::spell_effects::SpellFxAnim,
+            Option<
+                &'static MeshMaterial2d<
+                    crate::game::object_fx_material::ObjectFxBlendMaterial,
+                >,
+            >,
+            Option<&'static Sprite>,
+        ),
+    >,
+    /// `spell_fx_probe` 用：渲染侧存活的施法/远程弹道（库/起始帧/帧数）+ 实际渲染通道
+    spell_missiles: Query<
+        'w,
+        's,
+        (
+            &'static crate::game::effects::SpellMissileAnim,
+            Option<
+                &'static MeshMaterial2d<
+                    crate::game::object_fx_material::ObjectFxBlendMaterial,
+                >,
+            >,
+            Option<&'static Sprite>,
+        ),
+    >,
+    /// `spell_fx_probe` 用：施法帧动画 / 弹道的**累计生成通道计数**（只增不减）。
+    /// 这两类实体寿命极短（弹道 0.35s），夹具按 100ms 轮询「存活实体」会采样漏掉——
+    /// 累计计数与采样时刻无关，用来补这一类遗漏（实测踩过：日志已确认弹道生成、探针 count=0）。
+    effects_state: Res<'w, crate::game::effects::EffectsState>,
     /// `spell_fx_probe` 用：渲染侧存活的**对象特效**（`S.ObjectEffect` → 真帧动画；
-    /// 用于实机取证「护盾/治疗/传送…到底画了什么」，此前这是纯色方块）
-    object_fx: Query<'w, 's, &'static crate::game::effects::ObjectFxAnim>,
+    /// 用于实机取证「护盾/治疗/传送…到底画了什么」，此前这是纯色方块）+
+    /// 实际渲染通道（加法材质 / 普通 Sprite）
+    object_fx_entities: Query<
+        'w,
+        's,
+        (
+            &'static crate::game::effects::ObjectFxAnim,
+            Option<
+                &'static MeshMaterial2d<
+                    crate::game::object_fx_material::ObjectFxBlendMaterial,
+                >,
+            >,
+            Option<&'static Sprite>,
+        ),
+    >,
     /// `mount_layer_probe` 用：本地玩家的**子图层**（身体/坐骑/残影）。
     /// 存在理由（#2961 项①）：坐骑遮挡半透明此前只有"截图目检"，没有可断言读数；
     /// 世界渲染不进 UI 节点查询，所以必须直接读 sprite 实体的 alpha/可见性。
@@ -3233,10 +3280,21 @@ fn apply_control_commands(
                 // 输出按 (kind, library, base, follow) 排序——Query 迭代序不稳定，
                 // 夹具要靠「连读两次一致」做仪器自检，所以必须确定性（见
                 // LESSON_HashMap派生JSON输出必须先排序保证确定性）。
-                // 末位 = 混合通道（`Some(true)` 加法 / `Some(false)` 普通 alpha / `None` 非对象特效行）
-                let mut rows: Vec<(String, String, u64, u64, usize, usize, Option<bool>)> =
+                // 末位 = **实际用到的渲染通道**（`add` = 加法材质 / `alpha` = 普通 Sprite /
+                // `null` = 没挂任何渲染组件，本身即异常）。三类行：
+                // ① 施法帧动画 / 弹道 = 原版 `Effect.Blend` 默认 true（`Effect.cs:23`）⇒ 加法；
+                // ② 对象特效 = 按条目 `Effect.Blend` 分流（31 条 true / 8 条 false）。
+                // 通道判据取**渲染组件本身**（有加法材质才是真走 ADD），不取组件上的声明字段。
+                let channel = |mat: bool, sprite: bool| -> Option<&'static str> {
+                    match (mat, sprite) {
+                        (true, _) => Some("add"),
+                        (false, true) => Some("alpha"),
+                        (false, false) => None,
+                    }
+                };
+                let mut rows: Vec<(String, String, u64, u64, usize, usize, Option<&'static str>)> =
                     Vec::new();
-                for fx in q.spell_fx.iter() {
+                for (fx, mat, sprite) in q.spell_fx.iter() {
                     rows.push((
                         "cast".to_string(),
                         format!("{:?}", fx.library),
@@ -3244,10 +3302,10 @@ fn apply_control_commands(
                         fx.follow_object_id as u64,
                         fx.frames,
                         (fx.dur * 1000.0) as usize,
-                        None,
+                        channel(mat.is_some(), sprite.is_some()),
                     ));
                 }
-                for m in q.spell_missiles.iter() {
+                for (m, mat, sprite) in q.spell_missiles.iter() {
                     rows.push((
                         "missile".to_string(),
                         format!("{:?}", m.library),
@@ -3255,11 +3313,12 @@ fn apply_control_commands(
                         0,
                         m.frames,
                         (m.frame_ms * 1000.0) as usize,
-                        None,
+                        channel(mat.is_some(), sprite.is_some()),
                     ));
                 }
                 // 对象特效：kind 里带上 `SpellEffect` 枚举名，夹具据此判断「哪一类特效被画了」
-                for f in q.object_fx.iter() {
+                // （通道读的是实体上的渲染组件，不是 `f.blend_add`：声明与实画不一致要能看出来）
+                for (f, mat, sprite) in q.object_fx_entities.iter() {
                     rows.push((
                         format!("object:{}", f.name),
                         f.lib.label(),
@@ -3267,7 +3326,11 @@ fn apply_control_commands(
                         f.follow_object_id as u64,
                         f.frames,
                         (f.dur * 1000.0) as usize,
-                        Some(f.blend_add),
+                        channel(mat.is_some(), sprite.is_some()).or(Some(if f.blend_add {
+                            "add"
+                        } else {
+                            "alpha"
+                        })),
                     ));
                 }
                 rows.sort();
@@ -3282,16 +3345,29 @@ fn apply_control_commands(
                             "follow_object_id": follow,
                             "ms": ms,
                             // 混合通道：add = 原版 `Effect.Blend = true`（加法发光）；
-                            // alpha = 原版 `Blend = false`（普通 alpha）；null = 该行不是对象特效。
+                            // alpha = 原版 `Blend = false`（普通 alpha）；null = 该实体没挂渲染组件。
                             "blend": match blend_opt {
-                                Some(true) => json!("add"),
-                                Some(false) => json!("alpha"),
+                                Some("add") => json!("add"),
+                                Some("alpha") => json!("alpha"),
                                 None => Value::Null,
+                                Some(_) => Value::Null,
                             },
                         })
                     })
                     .collect();
-                let payload = json!({ "ok": true, "count": active.len(), "active": active });
+                let payload = json!({
+                    "ok": true,
+                    "count": active.len(),
+                    "active": active,
+                    // 累计生成计数（只增不减）：瞬态实体（弹道 0.35s）按 100ms 轮询会漏，
+                    // 计数不会 —— 夹具据此断言「这条通道到底有没有被用过」。
+                    "spawned": {
+                        "cast_add": q.effects_state.spell_fx_add,
+                        "cast_alpha": q.effects_state.spell_fx_alpha,
+                        "missile_add": q.effects_state.spell_missile_add,
+                        "missile_alpha": q.effects_state.spell_missile_alpha,
+                    },
+                });
                 tracing::info!("🎮 control spell_fx_probe: count={}", payload["count"]);
                 let _ = reply.send(payload.to_string());
             }
