@@ -260,9 +260,20 @@ def main():
         e = expr.strip()
         e = e.replace("Settings.ScreenWidth", "1024").replace("Settings.ScreenHeight", "768")
         e = e.replace("GameScene.Scene.NPCDialog.Size.Width", "440")  # NPCDialog Prguse[995] = 440x224
+        # `GameScene.Scene.MainDialog` = C# `MainDialogs.cs:35-40` 的底部 HUD 面板（1024 档是
+        # Prguse[1]，`Location.Y = ScreenHeight - Size.Height`）。**必须显式求值**：不认它就会被
+        # "其余符号名一律 0"静默吃成 0 —— 实测 `MenuDialog` 的 y 表达式（:3029）因此被算成
+        # `0 - 0 + 15 = 15`，把我方正确的 349 判成 DIFF。**假 DIFF 比 SKIP 更坏**：它会让人去"修"
+        # 本来就对的代码。
+        main_h = lib_header_size(os.path.join(a.data, "Prguse.Lib"), 1)
+        if main_h:
+            e = e.replace("GameScene.Scene.MainDialog.Location.Y", str(768 - main_h[1]))
+        e = e.replace("this.Size.", "Size.")  # C# `MirImageControl` AutoSize ⇒ 自身 Size = 背景图原生尺寸
         e = e.replace("Size.Width", str(size[0]) if size else "0")
         e = e.replace("Size.Height", str(size[1]) if size else "0")
-        e = re.sub(r"[A-Za-z_][\w\.]*", "0", e)  # 其余符号名一律 0（解不出的会被下面白名单挡掉）
+        # 其余符号名**不许当 0**：解不出就返回 None（诚实 SKIP）。把未知量当 0 会产出假 DIFF。
+        if re.search(r"[A-Za-z_]", e):
+            return None
         if not re.fullmatch(r"[\d\s\+\-\*/\(\)]+", e):
             return None
         try:
