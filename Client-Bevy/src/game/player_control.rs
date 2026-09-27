@@ -193,6 +193,22 @@ pub fn screen_to_world(screen: Vec2, cam_tf: &Transform, window: &Window) -> Vec
 }
 
 /// 演员命中盒（对齐 C# GameScene.MouseOver：按精灵身体矩形判定）。
+///
+/// 点击目标优先级：**地面物品在平局时也优先于演员**。
+///
+/// 为什么要有这条纯函数：地面物品同样挂 `NetObjectId + Transform`，一度被演员查询收进去
+/// （见 `left_click_interact_system` 的 `actors` 过滤）；同距离下旧判据 `item_d < actor_d`
+/// 为假 ⇒ 物品分支被跳过、落到"攻击 actor"分支 —— 实机就是「对着地上血瓶点一下，客户端发出
+/// 攻击那个 object_id」，物品永远捡不起来（owner：「血瓶怎么捡起来？」）。
+/// 过滤修好后平局几乎不会出现，但把优先级写死成函数，避免再次被"严格小于"这种细节坑到。
+pub(crate) fn click_prefers_item(item_d: Option<f32>, actor_d: Option<f32>) -> bool {
+    match (item_d, actor_d) {
+        (Some(i), Some(a)) => i <= a,
+        (Some(_), None) => true,
+        _ => false,
+    }
+}
+
 /// 以演员脚底锚点（tf.translation，Bevy y 向上）为基准：
 /// - 身体矩形：x ∈ [anchor.x-44, anchor.x+44]，y ∈ [anchor.y-16, anchor.y+128]
 ///   （精灵从脚底向上延伸约 2.7 格，脚下留 0.5 格容差）
@@ -482,7 +498,13 @@ fn left_click_interact_system(
         (Entity, &Transform, &mut ActorAnim),
         (With<LocalPlayer>, With<NetObjectId>),
     >,
-    actors: Query<(&NetObjectId, &Transform, Has<Npc>), Without<LocalPlayer>>,
+    // 2026-09-27 修复（owner：「血瓶怎么捡起来？」）：**必须排除地面物品**。
+    // 地面物品同样挂 `NetObjectId + Transform`，此前会被本查询当成"演员"收进 `best`：
+    // 于是同一个实体既进 `best`（距离 d）又进 `best_item`（距离 d），而物品分支的判据是
+    // `item_d < actor_d`（严格小于）⇒ **平局时物品分支被跳过**，落到下面"攻击 actor"分支，
+    // 实机表现就是「对着地上的血瓶点一下 → 客户端发出攻击那个 object_id」：
+    // 日志 `⚔️ 攻击目标 1929`（1929 正是那瓶血瓶的 object_id），玩家永远捡不起来。
+    actors: Query<(&NetObjectId, &Transform, Has<Npc>), (Without<LocalPlayer>, Without<GroundItem>)>,
     remote_players: Query<&NetObjectId, (With<crate::actor::Player>, Without<LocalPlayer>)>,
     items: Query<(&NetObjectId, &Transform), (With<GroundItem>, Without<LocalPlayer>)>,
     buttons: Query<(&UiButton, &InheritedVisibility)>,
@@ -580,7 +602,9 @@ fn left_click_interact_system(
     }
     if let Some((item_id, item_d)) = best_item {
         let actor_d = best.map(|(_, d)| d);
-        if actor_d.map(|d| item_d < d).unwrap_or(true) {
+        // 物品优先（含平局）——见 `click_prefers_item` 的说明：旧判据 `item_d < actor_d`
+        // 在"地面物品被演员查询重复收进 best"时必然为假，点击地面物品会变成攻击它。
+        if click_prefers_item(Some(item_d), actor_d) {
             let from_tile = world_to_tile(ptf.translation.x, ptf.translation.y);
             let item_tile = items
                 .iter()
@@ -1534,6 +1558,23 @@ fn npc_call_allowed(prev_id: Option<u32>, last_call: f32, now: f32, object_id: u
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 门禁：点击目标优先级 —— **地面物品在平局时也胜过演员**。
+    ///
+    /// 阳性对照（落地时实做）：把 `click_prefers_item` 的 `i <= a` 改回 `i < a`
+    /// → 本测试第一条断言立即红（复现 owner「对着地上血瓶点一下 → 攻击那个 object_id」）。
+    #[test]
+    fn click_prefers_item_on_tie() {
+        assert!(
+            click_prefers_item(Some(8.0), Some(8.0)),
+            "同距离时必须选地面物品（旧 `<` 判据在这里为假 → 物品分支被跳过 → 变成攻击物品）"
+        );
+        assert!(click_prefers_item(Some(8.0), Some(30.0)), "物品更近 → 物品");
+        assert!(!click_prefers_item(Some(30.0), Some(8.0)), "演员更近 → 演员");
+        assert!(click_prefers_item(Some(8.0), None), "只有物品 → 物品");
+        assert!(!click_prefers_item(None, Some(8.0)), "只有演员 → 演员");
+        assert!(!click_prefers_item(None, None), "都没有 → 不选");
+    }
 
     /// #2633 批次4 步4 R2：player_input_enabled 门控读 `StatusFlags`；实体未生成
     /// （single() 失败）默认放行 true，等价原 HudState 默认 dead/fishing/paralysis=false。
