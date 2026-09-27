@@ -391,34 +391,52 @@ fn spawn_pending_effects(
                 // **怪物**侧走的是 `MonsterObject.cs` 里另一张表（按「怪物图像索引 + 动作档位」
                 // 键控，见 `game::monster_projectiles`）——此前没移植，owner 反馈的「有些魔法是
                 // 个黄色方框」就是怪物远程攻击落到了下面的占位分支。
-                let monster_spec = if fx.is_none() {
-                    monster_ids
-                        .iter()
-                        .find(|(id, _)| id.0 == source_id)
-                        .and_then(|(_, appr)| {
-                            crate::game::monster_projectiles::monster_missile(
-                                appr.monster_type as i16,
-                                range,
-                            )
-                        })
-                } else {
-                    None
-                };
-                let frame_missile_spawned = match (fx, monster_spec) {
-                    (Some(m), _) => spawn_frame_missile(
-                        &mut commands,
-                        &mut libs,
-                        &mut images,
-                        &mut cache,
-                        &mut meshes,
-                        &mut fx_quad,
-                        &mut fx_mats,
-                        m,
-                        from,
-                        to,
-                    ),
-                    (None, Some(spec)) => match monster_missile_source(spec.lib) {
-                        Some(source) => spawn_frame_missile_from(
+                // 弹道取哪张表**按施放者的种类分**（2026-09-28 实机踩到并修正）：
+                //   · 怪物 → `MonsterObject.cs` 那张表（按「怪物图像索引 + 动作档位」键控，与 spell 无关）；
+                //   · 玩家/其他 → `PlayerObject.cs` 的 `range_missile(spell)`。
+                // 不能写成「`fx` 为空才查怪物表」：怪物远程攻击的包里 `spell` 常为 0，而 `range_missile(0)`
+                // 会命中玩家的 `DefaultArrow` ⇒ 怪物会被画成**玩家的箭**（实测：日志有
+                // `🏹 对象远程攻击`、弹道也生成了，但 `monster_missile_add` 一直是 0）。
+                let monster_spec = monster_ids
+                    .iter()
+                    .find(|(id, _)| id.0 == source_id)
+                    .and_then(|(_, appr)| {
+                        crate::game::monster_projectiles::monster_missile(
+                            appr.monster_type as i16,
+                            range,
+                        )
+                    });
+                let mut frame_missile_spawned = false;
+                let mut used_monster_table = false;
+                if let Some(spec) = monster_spec {
+                    match monster_missile_source(spec.lib) {
+                        Some(source) => {
+                            frame_missile_spawned = spawn_frame_missile_from(
+                                &mut commands,
+                                &mut libs,
+                                &mut images,
+                                &mut cache,
+                                &mut meshes,
+                                &mut fx_quad,
+                                &mut fx_mats,
+                                source,
+                                spec.base,
+                                spec.frames,
+                                spec.frame_ms,
+                                from,
+                                to,
+                            );
+                            used_monster_table = frame_missile_spawned;
+                        }
+                        // 本端没有该库的资产（如 `Siege`）：不静默——记日志后落回 `fx`/占位
+                        None => {
+                            debug!(monster = spec.monster, "怪物弹道库缺失：{:?}（退回占位）", spec.lib);
+                        }
+                    }
+                }
+                if !frame_missile_spawned {
+                    if let Some(m) = fx {
+                        frame_missile_spawned = spawn_frame_missile(
                             &mut commands,
                             &mut libs,
                             &mut images,
@@ -426,26 +444,17 @@ fn spawn_pending_effects(
                             &mut meshes,
                             &mut fx_quad,
                             &mut fx_mats,
-                            source,
-                            spec.base,
-                            spec.frames,
-                            spec.frame_ms,
+                            m,
                             from,
                             to,
-                        ),
-                        // 本端没有该库的资产（如 `Siege`）：不静默——记日志后落到下面的占位分支
-                        None => {
-                            debug!(monster = spec.monster, "怪物弹道库缺失：{:?}（退回占位）", spec.lib);
-                            false
-                        }
-                    },
-                    (None, None) => false,
-                };
+                        );
+                    }
+                }
                 if frame_missile_spawned {
                     state.spell_missile_add += 1;
                     // 怪物侧（`MonsterObject.cs` 那张表命中）单独记账：实机夹具按它取证
                     // 「黄色方块在怪物侧已被真帧弹道取代」（弹道只活 0.35s，累计计数才稳）
-                    if monster_spec.is_some() {
+                    if used_monster_table {
                         state.monster_missile_add += 1;
                     }
                 }
@@ -1711,7 +1720,19 @@ mod tests {
         ));
         {
             let mut msgs = world.resource_mut::<bevy::prelude::Messages<PendingEffect>>();
-            for source in [6001u32, 6002u32] {
+            // 6001 = 怪物表命中：**故意带 `fx = range_missile(0)`（= 玩家的 DefaultArrow）**——
+            // 实机就是这么翻车的：怪物远程攻击包里 `spell=0`，`range_missile(0)` 命中玩家的箭，
+            // 于是"表里命中"被 `fx` 抢先，弹道被画成玩家的箭、`monster_missile_add` 恒 0。
+            // 这条断言把「按施放者种类分表」钉住（阳性对照：改回 `if fx.is_none()` 即红）。
+            msgs.write(PendingEffect::ProjectileFromTo {
+                source_id: 6001,
+                destination_id: 6003,
+                color: [1.0, 1.0, 0.4],
+                fx: crate::game::spell_effects::range_missile(0),
+                spell: 0,
+                range: 1,
+            });
+            for source in [6002u32] {
                 msgs.write(PendingEffect::ProjectileFromTo {
                     source_id: source,
                     destination_id: 6003,
