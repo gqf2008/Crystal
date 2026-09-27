@@ -275,18 +275,26 @@ fn spawn_minimap(
     ));
 
     commands.entity(panel).with_children(|p| {
-        // 地图区域底色（深绿矩形，仅大模式显示）
-        spawn_container(p, MAP_RECT.0, MAP_RECT.1, MAP_RECT.2, MAP_RECT.3, 1).insert((
-            MiniMapMapArea,
-            BackgroundColor(Color::srgb(0.12, 0.16, 0.12)),
-            Visibility::Hidden,
-        ));
-        // 玩家位置点（C# 玩家为白点 4x4）
+        // 缩略图句柄容器：**必须带 `ImageNode`**——`minimap_map_image_system` 的查询是
+        // `(&mut ImageNode, &mut Node, &mut BackgroundColor, &mut Visibility) With<MiniMapMapArea>`，
+        // 缺 `ImageNode` 时该查询**一条都匹配不到**、循环体永不执行（无任何告警）⇒ 图区一直
+        // 停在 `Visibility::Hidden`、面板那块是**透的**（能看到世界），缩略图从来没画出来过。
+        // 2026-09-28 实测：`ui_nodes_at(960,76)` 命中图区节点 `vis=Hidden`，`minimap_probe`
+        // 报 `NoEntities`（当时的探针也带 `&ImageNode`，所以也查不到它）。
+        // 1x1 白图只是占位，真正的缩略图与子矩形由该系统按 C# `viewRect` 写入。
         let white = images.add(crate::map_renderer::make_image(
             vec![255, 255, 255, 255],
             1,
             1,
         ));
+        // 地图区域底色（深绿矩形，仅大模式显示；有缩略图时该系统会把底色置 NONE）
+        spawn_container(p, MAP_RECT.0, MAP_RECT.1, MAP_RECT.2, MAP_RECT.3, 1).insert((
+            MiniMapMapArea,
+            ImageNode::new(white.clone()),
+            BackgroundColor(Color::srgb(0.12, 0.16, 0.12)),
+            Visibility::Hidden,
+        ));
+        // 玩家位置点（C# 玩家为白点 4x4）
         spawn_image(p, white.clone(), MAP_RECT.0, MAP_RECT.1, 4.0, 4.0, 2)
             .insert((MiniMapPlayerDot, Visibility::Hidden));
         // 对象光点（最多 24 个，#120 C# MiniMap RadarTexture 2x2）
