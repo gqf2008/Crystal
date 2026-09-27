@@ -98,6 +98,9 @@ pub(crate) fn handle_world(
                 // 小地图缩略图索引（C# `MiniMap_BeforeDraw` 用 `map.MiniMap` 取 `Libraries.MiniMap`
                 // 的图；本端此前把这个字段整个丢掉 ⇒ 小地图只有一块写死的深绿底）。
                 game_data.minimap_index = p.minimap;
+                // 大地图索引（C# `MapInfo.BigMap`）：`BigMapViewPort.OnBeforeDraw` 从**同一套
+                // `mmap.Lib`** 取大图（`Libraries.MiniMap.Draw(map.BigMap, …)`），不是另画一张地形。
+                game_data.big_map_index = p.big_map;
                 server_events.write(ServerEvent::WeatherChanged { code: p.weather });
                 // 游戏内收到时必须用 set_if_neq：Bevy 0.19 的 NextState::set 对同态
                 // 也会真实重跑 OnExit+OnEnter（bevy_state 0.19.1 实测；只有

@@ -24,8 +24,8 @@ use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
 use crate::ui::sprite_ui::{shared_cjk_font, UiCjkFont, UiFont};
 use crate::ui::theme::{
-    load_lib_image, spawn_close_button, spawn_container, spawn_icon_button, spawn_label,
-    spawn_panel,
+    load_lib_image, spawn_close_button, spawn_container, spawn_icon_button, spawn_image,
+    spawn_label, spawn_panel,
 };
 
 /// #2892 批B：面板精灵与 C# 原生尺寸（C# `RelationshipDialog.Index = 583; Library = Libraries.Prguse`）
@@ -33,6 +33,45 @@ pub const PANEL: (LibraryName, usize) = (LibraryName::Prguse, 583);
 pub const PANEL_SIZE: (f32, f32) = (284.0, 194.0);
 /// 关闭键 `Prguse2[360..362]` @(260,3)（`RelationshipDialog.cs:38-47`，无 `Size` → 原生 24x21）
 pub const CLOSE_POS: (f32, f32) = (260.0, 3.0);
+/// 标题图 `Title[52]` @(18,8)（`RelationshipDialog.cs:30-36`）。
+///
+/// 2026-09-28 金标准 A/B（`tools/acceptance/csharp_golden/README.md` §3.2g）实测：
+/// 该带（面板内 y 8..23）原版帧有 439 个亮像素、本端只有 13 —— C# 有这张标题图、
+/// 本端整个控件漏了。图头 `Title[52]` = 109x15（C# 未写 `Size` ⇒ 原生尺寸）。
+pub const TITLE_POS: (f32, f32) = (18.0, 8.0);
+pub const TITLE_SIZE: (f32, f32) = (109.0, 15.0);
+/// 五个操作按钮的**原生**精灵尺寸（`Prguse[610/600/616/437/566]` 图头 = 28x25）。
+///
+/// C# 五个 `MirButton` 都不写 `Size` ⇒ `MirControl.Size = Library.GetTrueSize(Index)`
+/// = 28x25。本端旧值 24x22 会把精灵拉伸（A/B 逐像素看是插值色，且每颗钮多出
+/// 32x25 的差异块）。
+pub const ACTION_SIZE: (f32, f32) = (28.0, 25.0);
+/// 五个操作按钮的 Y（C# `RelationshipDialog.cs:54/67/89/111/133` 都是 164）
+pub const ACTION_Y: f32 = 164.0;
+/// 五颗操作钮的（X, normal, hover, pressed）：`RelationshipDialog.cs:50-139`——
+/// 600=求婚、610=切换婚配、616=离婚、437=邮件、566=私聊（Hint 见 `relationship_hint`）。
+pub const ACTION_BUTTONS: [(f32, usize, usize, usize); 5] = [
+    (50.0, 610, 611, 612),
+    (85.0, 600, 601, 602),
+    (120.0, 616, 617, 618),
+    (155.0, 437, 438, 439),
+    (190.0, 566, 567, 568),
+];
+/// `ACTION_BUTTONS` 的顺序（**判据用**：门禁按它钉住「哪颗钮在哪」，
+/// 免得以后调换精灵号/坐标时无人发现）
+const ACTION_ORDER: [RelationshipAction; 5] = [
+    RelationshipAction::Allow,
+    RelationshipAction::Propose,
+    RelationshipAction::Divorce,
+    RelationshipAction::Mail,
+    RelationshipAction::Whisper,
+];
+/// C# 信息行 `MirLabel` 是 `Location`(左上) + `Size.(200,30)` + `DrawFormat.VerticalCenter`
+/// ⇒ 文本**垂直居中在 30px 高的盒子里**，即文本中心 = `y + 15`。
+///
+/// 本端 `spawn_label` 是左上锚点、无垂直居中，实测文本高约 11px（A/B：本端文本行
+/// 41..51 / 66..75，C# 51..60 / 76..85）⇒ 顶边补偿 `(30 - 11) / 2 = 9.5`。
+pub const LINE_PAD_Y: f32 = 9.5;
 
 /// 婚姻状态
 #[derive(Resource, Default)]
@@ -202,9 +241,23 @@ fn spawn_relationship(
         {
             btn.insert(RelationshipClose);
         }
-        // C# 信息行 4 @(30,40/65/90/115)
+        // 标题图 Title[52] @(18,8)（`RelationshipDialog.cs:30-36` 的 `TitleLabel`）
+        if let Some(h) = load_lib_image(&mut libs, &mut images, LibraryName::Title, 52) {
+            spawn_image(
+                p,
+                h,
+                TITLE_POS.0,
+                TITLE_POS.1,
+                TITLE_SIZE.0,
+                TITLE_SIZE.1,
+                9,
+            );
+        }
+        // C# 信息行 4 @(30,40/65/90/115)：30px 高、VerticalCenter ⇒ 文本中心 = y+15，
+        // 本端 12px 字体顶边补 `LINE_PAD_Y`
         for (i, y) in [40.0, 65.0, 90.0, 115.0].into_iter().enumerate() {
-            spawn_label(p, &cjk, "", 30.0, y, 12.0, Color::WHITE, 9).insert(RelationshipLine(i));
+            spawn_label(p, &cjk, "", 30.0, y + LINE_PAD_Y, 12.0, Color::WHITE, 9)
+                .insert(RelationshipLine(i));
         }
         // 目标名输入框（TextInput id 13）@(30,140)，保留简化版求婚目标输入。
         spawn_container(p, 30.0, 140.0, 160.0, 20.0, 10)
@@ -233,28 +286,17 @@ fn spawn_relationship(
                     crate::game::dialogs::text_input::TextInputDisplay(13),
                 ));
             });
-        // C# 五个操作按钮：切换/求婚/离婚/邮件/私聊 @ x=50/85/120/155/190, y=164。
+        // C# 五个操作按钮：切换/求婚/离婚/邮件/私聊（`ACTION_BUTTONS`），y 恒 164。
         // #2775：Hint 取 C# `RelationshipDialog.cs:59/72/94/116/138`（精灵号与坐标一一对应）
-        let buttons = [
-            (
-                50.0,
-                610usize,
-                611usize,
-                612usize,
-                RelationshipAction::Allow,
-            ),
-            (85.0, 600, 601, 602, RelationshipAction::Propose),
-            (120.0, 616, 617, 618, RelationshipAction::Divorce),
-            (155.0, 437, 438, 439, RelationshipAction::Mail),
-            (190.0, 566, 567, 568, RelationshipAction::Whisper),
-        ];
-        for (x, normal, hover, pressed, action) in buttons {
+        for (i, &(x, normal, hover, pressed)) in ACTION_BUTTONS.iter().enumerate() {
+            let action = ACTION_ORDER[i];
             if let (Some(n), Some(h), Some(pr)) = (
                 load_lib_image(&mut libs, &mut images, LibraryName::Prguse, normal),
                 load_lib_image(&mut libs, &mut images, LibraryName::Prguse, hover),
                 load_lib_image(&mut libs, &mut images, LibraryName::Prguse, pressed),
             ) {
-                let mut e = spawn_icon_button(p, n, h, pr, x, 164.0, 24.0, 22.0, 10);
+                let mut e =
+                    spawn_icon_button(p, n, h, pr, x, ACTION_Y, ACTION_SIZE.0, ACTION_SIZE.1, 10);
                 e.insert(crate::ui::tooltip::UiHint {
                     text: relationship_hint(action).to_string(),
                 });
@@ -562,5 +604,54 @@ mod tests {
             crate::game::dialogs::center_origin(284.0, 194.0),
             (370.0, 287.0)
         );
+        // 面板 `Prguse[583]` 图头 284x194（C# `Index = 583` 无 Size ⇒ 原生）
+        assert_eq!(PANEL_SIZE, (284.0, 194.0));
+    }
+
+    /// 2026-09-28 金标准 A/B（README §3.2g）捞出的两处真缺口：
+    /// ① C# `TitleLabel`（`Title[52]` @(18,8)）整张漏画；② 五颗操作钮写死 24x22
+    /// 而美术原生是 28x25（`Prguse[610/600/616/437/566]`，C# 不写 `Size`）。
+    #[test]
+    fn relationship_title_and_action_buttons_match_csharp() {
+        assert_eq!(TITLE_POS, (18.0, 8.0), "C# `RelationshipDialog.cs:30-36`");
+        assert_eq!(
+            TITLE_SIZE,
+            (109.0, 15.0),
+            "`Title[52]` 图头（libextract 实测）"
+        );
+        assert_eq!(
+            ACTION_SIZE,
+            (28.0, 25.0),
+            "`Prguse[610]` 图头；旧值 24x22 会拉伸精灵"
+        );
+        assert_eq!(ACTION_Y, 164.0);
+        // 五颗钮的 X + 精灵号（C# `:50-139`）；顺序 = 切换/求婚/离婚/邮件/私聊
+        assert_eq!(
+            ACTION_BUTTONS,
+            [
+                (50.0, 610, 611, 612),
+                (85.0, 600, 601, 602),
+                (120.0, 616, 617, 618),
+                (155.0, 437, 438, 439),
+                (190.0, 566, 567, 568),
+            ]
+        );
+        assert_eq!(ACTION_ORDER.len(), ACTION_BUTTONS.len());
+    }
+
+    /// C# 四行信息是 `Location` + `Size(200,30)` + `VerticalCenter` ⇒ 文本中心 = `y + 15`；
+    /// 本端左上锚点 + 12px 字体（文本高约 11px）⇒ 顶边补 `(30 - 11) / 2 = 9.5`。
+    #[test]
+    fn relationship_line_vertical_centering_matches_csharp() {
+        assert_eq!(LINE_PAD_Y, 9.5);
+        // 逐行中心（本端）≈ C# 的 y + 15；容差 ±1px（字体行高取整）
+        for y in [40.0, 65.0, 90.0, 115.0] {
+            let ours_center = y + LINE_PAD_Y + 11.0 / 2.0;
+            assert!(
+                (ours_center - (y + 15.0)).abs() <= 1.0,
+                "y={y}: 本端中心 {ours_center} vs C# {}",
+                y + 15.0
+            );
+        }
     }
 }

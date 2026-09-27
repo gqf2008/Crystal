@@ -47,6 +47,81 @@ def diff_region(a, b, box):
     return n, total, (x0, y0, x1, y1)
 
 
+def diff_region_shifted(a, b, box, max_shift=1):
+    """同一块区域，允许把**我方帧**整块平移 ±max_shift 像素后再比，返回最小差异。
+
+    为什么需要：「居中窗」在 A/B 里会恒定偏 **+1px 横向**——C# `Center` 用
+    `(ScreenWidth - Width) / 2`，而原版侧取帧的客户区比 1024 宽 2px（⇒ 算出 381），
+    本端按 1024 算得 380。实测（2026-09-28，Friends）：我方 `dialog_rect rx=380 ry=248`
+    与 C# 公式逐值相同，但原版帧面板左边框在 x=381 —— 那是**取帧口径**，不是本端排版 bug。
+    显式坐标窗（Inventory/Equipment/Options/Group/Quests）位移扫描都是 dx=0。
+
+    返回 `(n, dx, dy)`：`n` = 平移后最小差异像素数，`(dx, dy)` = 取到最小的平移量。
+    """
+    x0, y0, w, h = box
+    x1, y1 = x0 + w, y0 + h
+    best = None
+    for dy in range(-max_shift, max_shift + 1):
+        for dx in range(-max_shift, max_shift + 1):
+            # ⚠️ 只能平移**一侧**：`diff_region(a, b, shifted_box)` 会把两边一起平移 ⇒
+            # 差异符号不变、等于没平移（第一版就是这么写的，扫描结果恒等于 raw）。
+            ca = a.crop((x0 + dx, y0 + dy, x1 + dx, y1 + dy))
+            cb = b.crop((x0, y0, x1, y1))
+            d = ImageChops.difference(ca, cb)
+            px = d.load()
+            n = 0
+            for y in range(d.height):
+                for x in range(d.width):
+                    if sum(px[x, y]) > 12:
+                        n += 1
+            if best is None or n < best[0]:
+                best = (n, dx, dy)
+    return best if best is not None else (0, 0, 0)
+
+
+def selftest() -> int:
+    """判据自检：① 纯 1px 平移必须被认成「口径」；② 真差异（整块 6px 平移）不许被认成口径。"""
+    import tempfile
+
+    from PIL import ImageDraw
+
+    tmp = tempfile.mkdtemp(prefix="golden_ab_diff_selftest_")
+    bad = 0
+
+    def mk(path, dx, dy):
+        im = Image.new("RGB", (120, 120), (0, 0, 0))
+        d = ImageDraw.Draw(im)
+        d.rectangle((10 + dx, 10 + dy, 60 + dx, 60 + dy), fill=(200, 180, 120))
+        d.rectangle((20 + dx, 20 + dy, 30 + dx, 30 + dy), fill=(255, 0, 0))
+        im.save(path)
+
+    a = os.path.join(tmp, "a.png")
+    b1 = os.path.join(tmp, "b1.png")
+    b6 = os.path.join(tmp, "b6.png")
+    mk(a, 0, 0)
+    mk(b1, 1, 0)
+    mk(b6, 6, 0)
+    ia, i1, i6 = (Image.open(p).convert("RGB") for p in (a, b1, b6))
+    box = (10, 10, 50, 50)
+    n_raw, _t, _r = diff_region(ia, i1, box)
+    n_shift, dx, _dy = diff_region_shifted(ia, i1, box, 1)
+    # 合成图把 `b` 相对 `a` 右移了 1px ⇒ 对齐要平移**一侧**；dx 的符号取决于取哪一侧平移，
+    # 判据只要求「量到 1px 平移且平移后差异归零」。
+    ok1 = n_raw > 0 and n_shift == 0 and abs(dx) == 1
+    print(f"  [{'PASS' if ok1 else 'FAIL'}] 纯 1px 平移：raw={n_raw} shifted={n_shift}(dx={dx})")
+    bad += 0 if ok1 else 1
+    n6_raw, _t6, _r6 = diff_region(ia, i6, box)
+    n6_shift, _dx6, _dy6 = diff_region_shifted(ia, i6, box, 1)
+    ok6 = n6_shift > 0 and n6_shift >= n6_raw * 0.5
+    print(f"  [{'PASS' if ok6 else 'FAIL'}] 真差异（6px 平移）：raw={n6_raw} shifted={n6_shift}（不许被 ±1 口径吃掉）")
+    bad += 0 if ok6 else 1
+    import shutil
+
+    shutil.rmtree(tmp, ignore_errors=True)
+    print("SelfTest PASS" if not bad else "SelfTest FAIL")
+    return 1 if bad else 0
+
+
 def _changed_vs_base(base_path, frame_path, box, scale):
     """该侧在自己那块区域**相对本侧基线**有没有变化（= 这一侧真的出了窗）。
 
@@ -65,10 +140,20 @@ def _changed_vs_base(base_path, frame_path, box, scale):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--shots", required=True)
-    ap.add_argument("--table", required=True)
+    # `--selftest` 不需要帧，所以这里不设 required，由下面的分支各自校验
+    ap.add_argument("--shots", default="")
+    ap.add_argument("--table", default="")
     ap.add_argument("--out", default="")
+    # 「居中窗 ±1px」口径（见 diff_region_shifted 的说明）：默认开；`--no-shift` 关掉
+    ap.add_argument("--max-shift", type=int, default=1)
+    ap.add_argument("--no-shift", action="store_true")
+    ap.add_argument("--selftest", action="store_true")
     a = ap.parse_args()
+    if a.selftest:
+        return selftest()
+    if not a.shots or not a.table:
+        print("FAIL(前置)：--shots 与 --table 必填（或 --selftest 只跑判据自检）", file=sys.stderr)
+        return 2
 
     pairs = json.load(open(os.path.join(a.shots, "ab_windows.json"), encoding="utf-8"))
     rects = rects_from_table(a.table)
@@ -85,6 +170,7 @@ def main():
     for p in pairs:
         kind = p.get("kind")
         orig, ours = p.get("orig"), p.get("ours")
+        shift_note = ""
         if not orig or not ours or not (os.path.exists(orig) and os.path.exists(ours)):
             print(f"{p.get('action',''):16s} {kind or '-':22s} {'(缺帧)':>22s} {'-':>10s} {'-':>7s}  SKIP")
             continue
@@ -110,6 +196,16 @@ def main():
                    int(round(sw * scale)), int(round(sh * scale)))
             n, total, r = diff_region(ia, ib, box)
             tag = "OK" if n == 0 else "DIFF"
+            shift_note = ""
+            # 平移口径：把差异里「整体 ±1px 平移就能消掉」的那部分单独列出来。
+            # 判据（对齐 §3.2f 的实测）：平移后差异降到 0.5% 以下 ⇒ 这一行算**取帧口径**，
+            # 不是窗内绘制缺陷；只降到"好一些"则仍按真实差异对待，但把读数打出来供判断。
+            if not a.no_shift and n > 0:
+                n_shift, sdx, sdy = diff_region_shifted(ia, ib, box, a.max_shift)
+                if n_shift == 0 or n_shift / max(total, 1) < 0.005:
+                    tag = f"口径(±{a.max_shift}px 平移, dx={sdx} dy={sdy})"
+                elif n_shift < n * 0.6:
+                    shift_note = f" 平移后={n_shift}({100.0 * n_shift / max(total, 1):.1f}%, dx={sdx} dy={sdy})"
         # 单边是否真的出了窗（与自己那侧基线在该区域比）
         o_chg = _changed_vs_base(base_orig, orig, r, scale)
         m_chg = _changed_vs_base(base_ours, ours, r, 1.0)
@@ -128,9 +224,10 @@ def main():
             tag = "不可比(缺基线)"
         pct = 100.0 * n / max(total, 1)
         print(f"{p.get('action',''):16s} {kind or '-':22s} {str(r):>22s} {n:>10d} {pct:>6.1f}%  {tag}"
-              f"   [原版出窗={o_chg} 我方出窗={m_chg}{manifest_note}]")
+              f"   [原版出窗={o_chg} 我方出窗={m_chg}{manifest_note}{shift_note}]")
         results.append(dict(p, region=r, changed=n, total=total, pct=round(pct, 3), tag=tag,
-                            orig_rendered=o_chg, ours_rendered=m_chg))
+                            orig_rendered=o_chg, ours_rendered=m_chg,
+                            shift_note=shift_note.strip()))
     if a.out:
         json.dump(results, open(a.out, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
         print("wrote", a.out)

@@ -295,7 +295,64 @@ pwsh tools\acceptance\csharp_golden\golden_ab_ours.ps1 -SandboxRoot $env:TEMP\go
 |---|---|---|
 | **Friends** | 25.6% | **两件事叠加（2026-09-28 修其一）**：① **真缺口——本端好友窗缺翻页条**（原版 `FriendDialog.cs:70-118`：`PageNumberLabel` (87,216) 83x17 居中、上一页 `Prguse2[240/241/242]` @(70,218) 16x16、下一页 `Prguse2[243/244/245]` @(171,218) 16x16），本端 `friend.rs` 全文搜 `page/arrow/翻页` 零命中；**已修**（PR #3320：补翻页条 + 列表改回 C# 的 `FriendRow[12]` 两列格子 `((i%2)*115+16, 55+(i/2)*22)`、行尺寸 (115,17)，并补两条门禁 + 阳性对照）。② **残余不是产品缺陷**：修后那 25.6% 几乎不变 ⇒ 主导项是**整体 +1px 的横向偏移**（把原版帧按 dx=1 采样，差异从 18383 掉到 4783 像素），而**我方窗口矩形实测 `dialog_rect kind=friend → rx=380 ry=248 rw=264 rh=272`，与 C# `Center`（(1024-264)/2, (768-272)/2）逐值相同**；逐像素看原版面板左边框在 x=381、我方在 x=380，且两边的边框色序完全一致（同图 +1px）。对照：显式坐标窗口（Inventory/Equipment/Options/Group/Quests/Ranking）的位移扫描都是 dx=0 ⇒ 只有**居中窗**在这一对帧里偏 1px，最可能是**原版侧取帧的客户区宽度比 1024 宽 2px**（C# `Center` 于是算出 381），属**A/B 取帧口径**问题，不是本端排版 bug。**待办**：给逐窗对拍加「居中窗允许 ±1px 平移」或把原版取帧改成真实客户区，之后再看这批窗的真实差异。 |
 | Help / Keybind | 87.6% / 26.6% | 非缺陷：键位表**语言与条目**不同（我方中文动态生成 vs 原版英文固定清单），窗口矩形/控件位置一致（§3.2c 已记）。 |
-| Relationship / Ranking / GameShop / Bigmap | 22.2% / 10.6% / 29.6% / 63.3% | **待逐条定性**（注意 `RankingDialog.cs` 与 `GameshopDialog.cs` 也都有 `PageNumberLabel` 一类的翻页控件，`TrustMerchantDialog.cs`/`HelpDialog.cs`/`MailDialogs.cs`/`IntelligentCreatureDialogs.cs`/`CharacterDialog.cs` 同理——**排查时先按这条线核"本端有没有翻页条"**，Friends 就是这么捞出来的）。 |
+| Relationship / Ranking / GameShop / Bigmap | 22.2% / 10.6% / 29.6% / 63.3% | **已定性，见 §3.2g**（注意 `RankingDialog.cs` 与 `GameshopDialog.cs` 也都有 `PageNumberLabel` 一类的翻页控件，`TrustMerchantDialog.cs`/`HelpDialog.cs`/`MailDialogs.cs`/`IntelligentCreatureDialogs.cs`/`CharacterDialog.cs` 同理——**排查时先按这条线核"本端有没有翻页条"**，Friends 就是这么捞出来的）。 |
+
+### 3.2g 「翻页条」线索套到 Relationship / Ranking / GameShop / Bigmap（2026-09-28）
+
+判据/配方同 §3.2c–§3.2f（原版侧 `golden_kbd_windows.ps1` 键位开窗；我方侧
+`golden_ab_ours.ps1 -User goldenchr --ui-scale 1`；`golden_ab_diff.py` 逐窗占比 + 位移扫描）。
+**本轮为了少看整图，把「差异块图」做成数值化输出**：把窗口矩形按 8x8 分块、逐块数差异像素，
+打成五档 ASCII（`#` >32、`+` >16、`:` >4、`.` >0、空格 0）；定位到可疑带之后再上
+**子区差异计数**（视口内/外）、**逐行亮像素直方图**（>90 灰度的像素数）与**单像素色值采样**。
+这三样足够区分「几何/尺寸差」「画源差」与「数据差」，全程不必打开整幅 PNG。
+
+**一、对表：C# 有没有翻页条 vs 本端有没有**
+
+| 窗口 | C# 侧翻页/滚动控件（`Client/MirScenes/Dialogs`） | 本端 | 线索结论 |
+|---|---|---|---|
+| Relationship | **无翻页条**（`RelationshipDialog.cs` 全文无 `PageNumberLabel/PreviousButton/NextButton`；只有 5 颗操作钮） | 无 | 不适用 |
+| Ranking | **无** `PageNumberLabel`；是 `PrevButton Prguse2[197..199]@(299,100)` + `NextButton [207..209]@(299,386)` + `ScrollBar [205/206]@(299,113)`（`:132-168`） | 三件套齐（`ranking.rs:439-495`） | 无缺口 |
+| GameShop | `PageNumberLabel` 83x17@(597,446) + `PreviousButton Prguse2[240..242]@(600,448)` + `NextButton [243..245]@(660,448)`（`:379-424`）；分类列另有一对 `[197..199]@(120,103)` / `[207..209]@(120,421)` + `PositionBar [205/206]@(120,117)`（`:99-155`） | **全有**（`game_shop.rs:283-293/1160-1381`，`PositionBar` 位置也是 (120,117)） | 无缺口 |
+| Bigmap | **无翻页条**；`ScrollUp [197..199]@(W-21,48)` + `ScrollDown [207..209]@(W-21,417)` + `ScrollBar [205/206]@(W-21,61)`（`:101-147`） | **全有**，尺寸按图头 12x12 | 不适用 |
+
+⇒ 这条线索**只对 Friends 有效**（`FriendDialog.cs` 有翻页三件套、本端零命中）。四扇窗里
+`Ranking/GameShop` 本来就有（GameShop 连 `PositionBar` 位置都对），`Relationship/Bigmap`
+C# 就没有翻页条。**不能照抄 Friends 的修法**——顺着 A/B 的数值化输出，这四扇窗真正的差异是下面三类。
+
+**二、真缺口（已修，本 PR）**
+
+| 窗口 | 缺口 | 数值证据 |
+|---|---|---|
+| Relationship | 缺 C# `TitleLabel` = `Title[52]` @(18,8) 109x15（`RelationshipDialog.cs:30-36`） | 该带（面板内 y 8..23）原版帧 **439** 个亮像素 / 本端 **13**（≈没画） |
+| Relationship | 5 颗操作钮写死 `24x22`，美术原生是 `Prguse[610/600/616/437/566]` = **28x25**（C# 不写 `Size` ⇒ 取图头） | 单颗钮在 A/B 里是 **32x25** 的差异块；逐像素看本端是插值色（精灵被拉伸） |
+| Relationship | 四行信息缺**垂直居中**：C# 是 `Size(200,30)` + `DrawFormat.VerticalCenter`（文本中心 = `y + 15`），本端左上锚点 | 逐行亮像素直方图：本端文本行 41..51 / 66..75，C# 51..60 / 76..85（偏上 ~9.5px） |
+| Bigmap | 视口画源：原版 `BigMapViewPort.OnBeforeDraw` 画 **`Data/mmap.Lib` 里的 `MapInfo.BigMap` 那张大图**，缩放进 `min(568,W) x min(380,H)` 居中铺满（`BigMapDialog.cs:642-676`）；本端画的是**按瓦片采样自造的地形纹理** | 视口矩形内差异 **207271/215840（96%）**；把原版帧视口与 `mmap.Lib[101]`（沙箱 DB 的 `BigMap`，1052x700 → 568x380 bilinear）逐像素比，**一致率 98.3%**（NEAREST 97.0%）⇒ 原版画的就是这张图 |
+
+**三、数据/状态差（不是绘制缺陷，别去改代码）**
+
+- **Ranking**：行区 20 行的亮像素数 **原版 27 / 本端 7567** —— 原版那份沙箱 DB 的排行榜是**空的**
+  （本端有 20 行）。四列（rank/name/class/level）全差、连 rank 列也一样，是内容差不是排版差。
+- **GameShop**：两侧 `GameShopList`/分类表不同源（各自 DB），商品格与分类行本来就该不同。
+  窗口 chrome 与翻页条的位置/帧号一致（表一已核）。
+
+**四、刻意偏离（**别当缺陷修**）**
+
+- **滚动条轨道/滑块**：本端 `spawn_scroll_bar_ui` 画的是**半透明黑轨道 + 浅色滑块**，而 C# 对应控件
+  只是一个 `Prguse2[205]` 手柄精灵（Ranking `:158-168`、GameShop `PositionBar :143-155`）。
+  这是 2026-09「好多窗口滚动条好像都没实现」之后落地的实现，有实机验收记录
+  （`tools/acceptance/UI_VERIFICATION_REPORT.md` 项 5 / #2968 #2978：滑块高按行数比例、拖动与滚轮
+  都改 `offset`）。**它不是 Friends 那类"自造交互"**——删掉会把已验证的滚动能力一起删掉。
+- **婚姻窗目标名输入框**：本端协议 `MarriageRequestWire` 带 `target_name`（C# `C.MarriageRequest`
+  是**空包**、由服务端选目标），输入框是协议扩展的必然产物，不动。
+- **居中窗 ±1px**：同 §3.2f（`--max-shift` 口径，不是本端排版 bug）。
+
+**五、残留（未修，留作队列）**
+
+- Bigmap 的 `BigMap <= 0` 守卫：C# `Show()` 直接返回（**连窗都不开**，`BigMapDialog.cs:288-289`），
+  本端无该守卫；本端在 `BigMap == 0` 或 `mmap.Lib` 缺该索引时**回落地形渲染**（＝本端旧行为，
+  不是 C# 行为）。收口前要先定"没大图的地图按 B 该弹什么提示"。
+- Relationship 四行**文案**仍是本端自造中文，C# 走 `ClientTextKeys.LoverName/MarriageDate/…`
+  模板（语言/条目差一类，同 §3.2c 的 Help/Keybind）。
 
 ## 3.3 逐窗几何对表（不需要原版交互，2026-09-26 起）
 
