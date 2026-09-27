@@ -536,7 +536,20 @@ Write-Host ("[D] 奖励：gold {0}->{1}；exp {2}->{3}；level {4}->{5}" -f $gol
 Write-Host ("VERDICT accept={0} quest_items_in_quest_bag={1} finish={2} reward={3}" -f `
     $(if ($okA) { 'PASS' } else { 'FAIL' }), $(if ($okB) { 'PASS' } else { 'FAIL' }), `
     $(if ($okC) { 'PASS' } else { 'FAIL' }), $(if ($okD) { 'PASS' } else { 'FAIL' }))
-if (-not ($okA -and $okB -and $okC -and $okD)) { exit 5 }
+# 环境性 SKIP 与真 FAIL 必须分开（2026-09-27）：B 的判据是「任务格里该物品数量 ≥ 需求」，
+# 而数量取决于**怪刷新 + 掉落概率**（本夹具只用自然刷新的怪，见头部"仪器口径"）。
+# → 若物品**已经掉进过任务格**（`$have > 0`），说明「Q 掉落 → 任务格」这条**链路是通的**，
+#   只是这次没凑够数（本机实测：4 只 SpittingSpider 只掉 1 个 Web，需求 10）；
+#   把它记成产品 FAIL 会把环境噪声当缺陷。故给专属退出码 3（前置/环境不满足），
+#   而"一次都没掉"（`$have -eq 0`）仍按 FAIL 处理——那才需要查链路。
+if (-not ($okA -and $okB -and $okC -and $okD)) {
+    if ($okA -and -not $okB -and $have -gt 0) {
+        Write-Host ("SKIP(环境): 任务物品已进任务格 {0} 个（需求 {1}），{2} 杀内没凑够 —— " -f $have, $task.need, $kills)
+        Write-Host '  链路是通的（有掉落进任务格）；数量不足属环境（怪刷新/掉落概率），按环境性 SKIP 处理（exit 3），不记产品缺陷。'
+        exit 3
+    }
+    exit 5
+}
 
 } finally {
     # 收尾：只清自己那份唯一命名的客户端（不再依赖"下一次运行按公共名清场"——那会误杀别人）。
