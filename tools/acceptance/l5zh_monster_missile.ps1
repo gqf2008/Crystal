@@ -1,21 +1,14 @@
-# ⛔ **PENDING（未跑绿，故意不合入门禁；按本仓约定改名 `.pending.ps1`）**
-#
-# 阻塞（2026-09-28 实测两条 GM 命令都走不通）：`@MOB` / `@RECALLMOB` 在本端**只广播 spawn 包、
-# 不建服务端实体**（`world::spawn_monster_named` 里只有 `build_object_monster_packet` + 广播，
-# 没有插入 `self.monsters`）⇒ 召唤出来的怪是"客户端幽灵"，**永远不会有 AI、不会攻击**。
-# 实测：`@MOB AxeSkeleton` 后客户端确实收到 `🌐 网络对象生成完成: 1 个`，但 40s 内
-# `spell_fx_probe.spawned.monster_missile_add` 一直是 0（`🏹 对象远程攻击` 日志也没有）。
-# 另有第二个前置：出生点 (288,616) 一带是**安全区**（`safe_zones`: map 1, (288,616), size 10），
-# 安全区里不打斗；而 `walk_to 300,650` 只把我们带到 (280,615)（路被挡/目标不可达）。
-#
-# 要跑绿这条，需要其中之一：
-#   ① 走到**有真实刷怪**的地图（OmaCave 的 AxeSkeleton 就在 `BichonProvince/OmaCave/` 刷）；
-#   ② 或先补服务端：`@MOB`/`@RECALLMOB` 建真实怪物实体 + AI（C# 原版是真实召唤）——那是另一条线；
-#   ③ 或走 mock 路径（像 `l5r_ranged_projectile.ps1` 那样让夹具自己造 `S.ObjectRangeAttack`），
-#      但那需要客户端世界里先有一只带 `MonsterAppearance` 的怪实体。
-# 在此之前，本文件的判据（下）只作配方留档，**不要**当覆盖证据。
-#
 # l5zh_monster_missile.ps1 —— 真机：怪物远程攻击用**原版表**的帧弹道（owner 反馈「有些魔法是个黄色方框」）
+#
+# 两个**必须踩对的前置**（2026-09-28 实测，都踩过一遍）：
+#   ① `@MOB` 召唤出的怪是**真实服务端实体**（`world::spawn_monster_named` 会插 `self.monsters`
+#      + `ai_profile` + `behavior`）——所以"召唤物不攻击"不是服务端缺实体，先别往那儿查；
+#   ② 但**出生点 (288,616) 一带是安全区**（`safe_zones`: map 1, (288,616), size 10），安全区不打斗，
+#      而 `walk_to 300,650` 会被挡在镇内 (280,615)。夹具默认用 GM 的 `@mapmove 0 250 500` 把角色
+#      挪到安全区外（`-MapMove` 可改；非 GM 账号请改用 `-WalkX/-WalkY` 走真实寻路）。
+#   ③ 曾经"日志有 `🏹 对象远程攻击` 但 `monster_missile_add` 恒 0"的真根因在**客户端**：
+#      怪物远程攻击包里 `spell=0`，而 `range_missile(0)` 命中玩家的 `DefaultArrow`，
+#      于是"怪物表"被 `fx` 抢先 ⇒ 怪物被画成玩家的箭。已修为「按施放者种类分表」并补进单测。
 #
 # 判据（只读探针，不看截图；弹道只活 0.35s，所以取**累计**计数）：
 #   A) 前置：`@MOB AxeSkeleton` 之后世界出现该怪（只读 `state`/日志，不用猜）；
@@ -36,6 +29,9 @@ param(
     # 安全区里怪物不会攻击玩家（实测 45s 一发都没有）。所以先用玩家路径走到安全区外再召唤。
     [int]$WalkX = 300,
     [int]$WalkY = 650,
+    # 更省事的一条：GM 角色的 `@mapmove <地图索引> <x> <y>`（金标准 A/B 一直用它对齐坐标）。
+    # 非空时优先用它把角色挪到安全区外（实测 `walk_to` 会被挡在镇内）。
+    [string]$MapMove = '0 250 500',
     [int]$WaitSeconds = 45
 )
 $ErrorActionPreference = 'Continue'
@@ -73,15 +69,22 @@ try {
     foreach ($i in 1..90) { Start-Sleep 1; try { $st = Rpc 'state'; if ($null -ne $st.tile_x) { break } } catch {} }
     if ($null -eq $st.tile_x) { Write-Host ("FAIL(9): 90s 未进图（日志尾：" + ((Get-Content $err -Tail 3 -EA SilentlyContinue) -join ' | ') + "）"); exit 9 }
     Write-Host ("[前置] 进场 map={0} tile=({1},{2}) 账号={3}" -f $st.map, $st.tile_x, $st.tile_y, $User)
-    # 走出安全区（`walk_to` 是玩家验收能力，走真实寻路）
-    Rpc 'walk_to' @{ tx = $WalkX; ty = $WalkY; run = $true } | Out-Null
-    $pos = $null
-    foreach ($i in 1..30) {
-        Start-Sleep 1
+    # 走出安全区：GM 走 `@mapmove`（快且确定）；没有 GM 时退化为 `walk_to`（可能被挡在镇内）
+    if ($MapMove) {
+        Rpc 'chat' @{ message = "@mapmove $MapMove" } | Out-Null
+        Start-Sleep -Seconds 4
         $pos = Rpc 'state'
-        if ($null -ne $pos.tile_x -and [Math]::Abs($pos.tile_x - $WalkX) -le 2 -and [Math]::Abs($pos.tile_y - $WalkY) -le 2) { break }
+        Write-Host ("[前置] @mapmove {0} → tile=({1},{2})" -f $MapMove, $pos.tile_x, $pos.tile_y)
+    } else {
+        Rpc 'walk_to' @{ tx = $WalkX; ty = $WalkY; run = $true } | Out-Null
+        $pos = $null
+        foreach ($i in 1..30) {
+            Start-Sleep 1
+            $pos = Rpc 'state'
+            if ($null -ne $pos.tile_x -and [Math]::Abs($pos.tile_x - $WalkX) -le 2 -and [Math]::Abs($pos.tile_y - $WalkY) -le 2) { break }
+        }
+        Write-Host ("[前置] 走出安全区：tile=({0},{1})（目标 ({2},{3})）" -f $pos.tile_x, $pos.tile_y, $WalkX, $WalkY)
     }
-    Write-Host ("[前置] 走出安全区：tile=({0},{1})（目标 ({2},{3})）" -f $pos.tile_x, $pos.tile_y, $WalkX, $WalkY)
     $before = Rpc 'spell_fx_probe'
     # 计数在 `spawned` 子对象里（探针返回 {ok,count,active,spawned{...}}）
     Write-Host ("[前置] 探针基线：monster_missile_add={0} fallback_placeholder={1}" -f $before.spawned.monster_missile_add, $before.spawned.fallback_placeholder)
