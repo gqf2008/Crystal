@@ -427,6 +427,15 @@ if ($QuestId -eq 0) {
                 continue
             }
         }
+        # 2026-09-27：候选**还要有 Q 掉落来源**——否则会在下面 440 行的守卫上整轮 FAIL 退出
+        #（实测：池序首位 quest 52 的物品 `CannibalLeaf` 没有任何 Q 掉落来源，整轮白跑 16 秒就结束）。
+        # 与上面几条（NPC 链接 / 等级 / 前置）同类，属"夹具侧先判掉"，不是产品缺陷。
+        $t = QuestItemTasks $q
+        if ($t.Count -eq 0 -or -not (QDropFor $t[0].name)) {
+            Write-Host ("[0] 跳过 quest {0}：物品 {1} 没有 Q（任务物品）掉落来源" -f `
+                $q, $(if ($t.Count) { $t[0].name } else { '(无 ItemTasks)' }))
+            continue
+        }
         $QuestId = $q
         break
     }
