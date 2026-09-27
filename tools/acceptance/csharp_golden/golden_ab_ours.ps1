@@ -8,6 +8,13 @@ param(
     [int]$Port = 9105,
     [int]$MapX = 278,
     [int]$MapY = 609,
+    # 2026-09-27 加：账号/密码可传。首次完整跑通时发现**逐窗差异的主项是"角色状态"**（原版是全新
+    # 1 级女道士：空背包/无宠物/无行会/无坐骑/无技能；我方当时用的高等级角色 51/51 格满、5 只宠物、
+    # 已在测试行会）——原版侧那几扇窗直接弹 MirMessageBox（"You do not own any creatures."），
+    # 于是 diff 98% 全是状态差。要出**可判的绘制差异**必须先把状态对齐：用这个参数指向一个
+    # 与金标准同职业/同等级/同空背包的测试角色再跑同一条链。
+    [string]$User = 'test',
+    [string]$Password = '123456',
     # 原版帧恒 1024x768@scale1；我方默认跟系统 DPI（本机 1.5）⇒ 传 1 让两边同尺度，
     # 否则逐窗 diff 的主项是重采样噪声（见 `--ui-scale` 的注释）。
     [string]$UiScale = '1'
@@ -36,7 +43,7 @@ catch { Copy-Item -LiteralPath $exeSrc -Destination $exe -Force }
 $log = Join-Path $env:TEMP 'golden_ab_ours.err.log'
 $scaleArgs = if ($UiScale) { @('--ui-scale', $UiScale) } else { @() }
 Start-Process -FilePath $exe `
-    -ArgumentList (@('--real-net','--auto-enter','--e2e-user','test','--e2e-pass','123456','--control-port',"$Port") + $scaleArgs) `
+    -ArgumentList (@('--real-net','--auto-enter','--e2e-user',$User,'--e2e-pass',$Password,'--control-port',"$Port") + $scaleArgs) `
     -WorkingDirectory "$ClientHome\Client-Bevy" `
     -RedirectStandardOutput (Join-Path $env:TEMP 'golden_ab_ours.out.log') -RedirectStandardError $log | Out-Null
 
