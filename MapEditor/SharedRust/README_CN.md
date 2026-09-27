@@ -1,5 +1,19 @@
 # SharedRust - Crystal游戏引擎共享库 (Rust版本)
 
+> ## ⚠️ 作用域声明 —— 不要把这份副本当协议真源
+>
+> **本目录是仓库根 `SharedRust` 的「陈旧且已部分分叉」的副本**，存在的唯一理由是
+> `MapEditor/rust-map-editor` 声明了 `mir2_shared = { path = "../SharedRust", features = ["client-parse"] }`，
+> 而它实际只用到**少量数据类型与枚举**——实际是 `mir2_shared::Point` 与
+> `mir2_shared::enums::MirAction`（见 `rust-map-editor/src/{map_code,mlibrary,frames}.rs`）。
+>
+> * **不承诺与主份同步**。2026-09-27 实测：本副本 `src/packets/server/user.rs` 与主份相差 23 insertions / 377 deletions。
+> * **不要在这里加协议代码**（包、编解码、客户端/服务端线格式）。协议真源在**仓库根 `SharedRust`**——
+>   `Client-Bevy` 与 `ServerRust` 真正构建依赖的那一份；仓库 `AGENTS.md` 明确「协议以 Rust 客户端+服务端自洽为准」。
+> * 若缺某个类型，优先把地图编辑器改成依赖**根** `SharedRust`（路径深度允许的话），而不是往这份副本里继续抄。
+> * 本 crate **不在 CI 里构建**；`MapEditor/rust-map-editor/build.ps1` 里的路径在本机甚至指向不存在的目录，
+>   所以它今天不是一个可直接构建的入口。
+
 > Legend of Mir 游戏服务器/客户端共享协议库的Rust实现
 
 ## 🚀 快速开始
