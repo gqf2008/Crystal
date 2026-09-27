@@ -33,7 +33,11 @@ try {
     if (-not (Test-Path $exeSrc)) { Write-Host "FAIL(9): 找不到客户端 $exeSrc"; exit 9 }
     $exe = Join-Path (Split-Path -Parent $exeSrc) 'l5ad_client.exe'
 . "$PSScriptRoot\build_stamp.ps1"   # 构建戳前置：不许对着旧产物下结论（见 LESSON_运行目标分支e2e前需重建二进制）
-Assert-ClientBuildStamp -Exe $exe -ScriptName 'l5ad_rightclick_move'
+# 2026-09-27 修：构建戳必须断言**规范 exe**（`$exeSrc`），不能断言 `$exe`——后者是**下面才创建**的
+# 唯一命名硬链接副本，断言时它还不存在 ⇒ 夹具永远报「被测 exe 里没有构建戳（旧产物）」而跑不起来
+# （实测：client_bevy.exe 戳正常 ddd6e57f2 dirty=0，l5ad_client.exe 却报无戳/不存在）。
+# 断言规范 exe 与断言副本等价（同一份文件内容），且不受创建顺序影响。
+Assert-ClientBuildStamp -Exe $exeSrc -ScriptName 'l5ad_rightclick_move'
     Get-CimInstance Win32_Process -Filter "Name='l5ad_client.exe'" -EA SilentlyContinue |
         ForEach-Object { Stop-Process -Id $_.ProcessId -Force -EA SilentlyContinue }
     try { New-Item -ItemType HardLink -Path $exe -Target $exeSrc -Force -ErrorAction Stop | Out-Null }
