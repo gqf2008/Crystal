@@ -39,6 +39,10 @@ pub enum PendingEffect {
         fx: Option<crate::game::spell_effects::MissileFx>,
         /// 该次弹道对应的法术 id（0 = 普通弓射/无技能）
         spell: u8,
+        /// 远程攻击的动作档位（1/2/3 = C# `MirAction.AttackRange1/2/3`；
+        /// 非 ObjectRangeAttack 的调用方填 1）。**怪物**远程攻击的弹道表按
+        /// 「怪物图像索引 + 动作档位」键控（见 `game::monster_projectiles`）。
+        range: u8,
     },
     /// 地图坐标特效：在指定世界坐标生成爆炸（#230 MapEffect）
     BurstAt { x: f32, y: f32, color: [f32; 3] },
@@ -109,10 +113,14 @@ pub(crate) fn spell_is_known(spell: u8) -> bool {
 }
 
 /// `S.ObjectRangeAttack`（其他玩家/怪物远程攻击）→ 弹道特效（同上，单一出口）
+///
+/// `attack_type` = `p.attack_type`（0/1/2）→ 动作档位 1/2/3（C# `MirAction.AttackRange1/2/3`）：
+/// 怪物侧的弹道表按「怪物图像索引 + 档位」查（`game::monster_projectiles`）。
 pub fn object_range_attack_projectile(
     source_id: u32,
     destination_id: u32,
     spell: u8,
+    attack_type: u8,
 ) -> PendingEffect {
     PendingEffect::ProjectileFromTo {
         source_id,
@@ -120,6 +128,7 @@ pub fn object_range_attack_projectile(
         color: spell_color(spell),
         fx: crate::game::spell_effects::range_missile(spell),
         spell,
+        range: attack_type.saturating_add(1).clamp(1, 3),
     }
 }
 
@@ -160,6 +169,10 @@ pub struct EffectsState {
     ///   的独立表，本端未移植；或未知法术 id）。
     pub fallback_player_suppressed: u64,
     pub fallback_placeholder: u64,
+    /// **怪物远程攻击**按 `MonsterObject.cs` 那张独立表生成的弹道计数（2026-09-28 移植后新增）。
+    /// 用途：实机夹具「召唤一只 AxeSkeleton → 让它远程攻击 → 断言本计数 > 0」——
+    /// 它是"黄色方块"在怪物侧被真帧弹道取代的**累计**证据（弹道只活 0.35s，采样抓不稳）。
+    pub monster_missile_add: u64,
     /// `SpellEffect.DelayedExplosion` 的 stage 记账：C# 只在 `stage > 已存在.stage` 时替换
     /// （`GameScene.cs:4867-4878`），重复 stage 的包不再重启动画。
     pub delayed_stage: std::collections::HashMap<u32, u32>,
@@ -263,6 +276,12 @@ fn spawn_pending_effects(
     // 种族过滤用：原版 `if (ob.Race != ObjectType.Player/Hero) return;`。
     // 本端 `Player` 标记覆盖本地玩家与远程玩家（本地玩家同时挂 `LocalPlayer` + `Player`）。
     player_ids: Query<&NetObjectId, With<Player>>,
+    // 怪物远程攻击的弹道表按**怪物图像索引**查（C# `MonsterObject.cs` 的 `switch (BaseImage)`）。
+    // 单独一条查询而不是并进 `actors`：后者在下面十来个分支里已按三元组解构，动它会牵连一片。
+    monster_ids: Query<
+        (&NetObjectId, &crate::actor::MonsterAppearance),
+        With<crate::actor::Monster>,
+    >,
     players: Query<&Transform, (With<LocalPlayer>, With<NetObjectId>)>,
     // 已存活的对象特效实体：光环 Up/Down 要清同组、DelayedExplosion 换 stage 要先移除旧实体
     object_fx_q: Query<(Entity, &ObjectFxAnim)>,
@@ -353,6 +372,7 @@ fn spawn_pending_effects(
                 color,
                 fx,
                 spell,
+                range,
             } => {
                 let mut from = None;
                 let mut to = None;
@@ -367,9 +387,25 @@ fn spawn_pending_effects(
                 let (Some(from), Some(to)) = (from, to) else {
                     continue;
                 };
-                // 其他对象的远程攻击（S.ObjectRangeAttack）：同样优先用原版帧表
-                let frame_missile_spawned = match fx {
-                    Some(m) => spawn_frame_missile(
+                // 其他对象的远程攻击（S.ObjectRangeAttack）：同样优先用原版帧表。
+                // **怪物**侧走的是 `MonsterObject.cs` 里另一张表（按「怪物图像索引 + 动作档位」
+                // 键控，见 `game::monster_projectiles`）——此前没移植，owner 反馈的「有些魔法是
+                // 个黄色方框」就是怪物远程攻击落到了下面的占位分支。
+                let monster_spec = if fx.is_none() {
+                    monster_ids
+                        .iter()
+                        .find(|(id, _)| id.0 == source_id)
+                        .and_then(|(_, appr)| {
+                            crate::game::monster_projectiles::monster_missile(
+                                appr.monster_type as i16,
+                                range,
+                            )
+                        })
+                } else {
+                    None
+                };
+                let frame_missile_spawned = match (fx, monster_spec) {
+                    (Some(m), _) => spawn_frame_missile(
                         &mut commands,
                         &mut libs,
                         &mut images,
@@ -381,10 +417,37 @@ fn spawn_pending_effects(
                         from,
                         to,
                     ),
-                    None => false,
+                    (None, Some(spec)) => match monster_missile_source(spec.lib) {
+                        Some(source) => spawn_frame_missile_from(
+                            &mut commands,
+                            &mut libs,
+                            &mut images,
+                            &mut cache,
+                            &mut meshes,
+                            &mut fx_quad,
+                            &mut fx_mats,
+                            source,
+                            spec.base,
+                            spec.frames,
+                            spec.frame_ms,
+                            from,
+                            to,
+                        ),
+                        // 本端没有该库的资产（如 `Siege`）：不静默——记日志后落到下面的占位分支
+                        None => {
+                            debug!(monster = spec.monster, "怪物弹道库缺失：{:?}（退回占位）", spec.lib);
+                            false
+                        }
+                    },
+                    (None, None) => false,
                 };
                 if frame_missile_spawned {
                     state.spell_missile_add += 1;
+                    // 怪物侧（`MonsterObject.cs` 那张表命中）单独记账：实机夹具按它取证
+                    // 「黄色方块在怪物侧已被真帧弹道取代」（弹道只活 0.35s，累计计数才稳）
+                    if monster_spec.is_some() {
+                        state.monster_missile_add += 1;
+                    }
                 }
                 // 同 `Projectile` 臂：**玩家**施放的已知法术、且原版表里没有弹道 ⇒ 原版就没有弹道，
                 // 不再飞占位方块。怪物施放的法术不在这里抑制 —— 原版走的是
@@ -987,7 +1050,9 @@ fn set_object_fx_alpha(
 /// 的修复此前只有单元测试钉表，没有实机判据）
 #[derive(Component, Debug, Clone, Copy)]
 pub(crate) struct SpellMissileAnim {
-    pub(crate) library: crate::game::spell_effects::SpellFxLibrary,
+    /// 帧图来源（法术库 / 扁平库 / 怪物库）。探针 `spell_fx_probe` 原样打印它——
+    /// 「这条弹道到底取哪一库的哪一段帧」是实机可断言的（怪物弹道此前只能画占位方块）。
+    pub(crate) source: MissileFrameSource,
     pub(crate) base: usize,
     pub(crate) frames: usize,
     pub(crate) frame_ms: f32,
@@ -1023,10 +1088,92 @@ fn spawn_frame_missile(
     let (mesh, mat, scale) = spawn_blend_quad_render(meshes, quad, mats, &handle, images);
     commands.spawn((
         SpellMissileAnim {
-            library: m.library,
+            source: MissileFrameSource::Spell(m.library),
             base: m.base,
             frames: m.frames,
             frame_ms: m.frame_ms as f32 / 1000.0,
+            from,
+            to,
+            t: 0.0,
+            dur: MISSILE_FLIGHT_SECS,
+        },
+        Mesh2d(mesh),
+        MeshMaterial2d(mat),
+        Transform::from_xyz(from.x, from.y, 21.0).with_scale(scale),
+    ));
+    true
+}
+
+/// 弹道帧的来源库
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum MissileFrameSource {
+    /// 法术库（`Magic`/`Magic2`/`Magic3`）
+    Spell(crate::game::spell_effects::SpellFxLibrary),
+    /// 扁平库（如 C# `Libraries.Dragon`）
+    Flat(crate::resources::libraries::LibraryName),
+    /// 怪物库 `Data/Monster/{asset:03}.Lib`（`asset` = **C# `Monster` 值** = 资产索引）
+    MonsterLib(u16),
+}
+
+/// 怪物弹道表的 `MissileLib` → 渲染侧的帧来源（`Unavailable` = 本端没有该库的资产）
+pub(crate) fn monster_missile_source(
+    lib: crate::game::monster_projectiles::MissileLib,
+) -> Option<MissileFrameSource> {
+    use crate::game::monster_projectiles::MissileLib as L;
+    match lib {
+        L::Flat(name) => Some(MissileFrameSource::Flat(name)),
+        L::Monster { asset } => Some(MissileFrameSource::MonsterLib(asset)),
+        L::Unavailable { .. } => None,
+    }
+}
+
+impl MissileFrameSource {
+    fn handle(
+        self,
+        libs: &mut GameLibraries,
+        images: &mut Assets<Image>,
+        cache: &mut UiImageCache,
+        index: usize,
+    ) -> Option<Handle<Image>> {
+        match self {
+            MissileFrameSource::Spell(l) => ui_image(libs, images, cache, l.library(), index),
+            MissileFrameSource::Flat(name) => ui_image(libs, images, cache, name, index),
+            MissileFrameSource::MonsterLib(asset) => {
+                ui_array_image(libs, images, cache, ArrayLibType::Monsters, asset as usize, index)
+            }
+        }
+    }
+}
+
+/// 生成一条**指定帧来源**的弹道（怪物远程攻击走这条：`MonsterObject.cs` 的 `CreateProjectile`
+/// 里库既可能是扁平库（`Libraries.Magic/Magic2/Dragon`…），也可能是**怪物库**
+/// `Libraries.Monsters[(ushort)Monster.X]`）。加法混合材质、飞行、逐帧推进与法术弹道共用同一条路径。
+#[allow(clippy::too_many_arguments)]
+fn spawn_frame_missile_from(
+    commands: &mut Commands,
+    libs: &mut GameLibraries,
+    images: &mut Assets<Image>,
+    cache: &mut UiImageCache,
+    meshes: &mut Assets<Mesh>,
+    quad: &mut crate::game::object_fx_material::ObjectFxQuad,
+    mats: &mut Assets<crate::game::object_fx_material::ObjectFxBlendMaterial>,
+    source: MissileFrameSource,
+    base: usize,
+    frames: usize,
+    frame_ms: u32,
+    from: Vec2,
+    to: Vec2,
+) -> bool {
+    let Some(handle) = source.handle(libs, images, cache, base) else {
+        return false;
+    };
+    let (mesh, mat, scale) = spawn_blend_quad_render(meshes, quad, mats, &handle, images);
+    commands.spawn((
+        SpellMissileAnim {
+            source,
+            base,
+            frames,
+            frame_ms: frame_ms as f32 / 1000.0,
             from,
             to,
             t: 0.0,
@@ -1104,13 +1251,7 @@ fn advance_spell_missiles(
         }
         let step = (m.t / m.frame_ms.max(0.001)).floor() as usize;
         let frame = step % m.frames.max(1);
-        if let Some(h) = ui_image(
-            &mut libs,
-            &mut images,
-            &mut cache,
-            m.library.library(),
-            m.base + frame,
-        ) {
+        if let Some(h) = m.source.handle(&mut libs, &mut images, &mut cache, m.base + frame) {
             set_frame_image(h, &mut sprite, &mat, &mut fx_mats, &images, &mut tf);
         }
     }
@@ -1407,8 +1548,8 @@ mod tests {
         );
         for m in &missiles {
             assert_eq!(
-                m.library,
-                SpellFxLibrary::Magic3,
+                m.source,
+                MissileFrameSource::Spell(SpellFxLibrary::Magic3),
                 "远程攻击箭矢都在 Magic3 库"
             );
         }
@@ -1482,6 +1623,7 @@ mod tests {
                     color: [1.0, 1.0, 0.4], // spell_color 的兜底黄
                     fx: None,
                     spell: mir2_shared::enums::Spell::IceThrust as u8,
+                    range: 1,
                 });
             }
         }
@@ -1501,8 +1643,104 @@ mod tests {
         );
         assert_eq!(
             st.fallback_placeholder, 1,
-            "怪物那条仍应是占位（原版怪物表未移植）"
+            "该怪物不带 `MonsterAppearance`（= 查不到怪物弹道表）⇒ 仍应是占位"
         );
+    }
+
+    /// 门禁：**怪物**远程攻击走 `MonsterObject.cs` 的独立表（2026-09-28 移植）——不再画占位方块。
+    ///
+    /// 判据：源对象带 `Monster` + `MonsterAppearance`（`monster_type` = C# `Monster` 值），
+    /// 表里 `(24 = AxeSkeleton, Range1)` → `Monster/024.Lib[224]` 3 帧 ⇒ 生成 `SpellMissileAnim`
+    /// 且 `source == MissileFrameSource::MonsterLib(24)`；同一批里**不在表里**的怪物仍走占位。
+    ///
+    /// 阳性对照（落地时实做）：把 `spawn_pending_effects` 里 `monster_ids` 那段查找去掉
+    /// ⇒ 两条都变占位（`SpellMissileAnim` 0 条、`Projectile` 2 条），本测试立即红。
+    #[test]
+    fn monster_range_attack_uses_csharp_projectile_table() {
+        use bevy::ecs::system::RunSystemOnce;
+        if !crate::resources::libraries::data_assets_present() {
+            eprintln!("skip monster_range_attack_uses_csharp_projectile_table: 无 Data 资产");
+            return;
+        }
+        let mut world = bevy::prelude::World::new();
+        world.insert_resource(crate::map_renderer::GameLibraries(
+            crate::resources::libraries::Libraries::new(
+                crate::resources::libraries::resolve_data_path(),
+            ),
+        ));
+        world.insert_resource(bevy::prelude::Assets::<bevy::prelude::Image>::default());
+        world.insert_resource(bevy::prelude::Assets::<bevy::prelude::Mesh>::default());
+        world.insert_resource(bevy::prelude::Assets::<
+            crate::game::object_fx_material::ObjectFxBlendMaterial,
+        >::default());
+        world.insert_resource(crate::game::object_fx_material::ObjectFxQuad::default());
+        world.insert_resource(crate::ui::sprite_ui::UiImageCache::default());
+        world.insert_resource(crate::game::dialogs::option::OptionState {
+            effect: true,
+            ..Default::default()
+        });
+        world.insert_resource(EffectsState::default());
+        world.insert_resource(bevy::prelude::Time::<()>::default());
+        world
+            .resource_mut::<crate::map_renderer::GameLibraries>()
+            .0
+            .ensure_initialized();
+        world.insert_resource(bevy::prelude::Messages::<PendingEffect>::default());
+        // 6001 = AxeSkeleton（C# 值 24，表里有 Range1 弹道）；6002 = 不在表里的怪物；6003 = 目标
+        world.spawn((
+            NetObjectId(6001),
+            crate::actor::Monster,
+            crate::actor::MonsterAppearance {
+                monster_type: 24,
+                stage: 0,
+            },
+            bevy::prelude::Transform::from_xyz(100.0, 100.0, 0.0),
+        ));
+        world.spawn((
+            NetObjectId(6002),
+            crate::actor::Monster,
+            crate::actor::MonsterAppearance {
+                monster_type: 1,
+                stage: 0,
+            },
+            bevy::prelude::Transform::from_xyz(300.0, 100.0, 0.0),
+        ));
+        world.spawn((
+            NetObjectId(6003),
+            bevy::prelude::Transform::from_xyz(500.0, 100.0, 0.0),
+        ));
+        {
+            let mut msgs = world.resource_mut::<bevy::prelude::Messages<PendingEffect>>();
+            for source in [6001u32, 6002u32] {
+                msgs.write(PendingEffect::ProjectileFromTo {
+                    source_id: source,
+                    destination_id: 6003,
+                    color: [1.0, 1.0, 0.4],
+                    fx: None,
+                    spell: 0,
+                    range: 1,
+                });
+            }
+        }
+        world
+            .run_system_once(spawn_pending_effects)
+            .expect("spawn_pending_effects 应能运行");
+        let mut mq = world.query::<&SpellMissileAnim>();
+        let missiles: Vec<&SpellMissileAnim> = mq.iter(&world).collect();
+        assert_eq!(missiles.len(), 1, "AxeSkeleton 那条应是真帧弹道，不是占位方块");
+        assert_eq!(
+            missiles[0].source,
+            MissileFrameSource::MonsterLib(24),
+            "帧图必须来自 Monster/024.Lib（C# 值 = 资产索引）"
+        );
+        assert_eq!((missiles[0].base, missiles[0].frames), (224, 3));
+        let mut pq = world.query::<&Projectile>();
+        assert_eq!(
+            pq.iter(&world).count(),
+            1,
+            "表里没有的怪物仍保留占位弹道（不静默消失）"
+        );
+        assert_eq!(world.resource::<EffectsState>().fallback_placeholder, 1);
     }
 
     /// B0001 接线门禁（P0，实机启动即崩挖出）：插件注册的五条特效系统放进同一调度

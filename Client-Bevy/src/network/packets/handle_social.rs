@@ -686,6 +686,9 @@ pub(crate) fn handle_social(
                             color,
                             fx: None,
                             spell: p.spell as u8,
+                            // 非 ObjectRangeAttack（这里是 ObjectMagic）：动作档位不适用，
+                            // 填 1；怪物弹道表只在这两处命中时才查（见 effects.rs 的 ProjectileFromTo 臂）。
+                            range: 1,
                         });
                     }
                 } else {
@@ -739,6 +742,7 @@ pub(crate) fn handle_social(
                         .ok()
                         .and_then(crate::game::spell_effects::spell_missile),
                     spell,
+                    range: 1,
                 });
                 tracing::info!(
                     "🎯 对象投射物: spell={:?} src={} dst={}",

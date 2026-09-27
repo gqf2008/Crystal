@@ -348,6 +348,7 @@ pub(crate) fn handle_npc_items(
                     p.object_id,
                     p.target_id,
                     p.spell as u8,
+                    p.attack_type,
                 ));
                 tracing::info!(
                     "🏹 对象远程攻击: id={} target={} spell={}",
