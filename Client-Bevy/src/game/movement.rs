@@ -580,6 +580,33 @@ fn advance_local_move(
         target.0,
         target.1
     );
+    // 候选 A（2026-09-27，owner 反馈「走一段被拉回原处」）：**起步就发 Walk/Run**，而不是等到达。
+    // 依据：C# 客户端按下/起步即发；本端原先在「到达该步目标」时才发（见下面到达分支），
+    // 实测服务端因此**恒定落后 1 格**（`l5ae_move_trace` 轨迹：客户端 (48,74) 时 srv=(49,75)，
+    // 16 个采样里 11 次 `in_sync=false`），而 `apply_self_position` 对 `UserLocation` 是**无条件采纳**
+    // ⇒ 中间步的确认一到就把客户端拉回那一步，肉眼即「走一段被拉回」。
+    // 每步只发一次：用既有**死字段** `step_timer_ms` 当标记（编码本步 target 格 + 1.0；它原本在 10 个
+    // 构造点被写、全仓无人读，复用它就不必给无 `Default` 的 `LocalMove` 加字段、动那 10 处构造）。
+    let step_code = 1.0 + target.0 as f32 * 4096.0 + target.1 as f32;
+    if lm.step_timer_ms != step_code {
+        if let Some(d) = direction_from_delta(d1.0, d1.1) {
+            if use_run {
+                net.send_packet(&mir2_shared::packets::client::movement::Run { direction: d });
+            } else {
+                net.send_packet(&mir2_shared::packets::client::movement::Walk { direction: d });
+            }
+            lm.step_timer_ms = step_code;
+            tracing::debug!(
+                "🚶 起步发包: from=({},{}) target=({},{}) dir={:?} run={}",
+                from.0,
+                from.1,
+                target.0,
+                target.1,
+                d,
+                use_run
+            );
+        }
+    }
     let target_world = tile_to_world(target.0, target.1);
     let dx = target_world.x - tf.translation.x;
     let dy = target_world.y - tf.translation.y;
@@ -655,31 +682,17 @@ fn advance_local_move(
                 }
             }
         }
-        if let Some(d) = seg_dir {
-            tracing::debug!(
-                "🚶 到达发包: from=({},{}) target=({},{}) dir={:?} run={}",
-                from.0,
-                from.1,
-                target.0,
-                target.1,
-                d,
-                use_run
-            );
-            if use_run {
-                net.send_packet(&mir2_shared::packets::client::movement::Run { direction: d });
-            } else {
-                net.send_packet(&mir2_shared::packets::client::movement::Walk { direction: d });
-            }
-        } else {
-            tracing::debug!(
-                "🚶 到达跳过发包: from=({},{}) target=({},{}) seg_dir=None run={}",
-                from.0,
-                from.1,
-                target.0,
-                target.1,
-                use_run
-            );
-        }
+        // 候选 A（2026-09-27）：发包已移到「**起步时**」（见本函数上方「起步发包」）——到达阶段不再重复发，
+        // 否则同一步会发两次（第二次对服务端是"已在该格"的重复指令，可能触发一次多余的坐标校正）。
+        tracing::debug!(
+            "🚶 到达: from=({},{}) target=({},{}) seg_dir={:?} run={}（发包已在起步时完成）",
+            from.0,
+            from.1,
+            target.0,
+            target.1,
+            seg_dir,
+            use_run
+        );
     } else {
         // 平滑滑向目标
         tf.translation.x += dx / dist * step;
