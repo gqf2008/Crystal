@@ -1226,6 +1226,8 @@ impl Message<NpcGroupRecall> for SocialActor {
                         body.extend_from_slice(&target_x.to_le_bytes());
                         body.extend_from_slice(&target_y.to_le_bytes());
                         body.push(mem_state.direction);
+                        // NPC GROUPRECALL：系统位移 ⇒ 校正
+                        body.push(1);
                         let _ = self
                             .gate_ref
                             .tell(SendToClient {
@@ -2673,6 +2675,8 @@ impl SocialActor {
                         body.extend_from_slice(&target_x.to_le_bytes());
                         body.extend_from_slice(&target_y.to_le_bytes());
                         body.push(mem_state.direction);
+                        // GROUPRECALL：系统位移 ⇒ 校正
+                        body.push(1);
                         let _ = self
                             .gate_ref
                             .tell(SendToClient {
@@ -2819,6 +2823,8 @@ impl SocialActor {
                             body.extend_from_slice(&target_x.to_le_bytes());
                             body.extend_from_slice(&target_y.to_le_bytes());
                             body.push(mem_state.direction);
+                            // RECALLMEMBER：系统位移 ⇒ 校正
+                            body.push(1);
                             let _ = self
                                 .gate_ref
                                 .tell(SendToClient {
@@ -3027,6 +3033,8 @@ impl SocialActor {
                         body.extend_from_slice(&front_x.to_le_bytes());
                         body.extend_from_slice(&front_y.to_le_bytes());
                         body.push(other_state.direction);
+                        // RECALL：系统位移 ⇒ 校正
+                        body.push(1);
                         let _ = self
                             .gate_ref
                             .tell(SendToClient {

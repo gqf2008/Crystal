@@ -1171,6 +1171,8 @@ impl Message<UseItemRequest> for WorldActor {
                                 loc.extend_from_slice(&tx.to_le_bytes());
                                 loc.extend_from_slice(&ty.to_le_bytes());
                                 loc.push(player_state.direction);
+                                // 传送落点：系统位移 ⇒ 校正
+                                loc.push(1);
                                 let _ = self
                                     .gate_ref
                                     .tell(SendToClient {
@@ -1257,6 +1259,8 @@ impl Message<UseItemRequest> for WorldActor {
                                 loc.extend_from_slice(&rx.to_le_bytes());
                                 loc.extend_from_slice(&ry.to_le_bytes());
                                 loc.push(player_state.direction);
+                                // 传送落点：系统位移 ⇒ 校正
+                                loc.push(1);
                                 let _ = self
                                     .gate_ref
                                     .tell(SendToClient {

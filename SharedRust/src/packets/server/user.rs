@@ -458,6 +458,15 @@ pub struct UserLocation {
     pub location_x: i32,
     pub location_y: i32,
     pub direction: MirDirection,
+    /// 这次位置更新的**语义**（2026-09-27 owner「跑一段被拉回来」的根因修复）：
+    ///
+    /// * `false` = **回显（ACK）**：自己刚成功走了一步 / 转了向，服务端把新位置告知一下。
+    ///   它天生落后客户端一个 RTT（客户端本地预测先行），**不能**当校正去挪玩家——
+    ///   一旦当校正采纳，每跑一段就会被拉回一段（实机现象）。
+    ///   客户端只把它记进「服务端已知位置」（夹具 `in_sync` / `state.server_tile_*` 靠它）。
+    /// * `true` = **校正**：走位被拒 / 传送 / 复活 / 召回等系统位移——服务端位置是权威，
+    ///   客户端必须采纳（C# `GameScene.UserLocation` 只在 Walk/Run **失败**时才收到这个包）。
+    pub correction: bool,
 }
 
 impl Packet for UserLocation {
@@ -467,10 +476,13 @@ impl Packet for UserLocation {
         let location_x = reader.read_i32::<LittleEndian>()?;
         let location_y = reader.read_i32::<LittleEndian>()?;
         let direction = MirDirection::try_from(reader.read_u8()?)?;
+        // 尾部语义字节：老包体没有它（读越界）⇒ 按「校正」处理（保守，与旧行为一致）。
+        let correction = reader.read_u8().map(|b| b != 0).unwrap_or(true);
         Ok(Self {
             location_x,
             location_y,
             direction,
+            correction,
         })
     }
 
@@ -478,6 +490,7 @@ impl Packet for UserLocation {
         writer.write_i32::<LittleEndian>(self.location_x)?;
         writer.write_i32::<LittleEndian>(self.location_y)?;
         writer.write_u8(self.direction as u8)?;
+        writer.write_u8(u8::from(self.correction))?;
         Ok(())
     }
 }

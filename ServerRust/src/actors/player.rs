@@ -1274,12 +1274,17 @@ impl PlayerActor {
         }
     }
 
-    /// 发送 UserLocation 给玩家
-    fn send_user_location(&self) {
+    /// 发送 UserLocation 给玩家。
+    ///
+    /// `correction=false` = **回显**（自己刚成功走一步 / 转向）：客户端只更新「服务端已知位置」，
+    /// 不据此挪玩家——否则每跑一段会被拉回一段（owner「跑一段被拉回来」）。
+    /// `correction=true` = 校正（复活 / 走位被拒 / 系统位移）。
+    fn send_user_location(&self, correction: bool) {
         let mut body = Vec::new();
         body.extend_from_slice(&self.state.x.to_le_bytes());
         body.extend_from_slice(&self.state.y.to_le_bytes());
         body.push(self.state.direction);
+        body.push(u8::from(correction));
         let _ = self
             .gate_ref
             .tell(SendToClient {
@@ -1682,8 +1687,8 @@ impl Message<RevivePlayer> for PlayerActor {
         self.state.y = msg.y;
         self.state.hp = self.state.effective_max_hp();
         self.state.mp = self.state.effective_max_mp();
-        // 发送位置更新
-        self.send_user_location();
+        // 发送位置更新（复活是系统位移 ⇒ 校正）
+        self.send_user_location(true);
         true
     }
 }
@@ -1763,7 +1768,9 @@ impl Message<MoveRequest> for PlayerActor {
                 self.state.y,
                 msg.direction
             );
-            self.send_user_location();
+            // 回显（ACK）：客户端本地预测已经先走了一步，这里的坐标天生落后一个 RTT，
+            // 只能当「服务端已知位置」，不能当校正（否则每跑一段被拉回一段）。
+            self.send_user_location(false);
         }
 
         success
@@ -1785,7 +1792,8 @@ impl Message<TurnRequest> for PlayerActor {
         self.state.step_counter = 0;
         self.turn(msg.direction);
         debug!("Player {} turned to dir={}", self.state.name, msg.direction);
-        self.send_user_location();
+        // 转向不改变坐标：回显即可（客户端本地也转了）
+        self.send_user_location(false);
     }
 }
 

@@ -92,20 +92,6 @@ pub fn world_to_tile(wx: f32, wy: f32) -> (i32, i32) {
     )
 }
 
-/// 收到服务端权威位置时，本地是否该**作废**正在进行的寻路（并就地采纳服务端位置）。
-///
-/// 判据（2026-09-24 实测标定）：
-/// - 偏差 ≤ 2 格 = 客户端预测的正常领先。一次 `Run` 就是 2 格，移动包又在"到达那一步"才发，
-///   所以服务端位置天然可能落后 2 格；此时打断本地路径会让路径永远走不完（#77 的教训）。
-/// - 偏差 ≥ 3 格 = 瞬移级（换图/`@mapmove`/被拒后跑偏）。实测连续 `@mapmove` 时客户端带着过期
-///   路径一路跑，5s 一次采样读数 417→434→449→464→478 而服务端原地不动，永不收敛；
-///   此时必须采纳服务端位置并清掉那条过期路径。
-pub fn should_abort_local_move(client_tile: (i32, i32), server_tile: (i32, i32)) -> bool {
-    (client_tile.0 - server_tile.0)
-        .abs()
-        .max((client_tile.1 - server_tile.1).abs())
-        >= 3
-}
 
 /// 计算朝向（dx/dy ∈ {-1,0,1}）
 pub fn direction_from_delta(dx: i32, dy: i32) -> Option<MirDirection> {
@@ -252,7 +238,13 @@ impl Plugin for MovementPlugin {
     }
 }
 
-/// 服务器权威位置（UserLocation）：距离超过 2 格时瞬移校正
+/// 服务器权威位置校正（UserLocation 且 `correction == true`）。
+///
+/// 2026-09-27 owner「跑一段被拉回来」的根因修复：服务端**每成功走一步也会回一发** UserLocation，
+/// 对客户端那是「回显 ACK」，天生落后一个 RTT；旧实现把它当校正无条件采纳 ⇒ 每跑一段就被拉回一段。
+/// 现在 ACK（`UserLocation.correction == false`）在包层就被挡在 `self_position` 之外，只更新
+/// `last_server_position`（夹具 `in_sync` / `state.server_tile_*` 用），所以这里收到的**只有真校正**
+/// （走位被拒 / 传送 / 复活 / 召回），可以无条件采纳（C# `GameScene.UserLocation` 同款语义）。
 fn apply_self_position(
     mut commands: Commands,
     mut session: ResMut<SessionState>,
@@ -261,42 +253,10 @@ fn apply_self_position(
     mut players: Query<(Entity, &mut Transform), (With<LocalPlayer>, With<NetObjectId>)>,
     local_moves: Query<(), (With<LocalPlayer>, With<LocalMove>)>,
 ) {
-    // 本地移动中：服务器位置必然滞后于客户端（网络往返），瞬移校正会与 LocalMove 每帧拉扯，
-    // 导致路径永远走不完（#77 实测：客户端 10 格路径只发 1 个 Run，服务器坐标停在出生点附近）。
-    // 不消费该校正值，等移动结束后下一帧再应用。
-    //
-    // **例外（2026-09-24 实测的"越跑越偏"）**：偏差达到"瞬移级"时必须立刻采纳并**作废本地寻路**。
-    // 实机复现：连续 `@mapmove 2 <x> <y>`（服务端每次都精确落到目标格）时，客户端带着**过期路径**
-    // 继续往前跑——5s 采样一次分别读到 (417,201)、(434,201)、(449,212)、(464,227)、(478,239)，
-    // 而服务端一直在 (399,199)/(400,199)/(402,200) 附近：越跑越偏、永不收敛。
-    // 近战方向、拾取距离、点 NPC 判定全部按**本地格**算 ⇒ 这种跑偏会让战斗与交互整体失效。
-    if !local_moves.is_empty() {
-        if let Some((tx, ty, _dir)) = session.self_position {
-            if let Ok((e, mut tf)) = players.single_mut() {
-                let cur = world_to_tile(tf.translation.x, tf.translation.y);
-                if should_abort_local_move(cur, (tx, ty)) {
-                    let p = tile_to_world(tx, ty);
-                    tf.translation.x = p.x;
-                    tf.translation.y = p.y;
-                    tf.translation.z = depth_z(-p.y);
-                    commands.entity(e).remove::<LocalMove>();
-                    session.self_position = None;
-                    tracing::info!(
-                        "📍 瞬移级校正 -> ({},{})：本地寻路作废（原本地格 ({},{}）",
-                        tx,
-                        ty,
-                        cur.0,
-                        cur.1
-                    );
-                }
-            }
-        }
-        return;
-    }
     let Some((tx, ty, _dir)) = session.self_position.take() else {
         return;
     };
-    let Ok((_e, mut tf)) = players.single_mut() else {
+    let Ok((e, mut tf)) = players.single_mut() else {
         tracing::debug!(
             "📍 位置校正：玩家 Query 未匹配（self_position 丢弃 ({},{})）",
             tx,
@@ -305,27 +265,25 @@ fn apply_self_position(
         return;
     };
     let cur = world_to_tile(tf.translation.x, tf.translation.y);
-    tracing::debug!(
-        "📍 位置校正检查：server=({},{}) cur=({},{})",
-        tx,
-        ty,
-        cur.0,
-        cur.1
-    );
     // 服务器位置是**权威**：只要和本地不一致就采用（C# `GameScene.UserLocation`
     // `Client/MirScenes/GameScene.cs:2244-2252` 就是无条件 `User.CurrentLocation = p.Location`）。
-    //
-    // 此前门限是「距离 > 2 格才校正」——**1 格偏差永远校不回来**，实机后果（2026-09-24）：
-    // 本地预测多走一格被服务端拒掉后，客户端认为在 (289,611)、服务端记的是 (289,612)；
-    // 近战按"正前方一格"结算落在空地上 → 64 次攻击全是空挥、怪物一点血不掉；
-    // 同理拾取/点 NPC 也会按错格判距离。
-    // 边界：本地正在寻路（LocalMove 非空）时前面已 return，不会与预测每帧拉扯。
     if cur != (tx, ty) {
         let p = tile_to_world(tx, ty);
         tf.translation.x = p.x;
         tf.translation.y = p.y;
         tf.translation.z = depth_z(-p.y);
-        tracing::info!("📍 服务器位置校正 -> ({},{})", tx, ty);
+        tracing::info!(
+            "📍 服务器位置校正 -> ({},{})（原本地格 ({},{}）",
+            tx,
+            ty,
+            cur.0,
+            cur.1
+        );
+    }
+    // 校正意味着本地预测这条路已经不成立：作废正在进行的寻路，避免带着过期路径继续跑
+    // （2026-09-24 实测：连续 `@mapmove` 时客户端带过期路径越跑越偏、永不收敛）。
+    if !local_moves.is_empty() {
+        safe_remove::<LocalMove>(&mut commands, e);
     }
 }
 
@@ -1139,42 +1097,4 @@ fn test_walk_fallback_tries_next_then_previous() {
         }
     }
     assert_eq!(chosen, Some(MirDirection::UpRight), "北墙时应回退北东");
-}
-
-/// 门禁（2026-09-24 实机缺陷）：**瞬移级偏差必须打断本地寻路**，1-2 格偏差**不能**打断。
-///
-/// 实机复现（`@mapmove` 连续传送）：服务端每次精确落到目标格，客户端却带着过期路径继续跑，
-/// 5s 采样一次读到 (417,201)→(434,201)→(449,212)→(464,227)→(478,239)，越跑越偏、永不收敛；
-/// 近战方向/拾取距离/点 NPC 全按本地格算 ⇒ 战斗与交互整体失效。
-/// 另一侧：一次 `Run` 就是 2 格、且移动包在"到达那一步"才发，所以 ≤2 格是正常预测领先，
-/// 打断它会让路径永远走不完（#77 实测）。
-///
-/// 阳性对照（实做）：把门限改成 `>= 1` → 本测试里 1 格与 2 格两条断言立即红。
-#[cfg(test)]
-#[test]
-fn should_abort_local_move_only_on_teleport_scale_drift() {
-    // 正常：同格 / 预测领先 1-2 格（Run 两格）→ 不打断
-    assert!(!should_abort_local_move((300, 300), (300, 300)));
-    assert!(
-        !should_abort_local_move((301, 300), (300, 300)),
-        "领先 1 格是常态"
-    );
-    assert!(
-        !should_abort_local_move((302, 301), (300, 300)),
-        "一次 Run 的 2 格仍是常态"
-    );
-    // 瞬移级：≥3 格 → 必须打断（否则越跑越偏）
-    assert!(
-        should_abort_local_move((303, 300), (300, 300)),
-        "3 格起算瞬移级"
-    );
-    assert!(
-        should_abort_local_move((417, 201), (399, 199)),
-        "实测跑偏样例"
-    );
-    // 同一输入连读一致
-    assert_eq!(
-        should_abort_local_move((478, 239), (402, 200)),
-        should_abort_local_move((478, 239), (402, 200))
-    );
 }
