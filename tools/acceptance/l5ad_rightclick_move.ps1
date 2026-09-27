@@ -6,7 +6,12 @@
 #   ② 负对照：在**同一个点**用左键点 → 不得移动（证明"能走"来自右键分流，而不是任何点击都会走）。
 # 依赖：客户端 control RPC 的 `click` 支持 `button`（master f02f9086 起）；服务端在 7000。
 param(
-    [string]$User = 'bevychar',
+    # 2026-09-27 修：`-User` 收的是**账号名**（e2e 登录用的就是它），不是角色名。
+    # 原默认 `bevychar` 是**角色**（属于账号 `test`）⇒ 默认跑会「✅ 登录成功，角色 0 个」然后 90s 未进图
+    # （服务端对未知账号自动建号、无角色）。实测 `-User test` 立刻正常进场。
+    # 注：`l5ac_newchar_create.ps1` 也默认 `bevychar`，但那条是**建新角色**、正需要「无角色的账号」，
+    # 属有意为之；本文件是移动夹具、要的是既有角色，故改默认值。
+    [string]$User = 'test',
     [string]$Pass = '123456',
     [string]$ClientHome = 'E:\Users\gxh\Documents\GitHub\Crystal-wt-blend',
     [int]$MaxTries = 6
