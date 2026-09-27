@@ -7,6 +7,70 @@ use mir2_shared::packets::base::{Packet, PacketHeader};
 // 网络包解码分派（#72 拆分；#1148 再按域拆分）：handle_player 处理服务端包 玩家属性/觉醒/信用 分支。
 // 由 packets.rs::handle_packet 调度器按 opcode 调用；返回 true 表示已处理。
 
+/// `S.UserInformation` 的背包段 → 本端 `Inventory::items`。
+///
+/// **不要截断到 40**（2026-09-27 修复）：C# `UserObject.Inventory = new UserItem[46]`
+/// （`Client/MirObjects/UserObject.cs:37`），`InventoryDialog.Grid = new MirItemCell[8*10]`
+/// （`InventoryDialog.cs:148`）——背包窗本来就有**第二页**（C# `ItemSlot = 6 + idx` 把网格映射到
+/// 46 格里的 `6..45`）。服务端 `BACKPACK_SIZE = 46`（`ServerRust/src/actors/inventory.rs:61`）
+/// 与本端口径一致：本端腰带在装备槽，`Inventory::items` 只存背包那一段，46 格要**照单全收**。
+///
+/// 此前这里 `.take(40)`：第 41–46 格被整段丢弃 —— 实机数据里那 6 格**确实有物品**
+/// （只读查 `inventory_backpack` 的 `grid` 40..45 共 6 行），玩家在客户端**看不见也用不了**，
+/// 同时背包还显示"满"。上限取 `MAX_INV_SLOTS = 80`（= C# 的 8×10 网格），扩容后同样不丢。
+pub(crate) fn client_inventory_slots(
+    inv: &Option<Vec<Option<mir2_shared::data::item::UserItem>>>,
+) -> Vec<Option<crate::game::dialogs::inventory::InvItem>> {
+    inv.as_ref()
+        .map(|v| {
+            v.iter()
+                .take(crate::game::dialogs::inventory::MAX_INV_SLOTS)
+                .map(|slot| slot.as_ref().map(to_inv_item))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use mir2_shared::data::item::UserItem;
+
+    /// 门禁：`S.UserInformation` 的背包段必须**整段收下**（46 格口径），不许截断到 40。
+    ///
+    /// 依据：C# `UserObject.Inventory = new UserItem[46]`（`UserObject.cs:37`）+
+    /// `InventoryDialog.Grid = new MirItemCell[8*10]`（`:148`，背包窗有第二页）；
+    /// 服务端 `BACKPACK_SIZE = 46`（`inventory.rs:61`）。实机里第 41–46 格确实有物品，
+    /// 截断会让玩家"看不见也用不了"，同时背包显示"满"。
+    ///
+    /// 阳性对照（落地时实做）：把 `client_inventory_slots` 里的 `take(MAX_INV_SLOTS)`
+    /// 改回 `take(40)` → 本测试立即红（末位物品消失、长度 40）。
+    #[test]
+    fn user_information_keeps_all_46_backpack_slots() {
+        let mut slots: Vec<Option<UserItem>> = vec![None; 46];
+        slots[45] = Some(UserItem {
+            unique_id: 777_045,
+            item_index: 782,
+            ..Default::default()
+        });
+        let out = client_inventory_slots(&Some(slots));
+        assert_eq!(out.len(), 46, "46 格背包必须整段保留（不许 take(40)）");
+        assert_eq!(
+            out[45].as_ref().map(|i| i.unique_id),
+            Some(777_045),
+            "第 46 格（index 45）的物品必须还在 —— 截断会让它对玩家不可见"
+        );
+    }
+
+    /// 门禁：服务端未携带背包段（轻量 UserInformation）时不得凭空造格子。
+    /// 该语义由 `apply_slots` 的空 Vec 守卫负责（#2870），这里只钉住转换本身返回空。
+    #[test]
+    fn user_information_without_inventory_yields_empty() {
+        assert!(client_inventory_slots(&None).is_empty());
+        assert!(client_inventory_slots(&Some(Vec::new())).is_empty());
+    }
+}
+
 #[allow(clippy::too_many_arguments, unused_variables)]
 pub(crate) fn handle_player(
     net: &mut NetConnection,
@@ -140,16 +204,7 @@ pub(crate) fn handle_player(
 
                     // ---- UI 数据：广播 ServerEvent，由各模块消费 ----
                     let magics: Vec<mir2_shared::data::client_data::ClientMagic> = p.magics.clone();
-                    let inventory: Vec<Option<InvItem>> = p
-                        .inventory
-                        .as_ref()
-                        .map(|inv| {
-                            inv.iter()
-                                .take(40)
-                                .map(|slot| slot.as_ref().map(to_inv_item))
-                                .collect()
-                        })
-                        .unwrap_or_default();
+                    let inventory: Vec<Option<InvItem>> = client_inventory_slots(&p.inventory);
                     let equipment: Vec<Option<InvItem>> = p
                         .equipment
                         .as_ref()
