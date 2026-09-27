@@ -67,22 +67,20 @@ pub const PLACE_CELL_POS: [(f32, f32); 4] = [
 /// 这里只用于放置规则的两档 `Shape` 判定（`< 200` 普通材料 / `== 200` 现金材料）。
 pub const AWAKEN_MATERIAL_SHAPE_CASH: i16 = 200;
 
-/// **物品类型码用 C# 编号**（`InvItem.item_type` 一路来自 DB `item_infos.type` → 线包 `ItemInfo.item_type`，
-/// 该列由 C# `Server.MirDB` 导入，存的是 C# `Shared/Enums.cs:882-915` 的 `ItemType`：`Weapon=1 /
-/// Armour=2 / Helmet=4 / Awakening=35`）。
+/// **物品类型码用 Rust 枚举值**（InvItem.item_type 是服务端把 DB 的 C# ItemType 映射过来的
+/// mir2_shared::enums::ItemType 值：Weapon=4 / Armour=5 / Helmet=7 / Awakening=38）。
 ///
-/// 本端 `SharedRust::enums::ItemType` 是**另一套 +3 编号**（`Weapon=4 / Armour=5 / Helmet=7 /
-/// Awakening=38`）——**拿它比 wire 值永远是 false**。本轮实测踩过：先前写成字面量 `20/21/22/113`
-/// （既不是 C# 也不是 Rust 值）⇒ 任何真实物品都进不了格、功能等于没接（fail-closed，无假绿）。
-/// DB 实测：`WoodenSword.type=1`、`BaseDress(M).type=2`、`AwakeningSoul0.type=35`。
-pub const ITEM_TYPE_WEAPON_CS: u8 = 1;
-pub const ITEM_TYPE_ARMOUR_CS: u8 = 2;
-pub const ITEM_TYPE_HELMET_CS: u8 = 4;
-pub const ITEM_TYPE_AWAKENING_CS: u8 = 35;
-
-/// `ItemGrade::None` 的 **Rust** 值：`InvItem.grade` 走 `SharedRust::enums::ItemGrade`
-/// （`None=3 / Common=4 / …`，整体 +3）。**同一个 `InvItem` 里 `item_type` 用 C# 编号、`grade` 用
-/// Rust 编号**——这是既有事实，改动时别把两套编号搞混。
+/// **踩坑记录（2026-09-27，两次）**：先前先写成字面量 20/21/22/113（既非 C# 也非 Rust）⇒ 全被拒；
+/// 再按 DB 里的 C# 值 1/2/4/35 改 ⇒ **仍被拒**（实机日志：『觉醒格 3 拒绝放入 AwakeningSoul0』）。
+/// 真值只能从**实机 wire**看：本次实测 AwakeningSoul0 的 item_type 走的是 **Rust 值 38**
+///（DB 里是 35，服务端映射 +3；与 ItemGrade 的 None=3 口径同源）。
+/// ⇒ 结论：本端规则里引用 item_type 一律用 **mir2_shared::enums::ItemType** 的 Rust 值，
+/// 别再拿 DB/C# 值去比。
+pub const ITEM_TYPE_WEAPON_RS: u8 = mir2_shared::enums::ItemType::Weapon as u8;
+pub const ITEM_TYPE_ARMOUR_RS: u8 = mir2_shared::enums::ItemType::Armour as u8;
+pub const ITEM_TYPE_HELMET_RS: u8 = mir2_shared::enums::ItemType::Helmet as u8;
+pub const ITEM_TYPE_AWAKENING_RS: u8 = mir2_shared::enums::ItemType::Awakening as u8;
+/// ItemGrade::None（同样是 Rust 编号口径）
 pub const ITEM_GRADE_NONE_RS: u8 = 3;
 
 /// 放置规则（C# `MirItemCell.cs:1655-1785` `#region To Awakening` 的纯函数版，门禁钉它）：
@@ -111,9 +109,9 @@ pub fn awake_place_accepts(
         0 => {
             // C# `ItemType.Weapon = 20 / Helmet = 21 / Armour = 22`、`ItemGrade.None = 3`（本端 +3 口径）
             const BASE_TYPES: [u8; 3] = [
-                ITEM_TYPE_WEAPON_CS,
-                ITEM_TYPE_ARMOUR_CS,
-                ITEM_TYPE_HELMET_CS,
+                ITEM_TYPE_WEAPON_RS,
+                ITEM_TYPE_ARMOUR_RS,
+                ITEM_TYPE_HELMET_RS,
             ];
             if BASE_TYPES.contains(&item.item_type) && item.grade != ITEM_GRADE_NONE_RS {
                 Ok(())
@@ -123,14 +121,14 @@ pub fn awake_place_accepts(
         }
         1 | 2 => Err("只读展示格"),
         3 | 4 => {
-            if item.item_type == ITEM_TYPE_AWAKENING_CS && item.shape < AWAKEN_MATERIAL_SHAPE_CASH {
+            if item.item_type == ITEM_TYPE_AWAKENING_RS && item.shape < AWAKEN_MATERIAL_SHAPE_CASH {
                 Ok(())
             } else {
                 Err("材料格只收 Awakening 且 Shape < 200")
             }
         }
         _ => {
-            if item.item_type == ITEM_TYPE_AWAKENING_CS && item.shape == AWAKEN_MATERIAL_SHAPE_CASH
+            if item.item_type == ITEM_TYPE_AWAKENING_RS && item.shape == AWAKEN_MATERIAL_SHAPE_CASH
             {
                 Ok(())
             } else {
@@ -658,8 +656,8 @@ mod tests {
     /// 阳性对照（落地时实做）：把格 3/4 的 `shape < 200` 改成 `shape > 200` ⇒ 第 2、3 条断言立即红。
     #[test]
     fn awake_place_rules_match_csharp() {
-        const AW: u8 = ITEM_TYPE_AWAKENING_CS;
-        const WEAPON: u8 = ITEM_TYPE_WEAPON_CS;
+        const AW: u8 = ITEM_TYPE_AWAKENING_RS;
+        const WEAPON: u8 = ITEM_TYPE_WEAPON_RS;
         let mk = |item_type: u8, shape: i16, grade: u8| InvItem {
             item_type,
             shape,
