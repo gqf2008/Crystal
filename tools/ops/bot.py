@@ -149,10 +149,15 @@ def one_session(idx: int, host: str, port: int, account: str, password: str,
     t0 = time.time()
     res = {"idx": idx, "account": account, "ok": False, "stage": "connect",
            "frames": 0, "bytes": 0}
-    sock = socket.create_connection((host, port), timeout=timeout)
-    sock.settimeout(timeout)
-    res["t_connected"] = round(time.time() - t0, 3)
+    # **connect 必须在 try 里**（2026-09-27 实测教训）：原先 `create_connection` 在 try **外**，
+    # 一旦连接失败（例如重载下的 `WSAENOBUFS`/超时），异常直接掀掉整条线程 ⇒ `results[i]` 保持 None、
+    # **连错误文本都没有**。现象就是「整轮 ok=0 / failed=N」而服务端日志里那次登录**根本没出现**
+    # （不是拒登，是没连上），查了三轮才定位到"错误被线程吃掉了"。
+    sock = None
     try:
+        sock = socket.create_connection((host, port), timeout=timeout)
+        sock.settimeout(timeout)
+        res["t_connected"] = round(time.time() - t0, 3)
         opcode, _ = recv_frame(sock)              # Connected
         res["t_connected_frame"] = round(time.time() - t0, 3)
         res["stage"] = "client_version"
@@ -315,10 +320,11 @@ def one_session(idx: int, host: str, port: int, account: str, password: str,
         res["error"] = f"{type(exc).__name__}: {exc}"
         return res
     finally:
-        try:
-            sock.close()
-        except Exception:
-            pass
+        if sock is not None:
+            try:
+                sock.close()
+            except Exception:
+                pass
 
 
 def main() -> int:
@@ -379,6 +385,15 @@ def main() -> int:
         "frames_recv": sum(r.get("frames", 0) for r in results if r),
         "bytes_recv": sum(r.get("bytes", 0) for r in results if r),
     }
+    # 失败归因直方图：J0 红时一眼能看出"卡在哪一段、什么错"，不必再去翻线程栈。
+    hist: dict[str, int] = {}
+    for r in results:
+        if r is None:
+            hist["<无结果：线程崩溃>"] = hist.get("<无结果：线程崩溃>", 0) + 1
+        elif not r.get("ok"):
+            key = "{0}: {1}".format(r.get("stage"), r.get("error") or "unknown")
+            hist[key] = hist.get(key, 0) + 1
+    summary["failed_by_stage_error"] = hist
     print(json.dumps({"summary": summary, "sessions": results}, ensure_ascii=False))
     return 0 if len(ok) == len(accounts) else 1
 

@@ -153,6 +153,7 @@ function RunCycle([int]$n) {
     $newLines = @(Get-NewLogLines)
     return [pscustomobject]@{
         sum      = $r.json.summary
+        raw      = $r.json
         entered  = @($newLines | Where-Object { $_ -match 'StartGame: session=' }).Count
         rejected = @($newLines | Where-Object { $_ -match 'StartGame rejected' }).Count
     }
@@ -179,6 +180,25 @@ foreach ($phase in @(@('warm', $WarmCycles), @('measure', $MeasureCycles))) {
         if ($null -eq $sum -or $sum.failed -ne 0) {
             Write-Host ("FAIL(J0): 第 {0} 轮会话失败（ok={1} failed={2}）——标定无效，不产出报告" -f `
                     $cycleNo, $(if ($sum) { $sum.ok } else { 'n/a' }), $(if ($sum) { $sum.failed } else { 'n/a' }))
+            # **失败归因就地打出来**（2026-09-27 补）：此前只报"整轮失败"，不看服务端日志根本不知道
+            # 是"没连上"还是"连上被拒"——而这两者的处置完全相反（前者查夹具/本机资源，后者查产品）。
+            # **先记录服务端此刻是否还活着**：这一条直接区分「产品崩了」与「夹具/bot 连不上」。
+            $proc.Refresh()
+            $code = if ($proc.HasExited) { "0x{0:X8}" -f $proc.ExitCode } else { "running" }
+            Write-Host ("        服务端进程此刻存活 = {0}（PID {1}，exit={2}）" -f (-not $proc.HasExited), $proc.Id, $code)
+            if ($null -ne $res -and $null -ne $res.raw) {
+                $failJson = Join-Path $ops ("out/leak_plateau_fail_cycle" + $cycleNo + ".json")
+                New-Item -ItemType Directory -Force -Path (Split-Path -Parent $failJson) | Out-Null
+                $res.raw | Set-Content -Encoding utf8 $failJson
+                Write-Host ("        该轮会话明细已存：{0}" -f $failJson)
+                if ($res.raw.summary.failed_by_stage_error) {
+                    Write-Host "        失败归因（阶段: 错误 → 条数）："
+                    $res.raw.summary.failed_by_stage_error.PSObject.Properties |
+                        ForEach-Object { Write-Host ("          {0} → {1}" -f $_.Name, $_.Value) }
+                }
+            } elseif ($null -eq $res) {
+                Write-Host "        本轮连 bot 都没跑出 JSON（见 _run_bot.ps1 的超时/错误文件）"
+            }
             Stop-Process -Id $proc.Id -Force -EA SilentlyContinue
             exit 3
         }
