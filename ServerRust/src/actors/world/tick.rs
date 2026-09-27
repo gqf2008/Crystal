@@ -4939,7 +4939,18 @@ impl WorldActor {
                     if let Err(e) =
                         db::save_character(&self.db_pool, &state, &record.account_username).await
                     {
+                        // owner 2026-09-24 拍板「落库失败**一律**直接反馈到客户端」——
+                        // 定期自动存档此前只有 `warn!`（2026-09-27 只读 DB 故障注入实测：
+                        // 玩家在线、每 300 ticks 自动存档连续失败，客户端一句提示都没有；
+                        // 登录/登出那两条路径会 notify，**这条不会**）。玩家因此可能带着坏库
+                        // 玩很久都不知道，正是拍板要堵的那种"静默丢"。
                         warn!("Auto-save failed for player {}: {}", record.name, e);
+                        notify_persist_failure(
+                            &self.gate_ref,
+                            record.session_id,
+                            "player_character",
+                            "phase=autosave",
+                        );
                     } else {
                         saved += 1;
                     }
@@ -4951,6 +4962,13 @@ impl WorldActor {
                             db::save_heroes(&self.db_pool, &record.name, &db_heroes).await
                         {
                             warn!("Auto-save heroes failed for {}: {}", record.name, e);
+                            // 同上：自动存档里的英雄表失败也要让玩家看到（同一拍板范围）。
+                            notify_persist_failure(
+                                &self.gate_ref,
+                                record.session_id,
+                                "heroes",
+                                "phase=autosave",
+                            );
                         }
                     }
                 }

@@ -14,10 +14,22 @@ param(
     [int]$KillDetectSec = 15,
     [int]$RecoverSec = 60,
     [double]$JitterDelayMs = 200,
-    [double]$JitterDropPct = 5,
+    # **默认 0**：`latency_proxy.py` 的 `--drop-pct` 是在字节流中间直接丢且**不重传**，
+    # 会破坏 TCP 语义（下游收到拼接坏的帧）——它自己的文件头就写明「想测丢包不要用本开关、
+    # 想测延迟用 --drop-pct 0」。此前默认 5 ⇒ jitter 用例**必然** session 超时假红
+    # （2026-09-27 实测：login_sent 后 TimeoutError、frames=0）。要探丢包/断流请另做
+    # 「按连接丢/阻断再放行」的模型，别用这个开关。
+    [double]$JitterDropPct = 0,
     [string]$OutFile = '',
     # 单次 bot 会话超时（秒）：超时按该次采样失败处理并**立刻**返回（2026-09-25 修）
-    [int]$BotTimeoutSec = 90
+    [int]$BotTimeoutSec = 90,
+    # 客户端可见报错的文案判据（与 storage_degrade_drill 同口径；可调便于做「断言本身会红」的阳性对照）
+    [string]$NoticePattern = '存档失败',
+    # 只读用例里会话的保持秒数：必须跨过「每 300 ticks 的自动存档」那一拍。
+    # **实测口径**：本服 tick≈100ms（heartbeat: 300 ticks / 30s）⇒ 自动存档**每 30s**一次，
+    # 12s 的会话根本打不到它（第一版就是 12s，日志里连 `Auto-save` 行都没有）。
+    # 默认 40s：保证跨过至少一次自动存档，才能验到「玩家在线时落库失败也看得到」。
+    [int]$RoHoldSec = 40
 )
 $ErrorActionPreference = 'Continue'
 $ops = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -128,8 +140,19 @@ if ($srvJ.ready) {
     if ($proxy -and -not $proxy.HasExited) { Stop-Process -Id $proxy.Id -Force -ErrorAction SilentlyContinue }
     # 服务端在抖动下是否出现真错误（排除良性断连）
     $hr = $null
-    & pwsh (Join-Path $ops 'health_report.ps1') -LogFile $srvJ.log -OutFile (Join-Path $ops 'out/fault_jitter_health.json') | Out-Null
-    try { $hr = (Get-Content -Raw (Join-Path $ops 'out/fault_jitter_health.json') | ConvertFrom-Json) } catch {}
+    # **必须先建 out 目录**：`health_report.ps1` 写不出报告时这里会静默变成 `$null`，
+    # 而判据 `($jitterErrors -eq 0)` 对 `$null` 不成立 ⇒ 整条 jitter 用例**假红**。
+    # 2026-09-27 实测：fresh worktree 里 `tools/ops/out/` 不存在（该目录不入库），
+    # 于是 `jitter.ok=false`、drill exit 5；同一条日志手工跑 health_report 却是 `errors=0 / PASS`。
+    $hrOut = Join-Path $ops 'out/fault_jitter_health.json'
+    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $hrOut) | Out-Null
+    & pwsh (Join-Path $ops 'health_report.ps1') -LogFile $srvJ.log -OutFile $hrOut | Out-Null
+    $hr = $null
+    try { $hr = (Get-Content -Raw $hrOut | ConvertFrom-Json) } catch {}
+    if ($null -eq $hr) {
+        # 报告都产不出来 = 这条判据**没判成**，要说清楚，别让人以为"服务端有真错误"
+        Write-Host ('WARN：health_report 未产出可解析报告（{0}）——jitter 判据按"未判成"记 false' -f $hrOut)
+    }
     $jitterErrors = if ($hr) { $hr.errors } else { $null }
     Stop-All
 } else { $jitterErrors = $null }
@@ -150,24 +173,44 @@ if (Test-Path $db) {
     $dbRo = (Get-Item $db).Attributes -band [IO.FileAttributes]::ReadOnly
 }
 $srvR = Start-Srv 'rodb' $Port
+# **判据补齐（2026-09-27）**：只验「服务端没 panic + 日志有错误行」是不够的——owner 已拍板
+# 「落库失败一律**直接反馈到客户端**」，所以只读 DB 这条故障路径也必须断言**客户端看得到**
+# （与 storage_degrade_drill 的 J5 同口径、同文案正则）。此前这里只 grep 日志，等于把
+# 「服务端降级可见」当成了「玩家可见」，而两者的实现路径不同（一个是 persist_report 打日志，
+#  一个是往会话发 S.Chat/ChatType::System）。
+$roSession = if ($srvR.ready) { Bot $Port $RoHoldSec } else { $null }
+$roMsgs = @()
+if ($null -ne $roSession) {
+    foreach ($s in @($roSession.sessions)) {
+        if ($null -ne $s -and $null -ne $s.system_messages) { $roMsgs += @($s.system_messages) }
+    }
+}
+$roHit = @($roMsgs | Where-Object { $_ -match $NoticePattern })
+$clientNotice = $roHit.Count -gt 0
 $roLog = Get-Content $srvR.log -ErrorAction SilentlyContinue
 $panicked = @($roLog | Where-Object { $_ -match 'panicked|thread .* panicked' }).Count
-$sawError = @($roLog | Where-Object { $_ -match 'ERROR|Failed|read-only|readonly' }).Count
+$sawError = @($roLog | Where-Object { $_ -match 'ERROR|Failed|read-only|readonly|PERSIST_LOST' }).Count
 Stop-All
 attrib -R $db | Out-Null
 $results.db_readonly = [ordered]@{
     db_set_readonly = [bool]$dbRo
     server_ready = $srvR.ready
+    session_failed = if ($roSession) { $roSession.summary.failed } else { $null }
+    client_notice_seen = $clientNotice
+    client_notice_messages = @($roHit | Select-Object -First 3)
+    client_system_messages_total = $roMsgs.Count
+    notice_pattern = $NoticePattern
     panicked = $panicked
     error_lines = $sawError
-    ok = (-not $dbRo) -or (($panicked -eq 0))     # 不 panic 即算通过（可降级/可报错）
+    # 不 panic **且** 玩家看得到失败提示，才算这条故障路径真的按拍板语义降级
+    ok = (-not $dbRo) -or (($panicked -eq 0) -and $clientNotice)
 }
 
 $allOk = ($results.kill_restart.ok -and $results.jitter.ok -and $results.db_readonly.ok)
 $report = [ordered]@{
     ok = $allOk
     scenarios = $results
-    criteria = '①杀进程可感知+可恢复 ②抖动下会话可用且零真错误 ③DB 只读时不 panic'
+    criteria = '①杀进程可感知+可恢复 ②抖动下会话可用且零真错误 ③DB 只读时不 panic 且落库失败对客户端可见'
 }
 $json = $report | ConvertTo-Json -Depth 8
 if ($OutFile) { $json | Set-Content -Encoding utf8 $OutFile }
