@@ -1,5 +1,24 @@
 # SharedRust - Crystal Game Engine Shared Library (Rust Port)
 
+> ## ⚠️ SCOPE — do not treat this copy as the protocol source of truth
+>
+> **This directory is a stale, partially diverged copy of the repository-root `SharedRust`.**
+> It exists **only** so that `MapEditor/rust-map-editor` (which declares
+> `mir2_shared = { path = "../SharedRust", features = ["client-parse"] }`) can use a **small set of
+> data types and enums** — in practice `mir2_shared::Point` and
+> `mir2_shared::enums::MirAction` (see `rust-map-editor/src/{map_code,mlibrary,frames}.rs`).
+>
+> * **Not synchronized, and not promised to be.** Measured 2026-09-27: this copy's
+>   `src/packets/server/user.rs` differs from the root copy by 23 insertions / 377 deletions.
+> * **Do not add protocol code here** (packets, codecs, client/server wire formats). Protocol
+>   truth lives in the **root `SharedRust`** — the crate that `Client-Bevy` and `ServerRust`
+>   actually build against. Protocol consistency is defined as "root `SharedRust` ↔ Rust client ↔
+>   Rust server", per the repo's `AGENTS.md`.
+> * If you need a type that this copy lacks, prefer changing the map editor to depend on the
+>   **root** `SharedRust` (path depth permitting) instead of copying more code into this copy.
+> * This crate is **not built in CI**; `MapEditor/rust-map-editor/build.ps1` even hardcodes a
+>   path that does not exist on this machine, so it is not a directly buildable entry point today.
+
 > Rust implementation of the Legend of Mir game server/client shared protocol library
 
 ## 🚀 Quick Start
