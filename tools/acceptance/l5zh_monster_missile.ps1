@@ -46,7 +46,8 @@ try {
     $exeSrc = "$ClientHome\Client-Bevy\target\debug\client_bevy.exe"
     $exe = Join-Path (Split-Path -Parent $exeSrc) 'l5zh_client.exe'
     if (-not (Test-Path $exeSrc)) { Write-Host "FAIL(9): 找不到客户端 $exeSrc"; exit 9 }
-    . "$acc\build_stamp.ps1"
+    # 用字面 `$PSScriptRoot`：门禁 T11.4 静态检查 dot-source 目标存在（`$acc` 这种中间变量它解析不了）
+    . "$PSScriptRoot\build_stamp.ps1"
     Assert-ClientBuildStamp -Exe $exeSrc -Worktree $ClientHome -ScriptName 'l5zh_monster_missile'
     Get-CimInstance Win32_Process -Filter "Name='l5zh_client.exe'" -EA SilentlyContinue |
         ForEach-Object { Stop-Process -Id $_.ProcessId -Force -EA SilentlyContinue }

@@ -105,10 +105,28 @@ try {
             if (-not $l) { return $null }; ($l | ConvertFrom-Json).result
         } catch { return $null }
     }
-    Get-CimInstance Win32_Process -Filter "Name='client_bevy.exe'" -EA SilentlyContinue | Where-Object { $_.ExecutablePath -eq $exe } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -EA SilentlyContinue }
+    # 清场**只按自己上一次留下的 PID**（`tools/ops/check_process_scope.ps1` 禁止按共享进程名清场：
+    # 同机多 agent 并行时那会把别人正在跑的客户端一起杀掉 ⇒ 对方拿到假红）。
+    $pidFile = Join-Path $work 'probe_ui_nodes.pid'
+    if (Test-Path -LiteralPath $pidFile) {
+        $oldPid = 0
+        if ([int]::TryParse((Get-Content -LiteralPath $pidFile -Raw -EA SilentlyContinue), [ref]$oldPid) -and $oldPid -gt 0) {
+            $op = Get-Process -Id $oldPid -EA SilentlyContinue
+            if ($op -and $op.ProcessName -eq 'client_bevy') {
+                try {
+                    if ((Get-CimInstance Win32_Process -Filter "ProcessId=$oldPid" -EA SilentlyContinue).ExecutablePath -eq $exe) {
+                        Stop-Process -Id $oldPid -Force -EA SilentlyContinue
+                    }
+                } catch {}
+            }
+        }
+        Remove-Item -LiteralPath $pidFile -Force -EA SilentlyContinue
+    }
     Start-Sleep -Milliseconds 800
-    Start-Process -FilePath $exe -ArgumentList '--real-net', '--auto-enter', '--e2e-user', 'test', '--e2e-pass', '123456', '--control-port', "$ControlPort" `
-        -WorkingDirectory $work -RedirectStandardOutput (Join-Path $work 'p.log') -RedirectStandardError (Join-Path $work 'p.err') | Out-Null
+    $clientProc = Start-Process -FilePath $exe -ArgumentList '--real-net', '--auto-enter', '--e2e-user', 'test', '--e2e-pass', '123456', '--control-port', "$ControlPort" `
+        -WorkingDirectory $work -RedirectStandardOutput (Join-Path $work 'p.log') -RedirectStandardError (Join-Path $work 'p.err') -PassThru
+    $script:probeClientPid = $clientProc.Id
+    Set-Content -LiteralPath $pidFile -Value $clientProc.Id -Encoding ascii
     $st = $null
     foreach ($i in 1..90) { Start-Sleep 1; $st = Rpc 'state'; if ($null -ne $st.tile_x) { break } }
     if ($null -eq $st -or $null -eq $st.tile_x) { Write-Host 'FAIL: 未进场'; exit 2 }
@@ -261,5 +279,5 @@ try {
     $json = $res | ConvertTo-Json -Depth 8
     [IO.File]::WriteAllText($Out, $json, (New-Object System.Text.UTF8Encoding($false)))
     Write-Host "已写 $Out"
-    Get-CimInstance Win32_Process -Filter "Name='client_bevy.exe'" -EA SilentlyContinue | Where-Object { $_.ExecutablePath -eq $exe } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -EA SilentlyContinue }
+    if ($script:probeClientPid) { Stop-Process -Id $script:probeClientPid -Force -EA SilentlyContinue }
 } finally { Exit-E2eLock }
