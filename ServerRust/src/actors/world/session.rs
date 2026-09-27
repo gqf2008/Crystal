@@ -7214,7 +7214,8 @@ impl Message<ChatRequest> for WorldActor {
                                         is_mounted: None,
                                     })
                                     .await;
-                                let body = user_location_body(fx, fy, os.direction);
+                                // 召回：系统位移 ⇒ 校正
+                                let body = user_location_body(fx, fy, os.direction, true);
                                 let _ = self
                                     .gate_ref
                                     .tell(SendToClient {
@@ -8734,11 +8735,14 @@ fn move_steps(run: bool, is_mounted: bool, swift_feet: bool) -> i32 {
 /// UserLocation 包体（wire 与 SharedRust `packets::server::user::UserLocation` 一致：
 /// [x i32][y i32][direction u8]）。统一入口避免再出现 [dir][x][y] 错序导致客户端把坐标
 /// 解析成 x*256+dir 的超大值（#1809）。
-pub(crate) fn user_location_body(x: i32, y: i32, direction: u8) -> Vec<u8> {
+/// `correction` = 语义字节（见 `mir2_shared::packets::server::user::UserLocation::correction`）：
+/// `false` 只是「自己成功走一步」的回显（客户端**不**据此挪玩家）；`true` 才是要求客户端采纳的校正。
+pub(crate) fn user_location_body(x: i32, y: i32, direction: u8, correction: bool) -> Vec<u8> {
     let mut body = Vec::new();
     body.extend_from_slice(&x.to_le_bytes());
     body.extend_from_slice(&y.to_le_bytes());
     body.push(direction);
+    body.push(u8::from(correction));
     body
 }
 
@@ -8751,7 +8755,8 @@ async fn send_user_location_sync(
     x: i32,
     y: i32,
 ) {
-    let body = user_location_body(x, y, direction);
+    // 走位被拒 / 系统重同步 ⇒ 校正
+    let body = user_location_body(x, y, direction, true);
     let _ = gate_ref
         .tell(SendToClient {
             session_id,
@@ -9028,8 +9033,9 @@ mod tests {
         // #1809：UserLocation 包体必须为 [x i32][y i32][direction u8]，
         // 与 SharedRust `packets::server::user::UserLocation::read_body` 一致；
         // 错序 [dir][x][y] 会让客户端解析出 x*256+dir 的超大坐标。
-        let body = user_location_body(275, 296, 6);
-        assert_eq!(body.len(), 9);
+        let body = user_location_body(275, 296, 6, false);
+        assert_eq!(body.len(), 10, "尾字节 = ack/correction 语义位");
+        assert_eq!(body[9], 0, "correction=false 必须编码成 0");
         let mut cur = std::io::Cursor::new(&body[..]);
         let pkt = mir2_shared::packets::server::user::UserLocation::read_body(&mut cur).unwrap();
         assert_eq!(pkt.location_x, 275);
@@ -9037,12 +9043,13 @@ mod tests {
         assert_eq!(pkt.direction as u8, 6);
 
         // 边界：0 与负数坐标也保持顺序
-        let body = user_location_body(-5, 0, 0);
+        let body = user_location_body(-5, 0, 0, true);
         let mut cur = std::io::Cursor::new(&body[..]);
         let pkt = mir2_shared::packets::server::user::UserLocation::read_body(&mut cur).unwrap();
         assert_eq!(pkt.location_x, -5);
         assert_eq!(pkt.location_y, 0);
         assert_eq!(pkt.direction as u8, 0);
+        assert!(pkt.correction, "correction=true 必须编码成非 0 且能读回");
     }
 
     #[test]

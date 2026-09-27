@@ -572,6 +572,8 @@ pub(crate) async fn teleport_core(
     body.extend_from_slice(&x.to_le_bytes());
     body.extend_from_slice(&y.to_le_bytes());
     body.push(direction);
+    // 传送/落位：系统位移 ⇒ 校正
+    body.push(1);
     if let Err(e) = world
         .gate_ref
         .tell(SendToClient {

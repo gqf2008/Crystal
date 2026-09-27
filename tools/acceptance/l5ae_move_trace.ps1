@@ -2,8 +2,14 @@
 #
 # 判据（全取状态读数，不看像素）：
 #   A) 一次右键远点后客户端 tile 位移 >= 2 格（能走）；
-#   B) 采样期间 `state.in_sync` 不得出现 false（客户端预测领先服务端 >2 格）；
-#   C) 轨迹里客户端 tile 不得**回退**到更早的采样点（= 被拉回）。
+#   B) 轨迹里客户端 tile 不得**回退**（= 没被拉回；owner 原话就是「跑一段被拉回来」）；
+#   C) 停下后 `state.in_sync` 必须收敛为 true（客户端与服务端最终一致，证明 B 不是靠"根本没动"糊过去的）。
+#
+# 为什么判据不是 `in_sync`：服务端**每成功走一步都回一发** UserLocation，那对客户端是落后一个 RTT 的
+# 「回显 ACK」，移动期间客户端本来就该领先 ⇒ `in_sync=false` 是常态，不能当判据（旧版夹具把它当判据，
+# 等于要求"客户端跟着落后的回显走"，反过来逼出「被拉回」）。现在 ACK 由 `UserLocation.correction=false`
+# 标出、客户端不据此挪人（只有真校正才挪），判据因此落在「不回退 + 最终收敛」上。
+# 阳性对照（实做）：把客户端 `apply_user_location` 改回"无条件写 self_position" → B 立刻红。
 # 用法：pwsh tools/acceptance/l5ae_move_trace.ps1 -ClientHome <worktree> [-User test]
 param(
     [string]$ClientHome = 'E:\Users\gxh\Documents\GitHub\Crystal-wt-blend',
@@ -68,10 +74,17 @@ foreach ($t in $trail) {
         $lastD = $dd
     }
 }
-Write-Host ("[判据] 末端位移={0} 格；采样中 in_sync 曾 false={1}；轨迹出现回退={2}" -f $d, $anyOut, $back)
-Write-Host ("VERDICT move={0} sync={1} no_pullback={2}" -f `
-    $(if ($d -ge 2) { 'PASS' } else { 'FAIL' }), $(if ($anyOut) { 'FAIL' } else { 'PASS' }), $(if ($back) { 'FAIL' } else { 'PASS' }))
-if (-not ($d -ge 2 -and -not $anyOut -and -not $back)) { exit 10 }
+$converged = $false
+foreach ($i in 1..20) {
+    Start-Sleep -Milliseconds 200
+    $e = Rpc 'state'
+    if ($null -ne $e -and $e.in_sync) { $converged = $true; break }
+}
+Write-Host ("[判据] 末端位移={0} 格；轨迹出现回退={1}；停止后 in_sync 收敛={2}（采样中曾 false={3}）" -f `
+    $d, $back, $converged, $anyOut)
+Write-Host ("VERDICT move={0} no_pullback={1} converge={2}" -f `
+    $(if ($d -ge 2) { 'PASS' } else { 'FAIL' }), $(if ($back) { 'FAIL' } else { 'PASS' }), $(if ($converged) { 'PASS' } else { 'FAIL' }))
+if (-not ($d -ge 2 -and -not $back -and $converged)) { exit 10 }
 exit 0
 } finally {
     Get-CimInstance Win32_Process -Filter "Name='l5ae_client.exe'" -EA SilentlyContinue |

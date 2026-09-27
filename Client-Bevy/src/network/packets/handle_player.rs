@@ -7,6 +7,31 @@ use mir2_shared::packets::base::{Packet, PacketHeader};
 // 网络包解码分派（#72 拆分；#1148 再按域拆分）：handle_player 处理服务端包 玩家属性/觉醒/信用 分支。
 // 由 packets.rs::handle_packet 调度器按 opcode 调用；返回 true 表示已处理。
 
+/// `S.UserLocation` 到达时的会话状态更新（纯函数：门禁与阳性对照都在这里钉）。
+///
+/// **关键口径**（2026-09-27 owner「跑一段被拉回来」的根因修复）：服务端**每成功走一步也回一发**
+/// `UserLocation`（`PlayerActor::MoveRequest` 成功分支），那一发对客户端是「回显 ACK」，
+/// 天生落后本地预测一个 RTT。旧实现把它当权威校正写进 `self_position`，
+/// `apply_self_position` 就会把刚跑出去的玩家往回拉 —— 用户看到的正是「跑一段被拉回来」。
+///
+/// 所以：
+/// * `correction == false`（ACK）→ **只**更新 `last_server_position`（夹具 `in_sync` /
+///   `state.server_tile_*` 读它），**不写** `self_position` ⇒ 不会挪玩家；
+/// * `correction == true`（走位被拒 / 传送 / 复活 / 召回）→ 写 `self_position`，下一帧被
+///   `apply_self_position` 无条件采纳（C# `GameScene.UserLocation` 同款语义）。
+pub(crate) fn apply_user_location(
+    session: &mut SessionState,
+    x: i32,
+    y: i32,
+    direction: u8,
+    correction: bool,
+) {
+    session.last_server_position = Some((x, y));
+    if correction {
+        session.self_position = Some((x, y, direction));
+    }
+}
+
 /// `S.UserInformation` 的背包段 → 本端 `Inventory::items`。
 ///
 /// **不要截断到 40**（2026-09-27 修复）：C# `UserObject.Inventory = new UserItem[46]`
@@ -68,6 +93,27 @@ mod tests {
     fn user_information_without_inventory_yields_empty() {
         assert!(client_inventory_slots(&None).is_empty());
         assert!(client_inventory_slots(&Some(Vec::new())).is_empty());
+    }
+
+    /// 门禁（owner「跑一段被拉回来」）：`S.UserLocation` 的**回显 ACK** 绝不能写 `self_position`，
+    /// 否则 `apply_self_position` 会把刚跑出去的玩家拉回服务端那个（落后一个 RTT 的）坐标。
+    ///
+    /// 阳性对照（落地时实做）：把 `if correction` 去掉、改成无条件写 `self_position`
+    /// → 第二条断言立即红（这就是修复前的行为）。
+    #[test]
+    fn user_location_ack_does_not_move_local_player() {
+        let mut s = SessionState::default();
+        // ACK：只更新「服务端已知位置」（夹具 in_sync 读它），权威位保持空 ⇒ 不产生位置校正
+        apply_user_location(&mut s, 300, 400, 2, false);
+        assert_eq!(s.last_server_position, Some((300, 400)));
+        assert_eq!(
+            s.self_position, None,
+            "ACK 不许写权威位（否则玩家每跑一段被拉回一段）"
+        );
+        // 校正：走位被拒 / 传送 / 复活 —— 必须写权威位，下一帧被无条件采纳
+        apply_user_location(&mut s, 301, 401, 3, true);
+        assert_eq!(s.last_server_position, Some((301, 401)));
+        assert_eq!(s.self_position, Some((301, 401, 3)));
     }
 }
 
@@ -298,13 +344,19 @@ pub(crate) fn handle_player(
             match user::UserLocation::read_body(&mut cur) {
                 Ok(p) => {
                     tracing::info!(
-                        "📍 UserLocation: ({},{}) dir={:?}",
+                        "📍 UserLocation: ({},{}) dir={:?} correction={}",
                         p.location_x,
                         p.location_y,
-                        p.direction
+                        p.direction,
+                        p.correction
                     );
-                    session.self_position = Some((p.location_x, p.location_y, p.direction as u8));
-                    session.last_server_position = Some((p.location_x, p.location_y));
+                    apply_user_location(
+                        session,
+                        p.location_x,
+                        p.location_y,
+                        p.direction as u8,
+                        p.correction,
+                    );
                 }
                 Err(e) => {
                     tracing::warn!("⚠️ UserLocation 解析失败: {}", e);

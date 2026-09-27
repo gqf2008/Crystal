@@ -189,6 +189,8 @@ pub(crate) fn revive_player(
             location_x: 354,
             location_y: 352,
             direction: MirDirection::Up,
+            // 复活 = 系统位移，客户端必须采纳
+            correction: true,
         },
     );
     tracing::info!("💚 [MOCK] 玩家复活（满血）");
