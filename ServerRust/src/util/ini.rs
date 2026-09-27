@@ -1320,7 +1320,10 @@ BuffExpRate=0
         );
         assert_eq!(list[0], 5, "Level1 原版 5");
         assert_eq!(list[4], 600, "Level5 原版 600");
-        assert_eq!(list[99], 5_400_000_000, "Level100 原版 5400000000（>u32::MAX）");
+        assert_eq!(
+            list[99], 5_400_000_000,
+            "Level100 原版 5400000000（>u32::MAX）"
+        );
         assert_eq!(list[499], 45_400_000_000, "Level500 原版 45400000000");
     }
 
