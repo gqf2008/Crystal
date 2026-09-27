@@ -1250,6 +1250,9 @@ mod tests {
         app.init_resource::<crate::game::dialogs::notice_box::NoticeBox>();
         app.init_resource::<crate::game::dialogs::guild::GuildState>();
         app.init_resource::<crate::game::dialogs::creature::CreatureState>();
+        // 大地图守卫读 `GameData.big_map_index`（默认 0 = 该图没有大图 ⇒ 会被守卫拦下），
+        // 需要大地图开窗的用例自己把 `big_map_index` 置非 0（见 `bigmap_hotkey_*`）。
+        app.init_resource::<crate::map_renderer::GameData>();
         app.add_systems(Update, dialog_hotkey_system);
         app.world_mut()
             .resource_mut::<ButtonInput<KeyCode>>()
@@ -1320,6 +1323,49 @@ mod tests {
                 .text,
             None,
             "状态具备时不该弹提示框"
+        );
+    }
+
+    /// 大地图守卫（C# `BigMapDialog.Show():288-289`：`if (map.BigMap <= 0) return;`）——
+    /// 与上面四扇**不同型**：静默不开窗、**不弹提示框**；`BigMap > 0` 时照常开。
+    ///
+    /// **阳性对照**：把 `show_guard` 里的 `DialogKind::BigMap` 分支去掉（或在
+    /// `ShowGuardParams::state` 里把 `has_big_map` 写死 true），用例①立刻红。
+    #[test]
+    fn bigmap_hotkey_guarded_by_map_big_map_index() {
+        use crate::game::dialogs::notice_box::NoticeBox;
+        use crate::game::dialogs::{DialogKind, DialogManager};
+        // ① `GameData` 默认 `big_map_index = 0`（该图没有大图）⇒ 按 B 什么都不该发生
+        let mut app = hotkey_app(false, key_of("大地图"));
+        app.update();
+        assert!(
+            !app.world()
+                .resource::<DialogManager>()
+                .is_open(DialogKind::BigMap),
+            "BigMap<=0：不该开窗（C# Show 直接 return）"
+        );
+        assert_eq!(
+            app.world().resource::<NoticeBox>().text,
+            None,
+            "BigMap<=0：C# 不弹 MirMessageBox，本端也不该弹"
+        );
+
+        // ② 有图（`MapInfo.BigMap > 0`）⇒ 正常开窗
+        let mut app = hotkey_app(false, key_of("大地图"));
+        app.world_mut()
+            .resource_mut::<crate::map_renderer::GameData>()
+            .big_map_index = 135;
+        app.update();
+        assert!(
+            app.world()
+                .resource::<DialogManager>()
+                .is_open(DialogKind::BigMap),
+            "BigMap>0：按 B 应正常开大地图"
+        );
+        assert_eq!(
+            app.world().resource::<NoticeBox>().text,
+            None,
+            "放行时不该弹提示框"
         );
     }
 

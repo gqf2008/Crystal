@@ -20,7 +20,6 @@ use crate::game::movement::world_to_tile;
 use crate::map_renderer::{GameData, GameLibraries};
 use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
-use crate::resources::map_reader::{resolve_map_path, MapReader};
 use crate::scenes::AppState;
 use crate::ui::outlined_text::spawn_outlined_label;
 use crate::ui::sprite_ui::{shared_cjk_font, UiCjkFont, UiFont};
@@ -245,10 +244,9 @@ fn spawn_big_map(
             spawn_icon_button(p, n, h, pr, pw - 25.0, 3.0, 24.0, 21.0, 8)
                 .insert((BigMapBtn(BigMapBtnKind::Close), CloseButton));
         }
-        // 视口背景（深色底）
-        spawn_container(p, VIEW_X, VIEW_Y, VIEW_W, VIEW_H, 0)
-            .insert(BackgroundColor(Color::srgb(0.1, 0.13, 0.1)));
-        // 地形纹理（首帧生成后填充）
+        // 大图（`Data/mmap.Lib[MapInfo.BigMap]`，首帧生成后填充）。
+        // **不铺自造底色**：C# `BigMapViewPort` 没有背景（`MirControl.BackColour = Color.Empty`），
+        // 画幅之外露的就是 `Title[820]` 面板美术本身（图比视口小时四周会露出面板）。
         let white = images.add(crate::map_renderer::make_image(
             vec![255, 255, 255, 255],
             1,
@@ -946,16 +944,19 @@ fn big_map_viewport_system(
     // `With<自身标记>`：仅 read fetch（&BigMapDot 等）不足以构成互斥对——实测
     // 两查询各自只挂对方 Without 而自身无显式 With 时判定仍死锁（tests 实验证）。
     mut terrain: Query<
-        (&mut Node, &mut ImageNode),
+        (&mut Node, &mut ImageNode, &mut Visibility),
         (
             With<BigMapTerrain>,
             Without<BigMapPlayerDot>,
             Without<BigMapDot>,
         ),
     >,
-    mut player_dot: Query<&mut Node, (With<BigMapPlayerDot>, Without<BigMapTerrain>)>,
+    mut player_dot: Query<
+        (&mut Node, &mut Visibility),
+        (With<BigMapPlayerDot>, Without<BigMapTerrain>),
+    >,
     mut npc_dots: Query<
-        (&mut Node, &mut BackgroundColor, &BigMapDot),
+        (&mut Node, &mut BackgroundColor, &mut Visibility, &BigMapDot),
         (
             With<BigMapDot>,
             Without<BigMapPlayerDot>,
@@ -1012,12 +1013,13 @@ fn big_map_viewport_system(
                         let (lx, ly, w, h) = bigmap_view_layout((aw, ah));
                         let tex =
                             images.add(crate::map_renderer::make_image(rgba, aw as u32, ah as u32));
-                        if let Ok((mut node, mut image)) = terrain.single_mut() {
+                        if let Ok((mut node, mut image, mut vis)) = terrain.single_mut() {
                             node.left = Val::Px(lx);
                             node.top = Val::Px(ly);
                             node.width = Val::Px(w);
                             node.height = Val::Px(h);
                             image.image = tex;
+                            *vis = Visibility::Visible;
                         }
                         state.viewport_ready = true;
                         state.tex_size = (w, h);
@@ -1038,34 +1040,34 @@ fn big_map_viewport_system(
                 tracing::warn!("🗺️ 大地图缺图：mmap.Lib[{big_idx}] 取不到（Data/mmap.Lib 缺失？）");
             }
         }
-        // ② 兜底（本端扩展，**不是** C# 行为）：`BigMap == 0` 或库缺该索引时退回
-        //    「按地图瓦片采样生成地形纹理」。C# 在 `BigMap <= 0` 时整扇窗都不开
-        //    （`BigMapDialog.Show():288-289`），本端暂无该守卫（见 §3.2g 残留清单）。
         if !built {
-            if let Some(map) = &game_data.map {
-                let map_path = resolve_map_path(&map_name_now);
-                if let Ok(reader) = MapReader::new(&map_path) {
-                    let (tex, tw, th, mw, mh) =
-                        build_terrain_texture(&mut libs, &mut images, &reader, map);
-                    if let Ok((mut node, mut image)) = terrain.single_mut() {
-                        node.left = Val::Px(VIEW_X + (VIEW_W - tw) / 2.0);
-                        node.top = Val::Px(VIEW_Y + (VIEW_H - th) / 2.0);
-                        node.width = Val::Px(tw);
-                        node.height = Val::Px(th);
-                        image.image = tex.clone();
-                    }
-                    state.viewport_ready = true;
-                    state.tex_size = (tw, th);
-                    state.map_size = (mw, mh);
-                    tracing::info!("🗺️ 大地图地形生成: {}x{} 纹理 {}x{}", mw, mh, tw, th);
-                }
-            }
+            // ② C# `OnBeforeDraw:644-645`：`index <= 0`（或取不到图）**什么都不画** ——
+            //    不铺底色、不画地形、不画点。新开窗这条路已被 `Show()` 守卫挡住
+            //    （`BigMap <= 0` 不开窗）；这条分支只在"窗开着时换到没大图的地图"时走到。
+            state.tex_size = (0.0, 0.0);
+            state.map_size = (mw, mh);
+            state.viewport_ready = true;
+            tracing::info!(
+                "🗺️ 大地图：BigMap={} 无可画的大图 → 视口留空（C# OnBeforeDraw 直接 return）",
+                game_data.big_map_index
+            );
         }
     }
 
     let (tw, th) = state.tex_size;
     let (mw, mh) = state.map_size;
+    // C# `OnBeforeDraw`：`index <= 0` 时整段提前 return —— 图没有，**对象点也不画**
+    // （玩家雷达点/队友点/ NPC 点都不该残留在面板美术上）。
     if tw <= 0.0 || mw <= 0.0 {
+        if let Ok((_, _, mut vis)) = terrain.single_mut() {
+            *vis = Visibility::Hidden;
+        }
+        if let Ok((_, mut vis)) = player_dot.single_mut() {
+            *vis = Visibility::Hidden;
+        }
+        for (_, _, mut vis, _) in &mut npc_dots {
+            *vis = Visibility::Hidden;
+        }
         return;
     }
     let (ox, oy) = panel_origin
@@ -1080,13 +1082,14 @@ fn big_map_viewport_system(
     // 玩家点
     if let Ok(player_tf) = players.single() {
         let (tx, ty) = world_to_tile(player_tf.translation.x, player_tf.translation.y);
-        if let Ok(mut node) = player_dot.single_mut() {
+        if let Ok((mut node, mut vis)) = player_dot.single_mut() {
             node.left = Val::Px(vx + (tx as f32 / mw) * tw - ox);
             node.top = Val::Px(vy + (ty as f32 / mh) * th - oy);
+            *vis = Visibility::Visible;
         }
     }
     // NPC 点（选中黄、其余绿）
-    for (mut node, mut color, d) in &mut npc_dots {
+    for (mut node, mut color, mut vis, d) in &mut npc_dots {
         if let Some(npc) = state.npcs.get(d.0) {
             let sx = vx + (npc.x as f32 / mw) * tw;
             let sy = vy + (npc.y as f32 / mh) * th;
@@ -1098,6 +1101,11 @@ fn big_map_viewport_system(
             } else {
                 Color::srgb(0.0, 1.0, 0.2)
             };
+            *vis = Visibility::Visible;
+        } else {
+            // C# `OnBeforeDraw` 只遍历**本图现存对象**（`MapControl.Objects`）——
+            // 池子里多出来的点不该留在上一张地图的位置上。
+            *vis = Visibility::Hidden;
         }
     }
 
@@ -1134,83 +1142,6 @@ fn big_map_viewport_system(
             }
         }
     }
-}
-
-/// 由地图瓦片采样生成大地图地形纹理（每个采样点取该格背景瓦片平均色）
-fn build_terrain_texture(
-    libs: &mut GameLibraries,
-    images: &mut Assets<Image>,
-    reader: &MapReader,
-    map: &crate::map_renderer::LoadedMap,
-) -> (Handle<Image>, f32, f32, f32, f32) {
-    let mw = map.width.max(1) as f32;
-    let mh = map.height.max(1) as f32;
-    // 显示尺寸适配视口
-    let scale = (VIEW_W / mw).min(VIEW_H / mh);
-    let dw = (mw * scale).max(1.0);
-    let dh = (mh * scale).max(1.0);
-    // 采样步长：纹理像素上限约 400x400
-    let step = ((mw / 400.0).ceil() as usize).max(1);
-    let tw = (map.width as usize).div_ceil(step);
-    let th = (map.height as usize).div_ceil(step);
-
-    let mut cache: std::collections::HashMap<(i16, i32), [u8; 4]> =
-        std::collections::HashMap::new();
-    let mut rgba = Vec::with_capacity(tw * th * 4);
-    for ty in 0..th {
-        for tx in 0..tw {
-            let cx = tx * step;
-            let cy = ty * step;
-            let cell = reader.map_cells.get(cy).and_then(|row| row.get(cx));
-            let mut color = match cell {
-                Some(c) => tile_avg_color(libs, &mut cache, c).unwrap_or([64, 110, 56, 255]),
-                None => [64, 110, 56, 255],
-            };
-            // 不可行走（障碍）压暗
-            if !map.is_walkable(
-                (cx as i32).min(map.width - 1),
-                (cy as i32).min(map.height - 1),
-            ) {
-                for ch in color.iter_mut().take(3) {
-                    *ch = (*ch as u16 * 6 / 10) as u8;
-                }
-            }
-            rgba.extend_from_slice(&color);
-        }
-    }
-    let img = images.add(crate::map_renderer::make_image(rgba, tw as u32, th as u32));
-    (img, dw, dh, mw, mh)
-}
-
-/// 瓦片平均色（带缓存）
-fn tile_avg_color(
-    libs: &mut GameLibraries,
-    cache: &mut std::collections::HashMap<(i16, i32), [u8; 4]>,
-    cell: &crate::resources::map_reader::CellInfo,
-) -> Option<[u8; 4]> {
-    let (lib, img) = cell.back_tile()?;
-    if let Some(c) = cache.get(&(lib, img)) {
-        return Some(*c);
-    }
-    let info = libs.0.get_map_image(lib, img)?;
-    let rgba = info.rgba.as_ref()?;
-    let w = info.width.max(0) as usize;
-    let h = info.height.max(0) as usize;
-    if w == 0 || h == 0 || rgba.len() < w * h * 4 {
-        return None;
-    }
-    let mut r = 0u64;
-    let mut g = 0u64;
-    let mut b = 0u64;
-    let n = (w * h) as u64;
-    for i in 0..(w * h) {
-        r += rgba[i * 4] as u64;
-        g += rgba[i * 4 + 1] as u64;
-        b += rgba[i * 4 + 2] as u64;
-    }
-    let c = [(r / n) as u8, (g / n) as u8, (b / n) as u8, 255];
-    cache.insert((lib, img), c);
-    Some(c)
 }
 
 /// 消费服务端大地图信息事件（网络层只广播 ServerEvent）

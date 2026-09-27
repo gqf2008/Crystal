@@ -382,6 +382,19 @@ FodyWeavers.xsd
 !tools/acceptance/
 /tools/acceptance/*
 !tools/acceptance/ui_interact_sweep.ps1
+# 金标准 C#↔本端对拍工具整批纳入管理：此前 `/tools/acceptance/*` 是白名单式规则，
+# **新增**工具（如 2026-09-28 的 `csharp_golden/bigmap_viewport_check.py`）会被静默吞掉，
+# 只能靠 `git add -f` 才发现——按扩展名放开这一层，别再让新工具悄无声息地不入库。
+# （`csharp_golden/dbtool/` 下的 .cs/.csproj 仍是显式 `-f` 跟踪，不受影响。）
+# 注意：`/tools/acceptance/*` 连**目录** `csharp_golden/` 一起排除了，而 git 不会进被排除的
+# 目录，所以必须先把这个目录自己放回来，下面的 `*.py` 之类的再包含才生效（实测：
+# 只写 `!…/*.py` 时 `git check-ignore` 仍报 383 行那条）。
+!tools/acceptance/csharp_golden/
+!tools/acceptance/csharp_golden/*.py
+!tools/acceptance/csharp_golden/*.ps1
+!tools/acceptance/csharp_golden/*.md
+!tools/acceptance/csharp_golden/*.txt
+!tools/acceptance/csharp_golden/*.json
 # 巡回覆盖清单：脚本与 Client-Bevy 的 lib 测试共用（漏登记要被 cargo test --lib 拦下）
 !tools/acceptance/interact_sweep_manifest.json
 !tools/acceptance/UI_VERIFICATION_REPORT.md

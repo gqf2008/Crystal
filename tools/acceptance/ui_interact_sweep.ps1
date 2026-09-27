@@ -12,6 +12,11 @@
   原版只弹 MirMessageBox、不开窗，`dialog open` 也不该开。判据 = `notice_probe` 有提示文本
   **且** `dialogs` 里没有它（`open=GUARDED` 记 pass；"弹了提示却还开着窗"记 FAIL）。
   #3314 之后这四扇在这条巡回上一直假红（"找不到标准关闭钮"）——它们不是缺陷，是缺这条判据。
+  还有**静默守卫**一扇：大地图（C# `BigMapDialog.Show()`：`if (map.BigMap <= 0) return;`，
+  不弹提示框）。逐窗前本脚本先 best-effort 把角色锚到 BichonProvince（地图文件 `0`，
+  本端 DB `big_map=135`）——锚上了就按严格判据（该开就得开），锚不上（非 GM 账号等）
+  big_map 记 SKIP（`-FailOnSkip` 下仍红）。**注意**：本脚本后面的 NPC 段会把角色留在
+  `D002`（big_map=0），所以这个锚点不是可选项——没有它，下一次巡回的 big_map 必假红。
   另有 inventory 拖动、NPC 会话窗 X、hero_manage X 三段专用检查。
 
   退出码（门禁语义）：
@@ -309,6 +314,20 @@ try {
     Write-Host ("进图 tile=({0},{1})" -f $st.tile_x, $st.tile_y)
     Start-Sleep 2
 
+    # ---------------- 前置：锚到「有大地图」的地图 ----------------
+    # 大地图窗的 C# `Show()` 守卫是「`MapControl.BigMap <= 0` 就不开窗」（`BigMapDialog.cs:288-289`，
+    # **静默**、不弹提示框——与宠物/行会那四扇不同型）。本端 `map_infos.big_map` 只有 15/400 张
+    # 非 0，而本脚本后面的 NPC 段会把角色留在 `D002`（big_map=0）⇒ 下一次巡回跑 big_map 那一项
+    # 会恒红（红的是"夹具起点"，不是产品）。所以逐窗前 best-effort 锚到 BichonProvince
+    # （地图文件 `0`，本端 DB `big_map=135`）——这正是金标准逐窗 A/B 用的那张图。
+    # 锚不上（非 GM 账号等）时该窗记 SKIP（`-FailOnSkip` 下仍然红），锚上了才按严格判据。
+    $bigMapAnchored = $false
+    Rpc 'chat' @{ message = '@mapmove 0 288 616' } | Out-Null
+    Start-Sleep 3
+    $anchorSt = Rpc 'state'
+    if ($null -ne $anchorSt.map -and $anchorSt.map -eq '0') { $bigMapAnchored = $true }
+    Write-Host ("锚图 map={0} tile=({1},{2}) big_map_ready={3}" -f $anchorSt.map, $anchorSt.tile_x, $anchorSt.tile_y, $bigMapAnchored)
+
     # ---------------- 逐窗：open → 点关闭钮 → 断言关闭 ----------------
     foreach ($k in $kinds) {
         $pascal = Pascal $k
@@ -346,6 +365,15 @@ try {
                     Write-Host ("{0,-20} C# Show() 守卫：只弹提示不开窗（""{1}""）" -f $k, $guardText)
                     Rpc 'dialog' @{ kind = $k; action = 'close' } | Out-Null
                     Rpc 'notice_probe' @{ action = 'close' } | Out-Null
+                    Start-Sleep -Milliseconds 300
+                } elseif ($k -eq 'big_map' -and -not $bigMapAnchored) {
+                    # 大地图的守卫是**静默**的（C# `Show()` 干返回、无 MirMessageBox），
+                    # 判据只能是"当前地图有没有大图"这个状态；而这里恰恰是锚图失败——
+                    # 前置不成立 ⇒ SKIP（既不假红也不假绿），`-FailOnSkip` 下仍会红。
+                    $results.Add([pscustomobject]@{
+                        kind=$k; open='SKIP_NO_ANCHOR'; hit=''; closed='-' })
+                    Add-Skip $k '未能锚到有大地图的地图（非 GM？）——C# Show() 会静默不开窗，本项无法验证'
+                    Rpc 'dialog' @{ kind = $k; action = 'close' } | Out-Null
                     Start-Sleep -Milliseconds 300
                 } elseif ($guardText -and -not $notOpen) {
                     $results.Add([pscustomobject]@{
