@@ -9,6 +9,11 @@ param(
     [string]$User = 'bevychar',
     [string]$Pass = '123456',
     [string]$Name = '小明明',
+    # 2026-09-27 加（可选）：建角时**先点职业/性别**再填名字。默认空 = 不点（保持原行为，
+    # 建出来是客户端默认的战士/男）。金标准逐窗像素 A/B 需要「与原版同状态的 1 级女道士」，
+    # 就靠这两个参数把真机建角路径走成 Taoist/Female。
+    [ValidateSet('', 'Warrior', 'Wizard', 'Taoist', 'Assassin', 'Archer')][string]$CreateClass = '',
+    [ValidateSet('', 'Male', 'Female')][string]$CreateGender = '',
     [string]$ClientHome = 'E:\Users\gxh\Documents\GitHub\Crystal-wt-blend',
     # 留空 = 从 `%TEMP%\e2e_run\server_build_record.json` 的 `data_root` 解析（= **正在跑的那个服务端**用的库）。
     # 判据来源必须是受测实例那一份（本仓踩过：判据读主检出的库、受测服务端却跑在别的目录 → 假红）。
@@ -144,6 +149,30 @@ Assert-ClientBuildStamp -Exe $exeSrc -ScriptName 'l5ac_newchar_create'
         Write-Host ('[pos] probe(开窗后) → ' + ($probeOpen | ConvertTo-Json -Compress))
         if (-not $probeOpen) { $fail += '正路：10 次点「新建角色」都没打开对话框' }
         if ($probeOpen -and -not $probeOpen.visible) { $fail += '正路：点了「新建角色」但对话框 visible=false' }
+        # 可选：点职业/性别（坐标 = NewCharacterDialog 居中原点 DLG(218,154) + C# 控件坐标 + 半个按钮）
+        $classX = @{ Warrior = 323; Wizard = 373; Taoist = 423; Assassin = 473; Archer = 523 }
+        $genderX = @{ Male = 323; Female = 373 }
+        if ($CreateClass) {
+            $btn = @{ x = 218 + $classX[$CreateClass] + 22; y = 154 + 296 + 21 }
+            Write-Host ("[pos] click 职业 {0} @({1},{2}) → {3}" -f $CreateClass, $btn.x, $btn.y, (Rpc 'click' $btn | ConvertTo-Json -Compress))
+            Start-Sleep -Milliseconds 700
+        }
+        if ($CreateGender) {
+            $btn = @{ x = 218 + $genderX[$CreateGender] + 22; y = 154 + 343 + 21 }
+            Write-Host ("[pos] click 性别 {0} @({1},{2}) → {3}" -f $CreateGender, $btn.x, $btn.y, (Rpc 'click' $btn | ConvertTo-Json -Compress))
+            Start-Sleep -Milliseconds 700
+        }
+        if ($CreateClass -or $CreateGender) {
+            # 点职业/性别会把焦点从名字框移走（实测 probe.name_focused: true → false），
+            # 不点回来 type_text 就落空（本轮实测：type_text 后 probe.name 仍为 ''）。
+            Write-Host ('[pos] click 名字框 @({0},{1}) → {2}' -f $nameField.x, $nameField.y, (Rpc 'click' $nameField | ConvertTo-Json -Compress))
+            Start-Sleep -Milliseconds 500
+            $pg = Rpc 'new_char_probe'
+            Write-Host ('[pos] probe(选职业/性别后) → ' + ($pg | ConvertTo-Json -Compress))
+            if ($CreateClass -and $pg.class -ne $CreateClass) { $fail += ("正路：点了职业 {0} 但 probe.class={1}" -f $CreateClass, $pg.class) }
+            if ($CreateGender -and $pg.gender -ne $CreateGender) { $fail += ("正路：点了性别 {0} 但 probe.gender={1}" -f $CreateGender, $pg.gender) }
+            if (-not $pg.name_focused) { $fail += '正路：点回名字框后 name_focused 仍为 false（type_text 会落空）' }
+        }
         Write-Host ("[pos] type_text {0} → {1}" -f $Name, (Rpc 'type_text' @{ text = $Name } | ConvertTo-Json -Compress))
         $probeTyped = Rpc 'new_char_probe'
         Write-Host ('[pos] probe(输入后) → ' + ($probeTyped | ConvertTo-Json -Compress))

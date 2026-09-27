@@ -65,11 +65,26 @@ $st = $null
 foreach ($i in 1..90) { Start-Sleep 1; $st = Rpc 'state'; if ($null -ne $st.tile_x) { break } }
 if ($null -eq $st.tile_x) { Write-Host 'FAIL(2): 我方客户端未进场'; exit 2 }
 Write-Host ("我方进场 map={0} tile=({1},{2})" -f $st.map, $st.tile_x, $st.tile_y)
-# 对齐到原版帧所在的地图/格（BichonProvince 278,609），并等落位
+# 对齐到原版帧所在的地图/格（BichonProvince 278,609），并等落位。
+# 2026-09-27 改：金标准 A/B 现在用**与金标准同状态的角色**（1 级女道士，非 GM）⇒ `@mapmove`
+# 会被服务端按权限拒绝（实测 tile 停在出生点 (288,616) 不动，脚本却照旧打印"对齐后"）。
+# 所以：先试 @mapmove，落点不对就退回 `walk_to`（玩家验收能力，走真实寻路，不需要 GM 权限），
+# 并把**最终落点**打出来（对不上就是对齐失败，别让后续截图在错误位置比）。
 Rpc 'chat' @{ message = "@mapmove 0 $MapX $MapY" } | Out-Null
-Start-Sleep -Seconds 4
+Start-Sleep -Seconds 2
 $st2 = Rpc 'state'
-Write-Host ("对齐后 map={0} tile=({1},{2})" -f $st2.map, $st2.tile_x, $st2.tile_y)
+$near = ($null -ne $st2.tile_x) -and ([Math]::Abs($st2.tile_x - $MapX) -le 1) -and ([Math]::Abs($st2.tile_y - $MapY) -le 1)
+if (-not $near) {
+    Write-Host ("@mapmove 未生效（tile=({0},{1})，目标 ({2},{3})）→ 改用 walk_to 走过去" -f $st2.tile_x, $st2.tile_y, $MapX, $MapY)
+    Rpc 'walk_to' @{ tx = $MapX; ty = $MapY; run = $true } | Out-Null
+    foreach ($i in 1..30) {
+        Start-Sleep 1
+        $st2 = Rpc 'state'
+        if (($null -ne $st2.tile_x) -and ([Math]::Abs($st2.tile_x - $MapX) -le 1) -and ([Math]::Abs($st2.tile_y - $MapY) -le 1)) { break }
+    }
+}
+$aligned = ($null -ne $st2.tile_x) -and ([Math]::Abs($st2.tile_x - $MapX) -le 1) -and ([Math]::Abs($st2.tile_y - $MapY) -le 1)
+Write-Host ("对齐后 map={0} tile=({1},{2}) aligned={3}" -f $st2.map, $st2.tile_x, $st2.tile_y, $aligned)
 
 # 帧差（判「这一张到底有没有开出窗」）——`screenshot` 是**下一帧**才落盘（bevy `Screenshot::primary_window()`
 # + `save_to_disk`），实测 0.9s 不够：第一版 20 张全是"没窗"的样子。所以每扇窗都做**重试直到画面变化**。

@@ -195,6 +195,66 @@ py -3.12 tools/acceptance/csharp_golden/golden_ab_diff.py --shots $env:TEMP\gold
 音量等设置也对齐）后重跑同一条链，此时的差异才是可判的窗内绘制差；② 要彻底去掉背景干扰，需要两台服务端
 用**同源地图数据**（否则整帧比对无意义，只能比窗口 chrome）；③ 再按 §3.3 的几何表逐窗收口。
 
+### 3.2d 状态对齐后重跑（2026-09-27，同轮）：**差异收敛到窗内，并捞出 4 处真缺口**
+
+**① 角色状态已对齐**（本 PR 给 `l5ac_newchar_create.ps1` 加了 `-CreateClass/-CreateGender`）：
+
+```powershell
+# 干净账号（服务端对未知账号自动建号、无角色）→ 真机建角路径上先点职业/性别、再填名字
+pwsh tools\acceptance\l5ac_newchar_create.ps1 -User goldenchr -Name 女道士 `
+     -CreateClass Taoist -CreateGender Female
+# ⇒ probe: {"class":"Taoist","gender":"Female","name":"女道士","name_valid":true} / VERDICT create=PASS
+pwsh tools\acceptance\csharp_golden\golden_ab_ours.ps1 -SandboxRoot $env:TEMP\golden_sandbox `
+     -ClientHome E:\...\Crystal-wt-blend -User goldenchr -Password 123456
+```
+
+两个**必须踩对的坑**（都已写进脚本注释）：
+
+1. **点职业/性别会把焦点从名字框移走**（`probe.name_focused: true → false`）⇒ 必须再点一次名字框，
+   否则 `type_text` 落空（`probe.name` 仍为 `''`，本轮实测）。
+2. **非 GM 角色用不了 `@mapmove`**：新角色没有 GM 权限，`@mapmove 0 278 609` 被服务端拒绝，
+   角色停在出生点 `(288,616)`，而老脚本照样打印"对齐后" ⇒ 假对齐。`golden_ab_ours.ps1` 已改成
+   「`@mapmove` 落点不对就退回 `walk_to`（玩家验收能力，真实寻路）」并打印 `aligned=<bool>`。
+   实测 `walk_to` 走到 `(285,616)` 就停了 ⇒ **(278,609) 在我们这份数据里不可达/不可走**——这也是
+   §3.2d ② 的必然结果：两边的 `BichonProvince` 根本不是同一份地图。
+
+**② 背景地形不同源：已定性为「数据版本差异」，不是绘制缺陷**（三个文件，SHA256 前 20 位）：
+
+| 文件 | 大小 | 格式 | 谁在用 |
+|---|---|---|---|
+| `ServerRust/Daneo1989/Maps/0.map` | 7,350,054 | `Map 2010 Ver 1.0`（0x10 头） | **我方客户端**（`map_reader.rs` 的解析顺序命中它）+ 我方服务端地图（`loader.rs` 的 `{data_dir}/Maps`） | 
+| 沙箱 `Server\Maps\0.map` / `Client\Map\0.map` | 12,740,008 | 老格式（`Legend of mir`） | **原版**（`MapInfo.FileName = "0"` 时） |
+| 沙箱 `Server\Maps\n0.map` / `Client\Map\n0.map` | 17,640,052 | 老格式 | 原版（`FileName = "n0"` 时）；**我方 `ServerRust/Data/Map/n0.map` 与它逐字节相同**（hash `79C159D7F5F2338A86A9`），但在我们这套栈里没被用到 |
+
+⇒ 我方跑的是 **Daneo1989 那一版（Map 2010）世界**，原版沙箱跑的是**老版世界**；同一个 tile 的地形/NPC
+自然不同。**整帧比对无意义**，A/B 只能在窗口区域内比（窗口 chrome/内容不受背景影响）。
+要把背景也做成同源，需要把两台服务端/客户端都换成同一套地图数据（属数据迁移，不在工具链范围）。
+
+**③ 逐窗差异（对齐状态前后对比，同一张 `rect_table.json`）**：
+
+| 窗口 | 对齐前 | 对齐后 | 判定 |
+|---|---|---|---|
+| Inventory | 37.5% | **7.1%** | 对齐生效（新角色 1 件起始装备 + 金币 46 vs 原版 45） |
+| Equipment | 7.7% | 6.3% | 同上 |
+| Quests / Options / Group | 8.5% / 6.2% / 5.2% | 7.9% / 6.2% / 5.2% | chrome 与控件一致，差在内容 |
+| Ranking / Friends / Relationship | 10.5% / 26.2% / 22.2% | 10.6% / 25.6% / 22.2% | 待逐条定性（列表内容/空表绘制） |
+| Help / Keybind | 87.6% / 26.6% | 87.6% / 26.6% | 键位表**语言与条目**不同（我方中文表 vs 原版英文表），窗口位置/尺寸一致 |
+| GameShop / Bigmap | 29.9% / 62.0% | 29.9% / 63.4% | 待逐条定性（商品数据/大地图绘制） |
+| **Creature / Guilds / MountWindow / Fishing** | 98.8% / 98.3% / 97.0% / 95.2% | 98.6% / 98.3% / 97.0% / 95.2% | **真缺口（见 ④）** |
+
+**④ 本轮捞出的 4 处真缺口（原版弹 `MirMessageBox`，我方照开空窗）**——每一条都有 C# 原文可依：
+
+| 窗口（键） | 原版行为（C# `Show()` 前置守卫） | 我方现状 |
+|---|---|---|
+| 宠物（E） | `IntelligentCreatureDialogs.cs:832-841`：`!User.IntelligentCreatures.Any()` → `MirMessageBox(NoCreatures)` | 直接开 PET STATUS 空窗（0 只、空槽、有名/召唤/放生等控件） |
+| 行会（G） | `GuildDialog.cs:2156-2166`：`MapControl.User.GuildName == ""` → `MirMessageBox(NotInGuild)` | 直接开 GUILD 空窗（NOTICE/MEMBERS/STORAGE/RANKS 四个空黑面板） |
+| 坐骑（M/J） | `MountDialog.cs:240-251`：`User.MountType < 0` → `MirMessageBox(NoMount)` | 直接开空坐骑窗（0 槽 + 大片黑底） |
+| 钓鱼（N） | `FishingDialog.cs:135-147`：`!User.HasFishingRod` → `MirMessageBox(NoFishingRod)` | 直接开空钓鱼窗（5 个空格子 + 黑底） |
+
+这 4 条**不是**背景/状态差异：守卫在 C# 里写在每个对话框自己的 `Show()` 里，键盘路径和程序化开窗
+（我方 `dialog open <kind>` 仪器同理）都必须走它；而我方这 4 个窗没有该守卫。已作为下一批队列项
+（`crystal-dialog-show-guards`）落账，修完用同一条链复跑即可看到这 4 行差异归零。
+
 ## 3.3 逐窗几何对表（不需要原版交互，2026-09-26 起）
 
 §3.1 把"驱动原版点开某个窗口"这条路堵掉之后，**窗口几何**仍可验：原版每扇窗的矩形是纯常量
