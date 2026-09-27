@@ -557,6 +557,18 @@ if (-not ($okA -and $okB -and $okC -and $okD)) {
         Write-Host '  链路是通的（有掉落进任务格）；数量不足属环境（怪刷新/掉落概率），按环境性 SKIP 处理（exit 3），不记产品缺陷。'
         exit 3
     }
+    # 「一次都没掉」也要看**样本够不够**（2026-09-27 实机补记）：本轮 3 杀 0 掉被判 FAIL，
+    # 但 RootSpider 的掉率下 3 杀 0 掉完全在正常方差内。判据取「每件期望击杀 = 需求 ÷ 掉率」，
+    # **3 倍门槛之内**的 0 掉仍属环境（散点），超过门槛才判链路 FAIL。
+    # 这样把「怪刷新/运气」与「Q 掉落 → 任务格这条链路坏了」真正分开。
+    $expPerItem = if ($drop.chance -gt 0) { $task.need / $drop.chance } else { 0 }
+    $minKills = [int][Math]::Ceiling(3 * $expPerItem)
+    if ($okA -and -not $okB -and $have -eq 0 -and $minKills -gt 0 -and $kills -lt $minKills) {
+        Write-Host ("SKIP(环境): {0} 杀内一次都没掉，但样本门槛是 {1} 杀" -f $kills, $minKills)
+        Write-Host ("  （= 3 × 每件期望击杀 {0:N1}：需求 {1} ÷ 掉率 {2:N3}）—— 0 掉仍在正常方差内，" +
+            "不能据此判链路故障，按环境性 SKIP 处理（exit 3）。" -f $expPerItem, $task.need, $drop.chance)
+        exit 3
+    }
     exit 5
 }
 
