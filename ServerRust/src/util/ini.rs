@@ -196,9 +196,20 @@ fn get_i32(
 
 /// 从 `Configs/ExpList.ini` 加载玩家升级经验曲线（C# Settings.ExperienceList：`[Exp] Level1..LevelN`）
 /// 文件缺失/无数据时返回空 Vec（调用方回退 ×1.5）
+///
+/// **占位曲线守卫（2026-09-27）**：本机 `ServerRust/Daneo1989` 是 gitignore 的**数据目录**，
+/// 一旦被放成占位文件（实测：500 条**全等于 100**），升级所需经验就恒为 100 —— 任务/怪物奖励
+/// 一发放就"升几十级"（实机：一次交付 111→167、167→200）。这不是数值口味问题，而是
+/// **金标准数据缺失被静默吞掉**：C# 原版 `Server/Configs/ExpList.ini` 是
+/// `Level1=100, Level2=200, … Level500=45400000000` 的真实曲线。
+/// 这里在加载时把"疑似占位"喊出来，避免同类问题再次静默跑到线上。
 pub fn load_exp_list(configs_dir: &Path) -> Vec<i64> {
     let path = configs_dir.join("ExpList.ini");
     let Ok(content) = fs::read_to_string(&path) else {
+        tracing::warn!(
+            "Configs/ExpList.ini 缺失（{}）—— 升级经验将退化为 ×1.5 回退曲线",
+            path.display()
+        );
         return Vec::new();
     };
     let parsed = parse_ini(&content);
@@ -210,7 +221,26 @@ pub fn load_exp_list(configs_dir: &Path) -> Vec<i64> {
         }
         out.push(v);
     }
+    if exp_curve_looks_like_placeholder(&out) {
+        tracing::warn!(
+            "Configs/ExpList.ini 疑似**占位曲线**（{} 条，全部等于 {}）—— 请用原版 C# \
+             `Server/Configs/ExpList.ini` 覆盖；否则升级所需经验恒为该值，任务/怪物奖励会一次涨数十级",
+            out.len(),
+            out.first().copied().unwrap_or_default()
+        );
+    }
     out
+}
+
+/// 经验曲线是否**疑似占位**：空表、或所有条目相等（占位文件最常见的两种形态）。
+///
+/// 真实曲线的第 1 级就有 100、第 2 级 200、第 5 级 600……**至少有两个不同值**；
+/// 因此"全等"足以判定异常，不会误伤正常配置（1 级长度的合法曲线不存在）。
+pub fn exp_curve_looks_like_placeholder(list: &[i64]) -> bool {
+    match list.first() {
+        None => true,
+        Some(first) => list.iter().all(|v| v == first),
+    }
 }
 
 /// 行会配置（C# Settings.LoadGuildSettings：Configs/GuildSettings.ini 覆盖默认值）
@@ -1005,6 +1035,21 @@ BuffExpRate=0
         assert_eq!(ini_get(&parsed, "Missing", "x"), None);
     }
 
+    /// 门禁：占位曲线检测器 —— 全等（占位文件最常见形态）必须判为占位；真实曲线不得误报。
+    ///
+    /// 阳性对照（落地时实做）：把 `all(|v| v == first)` 改成 `false`（永不判占位）→ 本测试立即红。
+    #[test]
+    fn exp_curve_placeholder_detector() {
+        // 实机踩到的形态：500 条全部 =100（本机 Daneo1989/Configs/ExpList.ini 曾是它）
+        assert!(exp_curve_looks_like_placeholder(&vec![100; 500]));
+        assert!(exp_curve_looks_like_placeholder(&[100]));
+        assert!(exp_curve_looks_like_placeholder(&[]));
+        // C# 原版曲线前几级：100/200/300/400/600 ⇒ 不是占位
+        assert!(!exp_curve_looks_like_placeholder(&[
+            100, 200, 300, 400, 600
+        ]));
+    }
+
     #[test]
     fn test_fishing_config_default_on_missing() {
         let cfg = load_fishing_config(Path::new("C:/definitely/not/exists"));
@@ -1066,7 +1111,14 @@ BuffExpRate=0
         assert!(load_exp_list(Path::new("C:/definitely/not/exists")).is_empty());
     }
 
-    /// #2404：真实 Daneo1989/Configs/ExpList.ini 加载（500 级）
+    /// #2404 + 2026-09-27 修正：真实 `Daneo1989/Configs/ExpList.ini`（500 级）必须加载出
+    /// **原版 C# 曲线**，而不是占位文件。
+    ///
+    /// 这条测试此前断言的是 `list[499] == 100` —— 也就是把当时那份**占位数据**钉成了期望值，
+    /// 于是"升级经验恒 100、任务奖励一次涨几十级"这种真缺陷一路绿灯。现在改为钉原版金标准
+    /// （`E:\...\Crystal\Server\Configs\ExpList.ini`：Level1=100 / Level2=200 / Level111=6500000000 /
+    /// Level500=45400000000），并显式断言"不是占位曲线"。
+    /// 数据目录 gitignore ⇒ 干净检出差不到文件时跳过（本机跑才真正拦）。
     #[test]
     fn test_load_real_exp_list() {
         let path = Path::new(concat!(
@@ -1079,8 +1131,15 @@ BuffExpRate=0
         let dir = path.parent().unwrap();
         let list = load_exp_list(dir);
         assert_eq!(list.len(), 500);
-        assert_eq!(list[0], 100);
-        assert_eq!(list[499], 100);
+        assert!(
+            !exp_curve_looks_like_placeholder(&list),
+            "本机 ExpList.ini 是占位曲线（全等于 {}）——请用原版 C# Server/Configs/ExpList.ini 覆盖",
+            list.first().copied().unwrap_or_default()
+        );
+        assert_eq!(list[0], 100, "Level1 原版 100");
+        assert_eq!(list[1], 200, "Level2 原版 200");
+        assert_eq!(list[110], 6_500_000_000, "Level111 原版 6500000000");
+        assert_eq!(list[499], 45_400_000_000, "Level500 原版 45400000000");
     }
 
     /// #2414：load_orbs_settings 解析 [Exp]/[Def]/[Att] Orb1..N；文件缺失返回空
