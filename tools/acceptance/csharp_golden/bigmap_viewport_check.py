@@ -1,0 +1,120 @@
+# bigmap_viewport_check.py — 大地图视口「画源+布局」的逐像素判据（2026-09-28，README §3.2h）
+#
+# 为什么需要它：`README §3.2g` 用**原版帧**证明了「大地图视口画的就是
+# `Data/mmap.Lib[MapInfo.BigMap]` 缩放进 `min(568,W) x min(380,H)`」（一致率 98.3%），
+# 那一侧依赖沙箱原版客户端。本端改成同一条路线后，判据可以**不依赖原版**：
+# 直接拿本端截图与同一张 `mmap.Lib[index]` 比 —— 因为两侧画的是同一份美术、同一套布局。
+#
+# 与 `golden_ab_diff.py` 的分工：那个比"本端 vs 原版"（要两边都跑得起来、且地图数据同源才行）；
+# 这个只比"本端 vs 原版会用的那张图"，**不需要原版客户端、也不受两侧地图数据版本差异影响**
+# （`MapInfo.BigMap` 索引本端自己的 DB 给，两张图不同只说明地图数据不同源，不代表画错）。
+#
+# 用法：
+#   py -3.12 bigmap_viewport_check.py --shot <本端截图.png> --mmap <Data/mmap.Lib> --index 135
+# 退出码：0 = 一致率 ≥ 阈值（VERDICT PASS）；1 = 低于阈值（FAIL）；2 = 前置不满足（缺文件/索引越界）
+#
+# 口径（都按 C# `BigMapViewPort.OnBeforeDraw`，`Client/MirScenes/Dialogs/BigMapDialog.cs:642-676`）：
+#   Size = Libraries.MiniMap.GetSize(BigMap)  ⇒ 画幅 w = min(568,W)、h = min(380,H)
+#   画幅左上（面板内）= (14 + (568-w)/2, 52 + (380-h)/2)
+#   整图 `Draw(index, DisplayLocation, Size)` ⇒ 图被**拉伸**到画幅（W>568 时缩小，反之原尺寸）
+#   `MImage` 的纯黑像素当透明（画幅之外露的是 `Title[820]` 面板美术）⇒ 比对时跳过近黑像素
+import argparse
+import os
+import sys
+
+from PIL import Image
+
+PANEL = (760.0, 500.0)  # C# `BigMapDialog` 背景 `Title[820]`，面板居中
+VIEW = (14.0, 52.0, 568.0, 380.0)
+
+
+def load_lib(path):
+    import struct
+
+    data = open(path, "rb").read()
+    version, count = struct.unpack_from("<ii", data, 0)
+    if version < 2:
+        raise SystemExit(f"unsupported lib version {version}: {path}")
+    off = 8 + (4 if version >= 3 else 0)
+    return data, list(struct.unpack_from(f"<{count}i", data, off))
+
+
+def extract(data, offset):
+    import gzip
+    import struct
+
+    w, h, _x, _y, _sx, _sy, _shadow, length = struct.unpack_from("<hhhhhhBi", data, offset)
+    raw = gzip.decompress(data[offset + 17 : offset + 17 + length])
+    need = w * h * 4
+    if len(raw) < need:
+        raw = raw + bytes(need - len(raw))
+    return Image.frombytes("RGBA", (w, h), raw[:need], "raw", "BGRA")
+
+
+def view_layout(art):
+    """C# 画幅（面板内相对坐标）：`(x, y, w, h)`。"""
+    w = min(VIEW[2], art[0])
+    h = min(VIEW[3], art[1])
+    return (VIEW[0] + (VIEW[2] - w) / 2.0, VIEW[1] + (VIEW[3] - h) / 2.0, w, h)
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--shot", required=True, help="本端截图（整屏 PNG）")
+    ap.add_argument("--mmap", required=True, help="含大图的 .Lib（本端 Data/mmap.Lib）")
+    ap.add_argument("--index", type=int, required=True, help="MapInfo.BigMap")
+    ap.add_argument("--dark", type=int, default=30, help="近黑阈值：图里低于它的像素当透明（不参与比对）")
+    ap.add_argument("--tol", type=int, default=60, help="单像素 RGB 差之和容差")
+    ap.add_argument("--threshold", type=float, default=0.90, help="一致率阈值（默认 0.90）")
+    a = ap.parse_args()
+
+    for p in (a.shot, a.mmap):
+        if not os.path.exists(p):
+            print(f"FAIL(前置)：找不到 {p}", file=sys.stderr)
+            return 2
+    data, offsets = load_lib(a.mmap)
+    if a.index <= 0 or a.index >= len(offsets):
+        print(f"FAIL(前置)：mmap 索引 {a.index} 越界（count={len(offsets)}）", file=sys.stderr)
+        return 2
+
+    shot = Image.open(a.shot).convert("RGB")
+    # 本端可能按系统 DPI 渲染（`--ui-scale`）；逻辑坐标恒 1024x768
+    scale = shot.width / 1024.0
+    px = (1024.0 - PANEL[0]) / 2.0
+    py = (768.0 - PANEL[1]) / 2.0
+
+    art = extract(data, offsets[a.index])
+    (vx, vy, vw, vh) = view_layout((art.size[0], art.size[1]))
+    box = (
+        int(round((px + vx) * scale)),
+        int(round((py + vy) * scale)),
+        int(round((px + vx + vw) * scale)),
+        int(round((py + vy + vh) * scale)),
+    )
+    crop = shot.crop(box)
+    want = art.convert("RGB").resize(crop.size, Image.BILINEAR)
+
+    same = 0
+    total = 0
+    for y in range(crop.height):
+        for x in range(crop.width):
+            r, g, b = want.getpixel((x, y))
+            if r + g + b < a.dark * 3:
+                continue  # 原版把纯黑当透明（露出面板美术）⇒ 不参与比对
+            total += 1
+            sr, sg, sb = crop.getpixel((x, y))
+            if abs(sr - r) + abs(sg - g) + abs(sb - b) <= a.tol:
+                same += 1
+    ratio = same / max(total, 1)
+    print(f"shot={os.path.basename(a.shot)} scale={scale:g}")
+    print(f"mmap[{a.index}] {art.size[0]}x{art.size[1]} → 画幅 {vw:g}x{vh:g} @ 面板内 ({vx:g},{vy:g})")
+    print(f"比对像素 {total}（跳过近黑/透明），一致 {same}，一致率 {ratio:.3f}（阈值 {a.threshold}）")
+    if ratio >= a.threshold:
+        print("VERDICT=PASS：视口画源与布局 = C# 的 mmap.Lib[MapInfo.BigMap]")
+        return 0
+    print("VERDICT=FAIL：视口与 mmap.Lib[BigMap] 不一致（画源/布局/缩放口径有出入）")
+    return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

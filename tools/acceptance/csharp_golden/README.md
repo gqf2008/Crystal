@@ -354,6 +354,59 @@ C# 就没有翻页条。**不能照抄 Friends 的修法**——顺着 A/B 的�
 - Relationship 四行**文案**仍是本端自造中文，C# 走 `ClientTextKeys.LoverName/MarriageDate/…`
   模板（语言/条目差一类，同 §3.2c 的 Help/Keybind）。
 
+### 3.2h 大地图视口闭环（2026-09-28）：不用原版也能验，外加 C# 的静默守卫
+
+§3.2g 把大地图视口改成 C# 路线（画 `Data/mmap.Lib[MapInfo.BigMap]`，缩放进
+`min(568,W) x min(380,H)` 居中）。**取证缺口**是当时只用"原版帧 vs `mmap.Lib[101]`"证明了
+*原版*画的是这张图，本端改完没实机验过。现在补上，而且做得**不依赖原版客户端**：
+
+```powershell
+# 本端起客户端 → dialog open big_map → screenshot（`--ui-scale 1`）
+py -3.12 tools/acceptance/csharp_golden/bigmap_viewport_check.py `
+    --shot %TEMP%\bigmap_ours.png --mmap Data/mmap.Lib --index 135
+```
+
+`bigmap_viewport_check.py` 自己算 C# 画幅（`(14+(568-w)/2, 52+(380-h)/2)`，`w=min(568,W)`）、
+把 `mmap[index]` 缩放到画幅，与本端截图同区域逐像素比（跳过近黑＝原版当透明的像素）。
+**为什么它能替代原版帧**：两侧画的是同一份美术、同一套布局，所以本端 vs 这张图既然是 99.9%，
+就等价于"本端 vs 原版"（原版那侧 §3.2g 已证 98.3%）。它**不受两侧地图数据不同源影响**——
+索引来自本端自己的 DB，两张图不同只说明数据不同源，不代表画错。
+
+实测（master `02c5a0d83` + 本线程改动，客户端 1024x768@scale1，`map_infos.big_map=135`）：
+
+| 场景 | 一致率 | 判定 |
+|---|---|---|
+| BichonProvince（`big_map=135`）开着大地图 | **0.999** | PASS（画源+布局 = C#） |
+| 负对照：拿 `mmap.Lib[136]`（452x300）去比同一张帧 | 0.275 | FAIL（判据能区分"另一张图"） |
+| 窗开着从 Bichon 换到 `D002`（`big_map=0`） | **0.000** | 视口已清空（旧实现会留着上一张图 ⇒ 仍 ~99%） |
+
+**顺带补的 C# 守卫**（`BigMapDialog.cs:288-289`）：
+
+```csharp
+public override void Show() { var map = GameScene.Scene.MapControl;
+    if (map.BigMap <= 0) return;          // ← 静默：不弹 MirMessageBox、连窗都不开
+    ...
+}
+```
+
+本端把它接进既有的 `ShowGuardParams`（键盘热键与 `dialog open` RPC 两条路径共用），
+与宠物/行会/坐骑/钓鱼那四扇的区别是**不弹提示框**：`show_guard` 现在返回枚举
+`ShowGuard::{Allow, Block(文案), BlockSilent}`。同时把 §3.2g 记的"回落地形渲染"残留**删掉**
+——`build_terrain_texture`/`tile_avg_color` 与视口那层自造深色底一并删除，
+`OnBeforeDraw:644-645`（`index <= 0` 就 return，连对象点都不画）成了唯一路径；
+自造的深色视口底也去掉（C# `BigMapViewPort` 无背景，画幅之外露的是 `Title[820]` 面板美术）。
+
+**这条守卫会波及门禁**（改行为必须同步审计依赖旧行为的门禁，见
+`LESSON_改行为必须同步审计依赖旧行为的门禁否则恒红被无视`）：`ui_interact_sweep.ps1`
+逐窗段跑在"角色当前停留在哪张图"上，而**本脚本自己的 NPC 段会把角色留在 `D002`**
+（`big_map=0`）⇒ 下一次巡回的 big_map 必假红。修法两步：① 逐窗前 best-effort
+`@mapmove 0 288 616` 锚到 BichonProvince（地图文件 `0`，`big_map=135`），把结果打进输出
+（`锚图 map=0 tile=(…) big_map_ready=True`）；② 锚不上（非 GM 账号等）时 big_map 记
+**SKIP**（`-FailOnSkip` 下仍红），锚上了才按严格判据（该开就得开）。
+
+实机判据（`D002`，`big_map=0`）：`dialog open big_map` 后 `dialogs=[Minimap]`、
+`notice_probe` 的 `text=null` ⇒ 窗口没开、也没弹提示，与 C# 的静默 `return` 一致。
+
 ## 3.3 逐窗几何对表（不需要原版交互，2026-09-26 起）
 
 §3.1 把"驱动原版点开某个窗口"这条路堵掉之后，**窗口几何**仍可验：原版每扇窗的矩形是纯常量

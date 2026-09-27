@@ -185,21 +185,38 @@ pub struct ShowGuardState {
     /// 是否装备钓鱼竿：武器槽 shape ∈ `Globals.n`（C# `HasFishingRod = Globals.FishingRodShapes.Contains(Weapon)`，
     /// `Shared/Globals.cs`：`n = {49, 50}`）
     pub has_fishing_rod: bool,
+    /// 当前地图有没有大地图：`GameData.big_map_index > 0`（C# `MapControl.BigMap > 0`）
+    pub has_big_map: bool,
 }
 
 /// 钓鱼竿判定用的武器 shape 白名单（C# `Shared/Globals.cs`：`n = new int[] { 49, 50 }`）
 pub const FISHING_ROD_SHAPES: [i16; 2] = [49, 50];
 
-/// C# 各对话框 `Show()` 的前置守卫。
+/// C# 各对话框 `Show()` 的前置守卫结论。
 ///
-/// 返回 `Some(文案)` = 原版会弹 `MirMessageBox(OK)` 且**不开窗**；`None` = 正常开窗。
-pub fn show_guard(kind: DialogKind, st: &ShowGuardState) -> Option<&'static str> {
+/// 两种拦法在 C# 里**不一样**，别混：宠物/行会/坐骑/钓鱼是「弹 `MirMessageBox(文案)` 再
+/// `return`」；大地图是 `if (map.BigMap <= 0) return;`（`BigMapDialog.cs:288-289`）——
+/// **什么都不弹**，窗口直接不开。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ShowGuard {
+    /// 放行（正常开窗）
+    Allow,
+    /// 拦下并弹提示框（`MirMessageBox`）
+    Block(&'static str),
+    /// 拦下但**不弹提示框**（C# `Show()` 干返回）
+    BlockSilent,
+}
+
+/// C# 各对话框 `Show()` 的前置守卫。
+pub fn show_guard(kind: DialogKind, st: &ShowGuardState) -> ShowGuard {
     match kind {
-        DialogKind::Creature if !st.has_creatures => Some("你没有任何宠物。"),
-        DialogKind::Guild if !st.in_guild => Some("你不在任何公会中。"),
-        DialogKind::Mount if !st.has_mount => Some("你没有坐骑。"),
-        DialogKind::Fishing if !st.has_fishing_rod => Some("你没有拿着鱼竿。"),
-        _ => None,
+        DialogKind::Creature if !st.has_creatures => ShowGuard::Block("你没有任何宠物。"),
+        DialogKind::Guild if !st.in_guild => ShowGuard::Block("你不在任何公会中。"),
+        DialogKind::Mount if !st.has_mount => ShowGuard::Block("你没有坐骑。"),
+        DialogKind::Fishing if !st.has_fishing_rod => ShowGuard::Block("你没有拿着鱼竿。"),
+        // `BigMapDialog.Show()`：`if (map.BigMap <= 0) return;`——**静默**不开窗，没有提示框
+        DialogKind::BigMap if !st.has_big_map => ShowGuard::BlockSilent,
+        _ => ShowGuard::Allow,
     }
 }
 
@@ -212,6 +229,8 @@ pub struct ShowGuardParams<'w, 's> {
         Query<'w, 's, Option<&'static crate::actor::MountState>, With<crate::actor::LocalPlayer>>,
     loadout:
         Query<'w, 's, &'static crate::game::player_state::Loadout, With<crate::actor::LocalPlayer>>,
+    /// 大地图索引来源（C# `MapControl.BigMap`）
+    game_data: Res<'w, crate::map_renderer::GameData>,
     pub notice: ResMut<'w, NoticeBox>,
 }
 
@@ -231,18 +250,24 @@ impl ShowGuardParams<'_, '_> {
             in_guild: self.guild.in_guild,
             has_mount,
             has_fishing_rod,
+            has_big_map: self.game_data.big_map_index > 0,
         }
     }
 
-    /// `true` = 被守卫拦下：已把原版文案写进提示框，调用方**不要再 open 那扇窗**。
+    /// `true` = 被守卫拦下：调用方**不要再 open 那扇窗**。
+    /// 有文案的（宠物/行会/坐骑/钓鱼）顺手写进提示框；大地图这类 C# 干返回的**不弹框**。
     pub fn blocked(&mut self, kind: DialogKind) -> bool {
         match show_guard(kind, &self.state()) {
-            Some(text) => {
+            ShowGuard::Block(text) => {
                 self.notice.show(text);
                 tracing::info!("🛡️ {kind:?} 前置不成立 → 只弹提示框：{text}");
                 true
             }
-            None => false,
+            ShowGuard::BlockSilent => {
+                tracing::info!("🛡️ {kind:?} 前置不成立 → 不开窗（C# Show() 静默返回，不弹提示）");
+                true
+            }
+            ShowGuard::Allow => false,
         }
     }
 }
@@ -283,6 +308,7 @@ mod tests {
             in_guild: true,
             has_mount: true,
             has_fishing_rod: true,
+            has_big_map: true,
         }
     }
 
@@ -296,9 +322,14 @@ mod tests {
             DialogKind::Guild,
             DialogKind::Mount,
             DialogKind::Fishing,
+            DialogKind::BigMap,
             DialogKind::Inventory,
         ] {
-            assert_eq!(show_guard(k, &ok), None, "{k:?} 状态具备时不该拦");
+            assert_eq!(
+                show_guard(k, &ok),
+                ShowGuard::Allow,
+                "{k:?} 状态具备时不该拦"
+            );
         }
 
         assert_eq!(
@@ -309,7 +340,7 @@ mod tests {
                     ..ok
                 }
             ),
-            Some("你没有任何宠物。")
+            ShowGuard::Block("你没有任何宠物。")
         );
         assert_eq!(
             show_guard(
@@ -319,7 +350,7 @@ mod tests {
                     ..ok
                 }
             ),
-            Some("你不在任何公会中。")
+            ShowGuard::Block("你不在任何公会中。")
         );
         assert_eq!(
             show_guard(
@@ -329,7 +360,7 @@ mod tests {
                     ..ok
                 }
             ),
-            Some("你没有坐骑。")
+            ShowGuard::Block("你没有坐骑。")
         );
         assert_eq!(
             show_guard(
@@ -339,31 +370,50 @@ mod tests {
                     ..ok
                 }
             ),
-            Some("你没有拿着鱼竿。")
+            ShowGuard::Block("你没有拿着鱼竿。")
+        );
+        // 大地图：C# `BigMapDialog.Show()` 的 `if (map.BigMap <= 0) return;` ——
+        // **静默**拦下（不弹 MirMessageBox），与本组前四扇的 `Block(文案)` 不同型。
+        assert_eq!(
+            show_guard(
+                DialogKind::BigMap,
+                &ShowGuardState {
+                    has_big_map: false,
+                    ..ok
+                }
+            ),
+            ShowGuard::BlockSilent
         );
         // 无守卫的窗不受影响
         assert_eq!(
             show_guard(DialogKind::Inventory, &ShowGuardState::default()),
-            None
+            ShowGuard::Allow
         );
     }
 
     /// 文案与原版中文包逐字一致（`Client/Localization/Chinese.json`）。
     #[test]
     fn guard_texts_match_csharp_chinese_localization() {
-        let st = ShowGuardState::default();
+        let st = ShowGuardState {
+            // 这几扇只看自己的状态位，大地图位留 true 以免误触 BigMap 分支
+            has_big_map: true,
+            ..ShowGuardState::default()
+        };
         assert_eq!(
             show_guard(DialogKind::Creature, &st),
-            Some("你没有任何宠物。")
+            ShowGuard::Block("你没有任何宠物。")
         );
         assert_eq!(
             show_guard(DialogKind::Guild, &st),
-            Some("你不在任何公会中。")
+            ShowGuard::Block("你不在任何公会中。")
         );
-        assert_eq!(show_guard(DialogKind::Mount, &st), Some("你没有坐骑。"));
+        assert_eq!(
+            show_guard(DialogKind::Mount, &st),
+            ShowGuard::Block("你没有坐骑。")
+        );
         assert_eq!(
             show_guard(DialogKind::Fishing, &st),
-            Some("你没有拿着鱼竿。")
+            ShowGuard::Block("你没有拿着鱼竿。")
         );
     }
 }
