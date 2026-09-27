@@ -72,6 +72,12 @@ Windows 客户端 zip 内已自动带上 MSYS2 UCRT64 运行库 DLL（`glib`/`li
 > 当成泄漏，也别拿它当通过。（本轮另修：部署目录建好后必须先
 > `py -3.12 tools/ops/seed_load_accounts.py <部署目录>/Data/crystal.db 20 --prefix opsload` 播种**角色**，
 > 否则 20 个会话全是"登录成功但没有角色"的空载荷，J5 跑不出来、`exit 3` 说"没判成"。）
+>
+> **同日补测（高会话档，`mem_leak_gate` 此前在这里"跑不完整"）**：探针构建（`--features mem-probe`）曾以
+> `0xC0000005` 在 30×8 / 40×5~9 的中间某轮静默崩掉服务端，根因是探针登记表 `reg_remove` 的"遇空槽即返回"
+> 留下**永久孤儿记录** → idle 普查读到已释放（且已 decommit）的大块。修后同机复测：
+> **40 会话 × 2 热身 + 6 测量轮 → exit 0 / PASS**（`+953 B/轮`、`dips=2`、`server_alive_at_end=true`）、
+> **30 会话 × 2 热身 + 8 测量轮 → exit 0 / PASS**（`+34,892 B/轮`、`dips=2`）。细节见 `tools/ops/README.md` §5c-2f。
 > **2026-09-25 按上面三条从零复跑（同一台机器，master `8ec2b58d5`）**：
 > 客户端 GNU release 构建 **21m12s** exit 0；打包预演 exit 0 —— zip **66.1 MiB / 38 条目** / 依赖闭包 0 缺失 /
 > 解压后 `alive=true, control_rpc=true, **entered_game=true**`（发布产物不仅能起来，还能连上服务器登录并进图）；
@@ -86,12 +92,18 @@ macOS 产物未签名：首次打开被 Gatekeeper 拦截时右键 → 打开，
 ## 1.5 上线就绪证据地图（2026-09-26 复核）
 
 做「能不能上线运营」这个判断时，**按这张表逐行看**即可——每行都写明判据落在哪个文件/小节、
-以及用什么命令能复跑。**产品代码自 `bf7c24b6e` 起零改动**（`git rev-list --count bf7c24b6e..HEAD -- Client-Bevy ServerRust SharedRust` = 0），
-所以下表各行互相对齐、不存在"证据来自不同代码"的拼接问题。
+以及用什么命令能复跑。
+
+> ⚠️ **2026-09-27 更正一处过期前提**：本表第一版写着「产品代码自 `bf7c24b6e` 起零改动」
+> （`git rev-list --count bf7c24b6e..HEAD -- Client-Bevy ServerRust SharedRust` = 0）。该前提**已不成立**：
+> 到 `bc7519d71` 为止同一命令是 **46**（含 `62b7d82ad` UserLocation 回显/校正、`0c53c67b8` 英雄经验曲线、
+> `c964bec13` 背包第 41–46 格、`71591b359` 自动存档失败反馈等产品改动）。
+> 所以下表**不能再当"同一份代码的证据拼图"读**：每行末尾标的 commit 才是它的取证版本，
+> 发版前必须按 §1 复跑段在**当时的 master** 上重跑一遍（§1 最近一次是 `ac61a2183`）。
 
 | 维度 | 判据 / 证据 | 位置 | 状态 |
 |---|---|---|---|
-| 发版三闸 | 客户端 GNU release + 打包预演 **J1–J4**（产物/staging/依赖闭包/zip 结构/**解压即跑**）；服务端 release + 全新目录 `deploy_smoke`；`mem_leak_gate`（判据 = 活跃字节窗口内**一次都没回落**即判泄漏） | 本文 §1 复跑段；`tools/ops/{package_windows_rehearsal,deploy_smoke,mem_leak_gate}.ps1` | 全绿（`bf7c24b6e`：18m42s / PASS / exit 0 / dips=2） |
+| 发版三闸 | 客户端 GNU release + 打包预演 **J1–J4**（产物/staging/依赖闭包/zip 结构/**解压即跑**）；服务端 release + 全新目录 `deploy_smoke`；`mem_leak_gate`（判据 = 活跃字节窗口内**一次都没回落**即判泄漏） | 本文 §1 复跑段；`tools/ops/{package_windows_rehearsal,deploy_smoke,mem_leak_gate}.ps1` | 全绿（`bf7c24b6e`：18m42s / PASS / exit 0 / dips=2；另：高会话档 **40 会话×6 轮 `+953 B/轮`、30 会话×8 轮 `+34,892 B/轮`，均 exit 0 / `dips=2`**——2026-09-27 修掉探针自身段错误后可判，见 `tools/ops/README.md` §5c-2f） |
 | 玩法验收（五闭环） | 战斗含掉落 → 跨图 5/5 → 复活回绑定点 → 买卖（金币+背包 delta）→ 任务接取/交付 → 仓库存取 → 邮件收发 | `tools/acceptance/l5{a,i,j,h,g,e,f}_*.ps1`；walgit `crystal-five-loops` | 全 PASS（同一批代码） |
 | 界面验收 | 44 窗「开→点标准 X→关」交互巡回 | `tools/acceptance/ui_interact_sweep.ps1` + `interact_sweep_manifest.json` | 44/44 |
 | 容量 / 背压 / tick 滞后 | `capacity_ramp.ps1` 阶梯（自起服务端、只认自己 PID） | `tools/ops/CAPACITY.md` §4.8 | 120 会话 **ok 120/0 失败、背压四项全 0、`max_abs_lag_pct=0.0`**（20→120 无拐点） |

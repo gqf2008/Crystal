@@ -579,7 +579,7 @@ A/B（同一夹具同一参数，20 会话）：
   现在按会话数自适应（`max(10, Sessions/2 + 10)`，可用 `-BotLoginTimeoutSec` 覆盖）。
 - **修完之后**：20 会话 8 轮 **PASS**（+60,204 B/轮、dips=1，见 `docs/DELIVERY.md` §1）；
   30 会话 6 轮 **PASS**（+85,299 B/轮、dips=1、`J0b_payload_entered=true`）。
-- **仍未通，且已定到根因（2026-09-27 二次结论，推翻本段第一版的"夹具侧"判断）**：
+- **根因已定位并修复（2026-09-27 结案；推翻本段第一版的"夹具侧"判断）**：
   30 会话 8 轮（第 7 轮）、40 会话 5/6 轮（第 5/6 轮）、40 会话 9 轮（第 8 轮）都在**中间某一轮整轮失败**
   （`ok=0 failed=N`），报的是 `connect: ConnectionRefusedError [WinError 10061]`（N 条）。
   给夹具补三件仪器后（见下）结论变了：
@@ -592,13 +592,33 @@ A/B（同一夹具同一参数，20 会话）：
 - **A/B 定性**：同一场景（40 会话 × 1 热身 + 5 轮、同部署目录、同端口）换 **plain release（无 `mem-probe`）**
   跑 ⇒ **exit 0、`server_alive_at_end=true`、6 轮全过**。⇒ 崩溃**只出现在 `--features mem-probe` 构建**，
   即**计数分配器/探针侧的内存安全 bug**，不是产品缺陷（默认构建不含该模块）。
-- **因此**：「≥6~8 轮 × 30/40 会话」这条内存门禁目前**跑不完整**（`exit 3` 没判成，而不是给绿）——
-  卡点是**仪器自己会崩**，不是服务端容量。服务端容量另有单轮 `capacity_ramp` 的 ≥120 会话 100% 成功率
-  （CAPACITY §3.6）背书；20 会话 8 轮的 `mem_leak_gate` 结论（+60,204 B/轮、dips=1）仍然有效。
-- **下一步（留档，别再猜）**：在 mem-probe 构建里二分探针的几条记账路径（`reg_insert/reg_remove` 的无锁表、
-  `track*` 的按尺寸直方图、`realloc` 的带头部搬家）——最省的做法是先按路径用环境开关逐个关掉跑同一场景，
-  定位到哪一条会崩；修好后 `mem_leak_gate` 才能在 30/40 会话档给出可信结论。
-  （`J0：第 1 轮会话失败 ok=0 failed=10 —— 标定无效，不产出报告`），不会静默给绿。
+- **二分（本轮加的开关；默认一个都不设 ⇒ 行为完全不变）**：
+  `MEM_PROBE_NO_REG=1`（关登记表）⇒ 40×6 **跑完、`server_alive_at_end=true`**；
+  `MEM_PROBE_NO_TRACK=1`（关直方图）⇒ **仍在第 4 轮崩 `0xC0000005`**。
+  ⇒ 崩溃点唯一落在 `reg_insert` / `reg_remove` / `registry_report` 这一组。
+  ⚠️ 开关**必须在 `main` 里读环境变量**（`init_bisect_flags()`），不能在分配器里读：`env::var` 自己会分配
+  ⇒ 递归进同一条记账路径，实测直接把服务端卡在启动（`server not ready` / exit 9）。
+- **根因（`reg_remove` 的"遇空槽即 return"）**：登记表是开放寻址，冲突的记录会被**后探测落位**；删除时
+  遇到第一个空槽就 `return` ⇒ 只要同哈希的前一条先被删掉，后面那条记录就**永久留在表里（孤儿）**，
+  而它指向的块早已 `System.dealloc`。`registry_report` 会照读这块内存的前 48 字节；Windows 堆对 ≥512KB 的块
+  走 VirtualAlloc，释放即 decommit ⇒ 读它就是**访问违例**。这也解释了为什么它是"稳定复现"而不是偶发：
+  孤儿只增不减，跑到第 N 轮必然踩到一条。
+- **修法（两道防线，都在探针内）**：① `reg_remove` 在自己那段探测窗口里**逐槽 CAS 清除**，不再"遇空即返"；
+  ② `registry_report` 读内容前用 `VirtualQuery` 确认 `[ptr, ptr+len)` 已提交且可读，不可读就跳过并累加
+  `MEM_PROBE_REG_UNREADABLE`（非 Windows 退化为不拦截，CI 仍能编译）。
+- **修后实测（本机、`%TEMP%\fault_deploy`、端口 7450、同一天同夹具）**：
+
+  | 档位 | 结果 | 读数 |
+  |---|---|---|
+  | **40 会话 × 2 热身 + 6 测量轮** | `mem_leak_gate` **exit 0 / PASS** | +953 B/轮、`dips=2`、`server_alive_at_end=true`、RSS 6 轮 71.3→72.4MB |
+  | **30 会话 × 2 热身 + 8 测量轮** | `mem_leak_gate` **exit 0 / PASS** | +34,892 B/轮、`dips=2`、`server_alive_at_end=true` |
+
+  登记表读数（40 会话那轮末尾）：`live_entries=6192 live_bytes=14,833,450 dropped=0`；
+  `MEM_PROBE_REG_UNREADABLE` **0 次** —— 说明孤儿已被 ① 消掉，② 只是兜底（留作"表里再出现悬垂记录"的告警）。
+- **因此**：「≥6~8 轮 × 30/40 会话」这条内存门禁现在**能给出结论**了（此前是 `exit 3` 没判成，而不是给绿）。
+  服务端容量另有单轮 `capacity_ramp` 的 ≥120 会话 100% 成功率（CAPACITY §3.6）背书；20 会话 8 轮
+  （+60,204 B/轮、dips=1）仍然有效。夹具侧的前置失败（`J0：第 1 轮 ok=0 failed=10 —— 标定无效，不产出报告`）
+  照旧硬失败，不会静默给绿。
 
 ### 5c-2g. 三条对照把「每次物化 × 怪物数量」钉死；两条走不通的路（2026-09-25）
 

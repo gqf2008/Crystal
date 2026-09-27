@@ -22,6 +22,10 @@ use crystal_server::gate::actor::{
 use crystal_server::util::config;
 
 fn main() -> anyhow::Result<()> {
+    // 二分定位开关（仅 mem-probe 构建用；默认两个环境变量都不设 ⇒ 行为不变）。
+    // 必须在这里（分配器外）读环境变量，见 mem_probe.rs 里的 ⚠️。
+    #[cfg(feature = "mem-probe")]
+    crystal_server::mem_probe::init_bisect_flags();
     let rt = tokio::runtime::Builder::new_multi_thread()
         // debug 构建下巨型 async handler 的 poll 栈帧会叠加（Tick 万行处理器 →
         // npc_script::exec_action 两千行 match，各自帧达 MB 级）；#2583 robot 首个
