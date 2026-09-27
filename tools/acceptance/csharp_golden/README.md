@@ -255,6 +255,37 @@ pwsh tools\acceptance\csharp_golden\golden_ab_ours.ps1 -SandboxRoot $env:TEMP\go
 （我方 `dialog open <kind>` 仪器同理）都必须走它；而我方这 4 个窗没有该守卫。已作为下一批队列项
 （`crystal-dialog-show-guards`）落账，修完用同一条链复跑即可看到这 4 行差异归零。
 
+### 3.2e 守卫修复后的复跑（2026-09-28，`crystal-dialog-show-guards` 收口）
+
+修复（`Client-Bevy/src/game/dialogs/notice_box.rs` + 键盘/RPC 两条开窗路径）：把「提示框」与「守卫判定」
+收敛成**唯一入口**，4 扇窗在状态不具备时**不开窗、只弹 `MirMessageBox(OK)`**——
+面板 `Prguse[360]` 456x190 @(284,289)、文本 (35,35)、OKAY `Title[200/201/202]` @(360,157) **76x25**
+（`libextract.py Title.Lib 200` 实测；第一版按截图目测写成 69x25，按钮被横向压扁 8%，逐窗按钮区差异 81%）。
+
+复跑判据（客户端由该提交构建，戳 `dirty=0`；原版侧沿用同一批金标准帧）：
+
+| 窗口 | 机器可读判据（`ab_windows.json`） | 提示框区域（284,289,740,479）| 按钮区（644,446,720,471）|
+|---|---|---|---|
+| 宠物 E | `我方窗开=False`、`提示=你没有任何宠物。` | 1315 / 86,640 = **1.5%** | **逐像素一致（bbox=None）** |
+| 行会 G | `我方窗开=False`、`提示=你不在任何公会中。` | 1041 = **1.2%** | **一致** |
+| 坐骑 M/J | `我方窗开=False`、`提示=你没有坐骑。` | 1019 = **1.2%** | **一致** |
+| 钓鱼 N | `我方窗开=False`、`提示=你没有拿着鱼竿。` | 1388 = **1.6%** | **一致** |
+
+残余的那 1.2%~1.6% 全部落在**文本行**：原版英文（"You do not own any creatures."）vs 我方中文
+（"你没有任何宠物。"，逐字取原版 `Client/Localization/Chinese.json`）。
+
+⚠️ **不要用「窗口矩形」那一列判这 4 条**：`golden_ab_diff.py` 的窗口矩形表里这 4 行仍是 34%~94%，
+因为窗口矩形比提示框大得多，多出来的部分是**两套世界数据的背景地图**（见 §3.2d ②）；
+按「窗口矩形」判会得出"修了没效果"的错误结论。**判据是上面这张表**：① `window_open=False` +
+② `notice=<原版文案>` + ③ 提示框区域≈文本差。
+
+仪器补强（同轮）：新增只读 RPC `notice_probe`（`{"action":"close"}` 可顺手清场），
+`golden_ab_ours.ps1` 每扇窗记 `window_open`（`dialog_rect(fallback=root)` 有根才算开；回复是**扁平**
+`rx/ry/rw/rh`，第一版按 `$rect.rect` 判空导致 20 扇全部误报"窗开=False"）与 `notice` 两个字段；
+`golden_ab_diff.py` 把这两个事实一并打印。**每扇窗开窗前必须先 `notice_probe {action:close}` 清场**——
+否则上一扇的提示框会留在后续截图里（本轮实测：Guilds 之后的 Ranking/Help/…/Skillbar 全部带着
+"你不在任何公会中。"，凭空多出 17%~60% 的假差异）。
+
 ## 3.3 逐窗几何对表（不需要原版交互，2026-09-26 起）
 
 §3.1 把"驱动原版点开某个窗口"这条路堵掉之后，**窗口几何**仍可验：原版每扇窗的矩形是纯常量

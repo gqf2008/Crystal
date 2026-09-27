@@ -113,13 +113,22 @@ def main():
         # 单边是否真的出了窗（与自己那侧基线在该区域比）
         o_chg = _changed_vs_base(base_orig, orig, r, scale)
         m_chg = _changed_vs_base(base_ours, ours, r, 1.0)
+        # 2026-09-28：`我方出窗` 这一列是**像素判据**（这一帧与基线帧不同）。对宠物/行会/坐骑/钓鱼
+        # 这四扇窗，"按 C# Show() 守卫应当**不开窗**、只弹提示框"才是正确行为 —— 把
+        # `golden_ab_ours.ps1` 记的机器可读事实（window_open / notice）一并打出来，避免读者把
+        # "画面变了" 误读成 "窗开了"。
+        manifest_note = ""
+        if p.get("window_open") is not None:
+            manifest_note = f" 我方窗开={p.get('window_open')}"
+        if p.get("notice"):
+            manifest_note += f" 提示={p['notice']}"
         if o_chg is False or m_chg is False:
             tag = "不可比(单边未出窗)"
         elif o_chg is None or m_chg is None:
             tag = "不可比(缺基线)"
         pct = 100.0 * n / max(total, 1)
         print(f"{p.get('action',''):16s} {kind or '-':22s} {str(r):>22s} {n:>10d} {pct:>6.1f}%  {tag}"
-              f"   [原版出窗={o_chg} 我方出窗={m_chg}]")
+              f"   [原版出窗={o_chg} 我方出窗={m_chg}{manifest_note}]")
         results.append(dict(p, region=r, changed=n, total=total, pct=round(pct, 3), tag=tag,
                             orig_rendered=o_chg, ours_rendered=m_chg))
     if a.out:

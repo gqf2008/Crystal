@@ -832,6 +832,8 @@ fn dialog_hotkey_system(
     hero: Res<crate::game::dialogs::hero::HeroState>,
     // #2892 批58：英雄对话框四页共窗 → 装备/技能键按页切换
     mut hero_pages: ResMut<crate::game::dialogs::hero_pages::HeroPageState>,
+    // 2026-09-28：宠物/行会/坐骑/钓鱼四窗的 C# `Show()` 前置守卫（状态缺失 ⇒ 只弹 MirMessageBox）
+    mut guard: crate::game::dialogs::notice_box::ShowGuardParams,
     windows: Query<&Window>,
 ) {
     use crate::game::input_gate::forwarded_while_typing;
@@ -900,6 +902,10 @@ fn dialog_hotkey_system(
             if !mod_req {
                 continue;
             }
+        }
+        // C# 守卫：状态不具备时原版**不开这扇窗**，只弹信息框（见 notice_box.rs 的 C# 行号）
+        if guard.blocked(kind) {
+            continue;
         }
         mgr.toggle(kind);
     }
@@ -1240,11 +1246,81 @@ mod tests {
         // #2771：`dialog_hotkey_system` 新增 `Res<NetConnection>`（交易快捷键发 C.TradeRequest）
         app.insert_resource(crate::network::NetConnection::default());
         app.insert_resource(crate::game::input_gate::TextInputGate(gate_on));
+        // 2026-09-28：宠物/行会/坐骑/钓鱼四窗的 `Show()` 守卫所需资源
+        app.init_resource::<crate::game::dialogs::notice_box::NoticeBox>();
+        app.init_resource::<crate::game::dialogs::guild::GuildState>();
+        app.init_resource::<crate::game::dialogs::creature::CreatureState>();
         app.add_systems(Update, dialog_hotkey_system);
         app.world_mut()
             .resource_mut::<ButtonInput<KeyCode>>()
             .press(pressed);
         app
+    }
+
+    /// 取某动作的默认键（测试用）
+    fn key_of(action: &str) -> KeyCode {
+        default_bindings()
+            .into_iter()
+            .find(|b| b.action == action)
+            .unwrap_or_else(|| panic!("默认键位应含「{action}」"))
+            .key
+    }
+
+    /// 2026-09-28 金标准 A/B 捞出：C# 这 4 扇窗的 `Show()` 有前置守卫，状态不具备时**不开窗**、
+    /// 只弹 `MirMessageBox(OK)`（`notice_box::show_guard` 的 C# 行号注释）。
+    ///
+    /// **阳性对照**：把 `dialog_hotkey_system` 里那句 `guard.blocked(kind)` 去掉，
+    /// 四条断言全部立刻红（窗会开、提示框为空）。
+    #[test]
+    fn hotkey_guards_block_dialogs_when_state_missing() {
+        use crate::game::dialogs::{DialogKind, DialogManager};
+        let cases = [
+            ("宠物", DialogKind::Creature, "你没有任何宠物。"),
+            ("行会", DialogKind::Guild, "你不在任何公会中。"),
+            ("坐骑", DialogKind::Mount, "你没有坐骑。"),
+            ("钓鱼", DialogKind::Fishing, "你没有拿着鱼竿。"),
+        ];
+        for (action, kind, want) in cases {
+            let mut app = hotkey_app(false, key_of(action));
+            app.update();
+            assert!(
+                !app.world().resource::<DialogManager>().is_open(kind),
+                "{action}：状态不具备时**不该**开窗（C# 只弹提示框）"
+            );
+            assert_eq!(
+                app.world()
+                    .resource::<crate::game::dialogs::notice_box::NoticeBox>()
+                    .text
+                    .as_deref(),
+                Some(want),
+                "{action}：应在提示框里显示原版文案"
+            );
+        }
+    }
+
+    /// 反向：状态具备时**照常开窗**（守卫不能做过头）。
+    #[test]
+    fn hotkey_guards_allow_dialogs_when_state_present() {
+        use crate::game::dialogs::{DialogKind, DialogManager};
+        // 行会：in_guild = true
+        let mut app = hotkey_app(false, key_of("行会"));
+        app.world_mut()
+            .resource_mut::<crate::game::dialogs::guild::GuildState>()
+            .in_guild = true;
+        app.update();
+        assert!(
+            app.world()
+                .resource::<DialogManager>()
+                .is_open(DialogKind::Guild),
+            "在行会里按 G 应正常开窗"
+        );
+        assert_eq!(
+            app.world()
+                .resource::<crate::game::dialogs::notice_box::NoticeBox>()
+                .text,
+            None,
+            "状态具备时不该弹提示框"
+        );
     }
 
     /// #2720：租赁浏览窗快捷键（Bevy 扩展；C# `KeybindOptions.Rental` 有枚举成员但
