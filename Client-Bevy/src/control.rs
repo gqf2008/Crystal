@@ -586,8 +586,15 @@ enum ControlCommand {
         reply: Sender<String>,
     },
     /// 返回指定对话框根面板的屏幕矩形（逻辑坐标），供 click 计算点击点
+    ///
+    /// `from_root`：找不到标准关闭钮时，是否退化为「直接取该 kind 的**可见根面板**矩形」。
+    /// 默认 false —— 保持既有语义（无关闭钮的窗返回 `ok:false`），因为交互巡回正是靠这个
+    /// 判别 `no_close_by_design`、并据此**不去点**不存在的关闭钮。
+    /// 逐窗几何对表（`probe_ui_nodes.ps1` 传 `fallback="root"`）打开它：那 6 扇没有关闭钮的窗
+    /// （menu/minimap/buff/refine/timer/chat_notice）此前**取不到矩形**，对表只能 SKIP。
     DialogRect {
         kind: DialogKind,
+        from_root: bool,
         reply: Sender<String>,
     },
     /// 诊断：inspect 全部 CloseButton 实体的组件清单（抓 Visibility 改写者）
@@ -1000,6 +1007,21 @@ struct ControlQueries<'w, 's> {
     /// `state` RPC：HP/死亡标志（复活闭环判据）
     vitals: Query<'w, 's, &'static crate::game::player_state::Vitals, With<LocalPlayer>>,
     state_flags: Query<'w, 's, &'static crate::game::player_state::StatusFlags, With<LocalPlayer>>,
+}
+
+/// `dialog_rect`(`fallback="root"`) 的选择规则：候选里挑**第一个可见且 kind 匹配**的根面板矩形。
+///
+/// 纯函数（候选压成 `(kind, 可见, 矩形)`）便于门禁——规则只有两条：
+/// ① 必须 `Visible`（隐藏的窗不能当矩形来源，否则对表会拿到隐藏窗的陈旧布局）；
+/// ② kind 必须相等（多个窗同时开着时不能张冠李戴）。
+pub fn pick_root_rect(
+    candidates: &[(DialogKind, bool, (f32, f32, f32, f32))],
+    kind: DialogKind,
+) -> Option<(f32, f32, f32, f32)> {
+    candidates
+        .iter()
+        .find(|(k, visible, _)| *k == kind && *visible)
+        .map(|(_, _, r)| *r)
 }
 
 /// 控制端口默认值（--control-port 未指定或非法时回退）
@@ -1987,6 +2009,9 @@ fn handle_conn(mut stream: std::net::TcpStream, tx: Sender<ControlCommand>) {
                         if tx
                             .send(ControlCommand::DialogRect {
                                 kind: k,
+                                // fallback="root"：无标准关闭钮的窗也返回根面板矩形（逐窗几何对表用）
+                                from_root: params.get("fallback").and_then(|v| v.as_str())
+                                    == Some("root"),
                                 reply: reply_tx,
                             })
                             .is_ok()
@@ -2930,7 +2955,11 @@ fn apply_control_commands(
                 #[cfg(debug_assertions)]
                 commands.insert_resource(VisBatchWatch(4));
             }
-            ControlCommand::DialogRect { kind, reply } => {
+            ControlCommand::DialogRect {
+                kind,
+                from_root,
+                reply,
+            } => {
                 // 语义：定位该窗口的**标准关闭钮**（spawn_close_button 的 CloseButton
                 // 标记），返回其中心的逻辑坐标（点击点）。根面板是全屏弹性容器时
                 // Node left/top 无意义，布局后矩形才可靠——用 ComputedNode +
@@ -3017,6 +3046,33 @@ fn apply_control_commands(
                         break;
                     }
                 }
+                let found = found.or_else(|| {
+                    // fallback="root"：该 kind 没有标准关闭钮时，直接取**可见根面板**的矩形。
+                    // 规则抽成纯函数 `pick_root_rect`（门禁见 tests::pick_root_rect_requires_visible_and_kind_match）。
+                    if !from_root {
+                        return None;
+                    }
+                    let cands: Vec<(DialogKind, bool, (f32, f32, f32, f32))> = q
+                        .dialog_roots
+                        .iter()
+                        .map(|(root, _n, vis, cn, gtf)| {
+                            let sz = cn.size() / scale;
+                            let tl = gtf.translation / scale;
+                            (
+                                root.0,
+                                *vis == Visibility::Visible,
+                                (tl.x - sz.x * 0.5, tl.y - sz.y * 0.5, sz.x, sz.y),
+                            )
+                        })
+                        .collect();
+                    pick_root_rect(&cands, kind).map(|(rx, ry, rw, rh)| {
+                        json!({
+                            "ok": true, "kind": format!("{kind:?}"), "source": "root",
+                            "cx": rx + rw * 0.5, "cy": ry + rh * 0.5,
+                            "rx": rx, "ry": ry, "rw": rw, "rh": rh,
+                        })
+                    })
+                });
                 let s = found
                     .unwrap_or_else(|| json!({"ok": false, "error": "close button not found"}))
                     .to_string();
@@ -4892,6 +4948,28 @@ mod tests {
     /// 未知（没收到过 UserLocation）必须给 false——夹具就是靠它决定"能不能挥砍"的，
     /// 放宽成"未知也算同步"会让近战在落后一格时空挥（本轮的实测缺陷形态）。
     ///
+    /// 门禁（长尾窗几何对表）：`dialog_rect(fallback="root")` 的选取规则。
+    ///
+    /// 六扇「无标准关闭钮」的窗（menu/minimap/buff/refine/timer/chat_notice）此前取不到矩形，
+    /// 逐窗对表只能 SKIP。fallback 打开后必须按「可见 + kind 匹配 + 取第一个」挑根面板。
+    /// 阳性对照（实做）：把 `&& *visible` 去掉 → 隐藏根被选中，本测试立刻红。
+    #[test]
+    fn pick_root_rect_requires_visible_and_kind_match() {
+        use crate::game::dialogs::DialogKind;
+        let cands = vec![
+            (DialogKind::Menu, false, (10.0, 10.0, 1.0, 1.0)),
+            (DialogKind::Buff, true, (0.0, 0.0, 2.0, 2.0)),
+            (DialogKind::Menu, true, (192.0, 60.0, 316.0, 466.0)),
+            (DialogKind::Menu, true, (0.0, 0.0, 9.0, 9.0)),
+        ];
+        assert_eq!(
+            super::pick_root_rect(&cands, DialogKind::Menu),
+            Some((192.0, 60.0, 316.0, 466.0)),
+            "必须跳过隐藏根与其它 kind，取第一个可见的 menu 根"
+        );
+        assert_eq!(super::pick_root_rect(&cands, DialogKind::Help), None);
+    }
+
     /// 阳性对照：把实现改成 `server_tile.is_some()`（不比较瓦片）→ 本测试立即红。
     #[test]
     fn in_sync_requires_exact_tile_match() {

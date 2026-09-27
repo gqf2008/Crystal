@@ -142,9 +142,11 @@ py -3.12 tools/acceptance/csharp_golden/window_rect_table.py `
 例外三类，各有据：
 
 1. **无关闭钮的窗**（`menu/minimap/buff/refine/timer/chat_notice`，即 manifest 的
-   `no_close_by_design`）取不到——`dialog_rect` 是**从关闭钮反推**窗口矩形的
-   （`rx = cx - w/2`），没关闭钮就没有 `cx/cy`，返回 `{ok:false,error:"close button not found"}`。
-   想让这 6 扇窗也进对表，得给 `dialog_rect` 加一条"直接从面板 Node 取矩形"的路径（未做）。
+   `no_close_by_design`）：`dialog_rect` 默认仍**从关闭钮反推**窗口矩形，没钮就返回
+   `{ok:false,error:"close button not found"}`（交互巡回靠这个 `ok:false` 判别「无钮设计窗」，
+   所以默认语义不能改）。**2026-09-27 补**：加了一条可选路径 `dialog_rect {kind, fallback:"root"}`
+   —— 没钮时直接取该 kind 的**可见根面板**矩形（`source:"root"`，`cx/cy` 给矩形中心），
+   探针在逐窗分支已默认带上，这 6 扇窗从此**也进对表**。
 2. `trade` 未取到：它在 manifest 的 `excluded` 里（单开不可达，需要对手方/服务端状态）。
 3. **按状态换图的窗**：`MountDialog` 面板随坐骑孔数在 `Prguse[167]`(324x377)/`Prguse[160]`(272x378)
    之间切（C# `SwitchType`），拿哪一张取决于角色状态——工具里登记为"任一命中即 OK"，
