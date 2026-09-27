@@ -60,6 +60,18 @@ Windows 客户端 zip 内已自动带上 MSYS2 UCRT64 运行库 DLL（`glib`/`li
 > ② 修完后构建戳又把"仅 tools/ 前进"判成陈旧、逼着重建 18 分钟产物；已改成按
 > 「`<stamp>..HEAD` 有没有触碰 `Client-Bevy`」判（#3221）。
 >
+> **2026-09-27 复跑（master `ac61a2183`，三条全绿）**：客户端 GNU release 构建 **19m38s** exit 0；
+> 打包预演 `-SmokeServer 127.0.0.1:7000` **PASS J1–J4**（依赖闭包 **0 缺失**、zip **69,374,248 B（66.2 MiB）**、
+> 解压后 `alive=true, control_rpc=true, **entered_game=true**` —— 发布产物真连服并进图）；
+> 服务端 release 构建 **2m04s**、`deploy_smoke` **exit 0**（`ok=true`、`gateway_ready`、协议级登录冒烟过、
+> 记录 exe/config/db 三个 sha256）；内存门禁 20 会话：**`-MeasureCycles 8` → exit 0**
+> （活跃字节每轮 **+60,204 B** ≤ 阈值 104,858、**dips=1**；RSS 斜率 **0.129 MB/轮** ≤ 0.5）。
+>
+> ⚠️ **同日的 3 轮与 6 轮窗口都是 `dips=0` exit 10**（+63,129 / +37,737 B/轮）——正是本门禁脚本头部写的
+> 「短窗口偶发单调」。**发版签字请用 `-MeasureCycles 8`**（或 ≥6 且真出现 dips）：既别把 3 轮的 `dips=0`
+> 当成泄漏，也别拿它当通过。（本轮另修：部署目录建好后必须先
+> `py -3.12 tools/ops/seed_load_accounts.py <部署目录>/Data/crystal.db 20 --prefix opsload` 播种**角色**，
+> 否则 20 个会话全是"登录成功但没有角色"的空载荷，J5 跑不出来、`exit 3` 说"没判成"。）
 > **2026-09-25 按上面三条从零复跑（同一台机器，master `8ec2b58d5`）**：
 > 客户端 GNU release 构建 **21m12s** exit 0；打包预演 exit 0 —— zip **66.1 MiB / 38 条目** / 依赖闭包 0 缺失 /
 > 解压后 `alive=true, control_rpc=true, **entered_game=true**`（发布产物不仅能起来，还能连上服务器登录并进图）；
