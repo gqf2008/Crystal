@@ -203,19 +203,26 @@ $taken2 = Taken
 $p = $null
 foreach ($i in 1..20) {
     Start-Sleep 1; $p = Rpc 'bag_probe'
-    if (([int]$p.gold - $gold0) -ge $MinGold -and ([int]$p.exp - [int]$exp0) -ge $MinExp) { break }
+    # 奖励到账判据（2026-09-27 修正）：**升级会让"当前等级 exp"归零**——只比 `exp` 差会把
+    # 「领了奖励并且升了级」误判成没拿到 exp（实机：gold +6000、level 111→167、exp 7→1，
+    # 旧判据 `expDelta >= 1` 为假 ⇒ 假红 reward_gold=FAIL）。升级本身即 exp 到账的强证据。
+    if (
+        ([int]$p.gold - $gold0) -ge $MinGold -and
+        ((([int]$p.exp - [int]$exp0) -ge $MinExp) -or ([int]$p.level -gt $lv0))
+    ) { break }
 }
 $gold1 = [int]$p.gold
 $goldDelta = $gold1 - $gold0
 $expDelta = [int]$p.exp - [int]$exp0
+$lvDelta = [int]$p.level - $lv0
 Write-Host ("[C] finish_quest 后 已接={0}（任务 {1} 已移除={2}）" -f ($taken2 -join ','), $QuestId, $removed)
-Write-Host ("[D] 奖励: gold {0}->{1} (delta={2}, 期望 >= {3})；exp {4}->{5} (delta={6}, 期望 >= {7})；level {8}->{9}" -f `
-    $gold0, $gold1, $goldDelta, $MinGold, $exp0, $p.exp, $expDelta, $MinExp, $lv0, $p.level)
+Write-Host ("[D] 奖励: gold {0}->{1} (delta={2}, 期望 >= {3})；exp {4}->{5} (delta={6}, 期望 >= {7} 或升级)；level {8}->{9} (delta={10})" -f `
+    $gold0, $gold1, $goldDelta, $MinGold, $exp0, $p.exp, $expDelta, $MinExp, $lv0, $p.level, $lvDelta)
 
 # C/D 以 A 为前提：没接上时「日志里本来就没有它」不算交付成功（空真 PASS 会把接取失败洗绿）
 $okA = [bool]$accepted
 $okC = ($okA -and $removed)
-$okD = ($okA -and ($goldDelta -ge $MinGold) -and ($expDelta -ge $MinExp))
+$okD = ($okA -and ($goldDelta -ge $MinGold) -and (($expDelta -ge $MinExp) -or ($lvDelta -gt 0)))
 Write-Host ("VERDICT accept={0} state_flip={1} reward_gold={2}" -f `
     $(if ($okA) { 'PASS' } else { 'FAIL' }), $(if ($okC) { 'PASS' } else { 'FAIL' }), $(if ($okD) { 'PASS' } else { 'FAIL' }))
 if (-not ($okA -and $okC -and $okD)) { exit 5 }
