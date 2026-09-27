@@ -65,7 +65,19 @@ CLASS_TO_KIND = {
     # = C# `ItemRentingDialog` 的 (ScreenWidth-W-W/2, H*2+H/2+15)）。
     "ItemRentalDialog": "item_rental_browse",
     "ItemRentingDialog": "item_rental",
+    # 精炼投放窗（`NPCDialogs.cs` 的 `RefineDialog`）：面板 `Prguse[1002]` 164x207 @ (0,225)。
+    # 它是 manifest 的 `no_close_by_design` 之一（C# 无关闭键，靠 NPC 窗联动），
+    # 靠 `dialog_rect{fallback:"root"}` 才拿得到矩形（2026-09-27）。实测我方 (0,225,164,207) ⇒ OK。
+    "RefineDialog": "refine",
 }
+
+# **有类但不可比**（写明理由，免得后人反复试）：
+#   BuffDialog / PoisonBuffDialog —— 扫出来的是**单个增益图标**（`Prguse2[20]` 44x34 @(854,0)，逐 buff 排布），
+#     不是一个窗口面板，整窗没有单一 `Index/Library` 可对；且 `PoisonBuffDialog` 在原版是 `//UNFINISHED`
+#     死代码（本端有意不实现）。
+#   ChatNoticeDialog —— 顶部公告横幅（`Prguse[1361]` 660x25 @(182,115)），**只在收到公告的几秒内可见**；
+#     逐窗探针开窗那一刻它不在屏上 ⇒ 取不到矩形，只能 SKIP（要覆盖它得先有「强制置态」的路径）。
+#   TimerDialog —— 同理：没设计时器时那扇窗本就不该在屏上。
 
 # 位置由**调用点动态锚定**的窗口：构造器里写的 (0,0) 不是真值，真值在 Show()/打开路径里算。
 # 期望值按「背包在 (0,0)、尺寸 316x236」求值——`probe_ui_nodes.ps1` 正是先开背包再逐窗开，
