@@ -111,7 +111,7 @@ macOS 产物未签名：首次打开被 Gatekeeper 拦截时右键 → 打开，
 | 短长稳（本机最长窗口） | 40 会话 × 30 分钟时间序列（RSS/tick 滞后/错误分类） | CAPACITY §5.9 | 无线性漂移；`lag_max=0.1%`；4383 条 ERROR 全部是"客户端突然断开"良性类 |
 | 单机故障语义 | `fault_injection.ps1`：kill -9 中途崩溃 / 网络抖动 / DB 只读 | `tools/ops/EXTERNAL_OPS_HANDOFF.md` 末尾 | kill **2.4s 感知 / 4s 恢复**；抖动 `server_real_errors=0`；只读 **不 panic** |
 | 网络时延 + 断线重连 | ① **纯时延**：真实客户端经 `latency_proxy`（`--drop-pct 0`）逐档单跑；② **断线重连**：`l5y_reconnect.ps1`（杀服务端→**5s 与 60s** 两种停机窗口各验一次，判据取客户端 `[RECON]` 日志） | ① 客户端**逐档单独跑**（各档独立日志）；② `tools/acceptance/l5y_reconnect.ps1`；更正说明见 `EXTERNAL_OPS_HANDOFF.md` | ① 时延 0/200/400ms 进图 **12.0 / 11.6 / 11.4s**（与直连无差异）⇒ 时延不是问题；② **`VERDICT enter_game=PASS saw_disconnect=PASS auto_reconnect=PASS`**（~2s 检测断线 → 自动重登 → 重新进图）。~~丢包档的完成率表~~ **已撤回**：代理按字节丢包破坏了 TCP 语义（见下方更正） |
-| owner 反馈（7 条） | 建角 / 中文字体 / 鼠标移动 / 写邮件窗 / 底部对话框 / 地图灯光 / 魔法特效 | 各自夹具（`l5ac`/字体 cmap 断言+截图/`l5ad`/`l5ab`/`l5t_chat_dialog4`/`l5ag_maplight_stream`） | 每条都有实机判据（其中三条证明是**旧构建**造成） |
+| owner 反馈（7 条） | 建角 / 中文字体 / 鼠标移动 / 写邮件窗 / 底部对话框 / 地图灯光 / 魔法特效 | 各自夹具（`l5ac`/字体 cmap 断言+截图/`l5ad`/`l5ab`/`l5t_chat_dialog4`/`l5ag_maplight_stream`/`l5zb_chat_size_cycle`） | 每条都有实机判据（其中三条证明是**旧构建**造成）。**2026-09-27 在 `b53ddb4c1` 的干净构建上重跑 6 条全 PASS**：`l5zb`（对话三档 0→1→2→0 可逆、面板 68/116/164、底边恒 739）、`l5ac`（2 字名拒绝 + 3 字名建角成功）、`l5ad`（右键移动、左键不误走）、`l5t`（对话四缺陷）、`l5ag`（换图后按新图重建灯光 + 阴性对照）、`l5z`（IME/中文字体）。首轮 3 条报 FAIL(2)「陈旧二进制」，根因是**夹具前置**（`l5ac`/`l5t` 断言了自己后面才创建的副本、`l5t`/`l5zb` 默认 ClientHome 指向主检出的旧产物），已修夹具（本 PR）后再跑全绿 | 
 | 工具链可信度 | 构建戳（exe 内固化 commit，夹具启动前比对）+ T11.1–T11.5 + 实机锁覆盖面 + 进程作用域 + 文档引用门禁 | `tools/acceptance/{build_stamp,e2e_lock_selftest}.ps1`、`tools/ops/check_process_scope.ps1`、`check_doc_tool_refs.ps1` | 全部在闸内（本轮还修掉 `$&` 事故与"仅 tools 前进即判陈旧"两处） |
 
 **仍未达成、且本机做不了（必须外部资源）**——逐项在本表下方的交接清单里有判据与所需输入：
