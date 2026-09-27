@@ -289,9 +289,6 @@ pub struct QuestLogWidget;
 #[derive(Component)]
 pub struct QuestLogClose;
 
-#[derive(Component)]
-pub struct QuestLogAbandon;
-
 /// #2535 接受按钮（C# QuestListDialog._acceptButton Title[270-272]）
 #[derive(Component)]
 pub struct QuestLogAccept;
@@ -825,14 +822,14 @@ fn spawn_quest_log(
             )
             .insert((Button, QuestLogTrack(i)));
         }
-        // 放弃 @(200,285)
-        if let (Some(n), Some(h), Some(pr)) = (
-            load_lib_image(&mut libs, &mut images, LibraryName::Title, 206),
-            load_lib_image(&mut libs, &mut images, LibraryName::Title, 207),
-            load_lib_image(&mut libs, &mut images, LibraryName::Title, 208),
-        ) {
-            spawn_icon_button(p, n, h, pr, 200.0, 285.0, 76.0, 25.0, 10).insert(QuestLogAbandon);
-        }
+        // 2026-09-28（README §3.2j）：这里原本有一枚**自造**的「放弃」钮
+        // （`Title[206..208]` @(200,285) 76x25，常显）——C# `QuestDiaryDialog` 的构造里
+        // **没有**这个控件（它只有 Title[15] 标题、`_closeButton` Title[193..195] @(200,436)、
+        // 关闭 Prguse2[360..362] @(289,3)）。金标准 A/B 里那块 80x25 的差异就是它。
+        // 「放弃任务」在原版走的是**任务详情窗**的 `_cancelButton`（`QuestDialogs.cs:581-601`：
+        // Title[203..205] @(200,436) → YesNo 询问框 → `C.AbandonQuest`），本端该路径已在
+        // `quest_detail_ui_system` 里实现（`confirm_cancel`），故删除这枚自造钮即可，
+        // 能力不减（也顺带用回了 `Title[206..208]` 真正的归属——那是婚姻邀请框的 Yes 钮）。
         // #2535 接受/完成（C# Title[270-272]/[273-275]；初始隐藏，状态机驱动显隐/置灰）
         if let (Some(n), Some(h), Some(pr)) = (
             load_lib_image(&mut libs, &mut images, LibraryName::Title, 270),
@@ -2135,9 +2132,8 @@ fn quest_log_ui_system(
             Entity,
             &Interaction,
             Option<&QuestLogClose>,
-            Option<&QuestLogAbandon>,
         ),
-        Or<(With<QuestLogClose>, With<QuestLogAbandon>)>,
+        With<QuestLogClose>,
     >,
     mouse: Res<ButtonInput<MouseButton>>,
     ui: (Query<&Window>, Query<&Node, With<QuestLogWidget>>),
@@ -2186,26 +2182,12 @@ fn quest_log_ui_system(
     if !open {
         return;
     }
-    for (e, inter, is_close, is_abandon) in &close {
+    for (e, inter, is_close) in &close {
         if !edge(e, inter, &mut prev_inter) {
             continue;
         }
         if is_close.is_some() {
             mgr.close(DialogKind::QuestLog);
-        } else if is_abandon.is_some() {
-            if let Some(i) = state.selected {
-                let q = state.quests[i].clone();
-                net.send_packet(&mir2_shared::packets::client::quest::AbandonQuest {
-                    quest_index: q.id,
-                });
-                state.quests.remove(i);
-                state.selected = None;
-                state.selected_reward = None;
-                state.message = format!("已放弃任务 {}", q.name);
-                tracing::info!("📜 放弃任务 {}", q.name);
-            } else {
-                state.message = "请先选中一个任务".to_string();
-            }
         }
     }
 
