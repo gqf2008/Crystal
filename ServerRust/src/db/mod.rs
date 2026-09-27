@@ -3016,9 +3016,10 @@ pub struct DbHero {
     /// 自动喝药已解锁（C# HeroInfo.AutoPot；Scroll 13 解锁，持久化）
     pub autopot: bool,
     /// 英雄经验（C# HeroInfo.Experience，持久化）
-    pub experience: u32,
+    /// 类型 `i64`：原版英雄经验曲线最大 45_400_000_000（u32 会截断，见 `load_hero_exp_list`）
+    pub experience: i64,
     /// 当前等级所需经验（C# Hero.MaxExperience；初始 100，升级 ×1.5，持久化保持一致）
-    pub max_experience: u32,
+    pub max_experience: i64,
     /// #2571：当前 HP（C# HeroInfo.HP；-1=未持久化，召唤按满血）
     pub hp: i32,
     /// #2571：当前 MP（C# HeroInfo.MP；-1=未持久化，召唤按满蓝）
@@ -3079,8 +3080,10 @@ pub async fn load_heroes(pool: &DbPool, character_name: &str) -> anyhow::Result<
             dead: r.try_get::<i32, _>("dead").unwrap_or(0) != 0,
             sealed: r.try_get::<i32, _>("sealed").unwrap_or(0) != 0,
             autopot: r.try_get::<i32, _>("autopot").unwrap_or(0) != 0,
-            experience: r.try_get::<i32, _>("experience").unwrap_or(0).max(0) as u32,
-            max_experience: r.try_get::<i32, _>("max_experience").unwrap_or(100).max(0) as u32,
+            // 2026-09-27：读侧同样按 i64 取——旧写法 `try_get::<i32>` 对 >i32::MAX 的
+            // 原版曲线值会**取失败**并静默回退成 0/100（英雄"下一级所需"整段错）。
+            experience: r.try_get::<i64, _>("experience").unwrap_or(0).max(0),
+            max_experience: r.try_get::<i64, _>("max_experience").unwrap_or(100).max(0),
             hp: r.try_get::<i32, _>("hp").unwrap_or(-1),
             mp: r.try_get::<i32, _>("mp").unwrap_or(-1),
         })

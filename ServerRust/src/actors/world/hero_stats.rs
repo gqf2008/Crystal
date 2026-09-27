@@ -10,7 +10,8 @@ use mir2_shared::enums::MirClass;
 
 /// 英雄当前等级所需经验（C# Settings.HeroExpList 无配置时默认 100/级；
 /// HeroObject.RefreshMaxExperience = HeroExperienceList[Level-1]）
-pub const HERO_MAX_EXPERIENCE: u32 = 100;
+/// 类型 `i64`：原版曲线值可达 45_400_000_000（见 `util::ini::load_hero_exp_list`）
+pub const HERO_MAX_EXPERIENCE: i64 = 100;
 
 /// 英雄属性集合（基础 + 装备加成）
 #[derive(Debug, Clone, Copy, Default)]

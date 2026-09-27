@@ -930,11 +930,29 @@ impl Message<StartGameRequest> for WorldActor {
         // #188/#194：从 DB 载入英雄列表（重启不丢）；S.ManageHeroes 不在此下发，
         // 只在英雄管理 NPC / NewHero / GM 链路下发（见下方注释与 #2950）。
         if let Ok(db_heroes) = db::load_heroes(&self.db_pool, &player_name).await {
+            // C# `Hero.RefreshMaxExperience`：`MaxExperience = HeroExperienceList[Level-1]`
+            //（越界 → 0，不再升级）——是**派生值**，登录时必须按当前曲线重算。
+            // 本端此前直接用库里持久化的 `max_experience`（旧版本写坏过/占位曲线时代存下 100），
+            // 且曲线值曾按 u32 截断（原版 412/500 条 > u32::MAX）。
+            let hero_curve = self.hero_exp_list.clone();
             self.player_heroes.insert(
                 msg.session_id,
                 db_heroes
                     .into_iter()
-                    .map(|h| HeroInfo {
+                    .map(|h| {
+                        let li = (h.level as usize).saturating_sub(1);
+                        let curve_max = hero_curve.get(li).copied().unwrap_or(0);
+                        if curve_max != h.max_experience {
+                            tracing::info!(
+                                "RefreshMaxExperience(hero, login): {} Lv.{} {} -> {}（曲线 {} 条）",
+                                h.name,
+                                h.level,
+                                h.max_experience,
+                                curve_max,
+                                hero_curve.len()
+                            );
+                        }
+                        HeroInfo {
                         index: h.index,
                         name: h.name,
                         level: h.level,
@@ -946,10 +964,11 @@ impl Message<StartGameRequest> for WorldActor {
                         sealed: h.sealed,
                         autopot: h.autopot,
                         experience: h.experience,
-                        max_experience: h.max_experience,
+                        max_experience: curve_max,
                         // #2571：恢复残血/残蓝（C# HeroInfo.HP/MP；-1 = 无存档按满血）
                         hp: h.hp,
                         mp: h.mp,
+                        }
                     })
                     .collect(),
             );

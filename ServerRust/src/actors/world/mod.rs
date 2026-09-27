@@ -177,7 +177,8 @@ pub struct WorldActorArgs {
     /// 宝石配置（C# Settings.LoadGem：Configs/GemSystem.ini）
     pub gem_cfg: crate::util::ini::GemIniSettings,
     /// 英雄升级经验曲线（C# Settings.HeroExpList：Configs/HeroExpList.ini；空 = 回退 100/级）
-    pub hero_exp_list: Vec<u32>,
+    /// 类型是 `i64`：原版 500 条里 412 条 > u32::MAX（Level100=5_400_000_000），u32 会截断
+    pub hero_exp_list: Vec<i64>,
     /// 服务端基础参数（#2420：Configs/Setup.ini 部分字段）
     pub setup_cfg: crate::util::ini::SetupIniSettings,
 }
@@ -2037,7 +2038,7 @@ pub struct WorldActor {
     /// 宝石配置（#2416：Configs/GemSystem.ini）
     pub(crate) gem_cfg: crate::util::ini::GemIniSettings,
     /// 英雄升级经验曲线（#2418：Configs/HeroExpList.ini；空 = 回退 100/级）
-    pub(crate) hero_exp_list: Vec<u32>,
+    pub(crate) hero_exp_list: Vec<i64>,
     /// 服务端基础参数（#2420：Configs/Setup.ini 部分字段）
     pub(crate) setup_cfg: crate::util::ini::SetupIniSettings,
     /// 全局经验倍率事件
@@ -2219,9 +2220,10 @@ pub struct HeroInfo {
     /// 自动喝药已解锁（C# HeroInfo.AutoPot；Scroll 13 解锁，持久化）
     pub autopot: bool,
     /// 英雄经验（运行时；C# Hero.Experience。等级持久化，经验重启清零）
-    pub experience: u32,
+    /// 类型 `i64`：原版英雄经验曲线最大 45_400_000_000，u32 会截断（见 `load_hero_exp_list`）
+    pub experience: i64,
     /// 当前等级所需经验（C# Hero.MaxExperience；初始 100，升级 ×1.5）
-    pub max_experience: u32,
+    pub max_experience: i64,
     /// #2571：持久化的当前 HP（C# HeroInfo.HP；-1 = 未持久化，召唤按满血。
     /// 出战英雄的实时值在 HeroCombatAI，存档时由 db_heroes_snapshot 合并）
     pub hp: i32,

@@ -151,6 +151,19 @@ async fn async_main() -> anyhow::Result<()> {
         exp_list.len(),
         orbs_ini.exp_list.len()
     );
+    // 经验曲线**摘要**留痕（2026-09-27）：数据目录 gitignore，占位/截断问题此前静默跑到线上
+    // （玩家侧 500×100、英雄侧 412/500 条被 u32 截断）。把首尾值打出来，一眼可判"曲线是否可信"。
+    info!(
+        "经验曲线：玩家 {} 条 [Level1={} … Level{}={}]；英雄 {} 条 [Level1={} … Level{}={}]",
+        exp_list.len(),
+        exp_list.first().copied().unwrap_or_default(),
+        exp_list.len(),
+        exp_list.last().copied().unwrap_or_default(),
+        hero_exp_list.len(),
+        hero_exp_list.first().copied().unwrap_or_default(),
+        hero_exp_list.len(),
+        hero_exp_list.last().copied().unwrap_or_default()
+    );
 
     // 初始化 SQLite 数据库（使用配置 database.path，支持绝对路径；#77 worktree 联调发现原硬编码忽略配置）
     let db_path = PathBuf::from(&cfg.database.path);
