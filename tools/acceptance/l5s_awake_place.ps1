@@ -143,7 +143,8 @@ foreach ($i in 1..6) {
     if ($null -ne $aw2.inv_selected -and [int]$aw2.inv_selected -eq $slot) { break }
 }
 $sel = $aw2.inv_selected
-Write-Host ("[B] 点背包 ({0},{1}) → inv_selected={2}（期望 {3}）" -f $bx, $by, $sel, $slot)
+Write-Host ("[B] inv_select slot={0} → inv_selected={1}（期望 {2}）；命中栈抽点 ({3},{4}) 见上（诊断）" -f `
+    $slot, $sel, $slot, $bx, $by)
 $okB = ($null -ne $sel -and [int]$sel -eq $slot)
 
 # C) 点格 3（窗内 (175,199) 36x32 中心）
