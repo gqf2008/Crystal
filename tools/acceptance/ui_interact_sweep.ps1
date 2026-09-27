@@ -8,6 +8,10 @@
   Client-Bevy/src/control.rs 的 RPC 窗口登记对账，新增窗口漏登记会被 `cargo test --lib` 拦下）。
   逐窗：dialog open → dialog_rect 定位标准关闭钮 → click 点它（真实 picking→Interaction 链路）
   → 断言窗口关闭；设计上无关闭钮的窗改验 RPC open/close 往返。
+  另有第三类：**C# `Show()` 前置守卫窗**（宠物/行会/坐骑/钓鱼，见 #3314）——状态不具备时
+  原版只弹 MirMessageBox、不开窗，`dialog open` 也不该开。判据 = `notice_probe` 有提示文本
+  **且** `dialogs` 里没有它（`open=GUARDED` 记 pass；"弹了提示却还开着窗"记 FAIL）。
+  #3314 之后这四扇在这条巡回上一直假红（"找不到标准关闭钮"）——它们不是缺陷，是缺这条判据。
   另有 inventory 拖动、NPC 会话窗 X、hero_manage X 三段专用检查。
 
   退出码（门禁语义）：
@@ -308,6 +312,9 @@ try {
     # ---------------- 逐窗：open → 点关闭钮 → 断言关闭 ----------------
     foreach ($k in $kinds) {
         $pascal = Pascal $k
+        # 清场：上一扇窗若走过 Show() 守卫，会留下一个 MirMessageBox；不清掉会让下一扇
+        # 看似"守卫了"（假 GUARDED），也可能挡住关闭钮的点击（#3314 之后新增的探针）。
+        Rpc 'notice_probe' @{ action = 'close' } | Out-Null
         Rpc 'dialog' @{ kind = $k; action = 'open' } | Out-Null
         Start-Sleep -Milliseconds 800
         $rect = Rpc 'dialog_rect' @{ kind = $k }
@@ -325,11 +332,34 @@ try {
                     Write-Host ("{0,-20} 无关闭钮(设计) RPC 往返 closed=YES" -f $k)
                 }
             } else {
-                $results.Add([pscustomobject]@{ kind=$k; open='FAIL_NO_BTN'; hit=''; closed='-' })
-                Add-Fail $k '找不到标准关闭钮（spawn_close_button 没挂上 CloseButton，或该窗没显示）'
-                # 兜底关窗，避免残留遮挡后续窗口
-                Rpc 'dialog' @{ kind = $k; action = 'close' } | Out-Null
-                Start-Sleep -Milliseconds 300
+                # #3314 的 C# `Show()` 前置守卫：状态不具备时**只弹 MirMessageBox、不开窗**
+                # （宠物/行会/坐骑/钓鱼四扇）。那是**预期**行为，不是"窗没显示"——
+                # 判据用 `notice_probe` 的机器可读提示文本（键鼠/RPC 两条开窗路径走同一守卫），
+                # 并顺带断言 `dialogs` 里确实没有它（"守卫了但窗帘还挂着"要红）。
+                $guard = Rpc 'notice_probe' @{}
+                $guardText = if ($guard) { $guard.text } else { $null }
+                $after = ((Rpc 'dialogs').dialogs) -join ','
+                $notOpen = $after -notmatch "\b$pascal\b"
+                if ($guardText -and $notOpen) {
+                    $results.Add([pscustomobject]@{
+                        kind=$k; open='GUARDED'; hit=''; closed='N/A'; notice=$guardText })
+                    Write-Host ("{0,-20} C# Show() 守卫：只弹提示不开窗（""{1}""）" -f $k, $guardText)
+                    Rpc 'dialog' @{ kind = $k; action = 'close' } | Out-Null
+                    Rpc 'notice_probe' @{ action = 'close' } | Out-Null
+                    Start-Sleep -Milliseconds 300
+                } elseif ($guardText -and -not $notOpen) {
+                    $results.Add([pscustomobject]@{
+                        kind=$k; open='FAIL_GUARD_LEAK'; hit=''; closed='-'; notice=$guardText })
+                    Add-Fail $k ("守卫弹了提示（""{0}""）却**还是开着窗**——窗帘漏挂" -f $guardText)
+                    Rpc 'dialog' @{ kind = $k; action = 'close' } | Out-Null
+                    Start-Sleep -Milliseconds 300
+                } else {
+                    $results.Add([pscustomobject]@{ kind=$k; open='FAIL_NO_BTN'; hit=''; closed='-' })
+                    Add-Fail $k '找不到标准关闭钮（spawn_close_button 没挂上 CloseButton，或该窗没显示）'
+                    # 兜底关窗，避免残留遮挡后续窗口
+                    Rpc 'dialog' @{ kind = $k; action = 'close' } | Out-Null
+                    Start-Sleep -Milliseconds 300
+                }
             }
             continue
         }
@@ -460,7 +490,8 @@ elseif ($failures.Count -gt 0) { $exitCode = 1 }
 elseif ($FailOnSkip -and $skips.Count -gt 0) { $exitCode = 1 }
 Write-Results $exitCode
 
-$passCount = ($results | Where-Object { $_.closed -eq 'YES' }).Count
+# GUARDED 行 closed 是 'N/A'（本就没有窗可关）——按**判过**计入 pass，否则汇总数会少报
+$passCount = ($results | Where-Object { $_.closed -eq 'YES' -or $_.open -eq 'GUARDED' }).Count
 Write-Host ''
 Write-Host ("===== 交互巡回: pass={0} total={1} fail={2} skip={3} exit={4} =====" -f `
     $passCount, $results.Count, $failures.Count, $skips.Count, $exitCode)
