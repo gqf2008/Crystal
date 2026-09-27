@@ -55,8 +55,50 @@ param(
     [int]$QuestId = 0,
     [int]$KillCap = 60,
     [switch]$ResetQuests,
-    [int]$HarvestTimeoutSec = 900
+    [int]$HarvestTimeoutSec = 900,
+    # 只跑判据分支自检（不需要客户端/服务端/锁，秒级）：覆盖两支「环境性 SKIP」与一支 FAIL
+    [switch]$SelfTest
 )
+
+# ---- 判据分支（纯函数：便于自检，不需要实机）--------------------------------
+# 为什么要单独抽出来：B 的判据（任务格里该物品数量 >= 需求）取决于**怪刷新 + 掉落概率**，
+# 真跑一次只能命中其中一支分支。把分类抽成纯函数 + `-SelfTest`，两支「环境性 SKIP」与
+# 真 FAIL 都能被**确定性**覆盖（实机跑只是补充「真能走到那一步」）。
+#
+# 返回：PASS / SKIP_HAVE_SHORT（有掉落但没凑够，链路已通）/ SKIP_SAMPLE_LOW（一次没掉但样本不足）
+#       / FAIL（样本够却一次没掉 = 链路真坏）
+function Get-L5g3Verdict {
+    param(
+        [bool]$OkA, [bool]$OkB, [bool]$OkC, [bool]$OkD,
+        [int]$Have, [int]$Need, [int]$Kills, [double]$Chance
+    )
+    if ($OkA -and $OkB -and $OkC -and $OkD) { return 'PASS' }
+    if ($OkA -and -not $OkB -and $Have -gt 0) { return 'SKIP_HAVE_SHORT' }
+    $expPerItem = if ($Chance -gt 0) { $Need / $Chance } else { 0 }
+    $minKills = [int][Math]::Ceiling(3 * $expPerItem)
+    if ($OkA -and -not $OkB -and $Have -eq 0 -and $minKills -gt 0 -and $Kills -lt $minKills) {
+        return 'SKIP_SAMPLE_LOW'
+    }
+    return 'FAIL'
+}
+
+if ($SelfTest) {
+    $script:stFail = @()
+    function T([string]$name, [string]$want, [string]$got) {
+        if ($want -eq $got) { Write-Host ("  [PASS] {0} -> {1}" -f $name, $got) }
+        else { Write-Host ("  [FAIL] {0}：期望 {1}，实得 {2}" -f $name, $want, $got); $script:stFail += $name }
+    }
+    T 'A~D 全 PASS' 'PASS' (Get-L5g3Verdict -OkA $true -OkB $true -OkC $true -OkD $true -Have 3 -Need 1 -Kills 5 -Chance 0.333)
+    T 'have>0 但不足' 'SKIP_HAVE_SHORT' (Get-L5g3Verdict -OkA $true -OkB $false -OkC $true -OkD $false -Have 1 -Need 10 -Kills 4 -Chance 0.333)
+    # 门槛 = ceil(3 × 需求/掉率) = ceil(3 × 10/0.333) = 91：90 杀仍 SKIP、91 杀必须 FAIL（边界两侧都钉住）
+    T 'kills=90（门槛下）且 0 掉' 'SKIP_SAMPLE_LOW' (Get-L5g3Verdict -OkA $true -OkB $false -OkC $true -OkD $false -Have 0 -Need 10 -Kills 90 -Chance 0.333)
+    T 'kills=91（门槛上）却 0 掉' 'FAIL' (Get-L5g3Verdict -OkA $true -OkB $false -OkC $true -OkD $false -Have 0 -Need 10 -Kills 91 -Chance 0.333)
+    T '掉率 0' 'FAIL' (Get-L5g3Verdict -OkA $true -OkB $false -OkC $true -OkD $false -Have 0 -Need 1 -Kills 1 -Chance 0)
+    T 'A 失败' 'FAIL' (Get-L5g3Verdict -OkA $false -OkB $false -OkC $false -OkD $false -Have 5 -Need 1 -Kills 1 -Chance 1)
+    if ($script:stFail.Count -gt 0) { Write-Host ("SELFTEST FAIL: {0}" -f ($script:stFail -join ', ')); exit 1 }
+    Write-Host '=== SELFTEST PASS（两支环境性 SKIP + 真 FAIL 边界都被覆盖）==='
+    exit 0
+}
 
 # ---- 实机资源互斥 ----------------------------------------------------------
 # 起客户端 / 登录 e2e 账号前必须先拿锁：客户端 + e2e 账号是「一次只能一组」的资源。
@@ -567,25 +609,22 @@ Write-Host ("VERDICT accept={0} quest_items_in_quest_bag={1} finish={2} reward={
 #   只是这次没凑够数（本机实测：4 只 SpittingSpider 只掉 1 个 Web，需求 10）；
 #   把它记成产品 FAIL 会把环境噪声当缺陷。故给专属退出码 3（前置/环境不满足），
 #   而"一次都没掉"（`$have -eq 0`）仍按 FAIL 处理——那才需要查链路。
-if (-not ($okA -and $okB -and $okC -and $okD)) {
-    if ($okA -and -not $okB -and $have -gt 0) {
+$verdict = Get-L5g3Verdict -OkA $okA -OkB $okB -OkC $okC -OkD $okD -Have $have -Need $task.need -Kills $kills -Chance $drop.chance
+switch ($verdict) {
+    'SKIP_HAVE_SHORT' {
         Write-Host ("SKIP(环境): 任务物品已进任务格 {0} 个（需求 {1}），{2} 杀内没凑够 —— " -f $have, $task.need, $kills)
         Write-Host '  链路是通的（有掉落进任务格）；数量不足属环境（怪刷新/掉落概率），按环境性 SKIP 处理（exit 3），不记产品缺陷。'
         exit 3
     }
-    # 「一次都没掉」也要看**样本够不够**（2026-09-27 实机补记）：本轮 3 杀 0 掉被判 FAIL，
-    # 但 RootSpider 的掉率下 3 杀 0 掉完全在正常方差内。判据取「每件期望击杀 = 需求 ÷ 掉率」，
-    # **3 倍门槛之内**的 0 掉仍属环境（散点），超过门槛才判链路 FAIL。
-    # 这样把「怪刷新/运气」与「Q 掉落 → 任务格这条链路坏了」真正分开。
-    $expPerItem = if ($drop.chance -gt 0) { $task.need / $drop.chance } else { 0 }
-    $minKills = [int][Math]::Ceiling(3 * $expPerItem)
-    if ($okA -and -not $okB -and $have -eq 0 -and $minKills -gt 0 -and $kills -lt $minKills) {
+    'SKIP_SAMPLE_LOW' {
+        $expPerItem = $task.need / $drop.chance
+        $minKills = [int][Math]::Ceiling(3 * $expPerItem)
         Write-Host ("SKIP(环境): {0} 杀内一次都没掉，但样本门槛是 {1} 杀" -f $kills, $minKills)
         Write-Host ("  （= 3 × 每件期望击杀 {0:N1}：需求 {1} ÷ 掉率 {2:N3}）—— 0 掉仍在正常方差内，" +
             "不能据此判链路故障，按环境性 SKIP 处理（exit 3）。" -f $expPerItem, $task.need, $drop.chance)
         exit 3
     }
-    exit 5
+    'FAIL' { exit 5 }
 }
 
 } finally {
