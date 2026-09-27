@@ -12,13 +12,16 @@
 # 阳性对照（实做）：把客户端 `apply_user_location` 改回"无条件写 self_position" → B 立刻红。
 # 用法：pwsh tools/acceptance/l5ae_move_trace.ps1 -ClientHome <worktree> [-User test]
 param(
-    [string]$ClientHome = 'E:\Users\gxh\Documents\GitHub\Crystal-wt-blend',
+    # 默认取**本脚本所在检出**（此前写死 `Crystal-wt-blend`）：那个 worktree 早已不维护，
+    # 夹具默认指过去 = 每跑一次都拿旧产物下结论（本仓反复踩过的坑）。要跑别处就显式传 -ClientHome。
+    [string]$ClientHome = '',
     [string]$User = 'test',
     [string]$Pass = '123456',
     [int]$Port = 9102,
     [int]$Samples = 16,
     [int]$SampleMs = 300
 )
+if (-not $ClientHome) { $ClientHome = (Resolve-Path "$PSScriptRoot\..\..").Path }
 . "$PSScriptRoot\e2e_lock.ps1"
 if (-not (Enter-E2eLock -ScriptName 'l5ae_move_trace' -TimeoutSec 1800)) { exit 2 }
 try {
