@@ -293,7 +293,7 @@ pwsh tools\acceptance\csharp_golden\golden_ab_ours.ps1 -SandboxRoot $env:TEMP\go
 
 | 窗口 | 差异 | 定性 |
 |---|---|---|
-| **Friends** | 25.6% | **真缺口：本端好友窗缺翻页条**。原版 `Client/MirScenes/Dialogs/FriendDialog.cs:70-118` 有三件：`PageNumberLabel` (87,216) 83x17 居中、"上一页" `Prguse2[240/241/242]` @(70,218) 16x16、"下一页" `Prguse2[243/244/245]` @(171,218) 16x16（两钮各带 `Page--/Page++` + 夹紧逻辑）。本端 `Client-Bevy/src/game/dialogs/friend.rs` 全文件搜 `page/arrow/翻页` **零命中** ⇒ 截图里原版有 `◀ 1/1 ▶` 那一行、我方没有。 |
+| **Friends** | 25.6% | **两件事叠加（2026-09-28 修其一）**：① **真缺口——本端好友窗缺翻页条**（原版 `FriendDialog.cs:70-118`：`PageNumberLabel` (87,216) 83x17 居中、上一页 `Prguse2[240/241/242]` @(70,218) 16x16、下一页 `Prguse2[243/244/245]` @(171,218) 16x16），本端 `friend.rs` 全文搜 `page/arrow/翻页` 零命中；**已修**（PR #3320：补翻页条 + 列表改回 C# 的 `FriendRow[12]` 两列格子 `((i%2)*115+16, 55+(i/2)*22)`、行尺寸 (115,17)，并补两条门禁 + 阳性对照）。② **残余不是产品缺陷**：修后那 25.6% 几乎不变 ⇒ 主导项是**整体 +1px 的横向偏移**（把原版帧按 dx=1 采样，差异从 18383 掉到 4783 像素），而**我方窗口矩形实测 `dialog_rect kind=friend → rx=380 ry=248 rw=264 rh=272`，与 C# `Center`（(1024-264)/2, (768-272)/2）逐值相同**；逐像素看原版面板左边框在 x=381、我方在 x=380，且两边的边框色序完全一致（同图 +1px）。对照：显式坐标窗口（Inventory/Equipment/Options/Group/Quests/Ranking）的位移扫描都是 dx=0 ⇒ 只有**居中窗**在这一对帧里偏 1px，最可能是**原版侧取帧的客户区宽度比 1024 宽 2px**（C# `Center` 于是算出 381），属**A/B 取帧口径**问题，不是本端排版 bug。**待办**：给逐窗对拍加「居中窗允许 ±1px 平移」或把原版取帧改成真实客户区，之后再看这批窗的真实差异。 |
 | Help / Keybind | 87.6% / 26.6% | 非缺陷：键位表**语言与条目**不同（我方中文动态生成 vs 原版英文固定清单），窗口矩形/控件位置一致（§3.2c 已记）。 |
 | Relationship / Ranking / GameShop / Bigmap | 22.2% / 10.6% / 29.6% / 63.3% | **待逐条定性**（注意 `RankingDialog.cs` 与 `GameshopDialog.cs` 也都有 `PageNumberLabel` 一类的翻页控件，`TrustMerchantDialog.cs`/`HelpDialog.cs`/`MailDialogs.cs`/`IntelligentCreatureDialogs.cs`/`CharacterDialog.cs` 同理——**排查时先按这条线核"本端有没有翻页条"**，Friends 就是这么捞出来的）。 |
 
