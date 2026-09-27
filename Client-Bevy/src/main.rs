@@ -114,6 +114,60 @@ fn log_window_metrics(
     *done = true;
 }
 
+/// `--ui-scale <f32>`：强制 UI 缩放（转发成 `Window::scale_factor_override`）。
+///
+/// 为什么需要它：原版 C# 客户端固定 1024x768 @ scale=1，而本端跟随系统 DPI（本机 150% ⇒ 截图
+/// 1536x1152）。逐窗像素 A/B 时两边尺度不一致，差异里最重的一项其实是**重采样噪声**——
+/// 2026-09-27 实测把「原版帧放大 / 我方缩小」两种口径各跑一遍，窗口区域仍报 30%~99% 差异，
+/// 主项就是这个；统一到 scale=1 之后差异才归因到窗内绘制本身。
+///
+/// 只接受有限正数并夹在 `0.5..=4.0`；非法或缺参返回 `None`（= 不覆盖系统 DPI，行为不变）。
+pub fn parse_ui_scale(args: &[String]) -> Option<f32> {
+    let i = args.iter().position(|a| a == "--ui-scale")?;
+    let v: f32 = args.get(i + 1)?.trim().parse().ok()?;
+    if v.is_finite() && (0.5..=4.0).contains(&v) {
+        Some(v)
+    } else {
+        None
+    }
+}
+
+#[cfg(test)]
+mod ui_scale_tests {
+    use super::parse_ui_scale;
+
+    /// 门禁：`--ui-scale` 只在**显式且合法**时覆盖系统 DPI，非法值必须当没传（否则一次手滑
+    /// 就能把整端 UI 缩到看不见）。逐窗像素 A/B 依赖"能强制 1.0"，所以这条不能松。
+    ///
+    /// 阳性对照（实做）：把 `(0.5..=4.0).contains(&v)` 去掉 → 第 2、3 条断言立刻红。
+    #[test]
+    fn ui_scale_accepts_only_sane_values() {
+        let a = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert_eq!(
+            parse_ui_scale(&a(&["client", "--ui-scale", "1"])),
+            Some(1.0)
+        );
+        assert_eq!(
+            parse_ui_scale(&a(&["client", "--ui-scale", "1.5"])),
+            Some(1.5)
+        );
+        assert_eq!(parse_ui_scale(&a(&["client"])), None, "没传 = 跟系统 DPI");
+        assert_eq!(parse_ui_scale(&a(&["client", "--ui-scale"])), None, "缺参");
+        assert_eq!(parse_ui_scale(&a(&["client", "--ui-scale", "abc"])), None);
+        assert_eq!(
+            parse_ui_scale(&a(&["client", "--ui-scale", "0"])),
+            None,
+            "0 会让 UI 缩到不可见"
+        );
+        assert_eq!(
+            parse_ui_scale(&a(&["client", "--ui-scale", "9"])),
+            None,
+            "上限 4.0"
+        );
+        assert_eq!(parse_ui_scale(&a(&["client", "--ui-scale", "-1"])), None);
+    }
+}
+
 fn main() {
     // --window-title <标题>：自定义窗口标题（多实例并行时便于区分，如“修复版”）
     let default_title = "Mir2 (Bevy) — 传奇2 客户端移植".to_string();
@@ -125,6 +179,11 @@ fn main() {
             .cloned()
             .unwrap_or(default_title)
     };
+    // --ui-scale <f>：逐窗像素 A/B 对拍用（原版恒 scale=1）；不给就跟随系统 DPI
+    let ui_scale = parse_ui_scale(&std::env::args().collect::<Vec<_>>());
+    if let Some(s) = ui_scale {
+        tracing::info!("🖥️ --ui-scale {s}：强制 UI 缩放为 {s}（逐窗 A/B 对拍用）");
+    }
     let mut app = App::new();
     // 构建戳（build.rs 固化）：owner 多次拿旧构建的截图/体验当缺陷报（写邮件窗「错位」、
     // 底部对话框滚动/对齐、地图灯光、魔法特效），每次都要先花一轮证明「代码早改过了」。
@@ -170,7 +229,13 @@ fn main() {
             .set(WindowPlugin {
                 primary_window: Some(Window {
                     title: window_title,
-                    resolution: (1024u32, 768u32).into(),
+                    // 见 `parse_ui_scale`：只在显式传参时覆盖（Bevy 0.19 的缩放覆盖挂在
+                    // `WindowResolution` 上，不是 `Window` 的字段），默认跟系统 DPI。
+                    resolution: match ui_scale {
+                        Some(s) => bevy::window::WindowResolution::new(1024u32, 768u32)
+                            .with_scale_factor_override(s),
+                        None => (1024u32, 768u32).into(),
+                    },
                     // 禁用系统 IME：用游戏内置拼音输入法（src/ui/pinyin_ime.rs）。
                     // winit 用 IACE_CHILDREN 解关联 IME 上下文，字母键作为原始
                     // KeyboardInput 到达，不被手心等系统输入法拦截。

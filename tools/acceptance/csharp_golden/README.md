@@ -123,6 +123,46 @@ pwsh -NoProfile -File .\csharp_kbd_login.ps1 -SandboxRoot <沙箱目录> -Accoun
 （纸娃娃正常，背包+角色窗同开）后是 26553/93912（28.3%）。
 **基准帧落盘后先看一眼窗口内容是否都渲染出来**，别默认它是对的。
 
+### 3.2b 键盘逐窗像素 A/B（2026-09-27 打通：原版鼠标点不动，但**键位**能开窗）
+
+§3.1 已经把「驱动原版点页签/点行」这条路堵死，但**键位是活的**——沙箱那份 `KeyBinds.ini` 把主要窗口
+都绑了键（`Inventory=F9`、`Equipment=F10`、`Skills=F11`、`Quests=Q`、`Options=F12`、`Group=P`、
+`Friends=F`、`Relationship=L`、`Guilds=G`、`Ranking=K`、`Help=H`、`Keybind=U`、`Creature=E`、
+`MountWindow=J`、`Fishing=N`、`GameShop=Y`、`Bigmap=B`、`Minimap=V`、`Belt=Z`、`Skillbar=R`），
+而键盘消息**实测能驱动**原版（§2.1）。于是逐窗 A/B 有了可复跑的两侧配方：
+
+```powershell
+# 0) 沙箱（按段改端口 + 回读校验）+ 原版服务端 + 键盘登录
+#    （账号密码写进**沙箱副本**：dbtool <沙箱>\Server setpw 333 abbtest123；重跑 make_sandbox -Force 会把原版 DB 拷回来，密码要重设）
+pwsh tools/acceptance/csharp_golden/make_sandbox.ps1 -Port 7100 -Force
+Start-Process "$env:TEMP\golden_sandbox\Server\Server.exe" -WorkingDirectory "$env:TEMP\golden_sandbox\Server"
+pwsh tools/acceptance/csharp_golden/csharp_kbd_login.ps1 -SandboxRoot $env:TEMP\golden_sandbox -Account 333 -Password abbtest123
+# 1) 原版侧：按 KeyBinds.ini 逐扇开窗 + 截图（自带「这一键有没有让画面变」的自检）
+pwsh tools/acceptance/csharp_golden/golden_kbd_windows.ps1 -SandboxRoot $env:TEMP\golden_sandbox
+# 2) 我方侧：同一份窗口清单，`dialog open <kind>` 开窗 + `screenshot` 落盘（默认 --ui-scale 1）
+pwsh tools/acceptance/csharp_golden/golden_ab_ours.ps1 -SandboxRoot $env:TEMP\golden_sandbox
+# 3) 逐窗比：按 C# 期望矩形裁区域算差异（期望表由 window_rect_table.py --out 产出）
+py -3.12 tools/acceptance/csharp_golden/golden_ab_diff.py --shots $env:TEMP\golden_sandbox\shots --table %TEMP%\rect_table.json
+```
+
+**四个必须踩对的点**（实测踩出来的，别再重踩）：
+
+1. **我方要 `--ui-scale 1`**（2026-09-27 新增的开关）：原版恒 1024x768@scale1，而本端跟系统 DPI
+   （本机 150% ⇒ 截图 1536x1152）。不统一尺度，逐窗差异的主项就是**重采样噪声**（实测窗口区域
+   30%~99% 的"差异"几乎全是它）；把原版放大、把我方缩小都救不了，必须两端同尺度渲染。
+2. **注入键要带 `WM_CHAR`**：C# 的 `MirMessageBox.OnKeyPress` 才处理 Escape（关模态框），
+   只发 `WM_KEYDOWN/UP` 关不掉 —— 模态框会一直吞掉后面的键（实测基线帧里那句
+   "You are not in a guild." 不退，后续 20 张全等于基线）。
+3. **基线帧要干净**：`csharp_kbd_login.ps1` 的 `orig_kbd_02_ingame.png` 是 F9/F10 之后拍的、
+   自带两扇窗；逐窗比对要用 `golden_kbd_windows.ps1` 开头 Escape 后现拍的 `orig_baseline_none.png`。
+4. **我方 `screenshot` 是下一帧才落盘**：`dialog open` 之后 0.9s 就截会拿到"还没开窗"的帧
+   （第一版 20 张全中招）。两侧脚本都内置「与基线比出可见差异，否则重试」。
+
+边界（如实）：C# 侧有些键在**当前角色状态下不开窗**（没行会按 G 弹的是 `MirMessageBox`、
+没拿钓竿按 N 什么都不出），另一些键是 HUD 开关（Z 腰带 / R 技能栏）。那几张的像素差再大也与
+"窗内绘制"无关，**只有两侧都真的出窗的那几扇可比**——出没出窗以帧为准（脚本会打印每扇窗的
+"与基线差"，人工过一眼）。
+
 ## 3.3 逐窗几何对表（不需要原版交互，2026-09-26 起）
 
 §3.1 把"驱动原版点开某个窗口"这条路堵掉之后，**窗口几何**仍可验：原版每扇窗的矩形是纯常量
