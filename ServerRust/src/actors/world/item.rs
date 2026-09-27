@@ -3219,14 +3219,28 @@ impl Message<DropItemRequest> for WorldActor {
                 location_y: player_pos.1,
             };
             let mut buf = Vec::new();
-            if mir2_shared::packets::base::serialize_packet(
+            // 2026-09-27：序列化失败此前被 `if …is_ok()` **静默吞掉** —— 实机排查
+            // 「丢弃回执 success=true、背包已扣、客户端却收不到任何 ObjectItem」时，
+            // 「没序列化出来」与「没送到」在日志里长得一模一样。改成显式告警（带 uid/index/shape）。
+            match mir2_shared::packets::base::serialize_packet(
                 &mut std::io::Cursor::new(&mut buf),
                 &object_item,
-            )
-            .is_ok()
-            {
-                // #1647：掉落/金币广播只发同图玩家（C# CurrentMap.Broadcast）
-                super::broadcast_to_map(&self.gate_ref, &self.players, state.map_index, &buf).await;
+            ) {
+                Ok(()) => {
+                    // #1647：掉落/金币广播只发同图玩家（C# CurrentMap.Broadcast）
+                    super::broadcast_to_map(&self.gate_ref, &self.players, state.map_index, &buf)
+                        .await;
+                }
+                Err(e) => {
+                    warn!(
+                        "Failed to serialize ObjectItem on player drop: uid={} object_id={} item_index={} map={} err={}",
+                        msg.unique_id,
+                        drop_oid,
+                        item.item_index,
+                        state.map_index,
+                        e
+                    );
+                }
             }
 
             // 添加到地面物品

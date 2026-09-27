@@ -10841,6 +10841,16 @@ pub(crate) async fn broadcast_to_map(
         }
     }
     if targets.is_empty() {
+        // 一条广播打到 0 个目标，说明「同图筛选」没匹配上任何会话 —— 这几乎总是 bug 而不是正常态
+        // （正常态至少丢弃者/施法者自己同图）。2026-09-27 实机排查「玩家丢弃的物品客户端看不见」
+        // 时正是缺这条可观测性：静默 return 让「没送到」和「没生成」看起来一样。
+        warn!(
+            "broadcast_to_map: 0 targets (map={}, players={}, opcode={:?})",
+            map_index,
+            players.len(),
+            // 包头 = 长度 u16 + opcode i16（小端，见 SharedRust 的 PacketHeader::read_from）
+            data.get(2..4).map(|b| i16::from_le_bytes([b[0], b[1]]))
+        );
         return;
     }
     let payload = std::sync::Arc::new(data.to_vec());
