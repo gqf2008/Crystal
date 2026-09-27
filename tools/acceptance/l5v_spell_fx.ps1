@@ -27,6 +27,15 @@
   夹具用 `--spell-verify`（`src/auto/combat.rs::auto_spell_verify`）自动走到怪旁循环施法，
   再轮询探针收集实际出现的 (kind, library, base, frames)。
 
+  混合通道断言（2026-09-27 补，owner 反馈「魔法特效应该用混合的吧，现在看上去效果不好」）：
+  施法帧动画与弹道在原版都走 **加法混合**（`Effect.Blend` 默认 true，`Effect.cs:23`；
+  玩家 `CreateProjectile` 第 3 参全传 true ⇒ `Missile.Draw` 走 `DrawBlend` ⇒
+  `DXManager.SetBlend(true)` = SrcAlpha/One）。本端此前一律画普通 `Sprite`（只有 alpha over），
+  发光帧图按 alpha 叠会发灰。夹具据此断言：**所有 `cast|*` / `missile|*` 行的 `blend` 必须是 `add`**。
+
+  阳性对照（落地时实做）：把 `effects.rs` 的两条 spawn 路径改回 `Sprite`
+  （去掉 `Mesh2d` + 加法材质）→ 本夹具必然 FAIL(1)（blend=alpha）。
+
   仪器自检：施法开始前连读两次探针，两次读数必须一致（静默期应为 0）——
   沿用仓库既有「判据区静态性自检」口径。
 
@@ -145,8 +154,10 @@ if ($null -eq $p0 -or $null -eq $p0.count) {
 $self_ok = ($p0.count -eq $p1.count)
 Write-Host ("仪器自检：连读两次 count = {0} / {1}（{2}）" -f $p0.count, $p1.count, $(if ($self_ok) { '一致' } else { '不一致' }))
 
-# ---- 收集：轮询探针，记录 (kind|library|base|frames) ----
+# ---- 收集：轮询探针，记录 (kind|library|base|frames) + 混合通道 ----
 $observed = @{}
+$blend_of = @{}
+$bad_blend = @{}
 $sw = [Diagnostics.Stopwatch]::StartNew()
 while ($sw.Elapsed.TotalSeconds -lt $TimeoutSec) {
     $p = Rpc 'spell_fx_probe'
@@ -155,8 +166,13 @@ while ($sw.Elapsed.TotalSeconds -lt $TimeoutSec) {
             $k = "{0}|{1}|{2}|{3}" -f $a.kind, $a.library, $a.base, $a.frames
             if (-not $observed.ContainsKey($k)) {
                 $observed[$k] = 1
-                Write-Host ("观察到特效: " + $k)
+                Write-Host ("观察到特效: {0} blend={1}" -f $k, $a.blend)
             } else { $observed[$k]++ }
+            $blend_of[$k] = $a.blend
+            # 施法帧动画与弹道必须是加法混合（原版 Effect.Blend 默认 true）；其它 kind 不在此断言
+            if (($a.kind -eq 'cast' -or $a.kind -eq 'missile') -and $a.blend -ne 'add') {
+                $bad_blend[$k] = ("{0}" -f $a.blend)
+            }
         }
     }
     Start-Sleep -Milliseconds 200
@@ -175,12 +191,18 @@ $also_record = @(
 )
 $fail = @()
 foreach ($e in $expect) { if (-not $observed.ContainsKey($e.key)) { $fail += $e.desc } }
+# 混合通道判据：见到 cast/missile 但通道不是 add ⇒ 明确 FAIL（不是"没跑到"）
+foreach ($k in $bad_blend.Keys) {
+    $fail += ("混合通道错: {0} blend={1}（原版 Effect.Blend 默认 true = 加法）" -f $k, $bad_blend[$k])
+}
 
 $result = [ordered]@{
     ok            = ($fail.Count -eq 0 -and $observed.Count -gt 0)
     probe_selfcheck = $self_ok
     probe_first_two = @($p0.count, $p1.count)
     observed      = @($observed.Keys)
+    blend_of      = $blend_of
+    bad_blend     = @($bad_blend.Keys)
     missing       = $fail
     also_record   = $also_record
     mp            = $mp
@@ -188,6 +210,9 @@ $result = [ordered]@{
 $result | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $json -Encoding UTF8
 
 Write-Host ("观察到的特效条目数 = {0}；缺条目 = {1}" -f $observed.Count, ($fail -join '; '))
+if ($blend_of.Count -gt 0) {
+    Write-Host ("混合通道读数：" + (($blend_of.GetEnumerator() | Sort-Object Name | ForEach-Object { "{0}={1}" -f $_.Name, $_.Value }) -join '; '))
+}
 Write-Host ("结论 JSON: " + $json)
 # 前置判据②：`--spell-verify` 必须**真的施放过**（它要先走到怪旁；没施放 = 前置不成立，不是 FAIL）
 $castLines = @(Select-String -Path $err -Pattern '\[SPELL\].*施放' -EA SilentlyContinue)

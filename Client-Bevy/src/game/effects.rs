@@ -266,6 +266,9 @@ fn spawn_pending_effects(
                         &mut libs,
                         &mut images,
                         &mut cache,
+                        &mut meshes,
+                        &mut fx_quad,
+                        &mut fx_mats,
                         m,
                         player_pos,
                         to,
@@ -316,6 +319,9 @@ fn spawn_pending_effects(
                         &mut libs,
                         &mut images,
                         &mut cache,
+                        &mut meshes,
+                        &mut fx_quad,
+                        &mut fx_mats,
                         m,
                         from,
                         to,
@@ -384,6 +390,9 @@ fn spawn_pending_effects(
                             &mut libs,
                             &mut images,
                             &mut cache,
+                            &mut meshes,
+                            &mut fx_quad,
+                            &mut fx_mats,
                             m,
                             from,
                             to,
@@ -438,6 +447,17 @@ fn spawn_pending_effects(
                         ) else {
                             continue;
                         };
+                        // 施法帧动画的混合通道 = 原版 `Effect.Blend` 默认值 `true`
+                        // （`Client/MirObjects/Effect.cs:23`）：`new Effect(...)` 不写 Blend
+                        // ⇒ `Library.DrawBlend` ⇒ `DXManager.SetBlend(true, rate)` = **加法混合**。
+                        // 详见下方 `spawn_blend_quad_render` 的说明。
+                        let (mesh, mat, scale) = spawn_blend_quad_render(
+                            &mut meshes,
+                            &mut fx_quad,
+                            &mut fx_mats,
+                            &handle,
+                            &images,
+                        );
                         commands.spawn((
                             crate::game::spell_effects::SpellFxAnim {
                                 library: fx.library,
@@ -448,12 +468,9 @@ fn spawn_pending_effects(
                                 frame_ms,
                                 follow_object_id: object_id,
                             },
-                            Sprite {
-                                image: handle,
-                                ..default()
-                            },
-                            bevy::sprite::Anchor::CENTER,
-                            Transform::from_xyz(pos.x, pos.y, 21.0),
+                            Mesh2d(mesh),
+                            MeshMaterial2d(mat),
+                            Transform::from_xyz(pos.x, pos.y, 21.0).with_scale(scale),
                         ));
                     }
                     None => {
@@ -682,17 +699,20 @@ fn advance_spell_fx(
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
     mut cache: ResMut<UiImageCache>,
+    // 施法帧动画走加法混合材质（原版 `Effect.Blend` 默认 true）——推进帧图时要改材质的 texture
+    mut fx_mats: ResMut<Assets<crate::game::object_fx_material::ObjectFxBlendMaterial>>,
     // B0001 回归：q 写 Transform 与 actors 读 Transform 冲突，进游戏即 panic（见下方门禁测试）。
     // 跟随源/目标永远是场景角色，绝不携带 SpellFxAnim，Without 划界即可证明两查询不相交。
     actors: Query<(&NetObjectId, &Transform), Without<crate::game::spell_effects::SpellFxAnim>>,
     mut q: Query<(
         Entity,
         &mut crate::game::spell_effects::SpellFxAnim,
-        &mut Sprite,
+        Option<&mut Sprite>,
+        Option<&mut MeshMaterial2d<crate::game::object_fx_material::ObjectFxBlendMaterial>>,
         &mut Transform,
     )>,
 ) {
-    for (e, mut fx, mut sprite, mut tf) in &mut q {
+    for (e, mut fx, mut sprite, mat, mut tf) in &mut q {
         fx.t += time.delta_secs();
         if fx.t >= fx.dur {
             commands.entity(e).despawn();
@@ -713,7 +733,33 @@ fn advance_spell_fx(
             fx.library.library(),
             fx.base + frame,
         ) {
-            sprite.image = h;
+            set_frame_image(h, &mut sprite, &mat, &mut fx_mats, &images, &mut tf);
+        }
+    }
+}
+
+/// 把某一帧图写进实体的渲染通道，并把尺寸对齐（加法材质的 `Mesh2d` 没有 `custom_size`，
+/// 只能靠 `Transform::scale`；帧图逐帧尺寸可能不同，必须每帧重设，否则后续帧会被拉成首帧大小）。
+/// 普通 `Sprite` 路径保持原样（Bevy 按纹理自然尺寸绘制）。
+fn set_frame_image(
+    h: Handle<Image>,
+    sprite: &mut Option<Mut<Sprite>>,
+    mat: &Option<Mut<MeshMaterial2d<crate::game::object_fx_material::ObjectFxBlendMaterial>>>,
+    mats: &mut Assets<crate::game::object_fx_material::ObjectFxBlendMaterial>,
+    images: &Assets<Image>,
+    tf: &mut Transform,
+) {
+    if let Some(s) = sprite.as_mut() {
+        s.image = h;
+        return;
+    }
+    if let Some(m) = mat.as_ref() {
+        if let Some(mut data) = mats.get_mut(&m.0) {
+            data.texture = h.clone();
+        }
+        if let Some(img) = images.get(&h) {
+            let size = img.size_f32();
+            tf.scale = Vec3::new(size.x.max(1.0), size.y.max(1.0), 1.0);
         }
     }
 }
@@ -876,11 +922,20 @@ pub(crate) struct SpellMissileAnim {
 
 /// 生成一条「按原版帧表播」的弹道实体（施法弹道与**远程攻击箭矢**共用）。
 /// 返回 `false` = 首帧取不到图（调用方自行决定是否退回占位表现）。
+///
+/// 混合通道固定走**加法混合**：原版 `Missile : Effect`（`Client/MirObjects/Effect.cs:142`）
+/// 继承 `Effect.Blend = true` 默认值，且 `PlayerObject.cs` 里**所有**玩家 `CreateProjectile`
+/// 调用点的第 3 参（`blend`）都传 `true`（弓/箭矢与法术弹道同表，见 `RANGE_MISSILE` 的
+/// C# 来源注释）⇒ `Missile.Draw` 走 `DrawBlend` = 加法。C# 里传 `false` 的是**怪物**
+/// 弹道（`MonsterObject.cs:2528` 等），本端没有那条表，故此处不表达 `Blend = false` 的情形。
 fn spawn_frame_missile(
     commands: &mut Commands,
     libs: &mut GameLibraries,
     images: &mut Assets<Image>,
     cache: &mut UiImageCache,
+    meshes: &mut Assets<Mesh>,
+    quad: &mut crate::game::object_fx_material::ObjectFxQuad,
+    mats: &mut Assets<crate::game::object_fx_material::ObjectFxBlendMaterial>,
     m: crate::game::spell_effects::MissileFx,
     from: Vec2,
     to: Vec2,
@@ -888,6 +943,7 @@ fn spawn_frame_missile(
     let Some(handle) = ui_image(libs, images, cache, m.library.library(), m.base) else {
         return false;
     };
+    let (mesh, mat, scale) = spawn_blend_quad_render(meshes, quad, mats, &handle, images);
     commands.spawn((
         SpellMissileAnim {
             library: m.library,
@@ -899,14 +955,46 @@ fn spawn_frame_missile(
             t: 0.0,
             dur: MISSILE_FLIGHT_SECS,
         },
-        Sprite {
-            image: handle,
-            ..default()
-        },
-        bevy::sprite::Anchor::CENTER,
-        Transform::from_xyz(from.x, from.y, 21.0),
+        Mesh2d(mesh),
+        MeshMaterial2d(mat),
+        Transform::from_xyz(from.x, from.y, 21.0).with_scale(scale),
     ));
     true
+}
+
+/// 建一条「加法混合帧动画」的渲染载体：单位四边形 + `ObjectFxBlendMaterial`（ADD）+ 首帧尺寸。
+///
+/// 为什么施法帧动画/弹道也要走加法：原版 `Effect.Blend` **默认 `true`**
+/// （`Client/MirObjects/Effect.cs:23`），`Effect.Draw`（`:129-132`）与 `Missile.Draw`（`:213-216`）
+/// 都在 `Blend` 为真时走 `Library.DrawBlend(...)` → `DXManager.SetBlend(true, rate)`
+/// → `SourceBlend = SourceAlpha` / `DestinationBlend = One` = **加法混合**
+/// （`Client/MirGraphics/DXManager.cs:378-379`，与对象特效 `Blend = true` 同一条通道）。
+///
+/// 本端此前对这两类一律 spawn 普通 `Sprite`（Bevy 的 Sprite 只有 alpha over），
+/// 帧图按 alpha 叠在黑底上会发灰、发闷——owner 反馈「魔法特效应该用混合的吧，现在看上去效果不好」
+/// 就是这条。`Mesh2d` 没有 `custom_size`，尺寸靠 `Transform::scale`（帧图逐帧尺寸可能不同，
+/// 推进侧 `set_frame_image` 每帧按当前纹理尺寸重设）。
+fn spawn_blend_quad_render(
+    meshes: &mut Assets<Mesh>,
+    quad: &mut crate::game::object_fx_material::ObjectFxQuad,
+    mats: &mut Assets<crate::game::object_fx_material::ObjectFxBlendMaterial>,
+    handle: &Handle<Image>,
+    images: &Assets<Image>,
+) -> (
+    Handle<Mesh>,
+    Handle<crate::game::object_fx_material::ObjectFxBlendMaterial>,
+    Vec3,
+) {
+    let mesh = crate::game::object_fx_material::object_fx_quad(meshes, quad);
+    let size = images
+        .get(handle)
+        .map(|i| i.size_f32())
+        .unwrap_or(Vec2::splat(1.0));
+    let mat = mats.add(crate::game::object_fx_material::ObjectFxBlendMaterial {
+        color: LinearRgba::WHITE,
+        texture: handle.clone(),
+    });
+    (mesh, mat, Vec3::new(size.x.max(1.0), size.y.max(1.0), 1.0))
 }
 
 /// 弹道推进：位置缓出插值 + 帧循环（帧用完从头循环，直到到达目标）
@@ -916,9 +1004,17 @@ fn advance_spell_missiles(
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
     mut cache: ResMut<UiImageCache>,
-    mut q: Query<(Entity, &mut SpellMissileAnim, &mut Sprite, &mut Transform)>,
+    // 弹道同样走加法混合材质（原版 `Missile.Draw` 的 `Blend = true` 分支）
+    mut fx_mats: ResMut<Assets<crate::game::object_fx_material::ObjectFxBlendMaterial>>,
+    mut q: Query<(
+        Entity,
+        &mut SpellMissileAnim,
+        Option<&mut Sprite>,
+        Option<&mut MeshMaterial2d<crate::game::object_fx_material::ObjectFxBlendMaterial>>,
+        &mut Transform,
+    )>,
 ) {
-    for (e, mut m, mut sprite, mut tf) in &mut q {
+    for (e, mut m, mut sprite, mat, mut tf) in &mut q {
         m.t += time.delta_secs();
         let k = (m.t / m.dur).min(1.0);
         let k2 = 1.0 - (1.0 - k) * (1.0 - k);
@@ -938,7 +1034,7 @@ fn advance_spell_missiles(
             m.library.library(),
             m.base + frame,
         ) {
-            sprite.image = h;
+            set_frame_image(h, &mut sprite, &mat, &mut fx_mats, &images, &mut tf);
         }
     }
 }
@@ -1053,6 +1149,106 @@ mod tests {
         assert_eq!(fx[0].base, 0, "Magic[0] 起（原版 PlayerObject.cs）");
         assert_eq!(fx[0].frames, 10);
         assert_eq!(fx[0].follow_object_id, 4242, "跟随施法者");
+    }
+
+    /// 门禁：施法帧动画与弹道的**混合通道**必须是加法混合 —— 原版 `Effect.Blend` 默认
+    /// `true`（`Client/MirObjects/Effect.cs:23`），`Effect.Draw`（`:129-132`）与
+    /// `Missile.Draw`（`:213-216`）在 Blend 为真时都走 `Library.DrawBlend` →
+    /// `DXManager.SetBlend(true, rate)`（`DXManager.cs:378-379`）= **ADD（SrcAlpha/One）**；
+    /// 玩家所有 `CreateProjectile` 调用点第 3 参都传 `true`。
+    ///
+    /// 本端此前对这两类一律 spawn 普通 `Sprite`（只有 alpha over）——owner 反馈
+    /// 「魔法特效应该用混合的吧，现在看上去效果不好」就是这条：发光帧图按 alpha 叠在暗底上
+    /// 会发灰发闷。判据取**实体上的渲染组件本身**（有加法材质 `MeshMaterial2d<ObjectFxBlendMaterial>`
+    /// 才是真走 ADD），不看声明字段。
+    ///
+    /// 阳性对照（落地时实做）：把 spawn 侧改回 `Sprite`（去掉 `Mesh2d` + 加法材质）
+    /// → 本测试立即红（`has_mat=false`）。
+    #[test]
+    fn spell_fx_and_missile_use_additive_blend_channel() {
+        use bevy::ecs::system::RunSystemOnce;
+        if !crate::resources::libraries::data_assets_present() {
+            eprintln!("skip spell_fx_and_missile_use_additive_blend_channel: 无 Data 资产");
+            return;
+        }
+        let mut world = bevy::prelude::World::new();
+        world.insert_resource(crate::map_renderer::GameLibraries(
+            crate::resources::libraries::Libraries::new(
+                crate::resources::libraries::resolve_data_path(),
+            ),
+        ));
+        world.insert_resource(bevy::prelude::Assets::<bevy::prelude::Image>::default());
+        world.insert_resource(bevy::prelude::Assets::<bevy::prelude::Mesh>::default());
+        world.insert_resource(bevy::prelude::Assets::<
+            crate::game::object_fx_material::ObjectFxBlendMaterial,
+        >::default());
+        world.insert_resource(crate::game::object_fx_material::ObjectFxQuad::default());
+        world.insert_resource(crate::ui::sprite_ui::UiImageCache::default());
+        world.insert_resource(crate::game::dialogs::option::OptionState {
+            effect: true,
+            ..Default::default()
+        });
+        world.insert_resource(EffectsState::default());
+        world.insert_resource(bevy::prelude::Time::<()>::default());
+        world
+            .resource_mut::<crate::map_renderer::GameLibraries>()
+            .0
+            .ensure_initialized();
+        world.insert_resource(bevy::prelude::Messages::<PendingEffect>::default());
+        world.spawn((
+            NetObjectId(4242),
+            bevy::prelude::Transform::from_xyz(100.0, 200.0, 0.0),
+        ));
+        world.spawn((
+            NetObjectId(4243),
+            bevy::prelude::Transform::from_xyz(300.0, 200.0, 0.0),
+        ));
+        {
+            let mut msgs = world.resource_mut::<bevy::prelude::Messages<PendingEffect>>();
+            msgs.write(PendingEffect::SpellCast {
+                object_id: 4242,
+                spell: mir2_shared::enums::Spell::FireBall as u8,
+                dir: 0,
+            });
+            msgs.write(PendingEffect::SpellMissile {
+                source_id: 4242,
+                destination_id: 4243,
+                spell: mir2_shared::enums::Spell::FireBall as u8,
+            });
+        }
+        world
+            .run_system_once(spawn_pending_effects)
+            .expect("spawn_pending_effects 应能运行");
+
+        let mut fq = world.query::<(
+            &SpellFxAnim,
+            Option<&MeshMaterial2d<crate::game::object_fx_material::ObjectFxBlendMaterial>>,
+            Option<&Sprite>,
+        )>();
+        let cast: Vec<(bool, bool)> = fq
+            .iter(&world)
+            .map(|(_, mat, sprite)| (mat.is_some(), sprite.is_some()))
+            .collect();
+        assert_eq!(cast.len(), 1, "FireBall 应生成 1 条施法帧动画");
+        assert!(
+            cast[0].0 && !cast[0].1,
+            "施法帧动画必须走加法材质、且不再挂普通 Sprite（实测 {cast:?}）"
+        );
+
+        let mut mq = world.query::<(
+            &SpellMissileAnim,
+            Option<&MeshMaterial2d<crate::game::object_fx_material::ObjectFxBlendMaterial>>,
+            Option<&Sprite>,
+        )>();
+        let missiles: Vec<(bool, bool)> = mq
+            .iter(&world)
+            .map(|(_, mat, sprite)| (mat.is_some(), sprite.is_some()))
+            .collect();
+        assert_eq!(missiles.len(), 1, "FireBall 应生成 1 条弹道帧动画");
+        assert!(
+            missiles[0].0 && !missiles[0].1,
+            "弹道必须走加法材质、且不再挂普通 Sprite（实测 {missiles:?}）"
+        );
     }
 
     /// 门禁（接线，不只是表）：`S.RangeAttack` 的弹道必须用**原版远程攻击帧表**
