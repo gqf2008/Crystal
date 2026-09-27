@@ -769,9 +769,21 @@ pub fn load_gem_settings(configs_dir: &Path) -> GemIniSettings {
 
 /// 英雄升级经验曲线（C# Settings.LoadHeroEXP：Configs/HeroExpList.ini [Exp] Level1..500；
 /// 默认 100/级，缺失项沿用上一级；文件缺失返回空，调用方回退 100/级）
-pub fn load_hero_exp_list(configs_dir: &Path) -> Vec<u32> {
+/// 从 `Configs/HeroExpList.ini` 加载英雄升级经验曲线（C# `Settings.HeroExperienceList`，`[Exp] Level1..N`）。
+///
+/// **两条 2026-09-27 修正**（都与玩家侧同源，见 `load_exp_list` 的说明）：
+/// 1. 返回类型由 `Vec<u32>` 改为 `Vec<i64>`。C# 的 `Settings.HeroExperienceList` 是 `List<long>`，
+///    原版曲线的 500 条里有 **412 条 > u32::MAX**（`Level100=5_400_000_000`、`Level500=45_400_000_000`），
+///    旧的 `exp.max(1) as u32` 会**静默截断**（`5_400_000_000 as u32` → 1_105_032_704），
+///    高等级英雄的"下一级所需"整段是错的。
+/// 2. 文件缺失/疑似占位（空表或全等）时 `warn!` 点名，避免数据问题静默落到英雄升级上。
+pub fn load_hero_exp_list(configs_dir: &Path) -> Vec<i64> {
     let path = configs_dir.join("HeroExpList.ini");
     let Ok(content) = fs::read_to_string(&path) else {
+        tracing::warn!(
+            "Configs/HeroExpList.ini 缺失（{}）—— 英雄升级将回退每级 100",
+            path.display()
+        );
         return Vec::new();
     };
     let parsed = parse_ini(&content);
@@ -779,7 +791,15 @@ pub fn load_hero_exp_list(configs_dir: &Path) -> Vec<u32> {
     let mut exp: i64 = 100;
     for i in 1..=500 {
         exp = ini_get_i64(&parsed, "Exp", &format!("Level{}", i), exp);
-        out.push(exp.max(1) as u32);
+        out.push(exp.max(1));
+    }
+    if exp_curve_looks_like_placeholder(&out) {
+        tracing::warn!(
+            "Configs/HeroExpList.ini 疑似**占位曲线**（{} 条，全部等于 {}）—— 请用原版 C# \
+             `Server/Configs/HeroExpList.ini` 覆盖",
+            out.len(),
+            out.first().copied().unwrap_or_default()
+        );
     }
     out
 }
@@ -1255,6 +1275,53 @@ BuffExpRate=0
 
         // 文件缺失 → 空（调用方回退 100/级）
         assert!(load_hero_exp_list(Path::new("C:/definitely/not/exists")).is_empty());
+    }
+
+    /// 门禁：英雄曲线**不得被 u32 截断**（2026-09-27 修正）。
+    ///
+    /// 原版 `Server/Configs/HeroExpList.ini` 500 条里 412 条 > u32::MAX
+    /// （`Level100=5_400_000_000`、`Level500=45_400_000_000`）；旧实现 `as u32` 会把
+    /// `5_400_000_000` 变成 `1_105_032_704`，高等级英雄"下一级所需"整段错。
+    ///
+    /// 阳性对照（落地时实做）：把 `out.push(exp.max(1))` 改回 `out.push(exp.max(1) as u32 as i64)`
+    /// → 本测试立即红。
+    #[test]
+    fn hero_exp_list_keeps_values_above_u32() {
+        let dir = std::env::temp_dir().join("crystal_ini_test_heroexp_u32");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("HeroExpList.ini"),
+            "[Exp]\nLevel1=5\nLevel2=5\nLevel3=5400000000\nLevel4=45400000000\n",
+        )
+        .unwrap();
+        let list = load_hero_exp_list(&dir);
+        assert_eq!(list[2], 5_400_000_000, ">u32::MAX 的值必须原样保留");
+        assert_eq!(list[3], 45_400_000_000, "Level500 量级的值同样不得截断");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// 门禁（本机数据）：`Daneo1989/Configs/HeroExpList.ini` 存在时必须是原版曲线且未被截断
+    /// （抽查 `Level100=5400000000`）。数据目录 gitignore ⇒ 干净检出差不到文件时跳过。
+    #[test]
+    fn local_hero_exp_list_matches_golden_when_present() {
+        let path = Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/Daneo1989/Configs/HeroExpList.ini"
+        ));
+        if !path.exists() {
+            eprintln!("skip local_hero_exp_list_matches_golden_when_present: 本机无 HeroExpList.ini（数据目录不入库）");
+            return;
+        }
+        let list = load_hero_exp_list(path.parent().unwrap());
+        assert_eq!(list.len(), 500);
+        assert!(
+            !exp_curve_looks_like_placeholder(&list),
+            "本机 HeroExpList.ini 是占位曲线 —— 请用原版 C# Server/Configs/HeroExpList.ini 覆盖"
+        );
+        assert_eq!(list[0], 5, "Level1 原版 5");
+        assert_eq!(list[4], 600, "Level5 原版 600");
+        assert_eq!(list[99], 5_400_000_000, "Level100 原版 5400000000（>u32::MAX）");
+        assert_eq!(list[499], 45_400_000_000, "Level500 原版 45400000000");
     }
 
     /// #2420：load_setup_settings 解析 + 真实 Setup.ini 集成

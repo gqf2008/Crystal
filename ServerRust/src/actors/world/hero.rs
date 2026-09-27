@@ -151,9 +151,9 @@ impl WorldActor {
             max_hp: ai_max_hp,
             max_mp: ai_max_mp,
             // #2892 批57：C# 用 `actor.Experience`（状态二页「经验 %」），此前硬编码 0
-            experience: hero.experience as i64,
+            experience: hero.experience,
             // #2418：英雄信息下发用当前 max_experience（替代硬编码 100）
-            max_experience: hero.max_experience as i64,
+            max_experience: hero.max_experience,
             min_ac: hero_stats.min_ac,
             max_ac: hero_stats.max_ac,
             min_mac: hero_stats.min_mac,
@@ -3540,7 +3540,7 @@ impl WorldActor {
         if hero.dead {
             return;
         }
-        hero.experience = hero.experience.saturating_add(amount);
+        hero.experience = hero.experience.saturating_add(amount as i64);
         let mut leveled = false;
         while hero.experience >= hero.max_experience && hero.level < u16::MAX {
             hero.experience -= hero.max_experience;
@@ -3585,8 +3585,8 @@ impl WorldActor {
             // S.HeroLevelChanged（C# Hero.LevelUp → Owner.Enqueue）
             let lvl_pkt = mir2_shared::packets::server::experience::HeroLevelChanged {
                 level: hero_level,
-                experience: hero_exp as i64,
-                max_experience: hero_max as i64,
+                experience: hero_exp,
+                max_experience: hero_max,
             };
             let mut lvl_body = Vec::new();
             if lvl_pkt.write_body(&mut lvl_body).is_ok() {
