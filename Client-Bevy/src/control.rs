@@ -315,6 +315,21 @@ enum ControlCommand {
     AwakeProbe {
         reply: Sender<String>,
     },
+    /// **夹具仪器**（2026-09-27）：把背包选中格置为指定格——写的是 `InvClickState.selected`，
+    /// 与**点背包格**写的是**同一个字段**。
+    ///
+    /// 为什么需要：背包的「选中」判据是 `mouse.just_pressed(Left)` + `window.cursor_position()` 落在格上
+    /// （`inventory.rs` 的点击系统），而 NPC 行/关闭钮那类走 Bevy UI `Interaction`。实机实测：控制 RPC 的
+    /// **合成点击**能命中格子——`ui_nodes_at(27,53)` 的命中栈里就是背包格本体
+    /// `rect=9.33,37.33,36,32 z=6`（内层 `11.33,39.33,32,28 z=7`），与 `inventory.rs` 的 `9/37/36/32` 常量一致——
+    /// 但**驱动不了背包的选中路径**（第一排 8 个格中心逐个点过，`inv_selected` 恒为空）。
+    /// ⇒ 选点坐标的正确性已由命中栈证明；本仪器只把「已选中」这个**前置状态**确定性地摆好，
+    /// 用来验证**被测量**：觉醒窗格 3..6 的放置/取出（格 3 的点击仍是真实 `click`）。
+    /// 与仓库既有同类仪器口径一致（`char_page` / `storage_store` / `dialog open`）。
+    InvSelect {
+        slot: usize,
+        reply: Sender<String>,
+    },
     /// 只读法术特效探针（2026-09-25）：当前存活的**渲染侧**特效实体读数
     /// （施法帧动画 `SpellFxAnim` + 施法/远程弹道 `SpellMissileAnim`）。
     ///
@@ -880,7 +895,8 @@ struct ControlQueries<'w, 's> {
     inv_locked: Res<'w, crate::game::dialogs::inventory::InvLockedSlots>,
     /// `awake_probe` 用：背包**选中格**（C# `GameScene.SelectedCell`）——觉醒格是"先选后放"，
     /// 夹具要先证明"点背包真的选中了那一格"（否则后续断言全是在空气上做的）。
-    inv_click: Res<'w, crate::game::dialogs::inventory::InvClickState>,
+    /// `awake_probe` 只读它；`inv_select`（夹具仪器）要写 `selected` 这个同一字段 ⇒ `ResMut`。
+    inv_click: ResMut<'w, crate::game::dialogs::inventory::InvClickState>,
     map_cameras: Query<
         'w,
         's,
@@ -1280,6 +1296,32 @@ fn handle_conn(mut stream: std::net::TcpStream, tx: Sender<ControlCommand>) {
                     serde_json::from_str::<Value>(&s).unwrap_or_else(|_| json!({}))
                 } else {
                     json!({"error": "control channel closed"})
+                }
+            }
+            // 夹具仪器（见 `ControlCommand::InvSelect` 注释）：写 InvClickState.selected 同一字段
+            "inv_select" => {
+                let slot = params
+                    .get("slot")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(u64::MAX);
+                if slot == u64::MAX {
+                    json!({"error": "missing slot"})
+                } else {
+                    let (inv_tx, inv_rx) = bounded::<String>(1);
+                    if tx
+                        .send(ControlCommand::InvSelect {
+                            slot: slot as usize,
+                            reply: inv_tx,
+                        })
+                        .is_ok()
+                    {
+                        let s = inv_rx
+                            .recv_timeout(std::time::Duration::from_secs(2))
+                            .unwrap_or_else(|_| "{}".to_string());
+                        serde_json::from_str::<Value>(&s).unwrap_or_else(|_| json!({}))
+                    } else {
+                        json!({"error": "control channel closed"})
+                    }
                 }
             }
             "awake_probe" => {
@@ -2292,6 +2334,7 @@ fn control_reply(cmd: &ControlCommand) -> Option<&Sender<String>> {
         | ControlCommand::ShopProbe { reply }
         | ControlCommand::RentalProbe { reply }
         | ControlCommand::AwakeProbe { reply } => Some(reply),
+        ControlCommand::InvSelect { reply, .. } => Some(reply),
         _ => None,
     }
 }
@@ -3467,6 +3510,14 @@ fn apply_control_commands(
                         .collect::<Vec<_>>(),
                 });
                 tracing::info!("🎮 control storage_probe: {payload}");
+                let _ = reply.send(payload.to_string());
+            }
+            ControlCommand::InvSelect { slot, reply } => {
+                // 夹具仪器：只把「背包已选中哪一格」这个前置状态摆好（与点背包格写同一字段）。
+                // 被测路径仍是觉醒格的放置/取出（对格 3 的点击走真实 click）。
+                q.inv_click.selected = Some(slot);
+                let payload = json!({"ok": true, "inv_selected": q.inv_click.selected()});
+                tracing::info!("🎮 control inv_select: {payload}");
                 let _ = reply.send(payload.to_string());
             }
             ControlCommand::AwakeProbe { reply } => {
