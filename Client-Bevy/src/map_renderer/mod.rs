@@ -271,6 +271,11 @@ pub struct GameData {
     /// 原版 `MiniMap_BeforeDraw` 用 `Libraries.MiniMap.GetSize(map.MiniMap)` 取缩略图；
     /// `0` = 该图没有缩略图（原版切小模式且不画）。
     pub minimap_index: u16,
+    /// 大地图索引（C# `MapInfo.BigMap`，来自 `S.MapChanged.big_map`）——
+    /// 原版 `BigMapViewPort.OnBeforeDraw` 用 `Libraries.MiniMap.Draw(map.BigMap, …)` 取
+    /// **同一套 `mmap.Lib`** 的大图；`0` = 该图没有大地图（原版 `BigMapDialog.Show()` 直接
+    /// 返回、整扇窗都不开）。
+    pub big_map_index: u16,
     /// 地图标题（C# `MapControl.Title`，来自 `S.NewMapInfo.title`）——小地图左上角显示的名字。
     /// 注意：**不是**地图文件名（`LoadedMap.name`，如 "0"/"D002"），UI 上不该显示文件名。
     pub map_title: String,

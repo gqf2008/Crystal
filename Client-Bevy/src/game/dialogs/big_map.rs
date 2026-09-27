@@ -46,6 +46,27 @@ const VIEW_X: f32 = 14.0;
 const VIEW_Y: f32 = 52.0;
 const VIEW_W: f32 = 568.0;
 const VIEW_H: f32 = 380.0;
+
+/// 视口画幅布局（C# `BigMapViewPort.OnBeforeDraw`，`BigMapDialog.cs:649-656`）：
+/// `Size = Libraries.MiniMap.GetSize(BigMap)` ⇒ 画幅取 `min(568, W) x min(380, H)`，
+/// 左上角 = `(14 + (568 - w)/2, 52 + (380 - h)/2)`（面板内相对坐标）。
+///
+/// 2026-09-28 金标准 A/B（`tools/acceptance/csharp_golden/README.md` §3.2g）实测证明
+/// 原版大地图视口**就是 `Data/mmap.Lib` 里的 `MapInfo.BigMap` 那张图**（沙箱那份
+/// `BigMap=101` 1052x700 → 缩放进 568x380，逐像素比对一致率 98.3%），不是另画地形。
+///
+/// 纯函数：门禁直接钉它（`bigmap_view_layout_matches_csharp`）。
+#[must_use]
+pub fn bigmap_view_layout(art: (f32, f32)) -> (f32, f32, f32, f32) {
+    let w = VIEW_W.min(art.0);
+    let h = VIEW_H.min(art.1);
+    (
+        VIEW_X + (VIEW_W - w) / 2.0,
+        VIEW_Y + (VIEW_H - h) / 2.0,
+        w,
+        h,
+    )
+}
 /// NPC 点池大小（超过部分不绘制）
 const DOT_POOL: usize = 64;
 /// 队友点池大小（C# Globals.MaxGroup）
@@ -76,6 +97,9 @@ pub struct BigMapState {
     pub top_line: usize,
     /// 地形纹理是否已生成
     pub viewport_ready: bool,
+    /// 视口纹理对应的（地图名, 大地图索引）——换图 / 换 `BigMap` 索引时重建。
+    /// 旧实现只在**首次开窗**建一次，换图后大地图会一直显示上一张图。
+    pub viewport_key: (String, u16),
     /// 地形纹理像素尺寸（生成后记录，供坐标换算）
     pub tex_size: (f32, f32),
     pub map_size: (f32, f32),
@@ -962,25 +986,79 @@ fn big_map_viewport_system(
         return;
     }
 
-    // 地形生成（首次打开时）
+    // 视口画幅生成：换图 / 换 `BigMap` 索引时重建
+    let map_name_now = game_data.desired_map.clone().unwrap_or_default();
+    let want_key = (map_name_now.clone(), game_data.big_map_index);
+    if state.viewport_key != want_key {
+        state.viewport_key = want_key;
+        state.viewport_ready = false;
+    }
     if !state.viewport_ready {
-        if let Some(map) = &game_data.map {
-            let map_name = game_data.desired_map.clone().unwrap_or_default();
-            let map_path = resolve_map_path(&map_name);
-            if let Ok(reader) = MapReader::new(&map_path) {
-                let (tex, tw, th, mw, mh) =
-                    build_terrain_texture(&mut libs, &mut images, &reader, &map);
-                if let Ok((mut node, mut image)) = terrain.single_mut() {
-                    node.left = Val::Px(VIEW_X + (VIEW_W - tw) / 2.0);
-                    node.top = Val::Px(VIEW_Y + (VIEW_H - th) / 2.0);
-                    node.width = Val::Px(tw);
-                    node.height = Val::Px(th);
-                    image.image = tex.clone();
+        let (mw, mh) = game_data
+            .map
+            .as_ref()
+            .map(|m| (m.width.max(1) as f32, m.height.max(1) as f32))
+            .unwrap_or((1.0, 1.0));
+        // ① C# 路线：`Data/mmap.Lib` 里的 `MapInfo.BigMap` 大图（`BigMapDialog.cs:642-676`
+        //    `Libraries.MiniMap.Draw(index, DisplayLocation, Size, …)`）——整张图缩放进
+        //    `min(568,W) x min(380,H)` 的画幅，**不裁切、不平移**。
+        let big_idx = game_data.big_map_index as usize;
+        let mut built = false;
+        if big_idx > 0 {
+            if let Some(info) = libs.0.get_image(LibraryName::MiniMap, big_idx) {
+                let (aw, ah) = (info.width.max(0) as f32, info.height.max(0) as f32);
+                if aw > 0.0 && ah > 0.0 {
+                    if let Some(rgba) = info.rgba.clone() {
+                        let (lx, ly, w, h) = bigmap_view_layout((aw, ah));
+                        let tex =
+                            images.add(crate::map_renderer::make_image(rgba, aw as u32, ah as u32));
+                        if let Ok((mut node, mut image)) = terrain.single_mut() {
+                            node.left = Val::Px(lx);
+                            node.top = Val::Px(ly);
+                            node.width = Val::Px(w);
+                            node.height = Val::Px(h);
+                            image.image = tex;
+                        }
+                        state.viewport_ready = true;
+                        state.tex_size = (w, h);
+                        state.map_size = (mw, mh);
+                        built = true;
+                        tracing::info!(
+                            "🗺️ 大地图用 mmap.Lib[{}] {}x{} → 画幅 {}x{}",
+                            big_idx,
+                            aw,
+                            ah,
+                            w,
+                            h
+                        );
+                    }
                 }
-                state.viewport_ready = true;
-                state.tex_size = (tw, th);
-                state.map_size = (mw, mh);
-                tracing::info!("🗺️ 大地图地形生成: {}x{} 纹理 {}x{}", mw, mh, tw, th);
+            }
+            if !built {
+                tracing::warn!("🗺️ 大地图缺图：mmap.Lib[{big_idx}] 取不到（Data/mmap.Lib 缺失？）");
+            }
+        }
+        // ② 兜底（本端扩展，**不是** C# 行为）：`BigMap == 0` 或库缺该索引时退回
+        //    「按地图瓦片采样生成地形纹理」。C# 在 `BigMap <= 0` 时整扇窗都不开
+        //    （`BigMapDialog.Show():288-289`），本端暂无该守卫（见 §3.2g 残留清单）。
+        if !built {
+            if let Some(map) = &game_data.map {
+                let map_path = resolve_map_path(&map_name_now);
+                if let Ok(reader) = MapReader::new(&map_path) {
+                    let (tex, tw, th, mw, mh) =
+                        build_terrain_texture(&mut libs, &mut images, &reader, map);
+                    if let Ok((mut node, mut image)) = terrain.single_mut() {
+                        node.left = Val::Px(VIEW_X + (VIEW_W - tw) / 2.0);
+                        node.top = Val::Px(VIEW_Y + (VIEW_H - th) / 2.0);
+                        node.width = Val::Px(tw);
+                        node.height = Val::Px(th);
+                        image.image = tex.clone();
+                    }
+                    state.viewport_ready = true;
+                    state.tex_size = (tw, th);
+                    state.map_size = (mw, mh);
+                    tracing::info!("🗺️ 大地图地形生成: {}x{} 纹理 {}x{}", mw, mh, tw, th);
+                }
             }
         }
     }
@@ -1201,6 +1279,7 @@ mod tests {
     /// #2767：大地图两处 Hint 的命中——搜索按钮（C# @(23, H-36) 32x30）与队友点（3x3，放宽 ±4px）
     #[test]
     fn big_map_hint_hit_matches_csharp() {
+        // （Hint 命中与视口画幅是两件事，视口见 `bigmap_view_layout_matches_csharp`）
         // 搜索按钮内部
         assert!(big_map_search_hit((30.0, PANEL_H - 30.0)));
         // 按钮上/下/右侧（右侧即搜索输入框区域，C# 无 Hint）
@@ -1212,5 +1291,32 @@ mod tests {
         assert!(big_map_dot_hit((100.0, 100.0), 96.0, 104.0));
         assert!(!big_map_dot_hit((100.0, 100.0), 106.0, 98.0));
         assert!(!big_map_dot_hit((100.0, 100.0), 100.0, 92.0));
+    }
+
+    /// 2026-09-28 金标准 A/B（README §3.2g）：原版大地图视口 = `Data/mmap.Lib[MapInfo.BigMap]`
+    /// 整图缩放进 `min(568,W) x min(380,H)` 的画幅（C# `BigMapDialog.cs:649-656`），
+    /// 不是另画地形。两个实测样本：
+    /// - 沙箱那份 `BigMap=101`（1052x700）→ 画幅 (14,52,568,380)，缩比 568/1052；
+    /// - 本端 DB `BichonProvince` 的 `big_map=135`（528x350）→ 原尺寸居中 (34,67,528,350)。
+    #[test]
+    fn bigmap_view_layout_matches_csharp() {
+        assert_eq!(
+            bigmap_view_layout((1052.0, 700.0)),
+            (14.0, 52.0, 568.0, 380.0)
+        );
+        assert_eq!(
+            bigmap_view_layout((528.0, 350.0)),
+            (34.0, 67.0, 528.0, 350.0)
+        );
+        // 正好等于视口：不补边、不裁切
+        assert_eq!(
+            bigmap_view_layout((568.0, 380.0)),
+            (14.0, 52.0, 568.0, 380.0)
+        );
+        // 单边小于视口：仍按 C# 的 `(568 - w)/2` 居中（整数除法在 f32 下即真除）
+        assert_eq!(
+            bigmap_view_layout((500.0, 300.0)),
+            (48.0, 92.0, 500.0, 300.0)
+        );
     }
 }

@@ -633,6 +633,7 @@ mod tests {
             desired_map: desired.map(|s| s.to_string()),
             player_spawn: None,
             minimap_index: 0,
+            big_map_index: 0,
             map_title: String::new(),
         });
         world
