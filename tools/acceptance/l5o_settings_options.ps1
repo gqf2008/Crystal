@@ -47,7 +47,7 @@ if (-not $ClientHome) { $ClientHome = (Resolve-Path "$PSScriptRoot\..\..").Path 
 $acc = "$PSScriptRoot"
 $exe = "$ClientHome\Client-Bevy\target\debug\client_bevy.exe"
 . "$PSScriptRoot\build_stamp.ps1"   # 构建戳前置：不许对着旧产物下结论（见 LESSON_运行目标分支e2e前需重建二进制）
-Assert-ClientBuildStamp -Exe $exe -Worktree $ClientHome -ScriptName 'l5o_settings_options'
+Assert-ClientBuildStamp -Exe $exeSrc -Worktree $ClientHome -ScriptName 'l5o_settings_options'
 # 唯一进程名（见 LESSON_多agent并行时按进程名清进程会污染他人GUI实验）：只用自己改名的副本，
 # 清场也只清这个唯一名——公共名 client_bevy.exe 可能是别的 agent 的验收或人工 GUI 会话。
 $exeSrc = $exe

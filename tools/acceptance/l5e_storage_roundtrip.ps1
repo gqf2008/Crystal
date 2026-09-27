@@ -49,7 +49,7 @@ $wt = 'E:\Users\gxh\Documents\GitHub\Crystal-wt-p3'
 if (-not $ClientHome) { $ClientHome = $wt }
 $exe = "$ClientHome\Client-Bevy\target\debug\client_bevy.exe"
 . "$PSScriptRoot\build_stamp.ps1"   # 构建戳前置：不许对着旧产物下结论（见 LESSON_运行目标分支e2e前需重建二进制）
-Assert-ClientBuildStamp -Exe $exe -Worktree $ClientHome -ScriptName 'l5e_storage_roundtrip'
+Assert-ClientBuildStamp -Exe $exeSrc -Worktree $ClientHome -ScriptName 'l5e_storage_roundtrip'
 
 # ---- 前置：仓库里放一件「本地物品名表里没有」的物品（判据 E 的触发条件）----------------
 # 见 `seed_storage_probe_item.py` 头部：`#782` 的「按需请求」分支只有「仓库里存在一个当前

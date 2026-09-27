@@ -44,7 +44,7 @@ if (-not (Test-Path $root)) { New-Item -ItemType Directory -Path $root | Out-Nul
 # 唯一进程名：多 agent 并行时禁止按公共进程名批量杀（见 LESSON_多agent并行时按进程名清进程...）
 $exe = "$root\mailp_client.exe"
 . "$PSScriptRoot\build_stamp.ps1"   # 构建戳前置：不许对着旧产物下结论（见 LESSON_运行目标分支e2e前需重建二进制）
-Assert-ClientBuildStamp -Exe $exe -ScriptName 'l5x_mail_pager'
+Assert-ClientBuildStamp -Exe $ExeSrc -Worktree $Worktree -ScriptName 'l5x_mail_pager'
 $err = "$root\l5x_$Tag.err"
 
 function Rpc([string]$m, [hashtable]$q = @{}) {
