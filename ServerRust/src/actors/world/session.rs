@@ -1146,6 +1146,35 @@ impl Message<StartGameRequest> for WorldActor {
         // 顺序放在 `ObjectPlayer` 之后，避免 `ObjectHidden` 先于对象创建到达（客户端会丢弃）。
         self.sync_player_visibility(msg.session_id).await;
 
+        // C# `PlayerObject.RefreshMaxExperience`：**登录时**按配置曲线重算本等级所需经验。
+        //
+        // 本端此前只在「获得经验」时用曲线刷新（`AddExperience { experience_list }`），
+        // 登录瞬间的 `max_exp` 是库里持久化的旧值 —— 实机门禁 `l5ze_exp_curve` 抓到：
+        // level=200 仍显示 100，而配置 `Level200=15400000000`。经验条与「下一级所需」
+        // 会在拿到第一笔经验前一直是错的（占位曲线时代更明显：奖励一发放就涨几十级）。
+        // 这里同时改**快照**（本次进场序列用它）与 **actor 真值**（后续逻辑用它），两侧同源。
+        let curve_max = crate::actors::player::max_experience_for_level(
+            &self.experience_list,
+            loaded_state.level,
+            loaded_state.max_experience,
+        );
+        if curve_max != loaded_state.max_experience {
+            tracing::info!(
+                "RefreshMaxExperience(login): level={} {} -> {}（曲线 {} 条）",
+                loaded_state.level,
+                loaded_state.max_experience,
+                curve_max,
+                self.experience_list.len()
+            );
+            loaded_state.max_experience = curve_max;
+            if let Some(r) = self.players.get(&msg.session_id) {
+                let _ = r
+                    .actor_ref
+                    .tell(crate::actors::player::SetMaxExperience { value: curve_max })
+                    .try_send();
+            }
+        }
+
         // 发送游戏进入序列（使用真实状态数据）
         send_game_entry_sequence(
             self.gate_ref.clone(),

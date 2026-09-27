@@ -2284,6 +2284,39 @@ pub struct AddExperience {
     pub experience_list: Vec<i64>,
 }
 
+/// 本等级所需经验（C# `PlayerObject.RefreshMaxExperience`：
+/// `MaxExperience = ExperienceList[Level-1]`；表越界 → 0（不再升级）；空表 → 上一值 ×1.5）。
+///
+/// 抽成纯函数是为了让**两条路径共用同一份口径**：
+/// ① 升级时（`AddExperience` 内部）、② **登录时**（世界侧 `send_game_entry_sequence` 前，
+/// 见 `SetMaxExperience`）——C# 在登录/升级/换装后都会 `RefreshMaxExperience`，
+/// 本端此前只在升级时刷，于是刚登录的 `max_exp` 是库里持久化的旧值（实机门禁抓到：
+/// level=200 仍显示 100，而配置 Level200=15400000000）。
+pub fn max_experience_for_level(list: &[i64], level: u16, prev: i64) -> i64 {
+    let li = (level as usize).saturating_sub(1);
+    if li < list.len() {
+        list[li]
+    } else if list.is_empty() {
+        ((prev as f64) * 1.5) as i64
+    } else {
+        0 // 超出经验表：不再升级（C# 语义）
+    }
+}
+
+/// 登录时把世界侧按曲线算好的 `max_experience` 同步进 actor 真值
+/// （快照侧由调用方直接改，两侧同源，见 `world::session` 的进场序列）。
+pub struct SetMaxExperience {
+    pub value: i64,
+}
+
+impl Message<SetMaxExperience> for PlayerActor {
+    type Reply = ();
+
+    async fn handle(&mut self, msg: SetMaxExperience, _ctx: &mut Context<Self, Self::Reply>) {
+        self.state.max_experience = msg.value;
+    }
+}
+
 impl Message<AddExperience> for PlayerActor {
     /// 返回实际获得经验（扣除前基础量、含全部加成后的最终值；C# GainExp 宠物经验用）
     type Reply = i64;
@@ -2427,14 +2460,11 @@ impl Message<AddExperience> for PlayerActor {
             }
 
             // 经验曲线（C# RefreshMaxExperience：MaxExperience = ExperienceList[Level-1]；空表回退 ×1.5）
-            let li = (self.state.level as usize).saturating_sub(1);
-            self.state.max_experience = if li < msg.experience_list.len() {
-                msg.experience_list[li]
-            } else if msg.experience_list.is_empty() {
-                (self.state.max_experience as f64 * 1.5) as i64
-            } else {
-                0 // 超出经验表：不再升级（C# 语义）
-            };
+            self.state.max_experience = max_experience_for_level(
+                &msg.experience_list,
+                self.state.level,
+                self.state.max_experience,
+            );
 
             info!(
                 "Player {} leveled up to {}! (hp={} mp={} atk={}-{} mc={}-{} sc={}-{})",
@@ -9528,5 +9558,30 @@ mod tests {
         ] {
             assert_eq!(super::magic_key_targets_hero(key, old_key), hero);
         }
+    }
+
+    /// 门禁：本等级所需经验（C# `RefreshMaxExperience`）——曲线命中 / 越界 / 空表三条口径。
+    ///
+    /// 阳性对照（落地时实做）：把命中分支改成恒返回 `prev`（不读表）→ 本测试第一条断言立即红。
+    #[test]
+    fn max_experience_follows_configured_curve() {
+        // 命中曲线：Level1/2/111 分别取表里的值（原版金标准数据点）
+        let curve = {
+            let mut v = vec![100i64, 200];
+            v.resize(111, 0);
+            v[110] = 6_500_000_000;
+            v
+        };
+        assert_eq!(super::max_experience_for_level(&curve, 1, 100), 100);
+        assert_eq!(super::max_experience_for_level(&curve, 2, 100), 200);
+        assert_eq!(
+            super::max_experience_for_level(&curve, 111, 100),
+            6_500_000_000,
+            "Level111 必须取曲线里的 6500000000（登录刷新也走这条）"
+        );
+        // 表越界（非空）→ 0：不再升级（C# 语义）
+        assert_eq!(super::max_experience_for_level(&curve, 500, 123), 0);
+        // 空表 → 上一值 ×1.5 回退
+        assert_eq!(super::max_experience_for_level(&[], 10, 100), 150);
     }
 }
