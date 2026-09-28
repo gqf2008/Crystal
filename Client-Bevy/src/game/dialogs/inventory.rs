@@ -1249,12 +1249,33 @@ fn inventory_ui_system(
     for (mut t, mut vis, gold, weight) in &mut money {
         *vis = Visibility::Visible;
         if gold.is_some() {
-            t.0 = format!("{}", player.map(|(_, g)| g.0).unwrap_or(0));
+            // C# `GoldLabel.Text = GameScene.Gold.ToString("###,###,##0")`
+            // （`Client/MirScenes/Dialogs/InventoryDialog.cs:388`）——**带千分位**；
+            // 旧实现是 `format!("{}")`，金币 ≥ 1000 时与原版对不上（与 HUD 的
+            // `format_gold` 同口径，直接复用）。
+            t.0 = crate::game::hud::format_gold(player.map(|(_, g)| g.0).unwrap_or(0));
         } else if weight.is_some() {
-            let (w, mw) = inv.map(|i| (i.weight, i.max_weight)).unwrap_or((0, 0));
-            t.0 = format!("{}/{}", w, mw);
+            // (268,212) 的 `WeightLabel` 在 **背包窗**里显示的是**空格数**（一个纯整数），
+            // 不是"负重/上限"：C# `InventoryDialog.UpdateDefault()` 就是
+            // `WeightLabel.Text = GameScene.User.Inventory.Count(t => t == null).ToString();`
+            // （`Client/MirScenes/Dialogs/InventoryDialog.cs:386`；它下面那行把旧的
+            // `MaxBagWeight - CurrentBagWeight` 注释掉了）。"剩余负重/空格"那一对是在
+            // **主 HUD** 上（`MainDialogs.cs:464-465` 的 `SpaceLabel`/`WeightLabel`），本端
+            // `hud_space_weight_system` 已按那个口径实现。
+            t.0 = inv_weight_text(inv);
         }
     }
+}
+
+/// 背包窗 `WeightLabel`（(268,212)）的文案：**空格数**（C# `InventoryDialog.cs:386`）。
+/// 抽成纯函数便于门禁钉住（原实现误写成了 `"{weight}/{max_weight}"`，A/B 里与
+/// 原版的 `45` 完全对不上——那是 46 格减 1 件起始装备）。
+#[must_use]
+pub fn inv_weight_text(inv: Option<&Inventory>) -> String {
+    let empty = inv
+        .map(|i| i.items.iter().filter(|s| s.is_none()).count())
+        .unwrap_or(0);
+    empty.to_string()
 }
 
 /// 悬停提示系统（#93/#106 通用 Tooltip）：物品格上显示 名称 + 类型/数量/耐久
@@ -2870,6 +2891,42 @@ pub fn pick_auto_hp_potion<'a>(items: impl Iterator<Item = &'a InvItem>) -> Opti
 mod tests {
     use super::*;
     use mir2_shared::enums::ItemType;
+
+    /// 背包窗 `WeightLabel`（(268,212)）= **空格数**（C# `InventoryDialog.cs:386`
+    /// `WeightLabel.Text = User.Inventory.Count(t => t == null).ToString()`）。
+    /// 原实现写成 `"{weight}/{max_weight}"`，A/B 里与原版的 `45`（46 格 − 1 件起始装备）对不上。
+    #[test]
+    fn inv_weight_label_shows_empty_slots() {
+        assert_eq!(inv_weight_text(None), "0", "无玩家实体视同 0");
+        assert_eq!(
+            inv_weight_text(Some(&Inventory::default())),
+            "0",
+            "空 Vec（未收到 UserInformation）⇒ 0"
+        );
+        let mut inv = Inventory {
+            items: vec![None; 46],
+            weight: 7,
+            max_weight: 100,
+            ..Default::default()
+        };
+        assert_eq!(inv_weight_text(Some(&inv)), "46", "全空 = 46");
+        // 放一件进 0 号格（原版沙箱那帧就是「46 格 − 1 件起始装备 = 45」）
+        inv.items[0] = Some(InvItem::default());
+        assert_eq!(inv_weight_text(Some(&inv)), "45");
+        // 负重值**不参与**这条文案（C# 那行只数空格）
+        inv.weight = 99;
+        assert_eq!(inv_weight_text(Some(&inv)), "45", "负重变化不影响空格数");
+    }
+
+    /// 背包窗 `GoldLabel`（(40,212)）用 C# 的 `"###,###,##0"` 千分位
+    /// （`InventoryDialog.cs:388`）——与 HUD 的 `format_gold` 同一口径。
+    #[test]
+    fn inv_gold_label_uses_thousands_separator() {
+        assert_eq!(crate::game::hud::format_gold(0), "0");
+        assert_eq!(crate::game::hud::format_gold(45), "45");
+        assert_eq!(crate::game::hud::format_gold(1000), "1,000");
+        assert_eq!(crate::game::hud::format_gold(1234567), "1,234,567");
+    }
 
     /// #2736/#2747：背包格锁定（C# `MirItemCell.Locked`）——锁定期间图标按
     /// `Color.DimGray`（105,105,105）× 0.8 不透明度绘制（C# `DrawOpaque` 把 alpha 置 0.8），
