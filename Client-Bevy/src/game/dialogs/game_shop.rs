@@ -34,6 +34,43 @@ pub const PANEL_SIZE: (f32, f32) = (696.0, 476.0);
 /// 关闭键 `Prguse2[360..362]` @(671,4)（`GameShopDialog.cs:67-76`，无 `Size` → 原生 24x21）
 pub const CLOSE_POS: (f32, f32) = (671.0, 4.0);
 
+/// 分类行字号：C# `Filters[i] = new MirLabel { Font = new Font(Settings.FontName, 7F) }`
+/// （`GameshopDialog.cs:435`）。本端标签用 px ⇒ 7pt × 4/3 = **9.333**（与既有
+/// 「9F → 12px」的换算一致）。旧实现写 12px（=9F），比原版大一档。
+pub const CAT_ROW_FONT_PX: f32 = 9.333;
+/// 分类行颜色（C# `GameshopDialog.cs:446/456/464`，`Color.FromArgb` 直译）：
+/// 选中 `(230,200,160)`、悬停 `(160,140,110)`、常态 `Color.Gray`。
+pub const CAT_COLOR_SELECTED: (u8, u8, u8) = (230, 200, 160);
+pub const CAT_COLOR_HOVER: (u8, u8, u8) = (160, 140, 110);
+pub const CAT_COLOR_NORMAL: (u8, u8, u8) = (128, 128, 128);
+
+/// 分类行颜色（纯函数）：选中 > 悬停 > 常态 —— 与 C# 三个事件的赋值优先级一致
+/// （`SetCategories` 只按 `TypeFilter` 判选中；`MouseEnter/Leave` 只在**非选中**时才改色，
+/// 见 `:456/464` 里的 `Filters[i].ForeColour != Color.FromArgb(230,200,160)` 守卫）。
+#[must_use]
+pub fn cat_row_color(selected: bool, hovered: bool) -> Color {
+    let (r, g, b) = if selected {
+        CAT_COLOR_SELECTED
+    } else if hovered {
+        CAT_COLOR_HOVER
+    } else {
+        CAT_COLOR_NORMAL
+    };
+    Color::srgb(r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0)
+}
+
+/// 分类行文案：C# 第 0 项是**字面量** `"Show All"`（`GameshopDialog.cs:26-28/224` 的哨兵值，
+/// 不随语言变），其余项直接用服务端给的 `Category` 字符串。本端内部用空串表示"全部"，
+/// 渲染时换成原版字面量（旧实现渲染成中文「全部」，且给选中行加 `▶ ` 前缀——两者都不是 C# 行为）。
+#[must_use]
+pub fn cat_row_text(category: &str) -> String {
+    if category.is_empty() {
+        "Show All".to_string()
+    } else {
+        category.to_string()
+    }
+}
+
 /// P3-3：商品名解析与物品名表写入**共用 `crate::game::item_names` 的同一对纯函数**
 /// （#782 验收判据 = 「仓库与商城走同一降级链」）——这里只保留商城侧的旧名字，
 /// 免得调用点与既有测试全改一遍：
@@ -1151,8 +1188,8 @@ fn spawn_game_shop(
                 "",
                 15.0,
                 103.0 + i as f32 * 15.0,
-                12.0,
-                Color::srgb(0.9, 0.9, 0.9),
+                CAT_ROW_FONT_PX,
+                cat_row_color(false, false),
                 9,
             )
             .insert(GameShopCat(i));
@@ -1633,7 +1670,7 @@ fn game_shop_ui_system(
             ),
             Or<(With<GameShopCellCount>, With<GameShopCellQty>)>,
         >,
-        Query<(&mut Text, &GameShopCat)>,
+        Query<(&mut Text, &mut TextColor, &GameShopCat)>,
         Query<&mut Text, With<GameShopPageLabel>>,
     )>,
     buttons: ShopButtons,
@@ -1845,26 +1882,32 @@ fn game_shop_ui_system(
         }
     }
     // 分类渲染（C# Filters[22]：第 0 项 = 全部；CStartIndex 行偏移 22 行窗，
-    // ▶ 标记当前选中；偏移由共享 UiScrollList 驱动：滚轮 + PositionBar 拖动）
+    // **靠颜色**标记选中/悬停；偏移由共享 UiScrollList 驱动：滚轮 + PositionBar 拖动）
     cat_list.set_total(shop.categories.len());
     let cat_base = cat_list.offset;
-    for (mut text, row) in &mut ui_set.p6() {
+    // 悬停行：与点击同一条矩形判据（C# `Filters[i]` 90x20 @(15,103+15i)，行距 15）
+    let cursor = windows.single().ok().and_then(|w| w.cursor_position());
+    let cat_origin = panel_origin
+        .single()
+        .map(|n| crate::ui::theme::node_origin(n, (164.0, 146.0)))
+        .unwrap_or((164.0, 146.0));
+    let hover_row = cursor.and_then(|c| {
+        (0..22usize).find(|i| {
+            let y = cat_origin.1 + 103.0 + *i as f32 * 15.0;
+            c.x >= cat_origin.0 + 15.0
+                && c.x <= cat_origin.0 + 105.0
+                && c.y >= y
+                && c.y <= y + 15.0
+        })
+    });
+    for (mut text, mut color, row) in &mut ui_set.p6() {
         let idx = cat_base + row.0;
         text.0 = match shop.categories.get(idx) {
-            Some(c) => {
-                let label = if c.is_empty() {
-                    "全部".to_string()
-                } else {
-                    c.clone()
-                };
-                if *c == shop.category {
-                    format!("▶ {}", label)
-                } else {
-                    label
-                }
-            }
+            Some(c) => cat_row_text(c),
             None => String::new(),
         };
+        let selected = shop.categories.get(idx).is_some_and(|c| *c == shop.category);
+        color.0 = cat_row_color(selected, hover_row == Some(row.0));
     }
     // 分类翻页（C# UpButton/DownButton：步 1 行，下限 0、上限 Count-22）
     for (e, inter) in &buttons.cat_up {
@@ -2286,6 +2329,30 @@ fn shop_server_events(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 分类行：**文案**（第 0 项 = C# 字面量 `"Show All"`，不本地化、无 `▶ ` 前缀）
+    /// 与**颜色**（选中 `(230,200,160)` > 悬停 `(160,140,110)` > 常态 `Color.Gray`）。
+    /// 依据：`GameshopDialog.cs:26-28/426-467/682-698`。
+    #[test]
+    fn shop_category_row_text_and_color_match_csharp() {
+        assert_eq!(cat_row_text(""), "Show All", "第 0 项是 C# 哨兵字面量");
+        assert_eq!(cat_row_text("Potion"), "Potion", "其余项直接用服务端 Category");
+        assert!(!cat_row_text("Potion").starts_with('▶'), "C# 不用 ▶ 前缀");
+
+        let srgba = |c: Color| c.to_srgba();
+        let sel = srgba(cat_row_color(true, false));
+        assert!((sel.red - 230.0 / 255.0).abs() < 1e-6 && (sel.green - 200.0 / 255.0).abs() < 1e-6
+            && (sel.blue - 160.0 / 255.0).abs() < 1e-6, "选中 = 230,200,160");
+        let hov = srgba(cat_row_color(false, true));
+        assert!((hov.red - 160.0 / 255.0).abs() < 1e-6 && (hov.blue - 110.0 / 255.0).abs() < 1e-6,
+            "悬停 = 160,140,110");
+        let nor = srgba(cat_row_color(false, false));
+        assert!((nor.red - 128.0 / 255.0).abs() < 1e-6 && (nor.red - nor.blue).abs() < 1e-6,
+            "常态 = Color.Gray(128)");
+        assert_eq!(cat_row_color(true, true), cat_row_color(true, false), "选中优先于悬停");
+
+        assert!((CAT_ROW_FONT_PX - 9.333).abs() < 0.01, "C# 7F ⇒ 9.333px（pt×4/3）");
+    }
 
     fn item(name: &str) -> ShopItem {
         ShopItem {
