@@ -548,6 +548,63 @@ py -3.12 tools/acceptance/csharp_golden/bigmap_viewport_check.py --view mini `
    基线取帧前就被别的步骤改过（基线帧本身可能就没有腰带）——下一轮先用 `ui_nodes_at` 把
    **基线帧那一刻**的节点数钉下来再谈像素。
 
+### 3.2l 「只能靠鼠标到达」那批窗的 A/B：**本轮未采集**（2026-09-28，owner 解锁后重试）
+
+§3.2b 的键位逐窗 A/B 覆盖 20 扇；§3.1 把「鼠标点开某个窗/点某一行」这条路堵掉之后，
+剩下这些窗只有鼠标路径可达：`game_shop`（分类页签 `Previous/Next`、`PositionBar`）、
+`npc` / `npc_goods`（NPC 菜单点行、滚轮命中区）、`inventory` 页签（ITEMS II / QUEST 切换）。
+owner 2026-09-28 同意解锁工作站后，本节记录重试的过程与结论。
+
+**结论：未采集**。没有任何成对帧，因此下表**不给任何占比数字**（按 owner 口径「拿不到证据的一律写未采集，不许推数」）。
+
+| 目标（鼠标路径） | 差异占比 | 定性 |
+|---|---|---|
+| `game_shop` 分类页签 `Previous/Next`（`Prguse2[197..199]/[207..209]@(120,103)/(120,421)`） | **未采集** | 未采集（帧拿不到） |
+| `game_shop` 分类列 `PositionBar`（`Prguse2[205/206]@(120,117)` 拖动） | **未采集** | 未采集 |
+| `npc` 菜单点行 / `npc_goods` 列表滚轮命中区 | **未采集** | 未采集 |
+| `inventory` 页签 ITEMS II / QUEST 切换 | **未采集** | 未采集 |
+| §3.2c–§3.2k 里因「原版侧压根没出那扇窗」而未比的其余窗 | **未采集** | 未采集 |
+
+**本轮实际做了什么（可复跑的命令）**
+
+```powershell
+# 1) 解锁判据（README §3 口径）：桌面级 CopyFromScreen 是否仍是纯色
+#    见下「两次读数矛盾」，这条判据本身在本次不够用
+# 2) 起沙箱（7100）+ 原版客户端，键盘登录（键位路径不受锁屏影响）
+Start-Process "$env:TEMP\golden_sandbox\Server\Server.exe" -WorkingDirectory "$env:TEMP\golden_sandbox\Server"
+Start-Process "$env:TEMP\golden_sandbox\Client\Client.exe" -WorkingDirectory "$env:TEMP\golden_sandbox\Client"
+pwsh -File tools\acceptance\csharp_golden\csharp_kbd_login.ps1 -SandboxRoot "$env:TEMP\golden_sandbox" -Account 333 -Password abbtest123
+# 3) 摆窗 + 正对照（. csharp_client_driver.ps1 之后）
+[CsUi]::SetWindowPos($global:csHwnd,[IntPtr]::Zero,0,0,1024,768,0x40)
+Key-Cs 120                      # F9 开背包
+Shot-Cs 'before'; Move-Image 301 13; Click-Image 301 13; Shot-Cs 'after'
+```
+
+**三个把这一轮卡住的实测事实（都值得下一轮先排掉）**
+
+1. **桌面判据两次读数互相矛盾**：同一台机、相隔几分钟，`CopyFromScreen`（8px 网格 12288 点）
+   先读到 **1 种颜色**（`#005495`，§3 的锁屏特征），后读到 **33 种颜色**（可读）。
+   ⇒ 解锁状态在这几分钟里发生过切换，**单次采样不足以判定"现在能不能跑"**。
+2. **原版客户端窗口会被拖走**：本轮实测窗口 rect = **`768,316,1024,768`** —— 屏幕右下角，
+   只有四分之一在屏内。`Click-Image` 是「窗口 origin + 图像坐标」，此时**所有点击都落在屏外**，
+   等于没点（`SetWindowPos` 摆回 `(0,0,1024,768)` 才谈得上测鼠标）。
+   ⇒ 做鼠标 A/B 前**必须先核对窗口 rect**，否则会把"窗口在屏外"误判成"原版点不动"。
+3. **注入式取帧在那一刻不出图**：`Shot-Cs`（向窗口 `SendMessage` `VK_SNAPSHOT`，等客户端
+   自己的 D3D 截图落盘）连续报 `FAIL: 4s 内未出现新截图`（4 次里 3 次失败），
+   另一次整段脚本在取首帧前就挂住（客户端 `Responding=True`，不是客户端死）。
+   ⇒ 拿不到"点前/点后"两张帧，任何占比都是编的。
+
+**下一轮的顺序（建议照抄）**
+
+1. 先测三条前提：① 桌面 `CopyFromScreen` 连续两次都 >5 色；② 客户端窗口 rect 已 `(0,0,1024,768)`
+   且 `GetForegroundWindow()` 就是它；③ 连续两次 `Shot-Cs` 都能出新图。
+2. 前提全过 → 跑**判据自身的阳性对照**：F9 开背包 → `Shot-Cs` → **键盘再按 F9 关背包** → `Shot-Cs`，
+   两帧在 `(0,0,316,236)` 的差异占比必须很大（证明"这个区域能反映窗开关"）。
+3. 再跑**鼠标正对照**：同上但第二步换成 `Click-Image 301 13`。
+   - 差异很大 ⇒ 鼠标路径通了，按上表逐窗铺开（每窗前后帧 + 占比 + 定性）；
+   - 差异 ≈0 ⇒ **终点**：如实记「已解锁但注入鼠标仍驱动不了原版 `MirControl.OnMouseClick`」，
+     不再重试（§3.1 已有同类记录），也不改产品代码。
+
 ## 3.3 逐窗几何对表（不需要原版交互，2026-09-26 起）
 
 §3.1 把"驱动原版点开某个窗口"这条路堵掉之后，**窗口几何**仍可验：原版每扇窗的矩形是纯常量
