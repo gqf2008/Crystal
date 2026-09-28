@@ -1858,3 +1858,45 @@ WeightLabel.Text = GameScene.User.Inventory.Count(t => t == null).ToString();   
 
 **门禁**：`cargo test --lib` **863 passed**；`cargo test --test b0001_smoke --test ui_alignment` **2 + 53**；
 实机交互巡回 `ui_interact_sweep.ps1 -ManageServer` **44/44 exit=0**。
+
+### 3.2af 逐窗 A/B 表**逐行结论索引**（2026-09-28，master `83e5ec6b0` 复跑）
+
+这一节不引入新判据，只是把 §3.2c–§3.2ae 一路攒下来的**20 行结论**收成一张索引表，
+方便下一轮"知道哪一行还欠什么"。复跑配方（原版侧沿用 §3.2b 的金标准帧）：
+
+```powershell
+pwsh tools\acceptance\csharp_golden\golden_ab_ours.ps1 -SandboxRoot $env:TEMP\golden_sandbox `
+     -ClientHome <检出> -User goldenchr -Password 123456      # 我方 20 窗 + ab_windows.json
+py -3.12 tools\acceptance\csharp_golden\golden_ab_diff.py `
+     --shots %TEMP%\golden_sandbox\shots --table %TEMP%\rect_table.json --max-shift 1
+```
+
+| 行 | 本次占比 | ±1px 后 | 结论（类型） | 依据 |
+|---|---|---|---|---|
+| **Group** | **0.0%** | — | 三处真缺口修完**归零** | §3.2j |
+| Inventory | 2.9% | — | 已修 5 处（页签裁剪/ITEMS II 换帧/…）+ 2 处文本口径（空格数/千分位）；残余＝物品内容与透明边 | §3.2j §3.2ae |
+| Skills | 1.7% | — | 与 `character` 同窗，可比（§3.2k 定的口径） | §3.2k |
+| Equipment | 6.3% | — | **数据**：纸娃娃/装备内容 + 面板底部透出世界 | §3.2j |
+| Options | 6.2% | — | **数据**：`Settings` 值（音量 100 vs 0） | §3.2c §3.2j |
+| Quests | 6.3% | — | 删掉自造「放弃」钮后，残余＝任务列表文本内容 | §3.2j |
+| **Friends** | 24.4% | **2.3%（dx=1）** | 翻页条补全（#3320）+ 5 钮原生尺寸（§3.2ad）后残余＝标题/页码**字形** | §3.2f §3.2ac §3.2ad |
+| Relationship | 13.1% | — | 标题/按钮原生尺寸/垂直居中三处修完；残余＝四行**文案语言** | §3.2g |
+| **Ranking** | 10.6% | — | **数据**：原版沙箱那份排行榜是空的（本端 20 行） | §3.2g |
+| **Guilds** | 66.2% | — | **不可比**（C# `Show()` 守卫：不在公会只弹提示）——判据是「提示框区 1.2% + 按钮逐像素一致」 | §3.2e |
+| **Creature / MountWindow / Fishing** | 50.1% / 94.5% / 34.4% | — | 同上（守卫窗）；**别用窗口矩形判** | §3.2e |
+| Help | 87.6% | **10.7%（dx=1）** | **语言/条目**（我方中文键位表 vs 原版英文固定清单）+ 关闭钮原生尺寸（§3.2ad） | §3.2c §3.2ad |
+| Keybind | 26.6% | — | 同上（语言/条目） | §3.2c |
+| **GameShop** | 29.9% | — | chrome 与翻页条位置一致；差＝商品/分类**数据不同源**；分类滑条「无可滚行程」 | §3.2g §3.2y |
+| **Bigmap** | 58.6% | — | 视口**画源已对齐**（§3.2h 自证 0.999）；整窗差来自**地图数据不同源**（视口图 + NPC 列表都是各自 DB 的） | §3.2g §3.2h |
+| **Minimap** | 91.3% | — | **不可比**：那一帧我方没出窗（本端 `V` 是开关、原版 `V` 是切大/小档）——板块位用 `art_match` 单独比过（2090 0.211 vs 原版 0.187） | §3.2i §3.2aa |
+| **Belt / Skillbar** | 91.7% / 91.7% | — | **参考（整帧）**：HUD 行不能用窗口矩形比（露的是世界）；改用「只比美术不透明像素」的判据 — 腰带 7.4%、技能栏位置/档位差 | §3.2k §3.2m §3.2v |
+
+**两类"不是缺陷"的残差（每条都已定性，别再当缺口修）**
+
+1. **字形**：两侧 `Settings.FontName`/字号不同 ⇒ 文本包围盒差 1~2 成（Help/Relationship/Friends 页码、
+   腰带数字、商品价格串…）。见 §3.2p §3.2v §3.2ad 的实测。
+2. **数据不同源**：两台服务端的**地图数据/DB/角色状态**都不同（§3.2d ② 给了三个地图文件的哈希），
+   凡是"露背景/露列表/露排行榜"的行，占比都不可比——只有窗口 chrome 与自绘控件可比。
+
+**唯一还欠凭证的一条**：`game_shop` 分类滑条的**真行程**（C# 守卫 `CStartIndex + 22 >= CategoryList.Count`
+就短路，沙箱那份数据只有 10 类）——要拿就必须给沙箱造一份分类数 > 22 的商城数据，属**数据准备**问题，不是判据缺失（§3.2y）。
