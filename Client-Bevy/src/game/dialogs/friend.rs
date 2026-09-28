@@ -285,12 +285,22 @@ fn spawn_friend(
             (false, false, false, false, true, 566, 172.0, "悄悄话"),
         ];
         for (is_add, is_remove, is_memo, is_email, is_whisper, idx, x, hint) in acts {
+            // 尺寸取**美术原生尺寸**：C# 这几颗 `MirButton` 都没写 `Size` ⇒ 用图头
+            // （`Prguse[554..568]` 实测 **28x25**）。本端旧代码写死 `24x22` ⇒ Bevy 会把 28x25
+            // **重采样**成 24x22：A/B 里那一排按钮整条带都是 3~7 级的色差
+            // （逐像素 `Prguse[554]` 比：原版 441,489 命中 **0/650**，本端 ±3px 穷举最好仍有 **379/650**）。
+            // 与 §3.2j 的背包页签「裁剪 ≠ 缩放」同一类缺陷。
+            let (bw, bh) = libs
+                .0
+                .get_image(LibraryName::Prguse, idx)
+                .map(|i| (i.width.max(0) as f32, i.height.max(0) as f32))
+                .unwrap_or((28.0, 25.0));
             if let (Some(n), Some(h), Some(pr)) = (
                 load_lib_image(&mut libs, &mut images, LibraryName::Prguse, idx),
                 load_lib_image(&mut libs, &mut images, LibraryName::Prguse, idx + 1),
                 load_lib_image(&mut libs, &mut images, LibraryName::Prguse, idx + 2),
             ) {
-                spawn_icon_button(p, n, h, pr, x, 241.0, 24.0, 22.0, 10).insert((
+                spawn_icon_button(p, n, h, pr, x, 241.0, bw, bh, 10).insert((
                     FriendAction {
                         is_add,
                         is_remove,

@@ -508,6 +508,10 @@ py -3.12 tools/acceptance/csharp_golden/bigmap_viewport_check.py --view mini `
 也不是"load 与 spawn 相邻且帧号字面量"那一型 ⇒ 静默漏掉（实测 `--data` 跑仍是 0 命中）。
 待办：把扫描面扩到"帧号来自循环变量"的表驱动形态（或至少在表驱动分支里按**尺寸列缺失**告警）。
 
+> **2026-09-28 更新（见 §3.2ad）**：已补上（`scan_loop_literal_size` + `TABLE_DECL_LET`），
+> 并用它捞出两处真缺陷（Friends 5 颗操作钮写死 24x22 而图头 28x25、Help 关闭钮写死 16x16 而图头 24x21），
+> 两处都已改成按图头取尺寸，正/负对照与实机 A/B 都在 §3.2ad。
+
 ### 3.2k A/B 表最后三行「噪声项」的可比口径（2026-09-28）
 
 `Skills / Belt / Skillbar` 三行长期是**整帧参考**（两边的"差异"其实是世界与角色不同，判不出窗内绘制）。
@@ -1722,3 +1726,86 @@ py -3.12 tools\acceptance\csharp_golden\golden_ab_diff.py --shots %TEMP%\golden_
 `PageNumberLabel (87,216) 83x17` + `Prguse2[240..242]@(70,218)` + `[243..245]@(171,218)`，
 空好友列表时该显示 `1/1` 且两个箭头为禁用帧）。下一轮的前置很清楚：
 **把 `Prguse2[240..245]` 三帧逐张导出来，与本端翻页条那一行逐像素比，判"帧号错"还是"占位/文字错"**。
+
+### 3.2ad 「写死尺寸 ≠ 美术原生尺寸」的第 4 个扫描面：`control_size_audit.py` 补盲点 + 捞出的两处真缺陷（2026-09-28）
+
+§3.2j 末尾记了 `control_size_audit.py` 的**第 4 个盲点**：「帧号来自循环变量」的表驱动形态
+（表里只有帧号、**尺寸写在 `spawn` 处当字面量**）此前三个扫描面都看不见。本轮把它补上，
+并用它捞出**两处真缺陷**。
+
+**① 补的扫描面（`scan_loop_literal_size`）**
+
+现场（`Client-Bevy/src/game/dialogs/friend.rs` 的 5 颗操作钮）：
+
+```rust
+let acts: [(bool, …, usize, f32, &str); 5] = [ (…, 554, 60.0, "添加"), … ];
+for (…, idx, x, hint) in acts {
+    load_lib_image(&mut libs, &mut images, LibraryName::Prguse, idx)   // lib 写死、idx 是循环变量
+    spawn_icon_button(p, n, h, pr, x, 241.0, 24.0, 22.0, 10)          // 尺寸是字面量
+}
+```
+
+三个旧扫描面都看不见它：`TABLE_DECL` 只认 `const … = &[`（这里是 **`let`** 声明，新增 `TABLE_DECL_LET`）、
+`DYN_LOAD` 只认 `*lib, *idx` 的**解引用**写法（这里是 `LibraryName::Prguse, idx`）。
+新面按「`spawn_*` 的两个尺寸实参是字面量 ⇒ 必须等于**每一行帧号**的美术原生尺寸」逐行比，
+帧号从循环体里那次 `load` 的**第 4 个实参**（必须是循环变量）反推它在表行里的列号。
+
+**正/负对照（实测）**
+
+| 场 | 结果 |
+|---|---|
+| 旧代码副本（把 `bw,bh` 换回 `24.0, 22.0`） | **5 行命中**：`Prguse[554/557/560/563/566]` 美术 **28x25**、写死 **24x22** ⇒ `VERDICT=FAIL`（exit 1） |
+| 修后本仓 | `合计 0 处`、`VERDICT=PASS` |
+
+**② 捞出的两处真缺陷（同一类：`MirButton` 不写 `Size` ⇒ 取图头，本端写死了别的尺寸）**
+
+| 位置 | 美术原生 | 修前写死 | 后果 |
+|---|---|---|---|
+| `friend.rs` 5 颗操作钮（`Prguse[554/557/560/563/566]`） | **28x25** | 24x22 | Bevy 把 28x25 **重采样**成 24x22 ⇒ 整排按钮 3~7 级色差 |
+| `help.rs` 3 颗钮里的**关闭钮**（`Prguse2[360..362]`） | **24x21** | 16x16（三颗同值） | 关闭钮被压扁；同表里的翻页 `Prguse2[240..245]` 本来就该是 16x16 |
+
+修法：两处都改成**按图头取尺寸**（`libs.0.get_image(lib, idx)` → `w/h`），不再写死——
+与 §3.2j 背包页签的「裁剪 ≠ 缩放」同一口径。
+
+**③ 实机 A/B 复验（同一批原版帧 + 修后重新生成的 `ours_win_*.png`）**
+
+单钮判据（`art_match` 的比对口径，只比美术不透明像素 + ±3px 穷举）：
+
+| 目标 | 修前（本端） | 修后（本端） | 原版 |
+|---|---|---|---|
+| Friends `Add` 钮 vs `Prguse[554]` | 0.583（379/650） | **0.000（0/650）** | 0.000（dx=1） |
+| Help 关闭钮 vs `Prguse2[360]` | （写死 16x16，未单独量） | **0.000（0/373）** | 0.000（dx=1） |
+
+整窗（`golden_ab_diff.py --max-shift 1`）：
+
+| 窗口 | 修前 | 修后 |
+|---|---|---|
+| **Friends** | 25.5%（平移后 **6.6% / 4719 px**） | 24.4%（平移后 **2.3% / 1678 px**） |
+| Help | 87.6%（平移后 10.7%） | 87.6%（平移后 **10.7%**，未动——该项被键位表语言/条目主导，符合预期） |
+| Inventory | 2.9% | 3.0%（噪声级） |
+
+⇒ Friends 平移后的残余**掉 64%**（4719 → 1678）；剩下的 1678 px 是标题/页码的**字形差**（§3.2ac 已定位到那一行）。
+
+**顺带把"页码那一行"的字形差钉成数据**（省得下一轮再猜）：文串**两侧一致**（C#
+`PageNumberLabel.Text = (Page + 1) + " / " + maxPage`、本端 `format!("{} / {}")`，空列表都是 `1 / 1`），
+差的是**字号/字体度量**——C# 那行不设 `Font` ⇒ 取 `MirLabel` 默认 `ScaleFont(new Font(Settings.FontName, 8F))`
+（`Client/MirControls/MirLabel.cs:180`），本端是 **12px** CJK 字体；实测文字包围盒
+**原版 18x8、本端 27x10**（左/上各差 2~3px）。属 §3.2v「字形级残留」同类——
+与"布局/画源"无关，改它要动字体选型，本轮不改。
+
+**门禁**：`cargo test --lib` **861 passed**；`cargo test --test b0001_smoke --test ui_alignment` **53 passed**；
+实机交互巡回 `ui_interact_sweep.ps1 -ManageServer` **44/44 exit=0**（含 `help` 关闭钮那条）。
+
+**④ 顺带修好工具自己的「自证」（本轮发现它已经恒失败）**
+
+`control_size_audit.py --selftest` 的**正对照**此前是拿 `group.rs` 的**整行字面量**当锚点
+（`let _ = spawn_image_native(p, &mut libs, &mut images, LibraryName::Title, 5, 18.0, 8.0, 9);`）。
+`rustfmt` 把这次调用折成多行之后，锚点失配 ⇒ 自证恒报「找不到要改坏的锚点」、**exit 1**，
+等于这条门禁失去了"证明自己会红"的能力。改成**空白宽松的正则**匹配后：
+
+```
+[负对照] 原样扫描的新增命中 0（期望 0）
+[正对照] 改坏一处后命中 1 条：group.rs:245 Title[5] 美术=(55,15) 写死=(57.0,15.0)
+[正对照②] 表驱动循环写死 38x19 后命中 13 条：menu.rs:283 Title[633/636]=(32,20)、Prguse[1970]=(32,18) …
+VERDICT=PASS（正/负对照）    exit=0
+```

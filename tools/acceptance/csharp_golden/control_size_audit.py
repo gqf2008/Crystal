@@ -77,12 +77,19 @@ NUM = re.compile(r"^\s*(\d+(?:\.\d+)?)\s*(?:f32|f64)?\s*$")
 # 2026-09-26 发现：这种写法此前**整组扫不到**（LOAD 正则要求字面量 lib/idx），
 # 实测 menu.rs 13 颗钮统一写死 38x19（图头 32x20 / 32x18）就是这样漏掉的。
 TABLE_DECL = re.compile(r"const\s+(\w+)\s*:[^=]*?=\s*&\[(.*?)\n\];", re.S)
+# `let` 声明的表（`friend.rs` 的操作钮表；`[^=;]*` 会被类型里的 `; 5]` 打断 ⇒ 用"到行尾的 = "）
+TABLE_DECL_LET = re.compile(r"let\s+(\w+)\s*:([^\n=]*?)=\s*&?\[(.*?)\n\s*\];", re.S)
 FOR_LOOP = re.compile(r"for\s*\(([^()]*)\)\s*in\s*(\w+)(?:\.iter\(\))?\s*\{")
 DYN_LOAD = re.compile(
     r"(?:load_lib_image|ui_image)\(\s*&mut libs,\s*&mut images,\s*\*(\w+),\s*\*(\w+)\s*\)"
 )
 # 循环体里的三元组绑定：`if let (Some(nh), Some(hh), Some(ph)) = (load…, load…, load…)`
 DYN_TUPLE = re.compile(r"if\s+let\s*\((.*?)\)\s*=\s*\(", re.S)
+# 循环体里**写死 lib** 的形态（表行只有帧号，没有 `LibraryName::` 列）：
+#   `for (…, idx, x, hint) in acts { load_lib_image(&mut libs, &mut images, LibraryName::Prguse, idx) … }`
+BODY_LIB = re.compile(
+    r"(?:load_lib_image|ui_image)\(\s*&mut libs,\s*&mut images,\s*LibraryName::(\w+)"
+)
 
 
 def _dyn_handles(body):
@@ -138,12 +145,22 @@ def scan_table_loops(text, data_dir, rows, path):
         handles = _dyn_handles(body)
         if not handles:
             continue
+        body_lib = next(iter(BODY_LIB.findall(body)), None)
         # 表行：`(a, LibraryName::X, n, h, pr, y, 32.0, 18.0),`
         table_rows = []
         for rm in re.finditer(r"\(([^()]*)\)", tbl):
             fields = [f.strip() for f in rm.group(1).split(",")]
             lib_pos = next((k for k, f in enumerate(fields) if f.startswith("LibraryName::")), None)
             if lib_pos is None:
+                # 表里没有 lib 列（`friend.rs` 的操作钮表就是这样）⇒ 用循环体里那次 load 的 lib，
+                # 帧号取行里第一个纯数字列。**尺寸却写在 spawn 处当字面量**——
+                # 这正是本工具此前的第 4 个盲点：实测 5 颗钮写死 24x22 而图头是 28x25，一条都没报。
+                if not body_lib:
+                    continue
+                idx_pos = next((k for k, f in enumerate(fields) if fields[k].isdigit()), None)
+                if idx_pos is None:
+                    continue
+                table_rows.append((fields, body_lib, int(fields[idx_pos])))
                 continue
             lib = fields[lib_pos].split("::", 1)[1]
             idx_pos = next((k for k in range(lib_pos + 1, len(fields)) if fields[k].isdigit()), None)
@@ -182,11 +199,18 @@ def scan_table_loops(text, data_dir, rows, path):
                 continue
             lib_k, idx_k = loop_vars.index(lib_var), loop_vars.index(idx_var)
             line = text[:open_brace + sm.start()].count("\n") + 1
-            for fields, _lib, _idx in table_rows:
-                if len(fields) <= max(lib_k, idx_k) or not fields[idx_k].isdigit():
+            for fields, row_lib, row_idx in table_rows:
+                # 有 lib 列就按循环变量取；没有就用行里带下来的（见上面 BODY_LIB 分支）
+                if lib_k < len(fields) and fields[lib_k].startswith("LibraryName::"):
+                    lib = fields[lib_k].split("::")[-1]
+                else:
+                    lib = row_lib
+                if idx_k < len(fields) and fields[idx_k].isdigit():
+                    idx = int(fields[idx_k])
+                else:
+                    idx = row_idx
+                if not lib or idx is None:
                     continue
-                lib = fields[lib_k].split("::")[-1]
-                idx = int(fields[idx_k])
                 art = art_size(data_dir, lib, idx)
                 if not art:
                     continue
@@ -210,11 +234,108 @@ def scan_table_loops(text, data_dir, rows, path):
                     })
 
 
+LOAD_ANY = re.compile(
+    r"(?:load_lib_image|ui_image)\(\s*&mut libs,\s*&mut images,\s*LibraryName::(\w+)\s*,\s*([^)]*?)\s*\)"
+)
+
+
+def scan_loop_literal_size(text, data_dir, rows, path):
+    """第三种扫描面：**表行只有帧号，尺寸写在 `spawn_*` 处当字面量**（`let` 声明的表也算）。
+
+    现场（`friend.rs` 的 5 颗操作钮）：
+
+    ```rust
+    let acts: [(bool, …, usize, f32, &str); 5] = [ (…, 554, 60.0, "添加"), … ];
+    for (…, idx, x, hint) in acts {
+        load_lib_image(&mut libs, &mut images, LibraryName::Prguse, idx)   // lib 写死、idx 是循环变量
+        spawn_icon_button(p, n, h, pr, x, 241.0, 24.0, 22.0, 10)          // 尺寸是字面量
+    }
+    ```
+
+    判据：`spawn_*` 的那两个尺寸实参是字面量时，必须等于**每一行帧号**的美术原生尺寸。
+    此前三个扫描面都看不见它：`TABLE_DECL` 只认 `const … = &[`（这里是 `let`），
+    `DYN_LOAD` 只认 `*lib, *idx` 的**解引用**写法（这里是 `LibraryName::Prguse, idx`）。
+    """
+    decls = {}
+    for m in TABLE_DECL.finditer(text):          # 组 2 = 表体
+        decls.setdefault(m.group(1), m.group(2))
+    for m in TABLE_DECL_LET.finditer(text):      # 组 2 = 类型、组 3 = 表体
+        decls.setdefault(m.group(1), m.group(3))
+    if not decls:
+        return
+    for lm in FOR_LOOP.finditer(text):
+        tbl = decls.get(lm.group(2))
+        if tbl is None:
+            continue
+        loop_vars = [v.strip() for v in lm.group(1).split(",")]
+        open_brace = text.index("{", lm.end() - 1)
+        body = text[open_brace:_block_end(text, open_brace)]
+        if not BODY_LIB.search(body):
+            continue
+        # 循环体里 `if let (Some(n), …) = (load…, …)` 的句柄顺序 → 对应的 (lib, 帧号表达式)
+        handle_calls = None
+        for tm in DYN_TUPLE.finditer(body):
+            names = re.findall(r"Some\(\s*(\w+)\s*\)", tm.group(1))
+            if not names:
+                continue
+            handle_calls = list(zip(names, LOAD_ANY.findall(body[tm.end():tm.end() + 400])))
+            break
+        if not handle_calls:
+            continue
+        for sm in SPAWN.finditer(body):
+            args = [a.strip() for a in sm.group(2).split(",")]
+            pos = (6, 7) if sm.group(1) == "icon_button" else (4, 5)
+            if len(args) <= pos[1]:
+                continue
+            mw, mh = NUM.match(args[pos[0]]), NUM.match(args[pos[1]])
+            if not (mw and mh):
+                continue  # 尺寸不是字面量 ⇒ 交给别的扫描面
+            want = (float(mw.group(1)), float(mh.group(1)))
+            hname = args[1].lstrip("*").strip()
+            k = None
+            for nm, (lib, expr) in handle_calls:
+                if nm != hname or "+" in expr:
+                    continue
+                vm = re.match(r"\**\s*([A-Za-z_]\w*)", expr.strip())
+                if vm and vm.group(1) in loop_vars:
+                    k = loop_vars.index(vm.group(1))
+                break
+            if k is None:
+                continue
+            line = text[:open_brace + sm.start()].count("\n") + 1
+            for rm in re.finditer(r"\(([^()]*)\)", tbl):
+                fields = [f.strip() for f in rm.group(1).split(",")]
+                if k >= len(fields) or not fields[k].isdigit():
+                    continue
+                idx = int(fields[k])
+                lib = next(iter(BODY_LIB.findall(body)), None)
+                art = art_size(data_dir, lib, idx)
+                if not art:
+                    continue
+                if want != (float(art[0]), float(art[1])):
+                    try:
+                        rel = os.path.relpath(path)
+                    except ValueError:
+                        rel = path
+                    rows.append({
+                        "file": rel,
+                        "line": line,
+                        "load_line": line,
+                        "lib": lib,
+                        "index": idx,
+                        "art": art,
+                        "explicit": want,
+                        "via": f"表 {lm.group(2)}（尺寸写在 spawn 处）",
+                    })
+
+
 def scan_file(path, data_dir, rows):
     text = open(path, encoding="utf-8", errors="replace").read()
     lines = text.split("\n")
     # 表驱动循环形态先扫（它用的是变量 lib/idx，下面的字面量配对逻辑看不见）
     scan_table_loops(text, data_dir, rows, path)
+    # 第三种形态：**表行只有帧号 + 尺寸写在 spawn 处当字面量**（`friend.rs` 的 5 颗操作钮）
+    scan_loop_literal_size(text, data_dir, rows, path)
     loads = [(text[:m.start()].count("\n") + 1, m.group(1) or "", m.group(2), int(m.group(3)),
               m.start(), None)
              for m in LOAD.finditer(text)]
@@ -427,13 +548,22 @@ def selftest(a):
 
         target = os.path.join(dst, "game", "dialogs", "group.rs")
         text = open(target, encoding="utf-8").read()
-        old = "let _ = spawn_image_native(p, &mut libs, &mut images, LibraryName::Title, 5, 18.0, 8.0, 9);"
+        # 锚点用**正则**而不是整行字面量：`rustfmt` 一旦把这次调用折成多行，整行字面量就失配、
+        # 自证会报"锚点漂了"（2026-09-28 实测：group.rs 的这次调用已折行 ⇒ 正对照恒失败，
+        # 工具等于没有自证）。这里按空白宽松匹配，换行/缩进都不影响。
+        old_re = re.compile(
+            r"let\s+_\s*=\s*spawn_image_native\(\s*"
+            r"p,\s*&mut libs,\s*&mut images,\s*LibraryName::Title,\s*5,\s*"
+            r"18\.0,\s*8\.0,\s*9,?\s*\);",
+            re.S,
+        )
+        m = old_re.search(text)
         new = ("if let Some(h) = load_lib_image(&mut libs, &mut images, LibraryName::Title, 5) {\n"
                "            spawn_image(p, h, 18.0, 8.0, 57.0, 15.0, 9);\n        }")
-        if old not in text:
+        if m is None:
             print("[正对照] 找不到要改坏的锚点 —— 门禁自证失败（锚点漂了，先更新 selftest）")
             return 1
-        open(target, "w", encoding="utf-8").write(text.replace(old, new))
+        open(target, "w", encoding="utf-8").write(text[:m.start()] + new + text[m.end():])
         pos = _scan_root(tmp, a.subdir, a.data)
         hit = [r for r in pos if r["file"].endswith("group.rs") and rel_key(r) not in known]
         print(f"[正对照] 改坏一处后命中 {len(hit)} 条（期望 ≥1）："
