@@ -591,12 +591,9 @@ fn npc_ui_system(
             let seg_col = if let Some(c) = seg.color {
                 c
             } else if seg.link.is_some() {
-                // 仅悬停中的那个链接段高亮（C# 每链接独立按钮的悬停语义）
-                if hover == LineHover::Link(idx) {
-                    Color::srgb(1.0, 0.95, 0.4)
-                } else {
-                    Color::srgb(1.0, 0.85, 0.3)
-                }
+                // 仅悬停中的那个链接段变红（C# 每链接独立按钮的悬停语义：
+                // 常态 Yellow、MouseEnter → Red，见 `npc_link_color`）
+                npc_link_color(hover == LineHover::Link(idx))
             } else {
                 Color::WHITE
             };
@@ -687,6 +684,21 @@ fn npc_ui_system(
 pub fn is_clickable_npc_line(line: &str) -> bool {
     let t = line.trim();
     t.starts_with("[@") || t.contains("/@")
+}
+
+/// 行内链接（C# `R = <text/@key>`，即 `NPCDialog.NewButton`）的两态文字色。
+///
+/// C# 依据 `MirScenes/Dialogs/NPCDialogs.cs:508-523`：标签 `ForeColour = Color.Yellow`；
+/// `MouseEnter → Color.Red`、`MouseLeave/MouseDown → Color.Yellow`、`MouseUp → Color.Red`。
+/// 实机帧实测（`tools/acceptance/csharp_golden/README.md` §3.2q/§3.2r 的原版 NPC 窗复测）：
+/// 常态 191 px 精确 `(255,255,0)`，悬停同一段后其中 64 px 变精确 `(255,0,0)`。
+/// 本端原先用 `(255,217,76)` / `(255,242,102)`，两态都不是 C# 值（悬停更不是红）。
+pub fn npc_link_color(hovered: bool) -> Color {
+    if hovered {
+        Color::srgb(1.0, 0.0, 0.0) // Color.Red
+    } else {
+        Color::srgb(1.0, 1.0, 0.0) // Color.Yellow
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1095,6 +1107,36 @@ mod tests {
     fn parse_double_bracket_link() {
         let segs = parse_npc_line("<<Buy/@shop>>");
         assert_eq!(segs, vec![seg("Buy", None, Some("shop"))]);
+    }
+
+    /// 行内链接两态文字色必须逐值等于 C# `NPCDialog.NewButton`
+    /// （`NPCDialogs.cs:508-523`：常态 `Color.Yellow`、`MouseEnter → Color.Red`）。
+    /// 原版同帧实测（§3.2q/§3.2r 复测）：常态 `(255,255,0)` 191 px、
+    /// 悬停后该段 64 px 精确变 `(255,0,0)`。
+    ///
+    /// 阳性对照（实做）：把 `npc_link_color` 的悬停分支改回 `Color::srgb(1.0, 0.95, 0.4)`
+    /// （或常态改回 `(1.0, 0.85, 0.3)`）→ 本测试立即红。
+    #[test]
+    fn npc_link_colour_matches_csharp_newbutton_yellow_and_red() {
+        let s = |c: Color| c.to_srgba();
+        let normal = s(npc_link_color(false));
+        assert!(
+            (normal.red - 1.0).abs() < 1e-6
+                && (normal.green - 1.0).abs() < 1e-6
+                && normal.blue.abs() < 1e-6,
+            "常态应为 Color.Yellow (255,255,0)，实得 ({},{},{})",
+            normal.red * 255.0,
+            normal.green * 255.0,
+            normal.blue * 255.0
+        );
+        let hover = s(npc_link_color(true));
+        assert!(
+            (hover.red - 1.0).abs() < 1e-6 && hover.green.abs() < 1e-6 && hover.blue.abs() < 1e-6,
+            "悬停应为 Color.Red (255,0,0)，实得 ({},{},{})",
+            hover.red * 255.0,
+            hover.green * 255.0,
+            hover.blue * 255.0
+        );
     }
 
     /// 宋体双宽度量：ASCII 恒 0.50em、CJK/全角恒 1.00em（upem 256 实测）——
