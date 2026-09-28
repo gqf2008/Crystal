@@ -1560,3 +1560,74 @@ Drapery 那次 0.1095 略超阈值，看图确认是开着的——阈值偏紧�
 
 **⑤ 一条口径**：`npc_page_probe.py` 的窗美术阈值默认 0.10（`--threshold`）。
 实测"开"的帧：NPC 窗 **0.020–0.051**、商品窗 **0.086–0.110**；"关"的帧 **0.808–0.958**。
+
+### 3.2aa 小地图残留三件小事定性 + P 标签按职业显示（2026-09-28）
+
+§3.2i 只把小地图的**缩略图**收口了，owner 还挂着三件小事：① 面板块位 `Prguse[2090]/[2091]` 与 S/A/P 标签；
+② 标题/坐标文字；③ 昼夜 fade 是否叠缩略图。本轮把三件都定性完，其中一件（P 标签）是**真缺口**，已修。
+
+**① 面板块位：两侧一致，且"小档"解释了 §3.2z ③ 的 HUD 遮挡**
+
+`Prguse[2090]` = **128x154**、`Prguse[2091]` = **128x45**（`libextract.py` 实测；C# `MiniMapDialog`
+`Location = (ScreenWidth-126, 0)` = (898,0)）。大档帧上两侧都是 `2090`：
+
+| 帧 | `art_match --rect 898 0 128 154 --candidates 2090,2091` |
+|---|---|
+| 原版 `orig_baseline_none.png` | [2090] **0.187** / [2091] 0.737 ⇒ 2090 |
+| 本端 `ours_kbd_02_ingame.png` | [2090] **0.211** / [2091] 0.798 ⇒ 2090 |
+
+残差（~0.19/0.21）来自画在美术**不透明像素**上的那些控件（标题文字、底排四钮、光点），不是板块位差。
+**顺带解释 §3.2z ③**：原版按 `V` 之后 `Toggle()` 走的是 `SetSmallMode()`（`Index=2091`、`_fade=0`）
+⇒ 面板从 154 高缩成 **45 高**，`(936,144)` 自然落回世界，不是"点不动"。
+
+**② 标题 / 坐标文字：两侧都有**
+
+同一带（`(900,2,120,18)` 与 `(944,131,56,18)`）的亮像素计数：
+
+| 帧 | 标题带白像素 | 坐标带白像素 |
+|---|---|---|
+| 原版 `orig_baseline_none.png` | 187 | 104 |
+| 本端 `ours_kbd_02_ingame.png` | 167 | 83 |
+
+⇒ 两侧都画了「地图标题（`MinimapName`）」与「坐标（`{x, y}`）」；数值不同（296,615 vs 285,616）
+是两台服务器角色位置不同。
+
+**③ S/A/P 标签：真缺口（已修）——C# 用**职业**覆盖 `ModeView`**
+
+C# 两处口径**不是一回事**：
+
+- 构造里三个标签都 `Visible = Settings.ModeView`（`MainDialogs.cs:359/369/379`；`Settings.ModeView` 默认 **false**）；
+- 但 `GameScene.UserInformation`（`GameScene.cs:2222-2226`）在登录/进图时**赋值**覆盖 P：
+  `MainDialog.PModeLabel.Visible = User.Class == MirClass.Wizard || User.Class == MirClass.Taoist;`
+
+⇒ `ModeView=false`（默认）时原版**只画 P**（且只对法师/道士），本端三个标签都只看 `ModeView` ⇒ 一个都不画。
+本端修法（`Client-Bevy/src/game/hud.rs`）：新增纯函数 `pmode_visible(class)`（`Wizard|Taoist` ⇒ Visible），
+P 标签 spawn 一律 `Hidden`，由 `attack_mode_text_system` 每帧按 `ActorAppearance.class` 置位；
+S/A 保持 `ModeView` 门控。
+
+**实机 A/B（同一 e2e 服务端、同一账号 `goldenchr`／女道士、只换客户端二进制；判据 =
+`(895..1023, 186..199)` 里 `Color.Orange (255,165,0)`（容差 45）的像素数）**
+
+| 帧 | 橙色像素 | bbox |
+|---|---|---|
+| master 构建（修前） | **0** | — |
+| 本 PR 构建（修后） | 55（整带 65） | `x899..983, y188..193` |
+| 原版（期望） | 270 | `x899..1004, y188..197` |
+
+左边界（x=899）与首行（y=188）**逐值相同**；残差是**文案**（我方中文「宠物:攻击和跟随」 vs
+原版英文「[Pet: Attack and Move]」）+ 字形，与 §3.2e/§3.2t 同类。
+**阴性对照**：换成战士角色（账号 `test`／`bevychar`）→ **0** 个橙色像素（证明是按职业，不是"总是画"）。
+
+**④ 昼夜 fade 不叠缩略图（两侧一致）**
+
+C# `Libraries.MiniMap.Draw(map.MiniMap, viewRect, drawLocation, White, _fade)`（`MainDialogs.cs:1933`）
+的第 5 个实参 `_fade` 是**大/小模式的 alpha**（`Toggle()`：大档 `_fade = 1F`、收成小档 `_fade = 0`），
+**不是昼夜**。本端 `minimap_map_image_system` 只写 `ImageNode.image` / `image.rect`、`Node` 尺寸、
+`BackgroundColor` 与 `Visibility`，没有任何 tint/alpha ⇒ 两侧都**不给缩略图叠昼夜 fade**。
+昼夜相位只出现在 `LightSetting` 图标上（原版那帧是月亮 `2092`=夜、本端同帧是星 `2093`=昼）——
+那是两台服务器时间/地图 `LightSetting` 的**数据差**，不是绘制差。
+
+**门禁**：`cargo test --lib` **861 passed**（含新增 `pmode_visible_follows_class_rule`、
+`pmode_label_visibility_tracks_class`（阳性对照：同实体换职业要跟着翻））；
+`cargo test --test b0001_smoke --test ui_alignment` **53 passed**；
+实机交互巡回 `ui_interact_sweep.ps1 -ManageServer` **44/44 exit=0**。
