@@ -16,8 +16,8 @@ use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
 use crate::ui::sprite_ui::{shared_cjk_font, UiCjkFont, UiFont};
 use crate::ui::theme::{
-    load_lib_image, spawn_close_button, spawn_icon_button, spawn_item_cell_ui, spawn_label,
-    spawn_panel, spawn_scroll_bar_ui, UiItemCellData, UiScrollList,
+    load_lib_image, spawn_close_button, spawn_container, spawn_icon_button, spawn_item_cell_ui,
+    spawn_label, spawn_panel, spawn_scroll_bar_ui, UiItemCellData, UiScrollList,
 };
 
 /// #2892 批B：面板精灵与 C# 原生尺寸/坐标（C# `NPCGoodsDialog.Index = 1000; Location = (0,224)`）
@@ -49,6 +49,32 @@ pub const ROW_Y0: f32 = 34.0;
 pub const ROW_PITCH: f32 = 33.0;
 pub const ROW_H: f32 = 32.0;
 pub const ROW_W: f32 = 205.0;
+
+/// 选中格边框颜色：C# `MirGoodsCell.BorderColour = Color.Lime`（`MirControls/MirGoodsCell.cs:21`）。
+pub const SELECT_BORDER_COLOR: Color = Color::srgb(0.0, 1.0, 0.0);
+/// 竖分隔线相对格左边的 x：C# `MirGoodsCell.BorderInfo` 里那条 `Left + 40`
+/// （`MirGoodsCell.cs:111-112`，把图标区与文字区分开）。
+pub const SELECT_BORDER_DIVIDER_DX: f32 = 40.0;
+
+/// 选中格的 5 段边框（相对面板的 `(x,y,w,h)` 单位矩形）——逐条对应 C#
+/// `MirGoodsCell.BorderInfo`（`MirGoodsCell.cs:97-113`）：
+/// `(L-1,T-1)-(R,T-1)` 上、`(L-1,T-1)-(L-1,B)` 左、`(L-1,B)-(R,B)` 下、`(R,T-1)-(R,B)` 右、
+/// 以及 `(L+40,B)-(L+40,T-1)` 竖分隔线。返回 `(x, y, w, h)`（线段按 1px 厚画）。
+///
+/// C# 只在**选中格**上开 `Border`：`NPCDialogs.cs:1349`
+/// `Cells[i].Border = SelectedItem != null && Cells[i].Item == SelectedItem;`。
+#[must_use]
+pub fn select_border_segments(x: f32, y: f32, w: f32, h: f32) -> [(f32, f32, f32, f32); 5] {
+    let (l, t) = (x - 1.0, y - 1.0);
+    let (r, b) = (x + w, y + h);
+    [
+        (l, t, r - l + 1.0, 1.0),          // 上
+        (l, t, 1.0, b - t + 1.0),          // 左
+        (l, b, r - l + 1.0, 1.0),          // 下
+        (r, t, 1.0, b - t + 1.0),          // 右
+        (x + SELECT_BORDER_DIVIDER_DX, t, 1.0, b - t + 1.0), // 竖分隔线
+    ]
+}
 pub const ROW_COUNT: usize = 8;
 /// 图标盒：C# `DrawItem` 把物品图**居中**画在 40x32 盒里（`MirGoodsCell.cs:139-141`），
 /// 故 32x32 图标落在 `(ROW_X + 4, y)`；本端 cell 自带 2px 内缩，取 32x32 不拉伸。
@@ -198,6 +224,11 @@ pub struct NpcGoodsPrice(usize);
 #[derive(Component)]
 pub struct NpcGoodsCell(usize);
 
+/// 选中格的**边框线段**（每行 5 条，C# `MirGoodsCell.BorderInfo` 的五段；
+/// 只在被选中时有货格子上可见，见 [`npc_goods_selection_border_system`]）。
+#[derive(Component)]
+pub struct NpcGoodsBorder(usize);
+
 pub struct NpcGoodsPlugin;
 
 impl Plugin for NpcGoodsPlugin {
@@ -216,6 +247,7 @@ impl Plugin for NpcGoodsPlugin {
                 npc_goods_dialog_sync_system,
                 npc_goods_ui_system,
                 npc_goods_title_system,
+                npc_goods_selection_border_system,
             )
                 .run_if(in_state(AppState::Game)),
         );
@@ -332,6 +364,16 @@ fn spawn_npc_goods(
                 9,
             )
             .insert(NpcGoodsPrice(i));
+            // 选中格边框（C# `NPCDialogs.cs:1349` 只给选中格开 `Border`，
+            // 颜色取 `MirGoodsCell.BorderColour = Color.Lime`）：默认隐藏，
+            // 由 [`npc_goods_selection_border_system`] 按 `state.selected` 切显隐。
+            for (bx, by, bw, bh) in select_border_segments(ROW_X, y, ROW_W, ROW_H) {
+                spawn_container(p, bx, by, bw, bh, 11).insert((
+                    BackgroundColor(SELECT_BORDER_COLOR),
+                    NpcGoodsBorder(i),
+                    Visibility::Hidden,
+                ));
+            }
         }
     });
 }
@@ -349,6 +391,22 @@ fn npc_goods_row_rect(i: usize, ox: f32, oy: f32) -> (f32, f32, f32, f32) {
 
 fn npc_goods_dialog_sync_system(state: Res<NpcGoodsState>, mut mgr: ResMut<DialogManager>) {
     crate::game::dialogs::sync_dialog_state(&mut mgr, DialogKind::NpcGoods, state.visible);
+}
+
+/// 选中格边框显隐：C# `NPCDialogs.cs:1349`
+/// `Cells[i].Border = SelectedItem != null && Cells[i].Item == SelectedItem;`
+/// ⇒ 只有**有货且被选中**的那一格画 `Color.Lime` 边框（几何见 [`select_border_segments`]）。
+fn npc_goods_selection_border_system(
+    state: Res<NpcGoodsState>,
+    mut borders: Query<(&mut Visibility, &NpcGoodsBorder)>,
+) {
+    for (mut vis, b) in &mut borders {
+        let on = state.selected == Some(b.0) && state.goods.get(b.0).is_some();
+        let want = if on { Visibility::Visible } else { Visibility::Hidden };
+        if *vis != want {
+            *vis = want;
+        }
+    }
 }
 
 /// 标题图随面板类型切换（买卖档 `Title[27]` ↔ 合成档 `Title[12]`）。
@@ -692,6 +750,23 @@ fn npc_goods_server_events(
 }
 #[cfg(test)]
 mod tests {
+    use super::*;
+
+    /// 选中格边框几何 = C# `MirGoodsCell.BorderInfo`（`MirGoodsCell.cs:97-113`）：
+    /// 第一格 `Cells[0] @ (10,34)` 205x32 ⇒ 线框 `(9,33)-(215,66)`、竖分隔线 `x=50(L+40)`。
+    /// 交叉验证：C# 实机点第 1 格后，商品窗里 `(0,255,0)` 像素的包围盒是 屏幕 `(9,257)-(215,290)`
+    /// = 面板相对 `(9,33)-(215,66)` ✔ 逐值相同。
+    #[test]
+    fn select_border_segments_match_csharp_border_info() {
+        let s = select_border_segments(10.0, 34.0, 205.0, 32.0);
+        assert_eq!(s[0], (9.0, 33.0, 207.0, 1.0), "上边 (L-1,T-1)-(R,T-1)");
+        assert_eq!(s[1], (9.0, 33.0, 1.0, 34.0), "左边 (L-1,T-1)-(L-1,B)");
+        assert_eq!(s[2], (9.0, 66.0, 207.0, 1.0), "下边 (L-1,B)-(R,B)");
+        assert_eq!(s[3], (215.0, 33.0, 1.0, 34.0), "右边 (R,T-1)-(R,B)");
+        assert_eq!(s[4], (50.0, 33.0, 1.0, 34.0), "竖分隔线 = L+40");
+        assert_eq!(SELECT_BORDER_COLOR, Color::srgb(0.0, 1.0, 0.0), "Color.Lime");
+    }
+
     /// 商品行命中：初始原点等价于原固定坐标，拖动后跟随面板
     #[test]
     fn row_rect_origin_and_drag() {
