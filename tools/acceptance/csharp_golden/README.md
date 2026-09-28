@@ -1199,3 +1199,49 @@ dotnet run --project .\dbtool\dbtool.csproj -c Release -- <沙箱>\Server dump S
    `Server.MirDB.offline-bak` 备份/还原（每次运行都会还原成原版字节）。
    另外 `SaveAccounts()` 重写的 `Server.MirADB` 比原文件小（20455 → 12685 字节），
    做真实数据演练前请先复制一份存档。
+
+### 3.2s NPC 窗两端同状态 A/B（2026-09-28）：**美术与行网格一致，正文不可比（两边 NPC 数据不同源）**
+
+§3.2l-b 的"逐窗同状态占比"对 `npc` 一直没做。本轮补上，并把"为什么只能比一部分"钉成数据。
+
+**两端怎么开到同一只 NPC**
+
+- 原版侧：§3.2q 的**点击格点扫描**（35 击），事后按黄字带图案分类，共 4 种：
+  ① 无 NPC（20 帧）；② 商人（含 `View`+`Ask`+`Close`，6 帧）；③ 商人（只有 `View`+`Close`，6 帧）；
+  ④ 布告板（一条长黄字 `x37..179`，3 帧）。
+- 我方侧：`nearby {radius:2000}` 拿 `object_id` → `npc_call {object_id, key:'[@MAIN]'}`。
+- **前置（本轮踩到）**：上一轮的实机巡回把测试角色留在了 `D002`，`nearby` 里只有仓库 NPC ⇒
+  先用 `@mapmove 0 288 616`（测试账号有 GM）把它送回出生图；`npc_call` **不需要走动**。
+- **对齐 NPC 的通用做法（新增）**：我方 DB `npc_infos.file_name` 就是 C# 脚本的相对路径
+  （如 `BichonProvince/BorderVillage/BountyBoard-0`），拿它去沙箱 `Envir/NPCs` 逐个对文件即可判定
+  "是不是同一只"（本轮 40/40 命中）。**同名/同位置的 NPC，两边可能取不同脚本文件**——
+  这直接决定正文能不能比。
+
+**可比项（实测）**
+
+| 项 | 原版 | 我方 |
+|---|---|---|
+| 窗矩形 | `(0,0,440,224)` | `(0,0,440,224)`（`dialog_rect npc` 回 `rx/ry/rw/rh`） |
+| 窗美术 vs `Prguse[995]` | 不符率 **0.026 / 0.030** | 不符率 **0.030** |
+| 行网格 | 黄字带落在 `34 + 18i` 网格上（商人：`y92-100`=第 3 行、`y110-118`=第 4 行、`y146-154`=第 6 行） | `npc_rows` 的链接矩形 `y0 = 70 / 88 / 124` = `34 + 18·{2,3,5}` |
+| 关闭钮 | 窗内 `(413,3)`、`Prguse2[360]`、图头 24x21 | `dialog_rect` 回 `cx=425, cy=13.5, w=24, h=21`（与 C# 钮心一致） |
+
+**不可比（**数据差异**，不是客户端渲染）**
+
+| 项 | 原版 | 我方 |
+|---|---|---|
+| 标题 | `Merchant` / `BorderVillage` | `Merchant_Bull` / `BorderVillage_Board`（`npc_infos.name`） |
+| 正文 | 7 行（含 `I see you're holding: No Torch` / `No Amulet`） | 6 行（多一个空行、无 holding 行） |
+| 脚本文件 | `BichonProvince/BichonWall/Grocery.txt`（holding 行在 `:15-18`） | `BichonProvince/BichonWall/Grocery-0.txt`（没有 holding 行） |
+
+实测两端整窗差 **8.92%**（正文区 8.93%、标题带 9.99%）——**差异全部来自文案与标题名**，
+因为窗美术的 `art_match` 不符率只有 0.03（同一张 `Prguse[995]`）。⇒
+`npc` 这一行的"同状态占比"只能给出**美术/几何**结论，**文本像素不具可比性**，如实记录。
+
+**两处如实记录的残留**
+
+1. `BorderVillage_Board`（脚本 `BountyBoard-0.txt`，首行 `#IF CHECKPKPOINT > 100`）在我方**出空页**
+   （`npc_rows` 回 `visible:false`），而原版能出页 ⇒ `#IF` 求值或数据不同，**未定性**。
+2. 原版标题条右侧有 `Crystal` 水印叠在关闭钮上，我方没有（另一条已知差异，不计入本表）。
+3. 商品窗两端 A/B **仍未采集**：本轮只拿到原版侧的商品窗；我方点 `View` 要按 `npc_rows` 给的
+   `cx=21, cy=78`（我按原版坐标点了 `(25,96)`，打到的是 `Ask`），只验到"链接可点"，商品窗没开。
