@@ -149,6 +149,30 @@ function Msg-Wheel([int]$x,[int]$y,[int]$delta=-3) {
   Start-Sleep -Milliseconds 200
 }
 
+function Msg-Drag([int]$x,[int]$y,[int]$dx,[int]$dy,[int]$steps=6,[int]$holdMs=120) {
+  # 注入"按下-移动-抬起"（滑条/滚动条这类取 `OnMoving` 的控件要用它，`Msg-Click` 只按一下不动）：
+  #   WM_MOUSEMOVE(0x0200) → WM_LBUTTONDOWN(0x0201, wParam=1) →
+  #   中间若干步 WM_MOUSEMOVE（插值）→ WM_LBUTTONUP(0x0202, wParam=0)
+  # 与 `Msg-Click` 同坐标系：**客户区坐标**（窗口在 (0,0,1024,768) 时等于屏幕坐标）。
+  # 实证（2026-09-28）：商城窗 `GameShopDialog.PositionBar`（面板 (164,146) + 面板内 (120,117)
+  # ⇒ 屏幕 (284,263)）拖 60px 后，商品列表/滑条位移 —— C# 侧处理器是 `PositionBar_OnMoving`
+  # （`Client/MirScenes/Dialogs/GameshopDialog.cs:143-155`）。
+  $h = $global:csHwnd
+  $pt = { param($px, $py) [IntPtr](([int]$py -shl 16) -bor ([int]$px -band 0xFFFF)) }
+  [void][CsUi]::SendMessage($h, 0x0200, [IntPtr]::Zero, (& $pt $x $y))
+  Start-Sleep -Milliseconds 120
+  [void][CsUi]::SendMessage($h, 0x0201, [IntPtr]1, (& $pt $x $y))
+  Start-Sleep -Milliseconds $holdMs
+  for ($i = 1; $i -le $steps; $i++) {
+    $px = [int]($x + $dx * $i / $steps)
+    $py = [int]($y + $dy * $i / $steps)
+    [void][CsUi]::SendMessage($h, 0x0200, [IntPtr]1, (& $pt $px $py))
+    Start-Sleep -Milliseconds 120
+  }
+  [void][CsUi]::SendMessage($h, 0x0202, [IntPtr]0, (& $pt ($x + $dx) ($y + $dy)))
+  Start-Sleep -Milliseconds 250
+}
+
 function Shot-Cs([string]$label) {
   $h = $global:csHwnd
   $dir = "$script:CS\Client\Screenshots"
