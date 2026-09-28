@@ -2192,3 +2192,42 @@ pwsh npc_sweep.ps1 -SandboxRoot $env:TEMP\golden_sandbox -SetPos -PosMap 1 -PosX
 
 **门禁**：`cargo test --lib` **864 passed**（含新增 `shop_category_row_text_and_color_match_csharp`）；
 `b0001_smoke` 2 + `ui_alignment` 53；`ui_interact_sweep.ps1 -ManageServer` **44/44 exit=0**。
+### 3.2am 「同状态」对表（第二批）：`npc_goods` **选中格边框** —— C# 有、本端没有，已补（2026-09-28）
+
+方法同 §3.2al：两端点**同一格**（`(100,274)` = 商品窗第 1 格 `Cells[0] @ (10,34)` 的中心）再对表。
+
+**① C# 侧（权威证据）**
+
+`dbtool setpos 1 324 292` + `npc_sweep -Points 504,336` 打开
+`BichonProvince/BichonWall/Potion1`（Alchemist_Samuel）的商店（18 项），真实鼠标点第 1 格 ⇒
+商品窗里出现 **`Color.Lime (0,255,0)` 边框 510 px，bbox 屏幕 `(9,257)-(215,290)`**
+= 面板相对 `(9,33)-(215,66)`。
+
+**② 源码（三处拼起来的完整行为）**
+
+| 位置 | 内容 |
+|---|---|
+| `MirControls/MirGoodsCell.cs:21` | `BorderColour = Color.Lime` |
+| `MirControls/MirGoodsCell.cs:97-113` | `BorderInfo` 五段：上/左/下/右 + **`Left+40` 处的竖分隔线**；线框在 `(L-1,T-1)-(R,B)` |
+| `MirScenes/Dialogs/NPCDialogs.cs:1349` | `Cells[i].Border = SelectedItem != null && Cells[i].Item == SelectedItem;`（**只有选中格**画边框） |
+
+**③ 本端缺口与修法**
+
+`npc_goods.rs` 一直有 `state.selected`（买/回购用），但**完全不画**选中边框 ⇒ 真缺口。修法：
+
+- `select_border_segments()` **纯函数**给出五段几何（逐条对应 C# `BorderInfo`）；
+- 每行 5 条 1px `BackgroundColor(Color::Lime)` 节点（spawn 时 `Visibility::Hidden`）；
+- `npc_goods_selection_border_system` 按 `state.selected == Some(i) 且该格有货` 切显隐。
+
+**④ 复验（同状态下两侧逐值相同）**
+
+| 侧 | lime 像素 | bbox（屏幕） |
+|---|---|---|
+| C# | **510** | `(9,257)-(215,290)` |
+| 本端（修后） | **510** | `(9,257)-(215,290)` |
+
+⇒ 连像素数都一致 ✔。单测 `select_border_segments_match_csharp_border_info` 把五段几何与
+C# 帧实测的 bbox 钉在一起（`(9,33)-(215,66)`、竖线 `x=50`）。
+
+**门禁**：`cargo test --lib` **864 passed**；`b0001_smoke` 2 + `ui_alignment` 53；
+`ui_interact_sweep.ps1 -ManageServer` **44/44 exit=0**。
