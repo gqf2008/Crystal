@@ -93,10 +93,6 @@ pub struct PotionBeltNumber(usize);
 #[derive(Component)]
 pub struct PotionBeltBg;
 
-/// 半透明叠层（Prguse[1933]/[1945]，C# BeltPanel_BeforeDraw 0.5 alpha）
-#[derive(Component)]
-pub struct PotionBeltBgOverlay;
-
 /// 旋转按钮（C# RotateButton）
 #[derive(Component)]
 pub struct PotionBeltRotate;
@@ -237,24 +233,14 @@ fn spawn_potion_belt(
         .insert((PotionBeltWidget, PotionBeltBg, Visibility::Visible));
 
     commands.entity(panel).with_children(|p| {
-        // 半透明叠层 Prguse[1933]（C# BeltPanel_BeforeDraw 0.5 alpha；ImageNode.color 调透明度）
-        if let Some(h) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 1933) {
-            p.spawn((
-                Node {
-                    position_type: PositionType::Absolute,
-                    left: Val::Px(0.0),
-                    top: Val::Px(0.0),
-                    width: Val::Px(240.0),
-                    height: Val::Px(38.0),
-                    ..default()
-                },
-                ImageNode::new(h).with_color(Color::srgba(1.0, 1.0, 1.0, 0.5)),
-                PotionBeltWidget,
-                PotionBeltBgOverlay,
-                ZIndex(1),
-            ));
-        }
-
+        // 2026-09-28（README §3.2m）：**不再画 `Prguse[1933]` 那层"半透明叠层"**。
+        // C# 只在 `BeltDialog` 的 `BeforeDraw` 里 `Libraries.Prguse.Draw(Index + 1, …, 0.5F)`，
+        // 而 `BeforeDraw` 跑在**控件自己那张图之前** ⇒ 1932 面板随后覆盖它；而且面板的**透明像素**
+        // 处露的是**世界**（原版帧实测 (20,4)rel = (54,55,55) 世界色，不是这层的近黑）。
+        // 本端早期把它当成"画在面板之上的叠层"，Bevy 又在**线性空间**混合，
+        // 结果整块腰带被压暗 ~27%（美术 (224,208,184) → 本端 (164,152,134)，
+        // 与 `Prguse[1932]` 的不透明像素只有 56.5% 相符；原版同一帧 96.7% 相符）。
+        // 删掉后本端应与原版一样**逐点等于** 1932 美术。
         let white = images.add(crate::map_renderer::make_image(
             vec![255, 255, 255, 255],
             1,
@@ -376,7 +362,6 @@ fn potion_belt_ui_system(
             Option<&mut ImageNode>,
             Option<&Interaction>,
             Option<&PotionBeltBg>,
-            Option<&PotionBeltBgOverlay>,
             Option<&PotionBeltSlot>,
             Option<&PotionBeltNumber>,
             Option<&PotionBeltRotate>,
@@ -400,7 +385,7 @@ fn potion_belt_ui_system(
     // 隐藏：整排 Hidden；显示：只复活结构件——图标/计数的显隐归
     // potion_belt_icon_system 按槽位实有物品决定，此处若一并置 Visible，
     // 空槽的白色占位图就会漏出来（六个白格，2026-09-18 实机截图取证）。
-    for (_, _, mut vis, _, _, _, _, _, _, _, _, icon, count) in &mut items {
+    for (_, _, mut vis, _, _, _, _, _, _, _, icon, count) in &mut items {
         *vis = if visible.0 {
             if icon.is_some() || count.is_some() {
                 continue;
@@ -432,7 +417,7 @@ fn potion_belt_ui_system(
     let (dx, dy) = drag.offset(DragWindow::PotionBelt);
     let (px, py) = (px + dx, py + dy);
 
-    for (e, mut node, _, mut img, inter, bg, overlay, slot, num, rot, cls, ..) in &mut items {
+    for (e, mut node, _, mut img, inter, bg, slot, num, rot, cls, ..) in &mut items {
         if bg.is_some() {
             if let Some(h) = load_lib_image(
                 &mut libs,
@@ -448,26 +433,6 @@ fn potion_belt_ui_system(
             }
             node.left = Val::Px(px);
             node.top = Val::Px(py);
-            node.width = Val::Px(pw);
-            node.height = Val::Px(ph);
-        } else if overlay.is_some() {
-            if let Some(h) = load_lib_image(
-                &mut libs,
-                &mut images,
-                LibraryName::Prguse,
-                if vert { 1945 } else { 1933 },
-            ) {
-                if let Some(img) = img.as_mut() {
-                    if img.image != h {
-                        img.image = h;
-                    }
-                    // C# BeltPanel_BeforeDraw：Prguse[1933/1945] 用 0.5F 透明度叠加；
-                    // 纹理本身 99% 是不透明黑块，不降 alpha 会整块黑盖住腰带
-                    img.color = Color::srgba(1.0, 1.0, 1.0, 0.5);
-                }
-            }
-            node.left = Val::Px(0.0);
-            node.top = Val::Px(0.0);
             node.width = Val::Px(pw);
             node.height = Val::Px(ph);
         } else if let Some(s) = slot {
