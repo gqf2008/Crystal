@@ -14,6 +14,13 @@ import sys
 
 from PIL import Image, ImageChops
 
+# 窗口 kind 的**别名**：同一块 C# 面板在不同键位下被我们的 A/B 清单记成不同 kind。
+#  - `character_skill_page`（F11 技能页）= `CharacterDialog` 的**同一扇窗**（技能页是它的子页），
+#    矩形与 `character` 逐值相同 ⇒ 直接复用几何表里的 `character` 行。
+KIND_ALIAS = {
+    "character_skill_page": "character",
+}
+
 
 def rects_from_table(path):
     rows = json.load(open(path, encoding="utf-8"))
@@ -23,6 +30,9 @@ def rects_from_table(path):
         if not kind or r.get("x") is None or not r.get("expect"):
             continue
         out.setdefault(kind, (r["x"], r["y"], r["expect"][0], r["expect"][1]))
+    for alias, target in KIND_ALIAS.items():
+        if alias not in out and target in out:
+            out[alias] = out[target]
     return out
 
 

@@ -503,6 +503,51 @@ py -3.12 tools/acceptance/csharp_golden/bigmap_viewport_check.py --view mini `
 也不是"load 与 spawn 相邻且帧号字面量"那一型 ⇒ 静默漏掉（实测 `--data` 跑仍是 0 命中）。
 待办：把扫描面扩到"帧号来自循环变量"的表驱动形态（或至少在表驱动分支里按**尺寸列缺失**告警）。
 
+### 3.2k A/B 表最后三行「噪声项」的可比口径（2026-09-28）
+
+`Skills / Belt / Skillbar` 三行长期是**整帧参考**（两边的"差异"其实是世界与角色不同，判不出窗内绘制）。
+本轮给它们定口径，方法三件：
+
+1. **我方侧的开窗路径**（它们不是 DialogKind，`dialog open <kind>` 必然失败）：
+   - `character_skill_page` → `char_page {page:3}`（C# F11 = `CharacterDialog.Show()+ShowSkillPage()`）；
+   - `hud_belt` → `hud_toggle belt`（C# Z = `BeltDialog.Show/Hide`）；
+   - `hud_skillbar` → `hud_toggle skillbar`（C# R = `Settings.SkillBar` 开关）。
+   `hud_toggle`（新增，`Client-Bevy/src/control.rs`）翻转/置位的**就是热键用的那个状态位**
+   （`PotionBeltVisible` / `OptionState.skill_bar`），`on` 省略即翻转。`golden_ab_ours.ps1`
+   里这张 kind→opener 映射表就是"我方侧怎么把这三行摆到屏上"的单一出处。
+   **踩坑记录**：HUD 两行是**翻转**语义，第一版用"与基线差 < 0.5 就再翻一次"的重试启发式，
+   结果第 2 次重试把腰带又翻回来 ⇒ A/B 帧与基线同态、腰地区域 0 变化，看上去像"本端没画腰带"。
+   现在 HUD 两行**只翻一次**（`$isHudRow`），判据交给下面的**状态/美术**两把尺子。
+2. **期望矩形**（`window_rect_table.py`）：补 `BeltDialog → hud_belt`、`SkillBarDialog → hud_skillbar`，
+   并补上 `GameScene.Scene.MainDialog.Location.X` 的求值（`MainDialog` = `Prguse[1]` 1024x152 居中 ⇒ X=0）
+   ——不然 `BeltDialog` 的 `MainDialog.X + 230` 解不出，工具会诚实地 SKIP 掉它。
+   两行的最终矩形：`hud_belt (230,618,240,38)`、`hud_skillbar (0,0,216,28)`
+   （后者取 **默认** `Settings.SkillbarLocation[0]`；原版每帧由 `GameScene.DialogProcess:1327-1333` 改写）。
+3. **判据**：`character_skill_page` 走原来的整窗像素比（与 `character` 同一扇窗）——
+   **实测 1.7%**（从"整帧参考 89%"变成真实可比项）。HUD 两行**不能**用整窗比：那一帧两侧都把 HUD
+   关掉了，区域里露的是**世界**（两边地图数据不同源）⇒ 比值恒 ≈95%。改用**美术对齐**判据：
+   只比 `Prguse[1932/2190]` 里**不透明**的像素（同 `bigmap_viewport_check.py` 的思路）。
+
+**实测（美术对齐判据，只比不透明像素）**
+
+| 帧 | 腰带 `Prguse[1932]@(230,618)` 不符 | 技能栏 `Prguse[2190]@(0,0)` 不符 |
+|---|---|---|
+| 原版基线 | **3.3%**（腰带确实画着） | 81.9%（原版那格不是这张图 ⇒ 位置/档位不同） |
+| 原版 Z/R 帧 | 76.3%（Z 之后腰带消失 ✓） | 82.1% |
+| 本端基线 | **43.5%** | 5.8%（本端确实画着这张图） |
+| 本端 Z/R 帧 | 43.5%（**没变** ⇒ 见下） | 5.8% |
+
+**两个后续线索（本轮未收口，如实记录）**
+
+1. **本端腰带的"画"与原版不一致**：位置正确（±6px 内最优就是 (0,0)），但 **43.5%** 的不透明像素与
+   `Prguse[1932]` 不符（原版 3.3%）。已排除两种解释：① 不是位移（±6px 穷举最优 (0,0)）；
+   ② 不是 `Prguse[1933]` 0.5 alpha 叠加（按叠加算反而 48.9%）。
+2. **A/B 里本端 HUD 两行"翻了没变化"**：`ui_nodes_at(350,637)` 实测翻转会 4→0 节点、
+   前后截图在该区域差 9072/9120（99.5%）——RPC 本身是好的；但**同一脚本跑出来的 A/B 帧
+   在该区域与基线 0 差异**。即"手工探针有效、A/B 序列里无效"，最可能是脚本里 HUD 行的状态在
+   基线取帧前就被别的步骤改过（基线帧本身可能就没有腰带）——下一轮先用 `ui_nodes_at` 把
+   **基线帧那一刻**的节点数钉下来再谈像素。
+
 ## 3.3 逐窗几何对表（不需要原版交互，2026-09-26 起）
 
 §3.1 把"驱动原版点开某个窗口"这条路堵掉之后，**窗口几何**仍可验：原版每扇窗的矩形是纯常量
