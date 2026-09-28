@@ -297,6 +297,11 @@ pwsh tools\acceptance\csharp_golden\golden_ab_ours.ps1 -SandboxRoot $env:TEMP\go
 | Help / Keybind | 87.6% / 26.6% | 非缺陷：键位表**语言与条目**不同（我方中文动态生成 vs 原版英文固定清单），窗口矩形/控件位置一致（§3.2c 已记）。 |
 | Relationship / Ranking / GameShop / Bigmap | 22.2% / 10.6% / 29.6% / 63.3% | **已定性，见 §3.2g**（注意 `RankingDialog.cs` 与 `GameshopDialog.cs` 也都有 `PageNumberLabel` 一类的翻页控件，`TrustMerchantDialog.cs`/`HelpDialog.cs`/`MailDialogs.cs`/`IntelligentCreatureDialogs.cs`/`CharacterDialog.cs` 同理——**排查时先按这条线核"本端有没有翻页条"**，Friends 就是这么捞出来的）。 |
 
+> **2026-09-28 更新（§3.2f 的「居中窗 ±1px」待办，详见 §3.2ac）**：`golden_ab_diff.py` **默认带**
+> `--max-shift 1`，同批帧复跑后 Friends **25.5% → 6.6%（dx=1）**、Help **87.6% → 10.7%（dx=1）**，
+> 其余窗 dx=dy=0 ⇒ 只有居中窗在这对帧里偏 1px，是**取帧口径**不是本端排版 bug；
+> Friends 的残余里有 3546 px 压在**翻页条那一行**（新线索，留给下一批）。
+
 ### 3.2g 「翻页条」线索套到 Relationship / Ranking / GameShop / Bigmap（2026-09-28）
 
 判据/配方同 §3.2c–§3.2f（原版侧 `golden_kbd_windows.ps1` 键位开窗；我方侧
@@ -1691,3 +1696,29 @@ C# `Libraries.MiniMap.Draw(map.MiniMap, viewRect, drawLocation, White, _fade)`�
 本端 NPC 窗滚轮**可用**（§3.2u：9 行页 `wheel +3` → `offset 0→1`、`-3` → `1→0`），是**严格超集**；
 原版这一版滚轮不达属客户端缺陷。⇒ 结论：**本端保留滚轮**，不把"原版不滚"当基准；
 这条差异记「刻意背离」，与 §3.2g 的滚动条实现同类。
+
+### 3.2ac §3.2f 那条「居中窗 ±1px」待办收口：`--max-shift` 复跑后的真实残差（2026-09-28）
+
+§3.2f 的待办是「给逐窗对拍加『居中窗允许 ±1px 平移』（或把原版取帧改成真实客户区），**之后再看这批窗的真实差异**」。
+`golden_ab_diff.py` 现在**默认就带** `--max-shift 1`（默认 1，逐窗报 `平移后=<像素>(<占比>, dx=.. dy=..)`），
+本轮用同一批帧（原版 `orig_win_*.png` + 本端 `ours_win_*.png` + `rect_table.json`）复跑，把"之后"这半句做完：
+
+```powershell
+py -3.12 tools\acceptance\csharp_golden\golden_ab_diff.py --shots %TEMP%\golden_sandbox\shots --table %TEMP%\rect_table.json --max-shift 1
+```
+
+| 窗口 | 原始差异 | ±1px 平移后 | 平移量 | 含义 |
+|---|---|---|---|---|
+| **Friends** | 25.5%（18331） | **6.6%（4719）** | dx=1 dy=0 | 与 §3.2f 记的 4783 同量级 ⇒ 主导项确实是那 1px |
+| **Help** | 87.6%（239050） | **10.7%（29293）** | dx=1 dy=0 | 同上；剩下的是**键位表语言/条目**（§3.2c 已定性） |
+| 其余（Inventory/Equipment/Skills/Quests/Options/Group/Relationship/Ranking/GameShop/Bigmap/Keybind） | — | **无位移改善**（dx=dy=0） | — | 它们的差异不是"居中偏 1px"，是真内容/数据差（各自小节已定性） |
+
+⇒ **§3.2f 的待办只剩"口径已加、结论已出"**：居中窗（`Center`）在这对帧里确实整体偏 1px（原版取帧的客户区比 1024 宽 2px），
+**不是本端排版 bug**；其余窗的差异与位移无关。
+
+**顺带一条新线索（未收口，留给下一批）**：Friends 平移后的残余 **4870 px 里 3546 px 压在翻页条那一行**
+（按 20 行分带：屏幕 `y488..507` = 2488 + `y508..527` = 1058，其余各带只有 55–198 px 的 1px 级残差，
+标题带 484 px）。即"翻页条"这块在两边**仍有可见差**（本端是 PR #3320 补的那套：
+`PageNumberLabel (87,216) 83x17` + `Prguse2[240..242]@(70,218)` + `[243..245]@(171,218)`，
+空好友列表时该显示 `1/1` 且两个箭头为禁用帧）。下一轮的前置很清楚：
+**把 `Prguse2[240..245]` 三帧逐张导出来，与本端翻页条那一行逐像素比，判"帧号错"还是"占位/文字错"**。
