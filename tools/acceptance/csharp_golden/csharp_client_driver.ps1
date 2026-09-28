@@ -10,7 +10,10 @@ Add-Type @"
 using System;using System.Text;using System.Collections.Generic;using System.Runtime.InteropServices;
 public class CsUi {
   [DllImport("user32.dll")] public static extern bool SetCursorPos(int x,int y);
-  [DllImport("user32.dll")] public static extern void mouse_event(uint f,uint dx,uint dy,uint d,IntPtr e);
+  // `dwData` 用 **int** 而不是 uint：滚轮 delta 是**有符号**的（上滚 +120 / 下滚 -120），
+  // 声明成 uint 时 PowerShell 传负数会直接抛「无法转换为 UInt32」（实测 `Real-Wheel … -3` 就踩了）。
+  // DWORD 与 int 的 ABI 完全一致，改签名不会影响既有的 `Click-Image`。
+  [DllImport("user32.dll")] public static extern void mouse_event(uint f,uint dx,uint dy,int d,IntPtr e);
   [DllImport("user32.dll")] public static extern void keybd_event(byte vk, byte scan, uint flags, IntPtr extra);
   [DllImport("user32.dll")] public static extern bool GetCursorPos(out POINT p);
   [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr h, uint msg, IntPtr wp, IntPtr lp);
@@ -171,6 +174,43 @@ function Msg-Drag([int]$x,[int]$y,[int]$dx,[int]$dy,[int]$steps=6,[int]$holdMs=1
   }
   [void][CsUi]::SendMessage($h, 0x0202, [IntPtr]0, (& $pt ($x + $dx) ($y + $dy)))
   Start-Sleep -Milliseconds 250
+}
+
+function Drag-Image([int]$ix,[int]$iy,[int]$dx,[int]$dy,[int]$steps=8,[int]$stepMs=90) {
+  # **真实光标**拖动（按下 → 逐步移动 → 抬起）——2026-09-28 实测：`Msg-Drag`（注入 WM_MOUSEMOVE）
+  # **拖不动任何 `Movable` 控件**，因为 C# 读的是**真实光标**而不是事件坐标：
+  #   `CMain.cs:176`  `MPoint = Program.Form.PointToClient(Cursor.Position);`
+  # ⇒ 依赖 `MPoint` 的交互（悬停高亮 / 拖动 / 滚轮路由到 MouseControl）**必须用真实光标**，
+  #   并且客户端窗口必须**真的置顶**（`SetWindowPos(h, [IntPtr](-1), …)`；写成 `[IntPtr]::Zero`
+  #   是 HWND_TOP，会把 `Init-CsClient` 设的 HWND_TOPMOST 降下来 ⇒ 别的窗口压着就收不到鼠标消息）。
+  #
+  # 实测（沙箱 1024x768@(0,0)）：大地图 ScrollBar 拖 130px → 窗区 14396 px 变化；
+  # 商城分类列 PositionBar 拖 80px → 滑块 +80px（同一坐标 `Msg-Drag` 为 0）。
+  $h = $global:csHwnd
+  $r = [CsUi]::WRect($h.ToInt64())
+  [void][CsUi]::SetCursorPos(($r[0]+$ix),($r[1]+$iy)); Start-Sleep -Milliseconds 250
+  [CsUi]::mouse_event(0x0002,0,0,0,[IntPtr]::Zero)          # LEFTDOWN
+  Start-Sleep -Milliseconds 200
+  for ($i=1; $i -le $steps; $i++) {
+    [void][CsUi]::SetCursorPos(($r[0]+$ix+[int]($dx*$i/$steps)), ($r[1]+$iy+[int]($dy*$i/$steps)))
+    Start-Sleep -Milliseconds $stepMs
+  }
+  [CsUi]::mouse_event(0x0004,0,0,0,[IntPtr]::Zero)          # LEFTUP
+  Start-Sleep -Milliseconds 250
+}
+
+function Real-Wheel([int]$ix,[int]$iy,[int]$delta=-3,[int]$n=1) {
+  # **真实滚轮**：先把真实光标放到目标上（MPoint 才会更新、MouseControl 才有落点），
+  # 再发 `MOUSEEVENTF_WHEEL`。实测：原版 NPC 11 行页 `-120 ×3` → 正文区 11463 px（可逆）；
+  # 同一位置**注入** `WM_MOUSEWHEEL`（`Msg-Wheel`）= 0 px。
+  $h = $global:csHwnd
+  $r = [CsUi]::WRect($h.ToInt64())
+  [void][CsUi]::SetCursorPos(($r[0]+$ix),($r[1]+$iy)); Start-Sleep -Milliseconds 300
+  for ($i=0; $i -lt $n; $i++) {
+    [CsUi]::mouse_event(0x0800,0,0,($delta*120),[IntPtr]::Zero)
+    Start-Sleep -Milliseconds 180
+  }
+  Start-Sleep -Milliseconds 200
 }
 
 function Shot-Cs([string]$label) {

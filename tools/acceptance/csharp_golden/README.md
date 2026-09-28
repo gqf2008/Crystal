@@ -1352,9 +1352,10 @@ dotnet run --project .\dbtool\dbtool.csproj -c Release -- <沙箱>\Server dump S
   > 但**箭头可滚**（11926/11925 px）、**大地图滚轮可滚**（382 px）⇒ 原版侧 NPC 窗滚轮本身不发，
   > 与本端（可用）相反；C# 侧根因未定性。
 
-> **2026-09-28 更新（见 §3.2ab）**：已收口——**真实滚轮**（窗口前台已确认 `GetForegroundWindow()==csHwnd`）
-> 与注入滚轮在 11 行 NPC 页上都是 **0 像素变化** ⇒ 不是注入问题，是**原版这一版滚轮不达**；
-> 本端保留滚轮（严格超集），记「刻意背离」。
+> **2026-09-28 更新（见 §3.2ab → 已被 §3.2ai 撤回）**：本节"NPC 窗滚轮不发"的结论**作废**。
+> 它那几条读数用的是**注入** `WM_MOUSEWHEEL`——而 C# 的 `MPoint` 读真实光标（`CMain.cs:176`），
+> 注入滚轮在这条派发链上**永远不生效**（夹具限制）。修正夹具后（真置顶 + 真实光标 + `Real-Wheel`）：
+> 11 行页 `-120×3` → 正文区 **11463 px**，反向可还原 ⇒ **原版滚轮可用**，与本端一致。
 
 ### 3.2v §3.2m 的腰带残差 4.1pp 定性（2026-09-28）：是 6 个槽位**数字**的字形，不是画错
 
@@ -1501,6 +1502,10 @@ C# 侧代码是挂着的（`NPCDialog` 构造里 `MouseWheel += NPCDialog_MouseW
 > **2026-09-28 更新（见 §3.2ag）**：这条**要重跑**——`PositionBar_OnMoving`（`GameshopDialog.cs:596-616`）
 > 里 `PositionBar.Location = (x,y)` 在 `if (CategoryList.Count > 22)` **之外**，10 类时滑块本身也该跟手；
 > 它当时没动更像"那一次拖没落到滑块上"。重跑前置：**先做悬停阳性**（§3.2ag ②），本轮因锁屏**未采集**。
+
+> **2026-09-28 收口（见 §3.2ai）**：已复跑——**滑块本身跟手**（真实光标拖 80px ⇒ 滑块 +80px），
+> 当时"没动"是夹具问题（`Msg-Drag` 注入移动不改 `MPoint`）；**分类列索引确实不动**（9 类 ≤ 22，
+> 守卫短路，§3.2ah 有真源数字）。⇒ 本条两半都定论，不再挂"不可判定"。
 
 ### 3.2z 「点哪只 NPC」不再是盲扫：`dbtool npcs` + 格心落点 + 页型数值判据（2026-09-28）
 
@@ -1705,6 +1710,11 @@ C# `Libraries.MiniMap.Draw(map.MiniMap, viewRect, drawLocation, White, _fade)`�
 原版这一版滚轮不达属客户端缺陷。⇒ 结论：**本端保留滚轮**，不把"原版不滚"当基准；
 这条差异记「刻意背离」，与 §3.2g 的滚动条实现同类。
 
+> **⚠️ 2026-09-28 撤回（见 §3.2ai）**：本条**整段作废**——那两条"真实滚轮/注入滚轮都 0 px"的读数
+> 是在**降级窗口（`[IntPtr]::Zero`）**的夹具下取的，客户端当时被别的窗口压着、真实光标的
+> `WM_MOUSEMOVE` 到不了它（`MPoint` 读到的是别处）。修正夹具后**原版 NPC 窗真实滚轮可用**
+> （11 行页 `-120×3` → 正文区 **11463 px**，反向可还原）。**不再有"刻意背离"这一说**。
+
 ### 3.2ac §3.2f 那条「居中窗 ±1px」待办收口：`--max-shift` 复跑后的真实残差（2026-09-28）
 
 §3.2f 的待办是「给逐窗对拍加『居中窗允许 ±1px 平移』（或把原版取帧改成真实客户区），**之后再看这批窗的真实差异**」。
@@ -1905,6 +1915,11 @@ py -3.12 tools\acceptance\csharp_golden\golden_ab_diff.py `
 **唯一还欠凭证的一条**：`game_shop` 分类滑条的**真行程**（C# 守卫 `CStartIndex + 22 >= CategoryList.Count`
 就短路，沙箱那份数据只有 10 类）——要拿就必须给沙箱造一份分类数 > 22 的商城数据，属**数据准备**问题，不是判据缺失（§3.2y）。
 
+> **2026-09-28 收口（见 §3.2ah / §3.2ai）**：这一条**结了**——离线量到真源分类数 = **9**（+`Show All` = 10 行，
+> 见 §3.2ah），守卫短路⇒**分类列索引本来就不该动**；而**滑块本身**用真实光标一拖就**跟手**（§3.2ai ③）。
+> §3.2y 当时记的"滑条没动"是夹具问题。若日后要给沙箱造 >22 类数据，也只需改 `Server.MirDB` 的
+> `GameShopList[].Category`（注意 §3.2ah 的 `Edit.ItemInfoList` 坑）。
+
 ### 3.2ag 鼠标路径试验的**前置阳性对照**：先证明 `MouseControl` 有落点（2026-09-28，本轮又撞上锁屏）
 
 本轮想复核 §3.2y 那条「`game_shop` 分类滑条没动」，结果连**已证过的阳性**（大地图 `ScrollBar` 拖动）
@@ -1941,7 +1956,11 @@ title=`Windows 默认锁屏界面`、rect=`(0,0)-(2560,1440)` ⇒ **锁屏**。�
   里 `PositionBar.Location = (x,y)` 在 `if (CategoryList.Count > 22)` **之外** ⇒ 就算只有 10 类，
   滑块本身也该跟手；它没动更像"那一次拖没落到滑块上"（同会话先前那次大地图拖动可能把 `ActiveControl` 占住了）。
   **重跑前置**：解锁 → 悬停阳性（②）→ 全新会话 `Y` 开商城 → `Msg-Drag 284 267 0 60` → 看滑条带变不变。
-本轮**未采集**（锁屏）。
+  本轮**未采集**（锁屏）。
+
+  > **2026-09-28 收口（见 §3.2ai）**：解锁后复跑——**滑块跟手**（真实光标 `Drag-Image` 拖 80px ⇒ +80px）。
+  > 关键不是"那次没落到滑块上"，而是 **`Msg-Drag` 本身拖不动任何东西**：C# 的 `MPoint` 读**真实光标**
+  > （`CMain.cs:176`），注入的 `WM_MOUSEMOVE` 改不了它 ⇒ 要拖就用 `Drag-Image`（真实光标）＋真置顶。
 
 **④ 沙箱数据也可能被清空**：本轮还发现沙箱实拷贝文件丢失（`Server\Envir` 全空、`Client` 顶层 32 个文件只剩 3 个，
 `Client.exe` 都没了），按原版 `robocopy` 补回后**注意 `make_sandbox.ps1 -Force` 必须重跑**——否则
@@ -1993,3 +2012,101 @@ tools\...\dbtool.exe %TEMP%\golden_sandbox\Server gameshop      # 落 <serverDir
 已实证并修好（0 → 105）；同一遍修完仍是 0 的还有 `RecipeInfoList` / `GuildList` / `HeroList` /
 `StartItems` / `GTMapList`（**未逐一核它们是真空还是另一条绑定路径**，要量之前先确认它读的是
 `Envir.*List` 还是 `Edit.*List`）。
+
+### 3.2ai 夹具重大修正：鼠标交互必须用**真实光标**＋**真置顶**；据此撤回 §3.2ab、修正 §3.2y（2026-09-28）
+
+工作站解锁后按 §3.2ag 的协议复跑，发现**前面两条结论**（§3.2ab 的"原版滚轮不达"、§3.2y 的"滑条没动"）
+**都是我自己的夹具造成的假象**。根因两条，都在夹具侧：
+
+**① `MPoint` 读的是真实光标，不是事件坐标**
+
+```csharp
+// Client/Forms/CMain.cs:176
+MPoint = Program.Form.PointToClient(Cursor.Position);
+```
+
+⇒ 注入 `WM_MOUSEMOVE`**不会**改变 `MPoint`（C# 忽略消息里的坐标，回去读真实光标）。
+而悬停高亮 / 拖动（`MouseControl.Moving` 的位移计算）/ 滚轮路由（`MirScene.OnMouseWheel` → `MouseControl`）
+**全都依赖 `MPoint`** ⇒ **这些交互只能用真实光标驱动**（`SetCursorPos` + `mouse_event`）。
+`Msg-Click` 的 down/up 还能触发 Click 语义（§3.2l-b 那条仍成立），但 `Msg-Drag` 的"拖动"实际上只等于
+按下+抬起（`MPoint` 没动 ⇒ 控件不会位移）。
+
+**② `SetWindowPos(..., [IntPtr]::Zero, …)` 是 HWND_TOP，会把置顶降下来**
+
+`Init-CsClient` 用的是 `[IntPtr](-1)` = **HWND_TOPMOST** ✔；驱动里若再写一次
+`SetWindowPos(h, [IntPtr]::Zero, 0,0,1024,768, 0x40)`（insert-after=0 = **HWND_TOP**），
+就会把客户端**降到非置顶** ⇒ 别的窗口（终端）压在上面时，真实光标的 `WM_MOUSEMOVE` 到不了客户端
+（`WindowFromPoint(x,y)` 实测返回终端的 hwnd 而不是客户端）。**要置顶就写 `-1`**。
+
+**③ 修正夹具后的实测（同一沙箱、同一会话）**
+
+| 试验 | 夹具（旧） | 夹具（修正后） |
+|---|---|---|
+| 悬停商城 `UpButton`（`Prguse2[197]→[198]`） | 0 px | **126 px** ✔ |
+| 真实光标拖商城分类列 `PositionBar` 80px | （`Msg-Drag`）0 px | **滑块 +80px**（滑条带 bbox `(1,23)-(13,121)`）✔ |
+| 真实光标拖大地图 `ScrollBar` 130px | （`Msg-Drag` 本轮 6 px） | **窗区 14396 px**、滑条带 432 px ✔ |
+| 原版 NPC 11 行页**真实滚轮** `-120×3` | §3.2ab 记 0 px | **正文区 11463 px**（反向滚轮回原状，净 0）✔ |
+| 同位置**注入** `WM_MOUSEWHEEL` | 0 px | **0 px**（口径不变：注入滚轮不生效） |
+
+**④ 撤回 §3.2ab 的结论（重要）**
+
+§3.2ab 由"真实滚轮也不滚"推出「**原版这一版滚轮不达**」——那两条读数都是在
+**降级窗口（`[IntPtr]::Zero`）+ 注入移动**的夹具下取的，**不成立**。修正后：
+**原版 NPC 窗滚轮可用**（真实滚轮 11463 px，可逆），**注入 `WM_MOUSEWHEEL` 不可用**（夹具限制，
+同 §3.2l-b 的"注入点击可用、注入拖动不可用"一类）。⇒ 本端滚轮可用（§3.2u）**与 C# 一致**，
+**不再记"刻意背离"**。
+
+**⑤ 修正 §3.2y**
+
+§3.2y 的两半现在都有定论：
+
+- **分类列索引**：`CategoryList.Count = 9 ≤ 22` ⇒ `DownButton` / `PositionBar_OnMoving` 里的守卫短路，
+  **不动是对的**（§3.2ah 给了真源数字）；
+- **滑块本身**：`PositionBar.Location = (x,y)` 在守卫**之外** ⇒ 真实光标一拖就**跟手**（+80px）。
+  §3.2y 记的"滑条没动"是夹具问题（`Msg-Drag` 注入移动不改 `MPoint`）。
+
+**⑥ 驱动补了两个函数（本轮）**
+
+| 函数 | 用途 |
+|---|---|
+| `Drag-Image x y dx dy [steps] [stepMs]` | **真实光标**按下-步进-抬起（拖 `Movable` 控件/滚动条） |
+| `Real-Wheel x y [delta] [n]` | 真实光标就位后发 `MOUSEEVENTF_WHEEL`（滚轮；`delta` 正 = 向上） |
+
+配套口径：**任何鼠标交互试验前先 `SetWindowPos(h,[IntPtr](-1),…)` 置顶 + 用真实光标**，
+并按 §3.2ag 做「悬停换帧」阳性对照；`Msg-Click` / `Msg-Wheel` / `Msg-Drag` 只用于**不依赖 `MPoint`**
+的场景（点按钮、键盘路径、注入探针）。
+
+> **实测口径补充**：同一个 `Drag-Image` 在会话里的**第一次**调用可能是空放（客户端还没"看见"光标
+> 进入窗口）——本轮验证时第一次 0 px、紧接着第二次同参数 **432 px（滑块 +80px）**。所以
+> **先跑悬停阳性、再跑正式动作**，并把"第二次复现"写进结论（别拿单次空放当"控件不动"）。
+
+### 3.2aj 用修正后的夹具收掉「>8 项商品列表滚轮」这条未采集项（2026-09-28）
+
+§3.2r / §3.2t 一直记着「**>8 项的商品列表**滚轮命中区未采集」（当时那两只商人的商品数 ≤ 8，
+C# 的 `StartIndex` 顶/底守卫短路，滚了也不动）。恢复沙箱 `Envir` 之后，>8 项的商人脚本现成就有
+（`BichonWall/Potion-0.txt` 18 项、`Blacksmith-1xxx` 19 项、`BookStore` 10 项…），
+用 `setpos` + `npc_sweep` 一键到位：
+
+```powershell
+# DB 里 BichonProvince/BichonWall/Potion1（Alchemist_Samuel）@(324,291)
+pwsh npc_sweep.ps1 -SandboxRoot $env:TEMP\golden_sandbox -SetPos -PosMap 1 -PosX 324 -PosY 292 -Points 504,336
+# → 商人页 → 自动点首条链接（View Store）→ 商品窗（该商人 18 项）
+```
+
+判据：修正夹具（**真置顶 + 真实光标 + `Real-Wheel`**），每次滚完把光标移开再取帧（否则物品 tooltip
+会盖在列表上、把读数污染成 1.8 万像素）：
+
+| 动作 | 商品窗区 `(0,224,244,558)` 变化 | 说明 |
+|---|---|---|
+| 真滚轮**下 3 格** | **10451 px** | 列表内容滚动（截图逐字可见 `(HP)DrugLarge…` → `(HP)DrugSmall…`） |
+| 真滚轮**上 3 格** | 10451 px | 滚回 |
+| 再上 3 格 | **28 px** | 到顶后 `StartIndex <= 0` 守卫短路（该 28 px 是面板边框的动画残差） |
+| ①→② 净 | **28 px** | 可逆 ⇒ 确认是"滚动"不是"重画" |
+
+**顺带修掉的驱动 bug**：`CsUi.mouse_event` 的第 4 参声明成 `uint`，而滚轮 delta 是**有符号**的
+（下滚 -120）⇒ PowerShell 传负数直接抛「无法转换为 `UInt32`」（第一版 `Real-Wheel` 就踩了，
+那次"18367 px"其实是**物品 tooltip**、不是滚动）。改成 `int`（DWORD/int ABI 一致，不影响 `Click-Image`）。
+
+**本端对照**：`npc_goods.rs` 用的是同一个 `UiScrollList`（`StartIndex -= count`，与 C#
+`NPCGoodsPanel_MouseWheel` 同口径），命中区有单测 `goods_wheel_rect_is_exact_union_of_cells`；
+**实机**侧的滚轮阳性在 NPC 窗那条已采（§3.2u），**商品窗的 RPC 级滚轮阳性本轮未单独采集**（如实）。
