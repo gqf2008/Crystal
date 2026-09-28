@@ -2426,3 +2426,74 @@ pwsh tools\acceptance\csharp_golden\npc_sweep.ps1 -SandboxRoot $env:TEMP\golden_
 **门禁**：本轮只动文档 + `report.rs` 一处注释（无代码逻辑变化）：`cargo test --lib` **866 passed**；
 `cargo test --test b0001_smoke --test ui_alignment` **2 + 53 passed**；
 `ui_interact_sweep.ps1 -ManageServer` **44/44 exit=0**。
+### 3.2ap 「几何表里没映射」的 8 个 kind：`inspect` 入表、`chat_notice` 带透明度复核、`buff/timer` 不可比（2026-09-29）
+
+§3.2ao ① 末尾列了 8 个 kind 工具没有 C# 期望可比。本轮把能定位的逐个补上判据。
+
+**① `inspect`：几何 + 面板美术都逐值对上（新入表的一扇）**
+
+C# `InspectDialog`（`MainDialogs.cs:2153-2155`）：`Index = 430; Library = Libraries.Prguse;
+Location = (536,0);`，图头 **264x408** ⇒ 期望矩形 `(536,0,264,408)`。
+
+| 侧 | 读数 |
+|---|---|
+| 本端 `dialog_rect {kind:'inspect', fallback:'root'}` | **(536,0,264,408)** —— 与 C# 逐值相同 |
+| 本端 `art_match --rect 536 0 264 408 --candidates 430` | **0.064**（命中） |
+
+**② `chat_notice`：带 `Opacity` 的面板别拿"纯美术"比——换成两层复合模型逐值命中 94.4%**
+
+C# `ChatNoticeDialog`（`ChatNoticeDialog.cs:15-19`）：面板 `Prguse[1361]`（660x25）、装饰边子控件
+`Prguse[1360]`（660x25 @ 面板内 (0,0)）、`Opacity = 0.7F`；
+`Location = (ScreenWidth/2 - Size.Width/2, ScreenHeight/6 - Size.Height/2)`（逐项整数除法）= **(182,116)**。
+
+直接用 `art_match` 比"纯美术"只有 **0.805**（FAIL）——**因为面板是 0.7 透明叠在世界上的**，
+那个读数不代表画错。改判据（从基线帧取"世界"层、按 C# 的合成顺序算期望像素）：
+
+```python
+# layer1 = 0.7*Prguse[1361] + 0.3*world ；final = alpha(1360)*1360 + (1-alpha(1360))*layer1
+```
+
+| 模型 | 逐值命中（容差 60） |
+|---|---|
+| 只算 `0.7*1361 + 0.3*world` | 0.6369（10493/16475） |
+| **两层复合**（再叠 `Prguse[1360]`，按它的 alpha） | **0.9439（15551/16475）** |
+
+⇒ 面板精灵、装饰层、透明度、位置**四样都对上**；残差 5.6% 是文案字形（同类见 §3.2al）。
+**口径警告**：带 `Opacity` 的窗（`chat_notice`、`game_shop` 分类列的半透明底…）**不能用 art_match 直接判红**。
+
+**③ `dura_status`：结构差一层容器，绝对位置/尺寸与交互等价（不是缺口）**
+
+C# `DuraStatusDialog`（`MainDialogs.cs:3904-3930`）：容器**没有 Index/Library**（不可见），
+`Size = (40,19)`、`Location = (MiniMapDialog.X + 86, MiniMapDialog.Size.Height)` = **(984,154)**；
+里面那颗 `Character` 钮 `Prguse[2113]`（hover 2111 / pressed 2112）`Size = (20,19)`、容器内 `(20,0)`
+⇒ 绝对 **(1004,154)**，点击切 `CharacterDuraPanel`。
+
+| 侧 | 根矩形 | 钮的绝对矩形 |
+|---|---|---|
+| C# | (984,154,40,19)（不可见容器） | (1004,154,20,19) |
+| 本端 `dialog_rect` | **(1004,154,20,19)** | 同 —— 本端的"根"就是那颗钮 |
+
+⇒ 钮的位置/尺寸**逐值相同**；差的是 C# 多一层不画任何东西、也没有点击处理的 40x19 容器
+（左半 20px 是空的）⇒ **视觉与交互等价**，记口径不记缺口。
+
+**④ `buff` / `timer`：当前状态**无内容** ⇒ 不可比；而且"开窗帧 vs 基线帧"会被世界动画骗**
+
+| 窗 | C# 期望 | 本端实测 |
+|---|---|---|
+| `buff` | `BuffDialog` `Prguse2[20]`（44x34）@ `(ScreenWidth-170,0)` = **(854,0)** | `dialog_rect{fallback:'root'}` **ok=false**（见 ⑤）；`art_match (854,0,44,34)` = **1.000** ⇒ 该处什么都没有 |
+| `timer` | `TimerDialog`（`MirControl`，**无面板美术**）`(1024-120,768-230)` = **(904,538)**、`Size (120,100)` | 期望矩形内 **0 px 变化** |
+
+两扇都是**内容驱动**的：测试角色没有 buff、没开计时器 ⇒ 两端都是空条，**不可比（不是缺失）**。
+本端常量本身是对的（`timer.rs` 的单测就钉着 `PANEL_ORIGIN == (904,538)`；`buff.rs` 注释记 C# (854,0)）。
+
+**判据教训（本轮实测）**：先用"开窗帧 − 基线帧"找窗口位置，会**把世界里的怪物/动画当成窗口**——
+同一状态下**连拍两张基线**，自身就在 `(516,301)-(581,406)` 差 **1376 px**（D002 里有怪在走），
+而 `buff` 帧的差是 1485 px、`timer` 帧 853 px，被排除掉那块后**窗内是 0**。
+⇒ 判"这扇窗画了没有"要看**期望矩形内**的差，别用全屏差的最大包围盒。
+
+**⑤ 工具覆盖缺口（留给下次）**：`dialog_rect {kind, fallback:'root'}` 对 `buff`/`timer` 返回
+`ok=false`（它们是 manifest 的"无关闭钮设计"窗，根节点没登记 kind 标记）⇒ 这两扇**进不了几何对表**，
+本轮只能靠像素判据。另注：`chat_notice` 的 `dialog open` 只切 `ChatNoticeState.visible`、
+**不进 `DialogManager`** ⇒ `dialogs` 列表里看不到它，别据此判"没开"（本轮踩过）。
+
+**门禁**：本轮只动文档，`cargo test --lib` **866 passed**（无代码变化）。
