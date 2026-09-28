@@ -2315,3 +2315,114 @@ Close `x[8,40.5] y[124,140]`）；悬停用本端 `cursor {x,y}` 注入链接中
 `npc_link_colour_matches_csharp_newbutton_yellow_and_red`；阳性对照实做：把 `npc_link_color`
 的悬停分支改回 `(1.0,0.95,0.4)` ⇒ 立即红，读数 `悬停应为 Color.Red (255,0,0)，实得 (255,242.25,102)`）；
 `b0001_smoke` 2 + `ui_alignment` 53；`ui_interact_sweep.ps1 -ManageServer` **44/44 exit=0**。
+### 3.2ao 「从没进过表」的 13 扇窗：几何复核 + 面板美术逐像素；顺带查到 `report` 窗**原版美术是空的**（2026-09-29）
+
+§3.2af 那张 20 行 A/B 表是**键位可达**的那批；客户端还有一批窗（NPC 驱动 / 条件可见）从没进过
+任何一次对表 —— `storage / craft / socket / market / npc_awake / quest_detail / mail_compose /
+hero_inventory / input_box / item_rental / item_rental_browse / guild_territory / mentor / report`。
+本轮把它们的**几何**与**面板美术**两层各验一遍（都不需要原版客户端，所以**锁屏也能做**）。
+
+**① 几何：把 §3.3 的对表刷新到当前 master（`826078403`）**
+
+```powershell
+pwsh tools\acceptance\csharp_golden\probe_ui_nodes.ps1 -Repo <检出> -ClientHome <检出> `
+     -RectKinds all -InventoryOnly -Out %TEMP%\rects_all_20260929.json
+py -3.12 tools\acceptance\csharp_golden\window_rect_table.py --src <检出> --data Data `
+     --compare %TEMP%\rects_all_20260929.json
+# ⇒ 不一致：0；跳过（未取到/表达式）：7
+```
+
+**29 窗一致、0 不一致、7 SKIP**。这批里**从没被 §3.2af 那种 A/B 表点过名**的窗，现在都有了
+C# ↔ 我端的几何行：`storage (0,0,388,346)`、`craft (-12,236,337,215)`、`socket (117,241,81,62)`、
+`market (0,0,492,478)`、`npc_awake (0,0,360,420)`、`quest_detail (532,60,316,466)`、
+`mail_compose (100,100,236,300)`、`hero_inventory (0,0,324,266)`、`item_rental (718,287,204,109)`、
+`item_rental_browse (312,297,400,174)`、`guild_territory (0,0,568,241)`、`mentor (390,280,244,207)`。
+7 个 SKIP 各有据：`fishing/guild/creature/mount` 是 §3.2e 的 **`Show()` 守卫窗**（只弹提示不开窗，
+取不到关闭钮，是判据的设计不是缺陷）、`trade` 需要对手方、`hud_belt/hud_skillbar` 那一刻不在屏上。
+
+还有 **8 个 kind 不在这张表里**（工具没有 C# 期望可比，只有我端实测矩形）：
+`buff / chat_notice / dura_status / timer`（条件可见，探针那一刻不在屏上）、
+`hero_equipment / inspect`（C# 侧按状态换图/由对手方状态驱动）、`input_box`（服务端发起）、
+以及 `report`（原因见 ④：C# 面板美术是空条目，`Location = Center` 用 0 尺寸解不出可比矩形）。
+它们这轮的我端实测矩形：`hero_equipment (760,0,264,380)`、`input_box (368,306,288,156)`、
+`report (332,262,360,244)`、`durability`/`buff`/`timer`/`chat_notice` 探针那一刻未上屏。
+
+**② 面板美术：我端渲染 vs C# 美术逐像素（判据 = 不符像素占比，阈值 0.9 命中）**
+
+```powershell
+# 逐窗：开窗 → 截图（关掉背包/小地图，见 ③）→ 与 C# 那帧美术比
+py -3.12 tools\acceptance\csharp_golden\art_match.py --shot <帧> --lib Data\Prguse.Lib `
+     --rect 0 0 388 346 --candidates 586      # storage 为例
+```
+
+| 窗 | C# 面板美术 | 不符率 | 判定 |
+|---|---|---|---|
+| `hero_inventory` | `Prguse[1422]` | **0.004** | 一致 |
+| `storage` | `Prguse[586]` | 0.026 | 一致 |
+| `quest_detail` | `Prguse[960]` | 0.031 | 一致 |
+| `guild_territory` | `Prguse[680]` | 0.033 | 一致 |
+| `mail_compose` | `Title[671]` | 0.046 | 一致 |
+| `npc_awake` | `Title[710]` | 0.050 | 一致 |
+| `socket` | `Prguse3[20]` | 0.057 | 一致 |
+| `item_rental_browse` | `Prguse3[1]` | 0.062 | 一致 |
+| `craft`（按屏幕内部分） | `Prguse[1109]` | 0.082 | 一致（见 ③ 负原点） |
+| `input_box` | `Prguse[660]` | 0.092 | 一致 |
+| `market` | `Title[786]` | 0.098 | 一致 |
+| `mentor` | `Prguse[170]` | 0.181 | 面板一致，残差 = **窗内中文文案 + 两个钮**（§3.2af 已定性的"语言/内容"类） |
+
+**③ 三处"看着不符"其实是夹具/工具口径，不是缺陷**
+
+1. **`craft` 的负原点**：C# `CraftDialog.Show()` 里 `Location = (InventoryDialog.X - 12, Y + 236)`
+   ⇒ x = **-12**，左边 12 px 在屏外。`art_match` 直接按 `-12` 裁会把这 12 列和黑边比 ⇒ 报 **0.160** 假红；
+   按**屏幕内那部分**裁（列 12.. 对列 0..）比是 **0.082**。⇒ 负原点窗要么按内部分裁，要么认这个已知口径。
+2. **写邮件窗被背包压住**：首轮 `mail_compose` 报 **0.270**，看图发现是**背包窗（`(0,0,316,236)`）
+   压在写邮件窗（`(100,100,236,300)`）上面** —— 本端 `dialog open` 的 RPC **不抬 z**（真机点窗会抬）。
+   把背包/小地图关掉再截 ⇒ **0.046**。⇒ 这批窗截图前必须 `dialog {kind:'inventory'|'minimap', action:'close'}`。
+3. **`mentor` 0.181**：并排看（美术 vs 帧）面板逐像素一致，差的是窗内我们画的中文标签
+   （师父/徒弟/允许拜师）与 `MENTOR`/`SECESSION` 两个钮 —— 同一类残差见 §3.2al/§3.2t。
+
+**④ 捞到一条真东西：`report` 窗的 C# 面板美术**是空的
+
+`Client/MirScenes/Dialogs/ReportDialog.cs:15-16`：`Index = 1633; Library = Libraries.Prguse;`。
+直接读 `Data/Prguse.Lib` 的图头（`libextract.py` 同格式）：
+
+```
+1631 w 0 h 0 len 0 / 1632 w 0 h 0 len 0 / 1633 w 0 h 0 len 0 / 1634 w 0 h 0 len 0 / 1635 w 0 h 0 len 0
+```
+
+⇒ **1631–1635 整块都是空条目**。两条旁证：① 沙箱 `Client\Data\Prguse.Lib` 与仓库 `Data\Prguse.Lib`
+**MD5 相同**（`06284454F488891AA24BD72BF70F9A38`）⇒ 原版客户端读到的也是 0×0；
+② 在 `Prguse/Prguse2/Prguse3/Title` 四个库里扫 `360x244` 的图，**一张都没有**（不是"索引写错到别处"）。
+于是原版这版的行为是：面板**什么都不画**，而 `Location = Center` 用 0 尺寸算成 **(512,384)**，
+子控件（关闭钮 `(336,3)`、下拉 `(12,35)`、描述框 `(12,57)`、提交钮 `(260,219)`）就锚在屏幕中心那条线上。
+`MLibrary` 的索引是**一一对应**（`_indexList[i] = ReadInt32()`，不跳过空条目），所以这不是映射错觉。
+
+本端 `Client-Bevy/src/game/dialogs/report.rs` 的做法是**有意偏离**：`PANEL_SIZE = (360,244)`
+（由子控件外沿反推：关闭钮 336+24、提交钮 219+24）+ 深色兜底面板、按居中摆 (332,262)。
+⇒ 记在案：**这不是"没对齐"，是 C# 那版缺资产**；要不要改成"照原版什么都不画"，属于产品取向，
+留痕不擅自改（§3.2ao 就是它的凭证）。
+
+**⑤ 两端同状态 A/B：这几扇窗本轮**未采集**（工作站锁屏）**
+
+`storage / craft / market / npc_awake` 是 NPC 驱动的，要**原版侧真鼠标点 NPC** 才能出帧；
+本轮准备跑时工作站是**锁屏**状态——判据（§3.2ag）：
+
+```powershell
+# 前台窗口 class = Windows.UI.Core.CoreWindow、标题「Windows 默认锁屏界面」
+fg=0x2102CA class='Windows.UI.Core.CoreWindow' title='Windows 默认锁屏界面'
+```
+
+⇒ 按 owner 的边界**没有硬跑**（硬跑出来的"点不动"是假红）。配方已就绪，解锁后一条命令即可：
+
+```powershell
+# 起点选在 BichonWall 仓库/工匠/信托商人附近；落点由 DB 的 NPC 表算出（§3.2z）
+pwsh tools\acceptance\csharp_golden\npc_sweep.ps1 -SandboxRoot $env:TEMP\golden_sandbox `
+     -SetPos -RestartPerPoint -PosMap 1 -PosX 301 -PosY 259 `
+     -NpcsJson $env:TEMP\golden_sandbox\npcs_1.json -PlayerX 301 -PlayerY 259 -MaxDist 40 `
+     -Only 'Warehouse1'
+# ⚠ 起点不能与 NPC 同格（实测 (301,257) 距离 0 时点出来的是角色自己，页型恒 closed）
+```
+
+**门禁**：本轮只动文档 + `report.rs` 一处注释（无代码逻辑变化）：`cargo test --lib` **866 passed**；
+`cargo test --test b0001_smoke --test ui_alignment` **2 + 53 passed**；
+`ui_interact_sweep.ps1 -ManageServer` **44/44 exit=0**。
