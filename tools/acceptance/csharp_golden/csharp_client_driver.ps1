@@ -117,6 +117,18 @@ function Key-Cs([byte]$vk,[int]$holdMs=90) {
   Start-Sleep -Milliseconds 200
 }
 
+function Msg-Key([byte]$vk,[int]$holdMs=90) {
+  # 与 `Key-Cs` 的区别：`keybd_event` 发给**前台窗口**（脚本一退出、焦点回终端，
+  # 按键就打到终端上了 —— 实测同一脚本里 F9 有时"生效"有时"没反应"，就是焦点在谁那）。
+  # 这条把 WM_KEYDOWN/WM_KEYUP **直接 SendMessage 给客户端 hwnd**，不依赖焦点，
+  # 与 `csharp_kbd_login.ps1` 的按键路径同源（同为 `MirControl`/`MirScene` 的消息入口）。
+  $h = $global:csHwnd
+  [void][CsUi]::SendMessage($h, 0x0100, [IntPtr][int]$vk, [IntPtr]::Zero)
+  Start-Sleep -Milliseconds $holdMs
+  [void][CsUi]::SendMessage($h, 0x0101, [IntPtr][int]$vk, [IntPtr]0xC0000001)
+  Start-Sleep -Milliseconds 250
+}
+
 function Shot-Cs([string]$label) {
   $h = $global:csHwnd
   $dir = "$script:CS\Client\Screenshots"

@@ -28,93 +28,9 @@ import sys
 
 from PIL import Image
 
-
-def load_lib(path):
-    import struct
-
-    with open(path, "rb") as f:
-        data = f.read()
-    version, count = struct.unpack_from("<ii", data, 0)
-    if version < 2:
-        raise SystemExit(f"unsupported lib version {version}: {path}")
-    off = 8 + (4 if version >= 3 else 0)
-    return data, list(struct.unpack_from(f"<{count}i", data, off))
-
-
-def extract(data, offset):
-    import gzip
-    import struct
-
-    w, h, _x, _y, _sx, _sy, _shadow, length = struct.unpack_from("<hhhhhhBi", data, offset)
-    raw = gzip.decompress(data[offset + 17 : offset + 17 + length])
-    need = w * h * 4
-    if len(raw) < need:
-        raw = raw + bytes(need - len(raw))
-    return Image.frombytes("RGBA", (w, h), raw[:need], "raw", "BGRA")
-
-
-def crop_logical(shot, scale, rect, dx=0, dy=0):
-    x, y, w, h = rect
-    box = (
-        int(round((x + dx) * scale)),
-        int(round((y + dy) * scale)),
-        int(round((x + dx + w) * scale)),
-        int(round((y + dy + h) * scale)),
-    )
-    box = (max(0, box[0]), max(0, box[1]), max(0, box[2]), max(0, box[3]))
-    return shot.crop(box)
-
-
-def compare(art_rgb, art_mask, crop, tol):
-    """返回 `(不符像素, 参与比拼像素, 不符像素列表)`。`art_mask` 为 True 的才比对（不透明像素）。"""
-    if crop.size != art_rgb.size:
-        crop = crop.resize(art_rgb.size, Image.NEAREST)
-    bad = 0
-    total = 0
-    bad_px = []
-    a = art_rgb.load()
-    m = art_mask.load()
-    c = crop.load()
-    for y in range(art_rgb.size[1]):
-        for x in range(art_rgb.size[0]):
-            if not m[x, y]:
-                continue
-            total += 1
-            r, g, b = a[x, y]
-            sr, sg, sb = c[x, y]
-            if abs(sr - r) + abs(sg - g) + abs(sb - b) > tol:
-                bad += 1
-                bad_px.append((x, y, (r, g, b), (sr, sg, sb)))
-    return bad, total, bad_px
-
-
-def print_hotspots(bad_px, art_size):
-    """把不符像素压成「靠边缘带 + 粗网格」两个读数（比看整幅 PNG 省事且可复现）。"""
-    xs = [p[0] for p in bad_px]
-    ys = [p[1] for p in bad_px]
-    print(f"    不符像素包围盒 x[{min(xs)}..{max(xs)}] y[{min(ys)}..{max(ys)}]"
-          f"（美术 {art_size[0]}x{art_size[1]}）")
-    # 粗网格：把美术切成 8x4 格，打印每格不符数（`##` = ≥20，`.` = 0）
-    gw = max(1, art_size[0] // 8)
-    gh = max(1, art_size[1] // 4)
-    cells = {}
-    for x, y, _, _ in bad_px:
-        cells[(x // gw, y // gh)] = cells.get((x // gw, y // gh), 0) + 1
-    rows = (art_size[1] + gh - 1) // gh
-    cols = (art_size[0] + gw - 1) // gw
-    print(f"    不符分布（{cols}x{rows} 粗网格，格内不符数）：")
-    for cy in range(rows):
-        line = "      "
-        for cx in range(cols):
-            n = cells.get((cx, cy), 0)
-            line += "  ." if n == 0 else f"{n:3d}"
-        print(line)
-    # 边缘带统计：第一行/最后一行/第一列/最后一列的不符数（用来判"是不是差 1px"）
-    top = sum(1 for _, y, _, _ in bad_px if y == 0)
-    bottom = sum(1 for _, y, _, _ in bad_px if y == art_size[1] - 1)
-    left = sum(1 for x, _, _, _ in bad_px if x == 0)
-    right = sum(1 for x, _, _, _ in bad_px if x == art_size[0] - 1)
-    print(f"    边缘带不符：上边界 {top} / 下边界 {bottom} / 左边界 {left} / 右边界 {right}")
+# 与 `art_match.py` **共用同一套**解析/取格/比对实现（单一来源：两处各写一份必然漂移）。
+# 本脚本是它的"单候选 + 位移诊断 + 边缘带"专用变体（腰带那类**位置恒定、图唯一**的 HUD）。
+from art_match import art_mask, compare, crop_logical, extract, load_lib, print_hotspots
 
 
 def main():
@@ -147,14 +63,8 @@ def main():
 
     art = extract(data, offsets[a.index])
     base = art.convert("RGB")
-    mask = Image.new("1", art.size)
-    px = art.load()
+    mask = art_mask(art, a.alpha, a.dark)
     mp = mask.load()
-    for y in range(art.size[1]):
-        for x in range(art.size[0]):
-            r, g, b, al = px[x, y]
-            opaque = al >= a.alpha and (a.dark == 0 or r + g + b >= a.dark * 3)
-            mp[x, y] = 1 if opaque else 0
     opaque_total = sum(1 for y in range(art.size[1]) for x in range(art.size[0]) if mp[x, y])
     print(f"美术 {os.path.basename(a.lib)}[{a.index}] {art.size[0]}x{art.size[1]}，"
           f"不透明像素 {opaque_total}（比对基准）")
