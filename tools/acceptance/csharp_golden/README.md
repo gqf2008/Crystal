@@ -781,6 +781,45 @@ py -3.12 tools/acceptance/csharp_golden/art_match.py --shot <帧.png> --lib Data
   都是现成的。下一轮先解决"原版侧怎么把 NPC 点开"（或改用本端自证：`npc_rows` 给的行矩形 +
   `wheel` 注入 + 行文本/`scroll` 读数对照）。
 
+### 3.2o §3.2n 捞出的分歧已修：46 格点 ITEMS II 不再换页（2026-09-28，issue #3332）
+
+**决策**（`jev-decisions classify`，规则 `RULE_通用决策先自行用jev出结论不向owner求证`）：
+候选 `align_prompt`（46 格不换页 + 复用本端已有扩容确认框，保住扩容入口）
+**0.880 / 置信度 0.840**，`keep_current` 0.070、`other` 0.050 ⇒ 采用 `align_prompt`。
+
+**改了什么**
+
+1. `Client-Bevy/src/game/dialogs/inventory.rs` 新增纯函数 `inv_tab_target_page(tab, slots)`：
+   `(ITEMS II, 46 格)` → `None`（**不切页**），其余原样返回目标页。页签边沿处命中 `None` 时
+   调 `request_expand_confirm`（等价 C# `InventoryDialog.cs:230-239` 那个
+   `MirMessageBox(ExtraSlots8)`；确认走 `inv_confirm_system` 的 mode 2 → `@ADDINVENTORY`）。
+2. 扩容确认抽成 `request_expand_confirm(confirm, len)`，**BUY 按钮与页签两条入口共用**。
+3. **顺带修掉同一处的数值缺口**：确认文案里的费用原先按 `(len - 40) / 4` 算（`GRID_COLS*GRID_ROWS`
+   = 40），而 C# `InventoryDialog.cs:90-91` 与**本端服务端实扣**
+   （`ServerRust/src/actors/world/session.rs:7613-7617`）都是 `(len - 46) / 4`
+   ⇒ 修复前**每一档都多报 1M**（46 格显示 2,000,000、实扣 1,000,000；54 格显示 4M、实扣 3M）。
+
+**实机证据（本端，`Crystal-wt-npc` 构建）**
+
+| 步骤 | 读数 |
+|---|---|
+| 打开背包（46 格） | 页签 **197/169/739**（`art_match.py`，与 §3.2n 原版逐位相同） |
+| `click 112 18`（ITEMS II） | 命中 `72x23 [root=Inventory]`；页签**仍是 197/169/739**（**没有**切页） |
+| 同上帧的确认框区 `(284,289,456,190)` | 与点前差 **86372/86640 = 99.7%** ⇒ 确认框弹出 |
+| 客户端日志 | `背包未扩容（46 格）：ITEMS II 不切页，改为扩容确认` → `📦 请求背包扩容` |
+| `click 582,458`（确认钮 Yes：面板 `(284,289)` + 钮 `(260,157)` 76x25） | 命中 `76x25 [root=Inventory]`；`bag_probe` **total 46 → 54**（服务端真的扩容了） |
+
+**探针的持久状态已复原**（`LESSON_验收夹具须对持久游戏态幂等`）：扩容改了测试账号 `bevychar` 的
+`characters.backpack_size`（46→54）并扣了 1,000,000 金币；停服后把 `backpack_size` 改回 46、
+金币补回 1,000,000，重启登录复核 **`bag_probe total=46`**（DB 回读 `backpack_size=46 / gold=2003244`）。
+
+**门禁**：`cargo test --lib` **856 passed**（新增 2 条：`second_bag_page_needs_expanded_bag`、
+`expand_confirm_matches_csharp_and_server_cost`）+ `cargo test --test b0001_smoke --test ui_alignment`
+（2 + 53）+ `rustfmt --edition 2021 --check` 0 + 实机交互巡回 **44/44 exit=0**。
+
+**仍未采集**：那个确认框本身的视觉（`Prguse[360]` 456x190 @ (284,289) 是否与原版 `MirMessageBox`
+逐像素一致、按钮/文字排版）本轮只证了"弹出来且能确认"，没有做框内像素对拍。
+
 ## 3.3 逐窗几何对表（不需要原版交互，2026-09-26 起）
 
 §3.1 把"驱动原版点开某个窗口"这条路堵掉之后，**窗口几何**仍可验：原版每扇窗的矩形是纯常量

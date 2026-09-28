@@ -221,6 +221,38 @@ pub fn inv_tab_art_index(page: usize, tab: usize, slots: usize) -> Option<usize>
     Some(inactive)
 }
 
+/// 点页签后应该切到哪一页；`None` = **这次点击不切页**。
+///
+/// 唯一不切页的情形是「未扩容（46 格）时点 ITEMS II」：
+/// C# `InventoryDialog.cs:230-239` 在这个位置上不切页，而是弹
+/// `MirMessageBox(ExtraSlots8)`（OK 发 `@ADDINVENTORY`）⇒ 第 2 页在未扩容时**不可达**，
+/// 那格也始终是灰帧 169（README §3.2n 两侧逐格实测；issue #3332）。
+/// 本端没有 `MirMessageBox`，等价动作＝复用本端已有的扩容确认框（见 [`request_expand_confirm`]），
+/// 这样既与 C# 的"不换页"一致，又不丢扩容入口。
+pub fn inv_tab_target_page(tab: usize, slots: usize) -> Option<usize> {
+    if tab == 1 && slots == INV_BASE_BAG_SLOTS {
+        return None;
+    }
+    Some(tab)
+}
+
+/// 扩容确认：把 `InvDropConfirm` 摆成「花 N 金币扩展背包格？」这一档（`mode = 2`）。
+///
+/// 两个入口共用同一条路径（单一来源）：BUY 按钮（第 2 页）与
+/// **46 格时点 ITEMS II**（C# 那条 `MirMessageBox(ExtraSlots8)` 的等价物）。
+/// 费用口径与 C# `AddButton` **和本端服务端**一致：`1M + openLevel * 1M`，
+/// `openLevel = (长度 - 46) / 4`（基线是 **46** 不是网格 40）——
+/// C# `InventoryDialog.cs:90-91`、服务端 `ServerRust/src/actors/world/session.rs:7613-7617`
+/// （`ADDINVENTORY` 实际扣的就是这个数）。写成 40 会让**每一档都多报 1M**
+/// （46 格显示 2M、实扣 1M；54 格显示 4M、实扣 3M）。
+pub fn request_expand_confirm(confirm: &mut InvDropConfirm, len: usize) {
+    let level = len.saturating_sub(INV_BASE_BAG_SLOTS) / 4;
+    let cost = 1_000_000u64 + (level as u64) * 1_000_000u64;
+    confirm.text = format!("花费 {} 金币扩展背包格？", cost);
+    confirm.mode = 2;
+    confirm.visible = true;
+}
+
 /// 未扩容背包的格数 —— **本端口径**（把腰带排除在外）。
 ///
 /// **就是这个 46**（不是 `GRID_COLS * GRID_ROWS = 40`）：C# 判据写的是
@@ -1011,6 +1043,8 @@ fn inventory_ui_system(
     mut mgr: ResMut<DialogManager>,
     player_q: Query<(&Inventory, &Gold), With<LocalPlayer>>,
     mut inv_ui: ResMut<InvUiState>,
+    // §3.2n / issue #3332：46 格时点 ITEMS II 不切页，改走扩容确认（与 BUY 按钮同一路径）
+    mut confirm: ResMut<InvDropConfirm>,
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
     // 评审 P1：走 UiImageCache 缓存句柄（同 storage_ui_system，防每帧资产 churn）
@@ -1139,10 +1173,18 @@ fn inventory_ui_system(
             continue;
         }
         match tab {
-            Some(t) => {
-                inv_ui.page = t.0;
-                tracing::debug!("背包页 -> {}", t.0);
-            }
+            Some(t) => match inv_tab_target_page(t.0, size) {
+                Some(page) => {
+                    inv_ui.page = page;
+                    tracing::debug!("背包页 -> {}", page);
+                }
+                // 46 格（未扩容）点 ITEMS II：不切页，弹扩容确认框（C# `MirMessageBox(ExtraSlots8)`
+                // 的等价物；README §3.2n / issue #3332）
+                None => {
+                    request_expand_confirm(&mut confirm, size);
+                    tracing::info!("背包未扩容（{} 格）：ITEMS II 不切页，改为扩容确认", size);
+                }
+            },
             None => mgr.close(DialogKind::Inventory),
         }
     }
@@ -2091,12 +2133,8 @@ fn inv_add_del_buttons_system(
     }
     for (e, inter) in &add_btn {
         if edge(e, inter, &mut prev_inter) && can_expand {
-            // C# cost = 1M + openLevel*1M（openLevel = (len-46)/4；Rust 基线 40）
-            let level = len.saturating_sub(GRID_COLS * GRID_ROWS) / 4;
-            let cost = 1_000_000u64 + (level as u64) * 1_000_000u64;
-            confirm.text = format!("花费 {} 金币扩展背包格？", cost);
-            confirm.mode = 2;
-            confirm.visible = true;
+            // 与「46 格时点 ITEMS II」共用同一条确认路径（§3.2n / issue #3332）
+            request_expand_confirm(&mut confirm, len);
         }
     }
     for (e, inter) in &del_btn {
@@ -3096,6 +3134,8 @@ mod tests {
         world.insert_resource(GameLibraries::default());
         world.insert_resource(Assets::<Image>::default());
         world.insert_resource(crate::ui::sprite_ui::UiImageCache::default());
+        // §3.2n：`inventory_ui_system` 现在还要写扩容确认（46 格点 ITEMS II 用）
+        world.insert_resource(InvDropConfirm::default());
         // 任务页签按钮（Pressed 边沿触发；带 Visibility 走 all_vis 分支，无 InvSlot → 恒可见）
         world.spawn((DialogWidget, Button, Interaction::Pressed, InvTab(2)));
 
@@ -3965,5 +4005,55 @@ mod tests {
             assert_ne!(inactive, active, "选中帧与未选中帧不得同图");
         }
         assert_eq!(inv_tab_art_index(0, 3, big), None, "只有 3 张页签");
+    }
+
+    /// §3.2n / issue #3332：**46 格（未扩容）时点 ITEMS II 不切页**。
+    ///
+    /// 两侧逐格美术实测（`tools/acceptance/csharp_golden/README.md` §3.2n）证明原版在这个位置上
+    /// 页签**不变**（197/169/739）、改弹 `MirMessageBox(ExtraSlots8)`（`InventoryDialog.cs:230-239`），
+    /// 而本端原先无条件切到第 2 页并把该页签画成选中帧 168。
+    ///
+    /// 阳性对照：把 `inv_tab_target_page` 改回恒 `Some(tab)` → 本测试第一条断言红。
+    #[test]
+    fn second_bag_page_needs_expanded_bag() {
+        assert_eq!(
+            inv_tab_target_page(1, INV_BASE_BAG_SLOTS),
+            None,
+            "46 格点 ITEMS II 不得切页（原版弹扩容提示框）"
+        );
+        assert_eq!(
+            inv_tab_target_page(1, INV_BASE_BAG_SLOTS + 8),
+            Some(1),
+            "扩容后点 ITEMS II 应正常切到第 2 页"
+        );
+        // 其余页签不受 46 格规则影响
+        assert_eq!(inv_tab_target_page(0, INV_BASE_BAG_SLOTS), Some(0));
+        assert_eq!(inv_tab_target_page(2, INV_BASE_BAG_SLOTS), Some(2));
+    }
+
+    /// 扩容确认的两个入口共用同一条路径：费用文案与 `mode = 2`
+    /// （`inv_confirm_system` 的 mode 2 分支发 C# 同款 `@ADDINVENTORY`）。
+    ///
+    /// 费用口径取自 C# `InventoryDialog.cs:90-91` **与服务端实扣**
+    /// （`ServerRust/src/actors/world/session.rs:7613-7617`）：`1M + ((len-46)/4) * 1M`。
+    /// 阳性对照：把基线改回 `GRID_COLS * GRID_ROWS`（=40，修复前的写法）→ 本测试红
+    /// （46 格会算成 2,000,000）。
+    #[test]
+    fn expand_confirm_matches_csharp_and_server_cost() {
+        for (len, want) in [
+            (INV_BASE_BAG_SLOTS, "1000000"),      // 46 → openLevel 0
+            (INV_BASE_BAG_SLOTS + 8, "3000000"),  // 54 → openLevel 2
+            (INV_BASE_BAG_SLOTS + 12, "4000000"), // 58 → openLevel 3
+        ] {
+            let mut c = InvDropConfirm::default();
+            request_expand_confirm(&mut c, len);
+            assert_eq!(c.mode, 2, "扩容确认必须是 mode 2（len={len}）");
+            assert!(c.visible, "扩容确认必须可见（len={len}）");
+            assert!(
+                c.text.contains(want),
+                "{len} 格的扩容费用应为 {want}（与服务端实扣一致）：{}",
+                c.text
+            );
+        }
     }
 }
