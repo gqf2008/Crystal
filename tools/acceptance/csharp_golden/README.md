@@ -1498,6 +1498,10 @@ C# 侧代码是挂着的（`NPCDialog` 构造里 `MouseWheel += NPCDialog_MouseW
 - 结论：这一条记为「**无可滚行程 / 本数据下不可判定**」，**不是**"点不动"。
   （真要有行程，需要一份分类数 > 22 的商城数据；届时用 `Msg-Drag` 复跑即可。）
 
+> **2026-09-28 更新（见 §3.2ag）**：这条**要重跑**——`PositionBar_OnMoving`（`GameshopDialog.cs:596-616`）
+> 里 `PositionBar.Location = (x,y)` 在 `if (CategoryList.Count > 22)` **之外**，10 类时滑块本身也该跟手；
+> 它当时没动更像"那一次拖没落到滑块上"。重跑前置：**先做悬停阳性**（§3.2ag ②），本轮因锁屏**未采集**。
+
 ### 3.2z 「点哪只 NPC」不再是盲扫：`dbtool npcs` + 格心落点 + 页型数值判据（2026-09-28）
 
 §3.2q–§3.2x 的 NPC 取证一直是**临时配方**（格点盲扫 + 肉眼判页型 + 手算链接坐标），每轮重抄一遍，
@@ -1900,3 +1904,46 @@ py -3.12 tools\acceptance\csharp_golden\golden_ab_diff.py `
 
 **唯一还欠凭证的一条**：`game_shop` 分类滑条的**真行程**（C# 守卫 `CStartIndex + 22 >= CategoryList.Count`
 就短路，沙箱那份数据只有 10 类）——要拿就必须给沙箱造一份分类数 > 22 的商城数据，属**数据准备**问题，不是判据缺失（§3.2y）。
+
+### 3.2ag 鼠标路径试验的**前置阳性对照**：先证明 `MouseControl` 有落点（2026-09-28，本轮又撞上锁屏）
+
+本轮想复核 §3.2y 那条「`game_shop` 分类滑条没动」，结果连**已证过的阳性**（大地图 `ScrollBar` 拖动）
+都复现不出来——最后查明是**工作站又锁屏了**。顺手把这条前置固化成判据，免得下次再把「锁屏」读成「原版不达」。
+
+**① 锁屏判据（比 §3 的 `CopyFromScreen` 更硬的一条）**
+
+```powershell
+$fg = [CsUi]::GetForegroundWindow()      # 或 user32 GetForegroundWindow
+# 锁屏时 = Windows.UI.Core.CoreWindow，标题「Windows 默认锁屏界面」，覆盖整屏
+```
+
+本轮实测：`cs=0xD99094A fg=0x2102CA same=False`，前台窗口 class=`Windows.UI.Core.CoreWindow`、
+title=`Windows 默认锁屏界面`、rect=`(0,0)-(2560,1440)` ⇒ **锁屏**。此时 `SetForegroundWindow(client)` 也无效
+（Windows 前台锁：后台进程抢不到焦点）。
+
+**② 锁屏时鼠标三条路径**全死（真光标落在锁屏上）：
+
+| 试验 | 结果 |
+|---|---|
+| 悬停商城 `UpButton`（`Prguse2[197]→[198]`） | 12x12 里 **0 px** 变化（`MouseControl` 没落点） |
+| 拖大地图 `ScrollBar`（§3.2y 证过 11220 px 的那一下） | 窗区 **6 px**（世界动画量级）= 没拖到 |
+| 注入 `WM_MOUSEWHEEL` / `Msg-Drag`（都是 `SendMessage` 到 hwnd） | 同样 0（派发链要 `MouseControl != null` 才把事件交给控件，而它恒 null） |
+
+⇒ 所以**判据是「悬停换帧」**：动手做任何 hover / 拖动 / 滚轮试验**之前**，先悬停一颗有 `HoverIndex` 的钮
+（商城上下页箭头、关闭钮…），**该钮的像素必须变**——不变就说明 `MouseControl` 没落点，
+后面所有"不动"都不算证据（§3.2q ③ 那条 177 px 的悬停对照就是本条）。
+
+**③ 对既有结论的影响（如实划界）**
+
+- §3.2ab（原版 NPC 窗滚轮不达）**不受影响**：那轮是**解锁**状态（`GetForegroundWindow()==csHwnd` 实测为真），
+  且同会话里**页面箭头点击可用**（点击走 `ActiveControl`，要 MouseControl 有落点才点得动）⇒ 当时派发链是活的。
+- §3.2y 的「`game_shop` 分类滑条拖动没动」**要重跑**：`PositionBar_OnMoving`（`GameshopDialog.cs:596-616`）
+  里 `PositionBar.Location = (x,y)` 在 `if (CategoryList.Count > 22)` **之外** ⇒ 就算只有 10 类，
+  滑块本身也该跟手；它没动更像"那一次拖没落到滑块上"（同会话先前那次大地图拖动可能把 `ActiveControl` 占住了）。
+  **重跑前置**：解锁 → 悬停阳性（②）→ 全新会话 `Y` 开商城 → `Msg-Drag 284 267 0 60` → 看滑条带变不变。
+  本轮**未采集**（锁屏）。
+
+**④ 沙箱数据也可能被清空**：本轮还发现沙箱实拷贝文件丢失（`Server\Envir` 全空、`Client` 顶层 32 个文件只剩 3 个，
+`Client.exe` 都没了），按原版 `robocopy` 补回后**注意 `make_sandbox.ps1 -Force` 必须重跑**——否则
+`Client\Mir2Config.ini` 会被原版那份覆盖成 `Port=7000`（打到共享 Rust 开发服）。口径与命令见
+`~/.agents/rules/LESSON_沙箱Envir可能被清空_取证前先核NPC脚本数并按原版恢复.md`。
