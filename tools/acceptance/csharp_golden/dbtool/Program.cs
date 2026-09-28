@@ -68,6 +68,7 @@ class Program
         if (mode == "export") { Export(arg2 ?? "db_export.json"); return; }
         if (mode == "setpw") { SetPassword(arg2, args.Length > 3 ? args[3] : null); return; }
         if (mode == "npcs") { ListNpcs(arg2); return; }
+        if (mode == "gameshop") { ListGameShop(arg2); return; }
         if (mode == "setpos")
         {
             // setpos <accountId> <mapIndex> <x> <y> [charName]
@@ -82,8 +83,51 @@ class Program
             return;
         }
         Console.WriteLine("usage: dbtool <serverDir> list | dump <TypeFullName> | export <outfile> | " +
-                          "setpw <accountId> <newPassword> | npcs [mapIndex] | " +
+                          "setpw <accountId> <newPassword> | npcs [mapIndex] | gameshop [outfile] | " +
                           "setpos <accountId> <mapIndex> <x> <y> [charName]");
+    }
+
+    // 商城分类对账：`GameShopList`（Server.MirDB）里的**分类名与条数**。
+    // 用途：客户端 `GameshopDialog` 的分类列滚动/滑条行程要 `CategoryList.Count > 22`
+    // （`GameshopDialog.cs:135/583` 两处守卫），而 README §3.2y 当时是拿一份 **Drops** 里的
+    // `GameShop_Guard.txt`（10 个以分类命名的段）当"商城数据"，那多半不是真源 —— 这条把真源量出来。
+    static void ListGameShop(string outArg)
+    {
+        var env = LoadEnvir(out _);
+        // ⚠️ `BindGameShop(item)` 是拿 **`Envir.Edit.ItemInfoList`**（编辑器那份）去绑 ItemInfo 的
+        // （`Server/MirEnvir/Envir.cs:4550-4561`），而离线 `LoadDB()` 里那份是**空的**
+        // ⇒ 每个商品都会 `return false` 被丢掉，`GameShopList` 恒 0（实测就是这个原因，
+        // 不是"DB 里没有商城"）。把 `ItemInfoList` 灌进 `Edit` 再跑一遍 LoadDB，这一遍才量得到真值。
+        SecondPassForEditBoundLists(env);
+        var items = Seq(F(env, "GameShopList")).ToList();
+        var byCat = new Dictionary<string, int>(StringComparer.Ordinal);
+        foreach (var it in items)
+        {
+            var cat = S(F(it, "Category"));
+            if (cat.Length == 0) cat = "(none)";
+            byCat[cat] = byCat.TryGetValue(cat, out var n) ? n + 1 : 1;
+        }
+        var cats = byCat.Keys.ToList();
+        cats.Sort(StringComparer.Ordinal);
+
+        var sb = new StringBuilder();
+        sb.Append("{\n");
+        sb.Append("  \"source\": \"" + Esc(Root) + "\",\n");
+        sb.Append("  \"items\": " + items.Count + ",\n");
+        sb.Append("  \"categories\": " + cats.Count + ",\n");
+        sb.Append("  \"categoryListCountOver22\": " + (cats.Count > 22 ? "true" : "false") + ",\n");
+        sb.Append("  \"categoryList\": [\n");
+        sb.Append(string.Join(",\n", cats.ConvertAll(c =>
+            "    {\"name\":\"" + Esc(c) + "\",\"items\":" + byCat[c] + "}")));
+        sb.Append("\n  ]\n}\n");
+
+        var outFile = string.IsNullOrEmpty(outArg)
+            ? Path.Combine(Path.GetFullPath(Path.Combine(Root, "..")), "gameshop.json")
+            : Path.GetFullPath(outArg);
+        File.WriteAllText(outFile, sb.ToString(), new UTF8Encoding(false));
+        Console.WriteLine($"gameshop: {items.Count} item(s), {cats.Count} categor(ies), " +
+                          $"Count>22={cats.Count > 22} → {outFile}");
+        foreach (var c in cats) Console.WriteLine($"  {c} : {byCat[c]}");
     }
 
     // 列出 Server.MirDB 的 NPCInfoList（`FileName` = 脚本相对路径、`Location` = 世界格），可按地图过滤。
@@ -181,7 +225,26 @@ class Program
     static void Export(string outFile)
     {
         var env = LoadEnvir(out var loadAccountsError);
+        SecondPassForEditBoundLists(env);
         WriteExport(env, loadAccountsError, outFile);
+    }
+
+    // 离线 `LoadDB()` 里 `Edit.ItemInfoList` 是空的，而 `BindGameShop()` 之类的绑定读的正是**它**
+    // （`Envir.cs:4550-4561`）⇒ 走 `Edit.*` 的列表会全被丢掉，`dbCounts` 里表现为**假零**
+    // （`GameShopList` 实测：pass1=0、pass2=105）。把 `ItemInfoList` 灌进 `Edit` 再跑一遍 `LoadDB()`
+    // 就修好了；绑定失败的条目不会进 `GameShopList`，所以这一遍的数字才是真值。
+    static void SecondPassForEditBoundLists(object env)
+    {
+        var editItems = F(F(env, "Edit"), "ItemInfoList") as IList;
+        if (editItems == null) return;
+        editItems.Clear();
+        foreach (var info in Seq(F(env, "ItemInfoList"))) editItems.Add(info);
+        var loadDb = env.GetType().GetMethod("LoadDB", BindingFlags.Public | BindingFlags.NonPublic |
+                                                      BindingFlags.Instance, null, Type.EmptyTypes, null);
+        if (loadDb == null) return;
+        ProtectGameDb();
+        Console.WriteLine("LoadDB() pass 2（Edit.ItemInfoList=" + editItems.Count + "）: " + S(loadDb.Invoke(env, null)));
+        ProtectGameDb();
     }
 
     // Give an existing sandbox account a known password, using the original AccountInfo.Password setter

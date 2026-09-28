@@ -1941,9 +1941,55 @@ title=`Windows 默认锁屏界面`、rect=`(0,0)-(2560,1440)` ⇒ **锁屏**。�
   里 `PositionBar.Location = (x,y)` 在 `if (CategoryList.Count > 22)` **之外** ⇒ 就算只有 10 类，
   滑块本身也该跟手；它没动更像"那一次拖没落到滑块上"（同会话先前那次大地图拖动可能把 `ActiveControl` 占住了）。
   **重跑前置**：解锁 → 悬停阳性（②）→ 全新会话 `Y` 开商城 → `Msg-Drag 284 267 0 60` → 看滑条带变不变。
-  本轮**未采集**（锁屏）。
+本轮**未采集**（锁屏）。
 
 **④ 沙箱数据也可能被清空**：本轮还发现沙箱实拷贝文件丢失（`Server\Envir` 全空、`Client` 顶层 32 个文件只剩 3 个，
 `Client.exe` 都没了），按原版 `robocopy` 补回后**注意 `make_sandbox.ps1 -Force` 必须重跑**——否则
 `Client\Mir2Config.ini` 会被原版那份覆盖成 `Port=7000`（打到共享 Rust 开发服）。口径与命令见
 `~/.agents/rules/LESSON_沙箱Envir可能被清空_取证前先核NPC脚本数并按原版恢复.md`。
+
+### 3.2ah 商城分类数**离线量出来**：`dbtool gameshop` ＋ 一个必须知道的绑定坑（2026-09-28）
+
+§3.2y 把「本沙箱商城只有 10 类」记在 **`Drops/GameShop_Guard.txt`** 上——那是**一份 drop 文件**
+（10 个以分类命名的段：Pots/Weapons/Armour/...），不是商城数据的真源。商城真源是
+`Server.MirDB` 的 `GameShopList[].Category`（服务端 `PlayerObject.GetGameShop()` 逐条发
+`S.GameShopInfo`，`Server/MirObjects/PlayerObject.cs:13913-13944`）。本轮把它离线量出来：
+
+```powershell
+tools\...\dbtool.exe %TEMP%\golden_sandbox\Server gameshop      # 落 <serverDir>\..\gameshop.json
+```
+
+**坑（不修就永远量成 0）**：`BindGameShop(item)` 是拿 **`Envir.Edit.ItemInfoList`**（编辑器那份）
+去绑 ItemInfo 的（`Server/MirEnvir/Envir.cs:4550-4561`），而离线 `LoadDB()` 里那份**是空的**
+⇒ 每个商品都 `return false` 被丢掉，`GameShopList` 恒 **0**——`dbtool export` 的
+`dbCounts.GameShopList = 0` 就是这种**假零**（我第一版 `gameshop` 也踩了同一个坑）。
+修法：把 `ItemInfoList` 灌进 `Edit.ItemInfoList` 再跑一遍 `LoadDB()`，这一遍才绑得上
+（`gameshop` 与 `export` **都已内置**这遍；修后 `dbCounts.GameShopList` 从 `0` 变成 **105**）。
+
+**实测（原版沙箱 DB，105 件 / 9 类）**
+
+| 分类 | 件数 |
+|---|---|
+| Potion | 28 |
+| Transform | 28 |
+| Special | 11 |
+| Scroll | 9 |
+| Mount | 8 |
+| Creature | 6 |
+| Torch | 6 |
+| Fishing | 5 |
+| Package | 4 |
+
+客户端分类列 = 9 类 + `Show All` = **10 行** ⇒ §3.2y 的"10 类"**数字对得上、来源写错了**。
+
+**对 §3.2y 结论的影响（两半分开看）**
+
+- **分类列的滚动/滑条行程**：`CategoryList.Count(9) > 22` = **false** ⇒ 在本数据下
+  **确实不可达**（`GameshopDialog.cs:135/583` 两处守卫短路）——这一半结论成立，而且现在有**真源数字**背书。
+- **滑块本身跟不跟手**：`PositionBar_OnMoving` 里 `PositionBar.Location = (x,y)` 在守卫**之外**
+  ⇒ 与分类数无关，属 §3.2ag ③ 要重跑的那条（**等解锁**）。
+
+**顺带一条口径**：凡是走 `Edit.*` 绑定的列表，离线 `dbCounts` 都可能是**假零**——`GameShopList`
+已实证并修好（0 → 105）；同一遍修完仍是 0 的还有 `RecipeInfoList` / `GuildList` / `HeroList` /
+`StartItems` / `GTMapList`（**未逐一核它们是真空还是另一条绑定路径**，要量之前先确认它读的是
+`Envir.*List` 还是 `Edit.*List`）。
