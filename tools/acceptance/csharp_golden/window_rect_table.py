@@ -69,6 +69,16 @@ CLASS_TO_KIND = {
     # 它是 manifest 的 `no_close_by_design` 之一（C# 无关闭键，靠 NPC 窗联动），
     # 靠 `dialog_rect{fallback:"root"}` 才拿得到矩形（2026-09-27）。实测我方 (0,225,164,207) ⇒ OK。
     "RefineDialog": "refine",
+    # 2026-09-28（§3.2k）：A/B 表里长期当"整帧参考"的两行 HUD，给它们定可比口径——
+    # 原版侧是两扇**独立窗口**，矩形可从 C# 常量算出来：
+    #  - `BeltDialog`（`InventoryDialog.cs:606-613`）`Prguse[1932]` 240x38 @(MainDialog.X+230, ScreenHeight-150)
+    #    = (230,618)（`MainDialog.X` 由上面的 MainDialog 求值补上）；
+    #  - `SkillBarDialog`（`MainDialogs.cs`）`Prguse[2190]` 216x28，**运行时**每帧被
+    #    `GameScene.DialogProcess:1327-1333` 改成 `Settings.SkillbarLocation[i]`（默认 (0,0)/(216,0)）
+    #    —— 这里取**默认档**的 bar0 即 (0,0,216,28)；原版沙箱若动过技能栏位置，这一行会显示位移，
+    #    属于口径的已知边界（写在这里免得后人当成缺陷）。
+    "BeltDialog": "hud_belt",
+    "SkillBarDialog": "hud_skillbar",
 }
 
 # **有类但不可比**（写明理由，免得后人反复试）：
@@ -280,6 +290,11 @@ def main():
         main_h = lib_header_size(os.path.join(a.data, "Prguse.Lib"), 1)
         if main_h:
             e = e.replace("GameScene.Scene.MainDialog.Location.Y", str(768 - main_h[1]))
+            # 同理补 X：`MainDialog`（1024 档 = `Prguse[1]` 1024x152）按
+            # `Location = (ScreenWidth/2 - Size.Width/2, …)` 居中 ⇒ X = (1024-1024)/2 = 0。
+            # 不认它的话 `BeltDialog`（`InventoryDialog.cs:608-613` 的 `MainDialog.X + 230`）
+            # 会被"未知符号一律 SKIP"跳过 —— 这条本来就在追它（§3.2k）。
+            e = e.replace("GameScene.Scene.MainDialog.Location.X", str(int((1024 - main_h[0]) / 2)))
         e = e.replace("this.Size.", "Size.")  # C# `MirImageControl` AutoSize ⇒ 自身 Size = 背景图原生尺寸
         e = e.replace("Size.Width", str(size[0]) if size else "0")
         e = e.replace("Size.Height", str(size[1]) if size else "0")
@@ -295,6 +310,14 @@ def main():
 
     for r in rows:
         w, h = (r["expect"] or [0, 0])
+        # 构造期 `Location` **不是最终位置**的窗口：运行时每帧被改写（§3.2k）。
+        #  - `SkillBarDialog`：`GameScene.DialogProcess:1327-1333`
+        #    `Bar.Location = Settings.SkillbarLocation[i]`（`Settings.cs:163` 默认 `{0,0}`、`{216,0}`）
+        #    ⇒ 取 **bar0 = (0,0)**；构造期的 `(0, BarIndex*20)` 会被覆盖（所以 `BarIndex` 解不出也照样可比）。
+        #    原版沙箱若在设置里挪过技能栏，本行会显示位移——这是口径的已知边界。
+        RUNTIME_LOC = {"SkillBarDialog": (0, 0)}
+        if r["class"] in RUNTIME_LOC:
+            r["x"], r["y"] = RUNTIME_LOC[r["class"]]
         # 扫描阶段的表达式求值不认识 `Size.Width`（那时还没解析出尺寸）——这里用最终尺寸再补一次
         if r.get("loc_expr") and (r["x"] is None or r["y"] is None):
             r["x"] = eval_expr(r["loc_expr"][0], r["expect"])

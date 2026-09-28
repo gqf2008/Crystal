@@ -133,13 +133,34 @@ foreach ($r in $manifest) {
     # （本轮实测：Guilds 之后 Ranking/Help/…/Skillbar 全部带着"你不在任何公会中。" ⇒ 假差异）。
     Rpc 'notice_probe' @{ action = 'close' } | Out-Null
     Start-Sleep -Milliseconds 200
-    $open = Rpc 'dialog' @{ kind = $kind; action = 'open' }
+    # 「我方侧怎么把这扇窗摆到屏上」：绝大多数窗就是 `dialog open <kind>`，但清单里有三行
+    # 原版是**键位驱动的 HUD/子页**，本端没有同名 DialogKind（此前这三行一直整帧比 = 噪声，
+    # §3.2k 给它们定可比口径）：
+    #   character_skill_page → `char_page {page:3}`（C# F11 = `CharacterDialog.Show()+ShowSkillPage()`）
+    #   hud_belt             → `hud_toggle belt`（C# Z = `BeltDialog.Show/Hide`）
+    #   hud_skillbar         → `hud_toggle skillbar`（C# R = `Settings.SkillBar` 开关）
+    # 判据仍是"与基线帧有可见差异"（`no_effect` 会如实标出摆位失败）。
+    $openKind = @{ character_skill_page = 'character'; hud_belt = 'belt'; hud_skillbar = 'skillbar' }
+    $isHudRow = ($kind -eq 'hud_belt' -or $kind -eq 'hud_skillbar')
+    function Open-One([string]$k) {
+        switch ($k) {
+            'character_skill_page' { return (Rpc 'char_page' @{ page = 3 }) }
+            'hud_belt' { return (Rpc 'hud_toggle' @{ which = 'belt' }) }
+            'hud_skillbar' { return (Rpc 'hud_toggle' @{ which = 'skillbar' }) }
+            default { return (Rpc 'dialog' @{ kind = $k; action = 'open' }) }
+        }
+    }
+    $open = Open-One $kind
     $png = Join-Path $shots ("ours_win_{0}.png" -f $r.action)
     if (Test-Path -LiteralPath $png) { Remove-Item -LiteralPath $png -Force }
     # 重试：直到这一张与基线**明显不同**（= 窗真的开出来了），最多 8 轮
     $diff = $null
     foreach ($try in 1..8) {
-        $open = Rpc 'dialog' @{ kind = $kind; action = 'open' }   # 幂等：open 已开时保持开
+        # 幂等：多数窗 `open` 已开时保持开。HUD 两行是**翻转**语义 ⇒ **只翻一次**，
+        # 判据换成状态（`hud_toggle` 的回执 `on` 字段 + 屏上节点数），不再靠"与基线有没有差"
+        # 重试——那个启发式会被世界动画污染，实测会让第 2 次重试把腰带又翻回来（= 帧与基线同态，
+        # A/B 里表现为"这块没变化"，把人引向假缺陷）。
+        if ($try -eq 1 -or ($null -ne $diff -and $diff -lt 0.5 -and -not $isHudRow)) { $open = Open-One $kind }
         Start-Sleep -Milliseconds 700
         Rpc 'screenshot' @{ path = $png } | Out-Null
         Start-Sleep -Milliseconds 900
@@ -150,7 +171,7 @@ foreach ($r in $manifest) {
     #   ① `dialog_rect(kind)` 有根（`fallback=root`）⇒ 窗真的开着；
     #   ② `notice_probe().text` ⇒ 若被 C# `Show()` 守卫拦下（宠物/行会/坐骑/钓鱼在状态不具备时），
     #      原版行为是"弹提示框且不开窗"，文本就是那一刻的原版文案。
-    $rect = Rpc 'dialog_rect' @{ kind = $kind; fallback = 'root' }
+    $rect = Rpc 'dialog_rect' @{ kind = $(if ($openKind.ContainsKey($kind)) { $openKind[$kind] } else { $kind }); fallback = 'root' }
     $np = Rpc 'notice_probe'
     $rows += [pscustomobject]@{
         action = $r.action; kind = $kind; key = $r.key

@@ -521,6 +521,14 @@ enum ControlCommand {
         clear: bool,
         reply: Sender<String>,
     },
+    /// 翻转 HUD 开关（2026-09-28，#3327）：`which` = `"belt"` / `"skillbar"`，
+    /// `on = None` = 翻转（与 C# 热键同语义）。逐窗 A/B 的两行 HUD（Belt/Skillbar）
+    /// 此前只能整帧比、等于噪声；有了它我方侧也能把这两行摆到屏上做窗内比对。
+    HudToggle {
+        which: String,
+        on: Option<bool>,
+        reply: Sender<String>,
+    },
     /// 只读小地图探针（2026-09-28）：小地图图区画的是**哪一块**（`ImageNode.rect`）在实机里
     /// 读不到，导致"本端图区与 `mmap[mini_map]` 的 C# 期望裁剪只对上 79.7%"只能靠推断
     /// （见 walgit 线程 `crystal-minimap-art-align`）。本探针把绘制侧的真值暴露出来：
@@ -1037,6 +1045,10 @@ struct ControlQueries<'w, 's> {
     >,
     /// `minimap_probe` 用：小地图大/小档位（C# `MiniMapDialog.Index != 2090` 即小档）
     minimap_mode: Res<'w, crate::game::dialogs::minimap::MiniMapMode>,
+    /// `hud_toggle` 用：腰带 HUD 显隐（C# `BeltDialog.Show/Hide`，键 Z；`potion_belt` 消费）
+    potion_belt_visible: ResMut<'w, crate::game::dialogs::potion_belt::PotionBeltVisible>,
+    /// `hud_toggle` 用：技能栏开关（C# `Settings.SkillBar`，键 R；`skill_bar_show_system` 消费）
+    option: ResMut<'w, crate::game::dialogs::option::OptionState>,
 }
 
 /// `dialog_rect`(`fallback="root"`) 的选择规则：候选里挑**第一个可见且 kind 匹配**的根面板矩形。
@@ -1856,6 +1868,34 @@ fn handle_conn(mut stream: std::net::TcpStream, tx: Sender<ControlCommand>) {
                     json!({"error": "control channel closed"})
                 }
             }
+            // #3327：HUD 两行的**可比口径**（§3.2k）——`hud_toggle {which}` 翻转与热键
+            // **同一个状态位**（belt → `PotionBeltVisible`，skillbar → `OptionState.skill_bar`），
+            // 让逐窗 A/B 能把「Belt（Z）」与「Skillbar（R）」两行从我方侧也真的摆到屏上。
+            // 不传 `on` 就是**翻转**（与原版按键语义一致：C# `if (!Visible) Show() else Hide()`）。
+            "hud_toggle" => {
+                let which = params
+                    .get("which")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let on = params.get("on").and_then(|v| v.as_bool());
+                let (reply_tx, reply_rx) = bounded::<String>(1);
+                if tx
+                    .send(ControlCommand::HudToggle {
+                        which,
+                        on,
+                        reply: reply_tx,
+                    })
+                    .is_ok()
+                {
+                    let s = reply_rx
+                        .recv_timeout(std::time::Duration::from_secs(2))
+                        .unwrap_or_else(|_| "{}".to_string());
+                    serde_json::from_str::<Value>(&s).unwrap_or_else(|_| json!({}))
+                } else {
+                    json!({"error": "control channel closed"})
+                }
+            }
             "chat_size" => {
                 // #2781：{size} 0/1/2 → 聊天窗口 4/7/11 行（等价点控制栏「大小」按钮）
                 let size = params.get("size").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
@@ -2476,6 +2516,7 @@ fn control_reply(cmd: &ControlCommand) -> Option<&Sender<String>> {
         | ControlCommand::QuestDetail { reply, .. }
         | ControlCommand::CharPage { reply, .. }
         | ControlCommand::ChatSize { reply, .. }
+        | ControlCommand::HudToggle { reply, .. }
         | ControlCommand::Click { reply, .. }
         | ControlCommand::TypeText { reply, .. }
         | ControlCommand::Key { reply, .. }
@@ -3176,6 +3217,28 @@ fn apply_control_commands(
                 page_res.0 = page;
                 mgr.open(crate::game::dialogs::DialogKind::Character);
                 let s = json!({"ok": true, "page": page}).to_string();
+                let _ = reply.send(s);
+            }
+            ControlCommand::HudToggle { which, on, reply } => {
+                // #3327（§3.2k）：翻转/置位 HUD 开关，**与热键同一个状态位**
+                //  belt     → `PotionBeltVisible`（C# `BeltDialog.Show/Hide`，键 Z）
+                //  skillbar → `OptionState.skill_bar`（C# `Settings.SkillBar`，键 R）
+                let s = match which.as_str() {
+                    "belt" => {
+                        let cur = q.potion_belt_visible.0;
+                        let want = on.unwrap_or(!cur);
+                        q.potion_belt_visible.0 = want;
+                        json!({"ok": true, "which": "belt", "on": want})
+                    }
+                    "skillbar" => {
+                        let cur = q.option.skill_bar;
+                        let want = on.unwrap_or(!cur);
+                        q.option.skill_bar = want;
+                        json!({"ok": true, "which": "skillbar", "on": want})
+                    }
+                    other => json!({"ok": false, "error": format!("unknown which: {other}")}),
+                }
+                .to_string();
                 let _ = reply.send(s);
             }
             ControlCommand::ChatSize { size, reply } => {
