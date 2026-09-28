@@ -1292,3 +1292,39 @@ dotnet run --project .\dbtool\dbtool.csproj -c Release -- <沙箱>\Server dump S
 **门禁**：`cargo test --lib` 859、`cargo test --test b0001_smoke --test ui_alignment`（2+53）、
 `rustfmt --edition 2021 --check` 0、实机交互巡回 **44/44 exit=0**
 （首跑有 2 项偶发 FAIL：`ranking` / `npc_awake` 的关闭钮，复跑全绿——记为已知偶发，与本改动无关）。
+
+### 3.2u 两侧 NPC 脚本来源对账 + NPC 窗滚轮阳性验证（2026-09-28）
+
+**① 脚本来源对账：解释掉 §3.2s 的两处残留**
+
+做法：把本端 DB `npc_infos.file_name` 指向的脚本（形如 `BichonProvince/BorderVillage/BountyBoard-0`）
+与「同目录同名的**默认变体**」（去掉 `-<地图号>` 后缀，即 `BountyBoard`）逐字节比。map1 的 43 只 NPC：
+
+| 类别 | 数量 |
+|---|---|
+| 默认变体与变体文件**内容相同** | 19 |
+| 内容**不同** | 14（如 `BountyBoard-0` vs `BountyBoard`、`Grocery-0` vs `Grocery`、`Blacksmith-0` vs `Blacksmith`…） |
+| **没有**默认变体（只有变体文件） | 10 |
+
+⇒ §3.2s 的两处残留都能归因：
+
+- `BorderVillage_Board` 在本端**出空页**：本端取 `BountyBoard-0.txt`（首行 `#IF CHECKPKPOINT > 100`），
+  原版取 `BountyBoard.txt`（**没有**这条守卫）——所以同一只"布告板"，一边有页一边没页；
+- 商品清单少 `TownTeleport`：`Grocery-0.txt` 与 `Grocery.txt` 的 goods 定义不同。
+
+两者都是**服务端数据差异**（两侧 NPC→脚本映射不同），不是本端渲染或引擎问题。
+
+**② NPC 窗滚轮：把"真能滚"的阳性场景拿到了**
+
+- 选页判据：扫 map1 的脚本，找常用页 `#SAY` 行数 > `MaximumLines(8)` 的 NPC——**15/43** 命中；
+  取 `GTMerchant_Jamie`（`@main` 10 行）做阳性用例。
+- 实机（本端）：`@mapmove 0 344 270` → `npc_call GTMerchant_Jamie [@MAIN]` →
+  页面 **9 行**、滚动列表 `{total:9, visible:8, shown:true}`；
+  `wheel {x:220,y:90,delta:+3}` → **offset 0 → 1**；`wheel {…,delta:-3}` → **offset 1 → 0** ✔
+  ⇒ 与 C# `NPCDialog_MouseWheel`（`CurrentLines.Count > MaximumLines` 才滚、`_index -= count`）一致，
+  也补上了 §3.2q/§3.2s 缺的那条阳性（此前那只 NPC 只有 3–4 行，**不滚才是对的**）。
+- **两个读数口径**（本轮各踩一次）：① `wheel` RPC 的 `delta` **正 = 向下滚**
+  （`control.rs` 注释），所以在 `offset=0` 上发负值本来就该"不动"；
+  ② `npc_rows.lines` 回的是**整页**行、不随 offset 变，判"滚了没有"要看 `scroll` 探针的 `offset`。
+- 原版侧同款阳性**未采集**：需要在世界里点到那只 NPC，而沙箱角色位置逐轮漂移
+  （智能扫描本轮两次未命中）——留作下一批。
