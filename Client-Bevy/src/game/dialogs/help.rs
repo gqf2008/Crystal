@@ -251,12 +251,20 @@ fn spawn_help(
             (HelpBtnKind::Next, 243, 244, 245, 310.0, 485.0),
         ];
         for (kind, n, h, pr, rx, ry) in buttons {
+            // 尺寸取**美术原生尺寸**：`Prguse2[240..245]`（翻页箭头）= **16x16**，
+            // 而 `Prguse2[360..362]`（关闭钮）= **24x21**。旧代码三颗都写死 16x16
+            // ⇒ 关闭钮被压扁（`control_size_audit.py` 新加的第 4 个扫描面捞到的第二处）。
+            let (bw, bh) = libs
+                .0
+                .get_image(LibraryName::Prguse2, n)
+                .map(|i| (i.width.max(0) as f32, i.height.max(0) as f32))
+                .unwrap_or((16.0, 16.0));
             if let (Some(nh), Some(hh), Some(ph)) = (
                 load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, n),
                 load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, h),
                 load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, pr),
             ) {
-                let mut ec = spawn_icon_button(p, nh, hh, ph, rx, ry, 16.0, 16.0, 10);
+                let mut ec = spawn_icon_button(p, nh, hh, ph, rx, ry, bw, bh, 10);
                 ec.insert(HelpBtn(kind));
                 if matches!(kind, HelpBtnKind::Close) {
                     ec.insert(CloseButton);
