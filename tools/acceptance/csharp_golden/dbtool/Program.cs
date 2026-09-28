@@ -67,7 +67,67 @@ class Program
         }
         if (mode == "export") { Export(arg2 ?? "db_export.json"); return; }
         if (mode == "setpw") { SetPassword(arg2, args.Length > 3 ? args[3] : null); return; }
-        Console.WriteLine("usage: dbtool <serverDir> list | dump <TypeFullName> | export <outfile> | setpw <accountId> <newPassword>");
+        if (mode == "setpos")
+        {
+            // setpos <accountId> <mapIndex> <x> <y> [charName]
+            //   把账号下（或指定）角色的落点改掉，只重写 Server.MirADB（与 setpw 同一条保存路径）。
+            //   用途：给沙箱一个**重置按钮** —— 原版侧那些"点到哪只 NPC"的取证要靠格点扫描，
+            //   而扫描本身会把角色带走；每次先 setpos 回同一个格子，扫描/复现才有确定性。
+            SetPos(arg2,
+                   args.Length > 3 ? args[3] : null,
+                   args.Length > 4 ? args[4] : null,
+                   args.Length > 5 ? args[5] : null,
+                   args.Length > 6 ? args[6] : null);
+            return;
+        }
+        Console.WriteLine("usage: dbtool <serverDir> list | dump <TypeFullName> | export <outfile> | " +
+                          "setpw <accountId> <newPassword> | setpos <accountId> <mapIndex> <x> <y> [charName]");
+    }
+
+    // 改角色落点：Server.MirDatabase.CharacterInfo 的 CurrentMapIndex(Int32) / CurrentLocation(Point)。
+    // 只调 SaveAccounts()（写 Server.MirADB）——**不要**碰 SaveDB()：离线 LoadDB() 时 MapInfoList/ItemInfoList
+    // 是空的，SaveDB() 会把 Server.MirDB 写坏（dbtool 里的 ProtectGameDb() 就是为此存在的）。
+    static void SetPos(string accountId, string mapS, string xS, string yS, string charName)
+    {
+        if (string.IsNullOrEmpty(accountId) || string.IsNullOrEmpty(mapS) ||
+            string.IsNullOrEmpty(xS) || string.IsNullOrEmpty(yS))
+        {
+            Console.WriteLine("usage: setpos <accountId> <mapIndex> <x> <y> [charName]");
+            return;
+        }
+        int map = int.Parse(mapS), x = int.Parse(xS), y = int.Parse(yS);
+        var env = LoadEnvir(out var err);
+        if (err.Length > 0) { Console.WriteLine("accounts did not load: " + err); return; }
+        var target = Seq(F(env, "AccountList")).FirstOrDefault(a => S(F(a, "AccountID")) == accountId);
+        if (target == null) { Console.WriteLine("account not found: " + accountId); return; }
+
+        int changed = 0;
+        foreach (var ch in Seq(F(target, "Characters")))
+        {
+            var name = S(F(ch, "Name"));
+            if (!string.IsNullOrEmpty(charName) && name != charName) continue;
+            var t = ch.GetType();
+            var mapField = t.GetField("CurrentMapIndex");
+            var locField = t.GetField("CurrentLocation");
+            if (mapField == null || locField == null)
+            {
+                Console.WriteLine($"character {name}: CurrentMapIndex/CurrentLocation field not found");
+                continue;
+            }
+            var before = $"map={I(F(ch, "CurrentMapIndex"))} loc={S(F(ch, "CurrentLocation"))}";
+            mapField.SetValue(ch, map);
+            locField.SetValue(ch, Activator.CreateInstance(locField.FieldType, x, y));
+            Console.WriteLine($"character {name}: {before} -> map={map} loc={{X={x},Y={y}}}");
+            changed++;
+        }
+        if (changed == 0) { Console.WriteLine("no matching character on account " + accountId); return; }
+
+        var envirType = allTypes.First(t => t.FullName == "Server.MirEnvir.Envir");
+        var saveAcc = envirType.GetMethod("SaveAccounts", BindingFlags.Public | BindingFlags.NonPublic |
+                                                           BindingFlags.Instance, null, Type.EmptyTypes, null);
+        if (saveAcc == null) { Console.WriteLine("SaveAccounts() not found"); return; }
+        saveAcc.Invoke(env, null);
+        Console.WriteLine($"saved Server.MirADB ({changed} character(s) updated)");
     }
 
     static Type[] SafeTypes(Assembly a)

@@ -1330,6 +1330,10 @@ dotnet run --project .\dbtool\dbtool.csproj -c Release -- <沙箱>\Server dump S
   ② `npc_rows.lines` 回的是**整页**行、不随 offset 变，判"滚了没有"要看 `scroll` 探针的 `offset`。
 - 原版侧同款阳性**未采集**：需要在世界里点到那只 NPC，而沙箱角色位置逐轮漂移
   （智能扫描本轮两次未命中）——留作下一批。
+  > **2026-09-28 更新**：已在 **§3.2w** 补做——用新工具 `dbtool setpos` 把角色重置到固定格后，
+  > 点到 `MaterialDealer` 的 **11 行**页实测：**滚轮不生效**（5 个光标位置 + 先激活都 0 px），
+  > 但**箭头可滚**（11926/11925 px）、**大地图滚轮可滚**（382 px）⇒ 原版侧 NPC 窗滚轮本身不发，
+  > 与本端（可用）相反；C# 侧根因未定性。
 
 ### 3.2v §3.2m 的腰带残差 4.1pp 定性（2026-09-28）：是 6 个槽位**数字**的字形，不是画错
 
@@ -1360,3 +1364,54 @@ dotnet run --project .\dbtool\dbtool.csproj -c Release -- <沙箱>\Server dump S
 
 **结论**：与 §3.2p 的"文字字形差"同类——**字形级残留，不是布局/画源缺陷**；判据仍 PASS
 （7.4% ≤ 10% 阈值）。若要再压，需要对齐数字的字体/字号（本轮没有证据说哪个字号对，未改）。
+
+### 3.2w 沙箱"重置按钮" `dbtool setpos` + 原版侧 NPC 窗滚轮实测不生效（2026-09-28）
+
+**① 新工具：`dbtool setpos`（沙箱副本专用）**
+
+原版侧那几条取证（点到哪只 NPC、同 locale 复帧）一直被"**沙箱角色位置逐轮漂移**"卡着——
+格点扫描本身会把角色带走，下一次就跑不到同一只 NPC 上了。本轮给 `dbtool` 加了重置按钮：
+
+```powershell
+# 把账号下（或指定）角色挪到指定落点；只重写 Server.MirADB
+tools\acceptance\csharp_golden\dbtool\bin\Release\net8.0-windows\dbtool.exe ^
+    %TEMP%\golden_sandbox\Server setpos <accountId> <mapIndex> <x> <y> [charName]
+# 回读：dbtool … export out.json  → characters[].mapIndex / loc
+```
+
+- 实现：反射设 `Server.MirDatabase.CharacterInfo.CurrentMapIndex(Int32)` / `CurrentLocation(Point)`
+  （`dump Server.MirDatabase.CharacterInfo` 得到），然后**只调 `SaveAccounts()`（写 `Server.MirADB`）**——
+  **绝不要**顺手调 `SaveDB()`：离线 `LoadDB()` 时 `MapInfoList/ItemInfoList` 是空的，
+  `SaveDB()` 会把 `Server.MirDB` 写坏（dbtool 里 `ProtectGameDb()` 就是为此存在的）。
+- 用法前提：**先停掉沙箱 Client/Server**（服务端在内存里持有账号，边跑边改会被它的周期存档覆盖）。
+- 实测：`setpos 333 1 296 615` → 输出 `character 女道士: map=1 loc={X=275,Y=607} -> map=1 loc={X=296,Y=615}`
+  （同账号两个角色一起改）、`saved Server.MirADB (2 character(s) updated)`；`export` 回读
+  `mapIndex=1 loc={X=296,Y=615}` ✓；重启客户端登录后，**从同一格 (296,615) 出发点 (800,160)
+  稳定开出 MaterialDealer**（下一节）。
+
+**② 原版侧 NPC 窗滚轮：实测**不生效**（但注入与滚动机制都没问题）**
+
+用上面这次确定的起点打开 `MaterialDealer` 的长页（脚本 `BichonProvince/BichonWall/Materials-0.txt`
+的 `[@Main-1]` = **11 行** > `MaximumLines(8)`，右侧箭头可见），分别做了三件事：
+
+| 做什么 | 读数 | 说明 |
+|---|---|---|
+| 光标移到正文 `(220,120)` 后发 `WM_MOUSEWHEEL`（下 3 格，再上 3 格） | 正文区 **0 px** 变化 | 滚轮没动 |
+| 换 4 个位置再试：标题 `(220,15)` / 正文 `(220,120)` / 右缘 `(410,120)` / 底边 `(100,205)` | 全部 **0 px** | 与光标位置无关 |
+| 先点窗内空白 `(410,205)`，再悬停正文滚 | 仍 **0 px** | "先激活对话框"也不成立 |
+| **箭头**：点下箭头 `(425,182)` ×3 → 再点上箭头 `(425,41)` ×3 | 窗区 **11926 / 11925 px** 变化 | 页面**确实可滚**、滚动机制是好的 |
+| **阳性对照**（同一次会话）：大地图（B 键）里滚轮 | 窗区 **382 px** | 注入链路是好的 |
+
+⇒ **在沙箱这一版里，NPC 窗的滚轮不生效**，而"注入可用"（大地图）与"页面可滚"（箭头）都成立。
+C# 侧代码是挂着的（`NPCDialog` 构造里 `MouseWheel += NPCDialog_MouseWheel`，`NPCDialogs.cs:64`；
+行标签上也挂了 `:502`，但那些标签是 `NotControl = true`），派发链是
+`CMain_MouseWheel → MirScene.OnMouseWheel → MouseControl.OnMouseWheel`（`MirScene.cs:136-145`）。
+**根因未定性**：最可疑的一处是 `MirControl.Highlight()` 的早退
+（`:808-823`：`if (ActiveControl != null && ActiveControl != this) return;`）——沙箱里聊天输入框很可能
+占着 `ActiveControl`，于是悬停 NPC 窗不会把 `MouseControl` 切过去，滚轮就发不到对话框上；
+但本轮"先点窗内空白"并没有改变结果，所以**没结案**，如实记录。
+
+**③ 与本端的对照（顺带，不冲突）**：本端 NPC 窗滚轮**可用**——§3.2u 实测 9 行页
+（`wheel +3` → `offset 0→1`、`-3` → `1→0`），那是我方自己的 `UiScrollList` 命中判据（整窗 + 光标探针）。
+两边不是"一方对一方错"就能盖棺的：C# 的挂点/派发已如上，本端的命中区与探针口径也已对齐过
+（线程 `scroll-hitrect-npc`），本节的结论只是**"沙箱这一版原版不滚"这一事实**。
