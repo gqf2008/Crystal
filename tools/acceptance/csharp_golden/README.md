@@ -2497,3 +2497,41 @@ C# `DuraStatusDialog`（`MainDialogs.cs:3904-3930`）：容器**没有 Index/Lib
 **不进 `DialogManager`** ⇒ `dialogs` 列表里看不到它，别据此判"没开"（本轮踩过）。
 
 **门禁**：本轮只动文档，`cargo test --lib` **866 passed**（无代码变化）。
+### 3.2aq §3.2af 的 20 行表在 master `632224d15` 复跑：**没有回归**（2026-09-29）
+
+§3.2al/§3.2am/§3.2an 三笔改的是 `game_shop` 分类行、`npc_goods` 选中格边框、`npc` 行内链接两态色
+——都落在 A/B 表能看到的窗里。所以按 §3.2af 的老配方**原样复跑一遍**，看有没有把别处带坏：
+
+```powershell
+pwsh tools\acceptance\csharp_golden\golden_ab_ours.ps1 -SandboxRoot $env:TEMP\golden_sandbox `
+     -ClientHome <检出> -User goldenchr -Password 123456
+py -3.12 tools\acceptance\csharp_golden\golden_ab_diff.py `
+     --shots %TEMP%\golden_sandbox\shots --table %TEMP%\rect_table_20260929.json --max-shift 1
+```
+
+| 行 | §3.2af（`83e5ec6b0`） | 本轮（`632224d15`） | 判定 |
+|---|---|---|---|
+| Group | 0.0% | **0.0% OK** | 不变 |
+| Inventory | 2.9% | **2.9%** | 不变 |
+| Skills | 1.7% | **1.7%** | 不变 |
+| Equipment | 6.3% | **6.3%** | 不变 |
+| Options | 6.2% | **6.2%** | 不变 |
+| Quests | 6.3% | **6.9%** | +0.6pp：任务列表**内容**（数据不同源） |
+| Friends | 24.4%（±1px 后 2.3%, dx=1） | **24.4%（2.3%, dx=1）** | 不变 |
+| Relationship | 13.1% | **13.1%** | 不变 |
+| Ranking | 10.6% | **10.6%** | 不变 |
+| Guilds（守卫窗） | 66.2% | **66.2%** | 不变 |
+| Help | 87.6%（±1px 后 10.7%） | **87.6%（10.7%, dx=1）** | 不变 |
+| Keybind | 26.6% | **26.6%** | 不变 |
+| Creature（守卫窗） | 50.1% | **50.1%** | 不变 |
+| MountWindow（守卫窗） | 94.5% | **94.4%** | 不变 |
+| Fishing（守卫窗） | 34.4% | **34.4%** | 不变 |
+| GameShop | 29.9% | **29.9%** | 不变 |
+| Bigmap | 58.6% | **58.6%** | 不变 |
+| Minimap | 91.3%（我方没出窗 ⇒ 不可比） | **91.3%（不可比）** | 不变 |
+| Belt / Skillbar | 91.7% / 91.7%（**整帧参考**，露世界） | **98.2% / 99.1%** | 这两行本来就**不能用窗口矩形判**（§3.2k 改成"只比美术不透明像素"：腰带 7.4%）；整帧数会随"露出来的世界"波动，不是回归 |
+
+⇒ **14 行逐值不变**，无回归；唯一的移动项都是早已定性的「数据不同源 / 露世界」两类。
+（`Quests` 的 ±0.6pp 与 Belt/Skillbar 的整帧波动都不指向代码改动。）
+
+**门禁**：本轮只动文档，无代码变化。
