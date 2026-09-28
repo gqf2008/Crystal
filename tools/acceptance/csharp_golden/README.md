@@ -1245,3 +1245,50 @@ dotnet run --project .\dbtool\dbtool.csproj -c Release -- <沙箱>\Server dump S
 2. 原版标题条右侧有 `Crystal` 水印叠在关闭钮上，我方没有（另一条已知差异，不计入本表）。
 3. 商品窗两端 A/B **仍未采集**：本轮只拿到原版侧的商品窗；我方点 `View` 要按 `npc_rows` 给的
    `cx=21, cy=78`（我按原版坐标点了 `(25,96)`，打到的是 `Ask`），只验到"链接可点"，商品窗没开。
+### 3.2t 商品窗（`npc_goods`）两端对拍：行文案/数量角标按 C# 修好，残差是 locale 与数据（2026-09-28）
+
+§3.2s 留的"商品窗两端 A/B 未采集"在本轮补上，并据此修掉一处**真客户端偏差**。
+
+**开窗路径（两端都可复跑）**
+
+- 原版侧：格点扫描命中 NPC（§3.2q 的检测判据：与 `Prguse[995]` 的采样像素比对）→ 点**最上面那条黄字链接**
+  `View`（§3.2r 的颜色扫描给坐标）→ 商品窗。
+- 我方侧：`npc_call Merchant_Bull` → `npc_rows` 给 `View@(21,78)` → `click 21 78`。
+  `dialog_rect npc_goods` 回 **`(0,224,244,334)`**（与 §3.3 矩形表一致），`npc_goods_probe` 回 **6 件**
+  （Candle/Torch/RandomTeleport/DungeonEscape/Amulet/RepairOil）。
+
+**修前实测（两端都开着商品窗、沙箱英文 locale）**：商品窗区两端差 **23.04%**（逐行 1189–2771 px）。
+侧视图看出根因：本端把「名称 x数量 价格 金」塞成**一行**、且**永远显示 `x1`**；
+而 C# `MirControls/MirGoodsCell.cs` 是**两行**：
+
+| C# 控件 | 位置（cell 相对） | 内容 |
+|---|---|---|
+| `NameLabel` | `(44,0)` | 物品名（白） |
+| `PriceLabel` | `(44,14)` | 本地化 `PriceGold` = **`价格：{0} 金币`**；珍珠档 `PricePearl` = `价格：{0} 颗珍珠{1}`（`:75`，`{1}` = `price>1 ? "s" : ""`，中文串里也留着这个占位符——原版拼接怪癖，照抄） |
+| `CountLabel` | `(23,17)` | 数量（黄），**只有 `Count > 1` 才显示**（`:69`） |
+
+**本次修复**（`Client-Bevy/src/game/dialogs/npc_goods.rs`）：名称/价格拆成两条 `Text`（价格串按 C# 本地化逐字复刻）、
+数量角标改成 `count > 1` 才给、名称行去掉 `x{count}` 与"金"。两条都取 `&mut Text` 的查询用 **`ParamSet`**
+串行访问——加第二个 `Text` 查询会让系统参数正好越过 Bevy 的 16 上限（实测报
+`cannot become an ObserverSystem`，是同一个上限的伪装报错）。
+
+**修后验证**
+
+- 单测：`goods_price_text_matches_csharp_localization`（`价格：10 金币` / `价格：1 颗珍珠` /
+  `价格：25 颗珍珠s`）、`goods_count_badge_only_above_one`；`cargo test --lib` **859 passed**。
+- 实机（结构判据，与 locale 无关）：逐行量"文字带"（`x∈[50,236]` 处亮像素按 y 分带）——
+  原版每行两条 `(4..11) + (18..27)`（= 名称在 `+0`、价格在 `+14` 的 C# 布局）；本端修后也是两条
+  `(3..10) + (15..27)`（描边让带更满）；**修前只有一条**。
+
+**仍未采集（如实）**
+
+1. **同中文 locale 的两端复帧**：已把沙箱 `Language.ini` 的 `PriceGold/PricePearl` 换成中文条目
+   （仓库本地化文件未动），但这一轮格点扫描**连续两次都没再命中 NPC**（角色位置逐轮漂移，
+   扫描本身会把人带走）⇒ 修后只做到"我方中文 vs 原版英文"的结构级对比（22.6%），
+   **没有**同串像素数。
+2. **商品数据差**：原版那只 7 件（多 `TownTeleport`），本端 6 件——同 §3.2s 的脚本变体差
+   （`Grocery.txt` vs `Grocery-0.txt`），属服务端数据。
+
+**门禁**：`cargo test --lib` 859、`cargo test --test b0001_smoke --test ui_alignment`（2+53）、
+`rustfmt --edition 2021 --check` 0、实机交互巡回 **44/44 exit=0**
+（首跑有 2 项偶发 FAIL：`ranking` / `npc_awake` 的关闭钮，复跑全绿——记为已知偶发，与本改动无关）。

@@ -139,6 +139,28 @@ fn buy_button_visible(state: &NpcGoodsState) -> bool {
     state.visible && state.panel != mir2_shared::enums::PanelType::Craft
 }
 
+/// C# 本地化文案（`Client/Localization/Chinese.json`）里的两条价格串，**逐字复刻**：
+///   - `PriceGold`  = `"价格：{0} 金币"`（`MirGoodsCell.cs:85` 用 `Item.Price() * NPCRate`）
+///   - `PricePearl` = `"价格：{0} 颗珍珠{1}"`（`:75`，`{1}` 传 `Item.Price() > 1 ? "s" : ""`
+///     —— 中文串里也留着这个占位符，是原版的拼接怪癖，照抄不"修"）
+pub fn goods_price_text(price: u32, use_pearls: bool) -> String {
+    if use_pearls {
+        format!("价格：{} 颗珍珠{}", price, if price > 1 { "s" } else { "" })
+    } else {
+        format!("价格：{} 金币", price)
+    }
+}
+
+/// 数量角标：C# `CountLabel.Text = (Item.Count <= 1) ? "" : Item.Count.ToString()`
+/// （`MirControls/MirGoodsCell.cs:69`）⇒ **只有 >1 才显示**。
+pub fn goods_count_badge(count: u16) -> Option<u32> {
+    if count > 1 {
+        Some(count as u32)
+    } else {
+        None
+    }
+}
+
 /// 购买数量上限（C# BuyItem：max = min(StackSize, 库存)；非堆叠 = 1）
 fn buy_max_quantity(stack_size: u16, stock: u16) -> u32 {
     if stack_size > 1 {
@@ -163,6 +185,14 @@ pub struct NpcGoodsBuy;
 
 #[derive(Component)]
 pub struct NpcGoodsLine(usize);
+
+/// 商品行的**价格标签**（C# `MirGoodsCell.PriceLabel@(44,14)`，`MirControls/MirGoodsCell.cs:41-47`）。
+///
+/// 与 [`NpcGoodsLine`]（名称行，C# `NameLabel@(44,0)`）分开两条：C# 是**两行**——
+/// 上一行物品名、下一行 `价格：N 金币`（本地化 `PriceGold`，`Chinese.json`）
+/// ——2026-09-28 实机对拍前本端把"名称 x数量 价格 金"塞在**一行**里（README §3.2t）。
+#[derive(Component)]
+pub struct NpcGoodsPrice(usize);
 
 /// 商品图标格（通用 ItemCell，带行号）
 #[derive(Component)]
@@ -288,17 +318,20 @@ fn spawn_npc_goods(
             spawn_item_cell_ui(p, &mut images, &cjk, ROW_X + ICON_DX, y, ROW_H, ROW_H, 9, i)
                 .insert(NpcGoodsCell(i));
             // 名称/价格行：C# `NameLabel@(44,0)`（cell 相对）→ 面板内 (ROW_X+44, y)
+            spawn_label(p, &cjk, "", ROW_X + LABEL_DX, y, 12.0, Color::WHITE, 9)
+                .insert(NpcGoodsLine(i));
+            // 价格行：C# `PriceLabel@(44,14)`（cell 相对）→ 面板内 (ROW_X+44, y+14)
             spawn_label(
                 p,
                 &cjk,
                 "",
                 ROW_X + LABEL_DX,
-                y + 2.0,
+                y + 14.0,
                 12.0,
                 Color::WHITE,
                 9,
             )
-            .insert(NpcGoodsLine(i));
+            .insert(NpcGoodsPrice(i));
         }
     });
 }
@@ -368,7 +401,12 @@ fn npc_goods_ui_system(
         (With<NpcGoodsBuy>, Without<NpcGoodsClose>),
     >,
     mut widgets: Query<&mut Visibility, (With<NpcGoodsWidget>, Without<NpcGoodsBuy>)>,
-    mut lines: Query<(&mut Text, &NpcGoodsLine)>,
+    // §3.2t：名称行与价格行是两条 `Text`；两查询都取 `&mut Text`，用 `ParamSet` 串行访问
+    // （同时把系统参数压回 Bevy 的 16 上限内——加第二个 Text 查询会正好超一个）。
+    mut texts: ParamSet<(
+        Query<(&mut Text, &NpcGoodsLine)>,
+        Query<(&mut Text, &NpcGoodsPrice)>,
+    )>,
     mut cells: Query<(&mut UiItemCellData, &NpcGoodsCell)>,
     mut scroll: Query<&mut UiScrollList, With<NpcGoodsWidget>>,
     mut libs: ResMut<GameLibraries>,
@@ -438,18 +476,31 @@ fn npc_goods_ui_system(
         }
     }
     let off = scroll.single().map(|s| s.offset).unwrap_or(0);
-    for (mut text, line) in &mut lines {
-        if let Some(g) = state.goods.get(off + line.0) {
-            // #2536：Craft 面板行是合成产物（不标价；价格由配方金币决定，服务端校验）
-            text.0 = if state.panel == mir2_shared::enums::PanelType::Craft {
-                format!("合成 {} x{}", g.name, g.count)
-            } else if state.use_pearls {
-                format!("{} x{}  {} 珍珠", g.name, g.count, g.price)
+    {
+        let mut lines = texts.p0();
+        for (mut text, line) in &mut lines {
+            if let Some(g) = state.goods.get(off + line.0) {
+                // 名称行 = C# `NameLabel`（合成档保留本端的"合成"前缀，价格行留给 PriceLabel）
+                text.0 = if state.panel == mir2_shared::enums::PanelType::Craft {
+                    format!("合成 {} x{}", g.name, g.count)
+                } else {
+                    g.name.clone()
+                };
             } else {
-                format!("{} x{}  {} 金", g.name, g.count, g.price)
+                text.0 = String::new();
+            }
+        }
+    }
+    {
+        let mut prices = texts.p1();
+        for (mut text, price_line) in &mut prices {
+            text.0 = match state.goods.get(off + price_line.0) {
+                // #2536：Craft 面板是合成产物，价格由配方金币决定（服务端校验）⇒ 本端不标价
+                // （未采集 C# 合成档实机帧）
+                Some(_) if state.panel == mir2_shared::enums::PanelType::Craft => String::new(),
+                Some(g) => goods_price_text(g.price, state.use_pearls),
+                None => String::new(),
             };
-        } else {
-            text.0 = String::new();
         }
     }
 
@@ -459,7 +510,8 @@ fn npc_goods_ui_system(
         let icon = g.and_then(|g| {
             load_lib_image(&mut libs, &mut images, LibraryName::Items, g.image as usize)
         });
-        let count = g.map(|g| g.count.max(1) as u32);
+        // C# `CountLabel` 只在 count > 1 时显示（`MirGoodsCell.cs:69`）
+        let count = g.and_then(|g| goods_count_badge(g.count));
         // 性能（#112）：无变化不写
         if data.icon.as_ref() != icon.as_ref() {
             data.icon = icon;
@@ -697,6 +749,30 @@ mod tests {
     fn buy_max_quantity_stackable_caps_by_stock_and_stack() {
         assert_eq!(buy_max_quantity(10, 5), 5); // 库存 5 < 堆叠 10
         assert_eq!(buy_max_quantity(10, 99), 10); // 堆叠上限 10
+    }
+
+    /// §3.2t：商品行价格文案逐字复刻 C# 本地化 `PriceGold`/`PricePearl`
+    /// （`Client/Localization/Chinese.json`、`MirControls/MirGoodsCell.cs:75/85`）。
+    ///
+    /// 阳性对照：改回本端旧的 `"{} x{}  {} 金"`（修复前的一行式）→ 本测试红。
+    #[test]
+    fn goods_price_text_matches_csharp_localization() {
+        // PriceGold = "价格：{0} 金币"
+        assert_eq!(goods_price_text(10, false), "价格：10 金币");
+        assert_eq!(goods_price_text(1_000_000, false), "价格：1000000 金币");
+        // PricePearl = "价格：{0} 颗珍珠{1}"，{1} = price > 1 ? "s" : ""（中文串也留着这个占位符）
+        assert_eq!(goods_price_text(1, true), "价格：1 颗珍珠");
+        assert_eq!(goods_price_text(25, true), "价格：25 颗珍珠s");
+    }
+
+    /// §3.2t：数量角标只在 count > 1 时显示（C# `MirGoodsCell.cs:69`
+    /// `CountLabel.Text = (Item.Count <= 1) ? "" : Count`）。
+    #[test]
+    fn goods_count_badge_only_above_one() {
+        assert_eq!(goods_count_badge(0), None);
+        assert_eq!(goods_count_badge(1), None);
+        assert_eq!(goods_count_badge(2), Some(2));
+        assert_eq!(goods_count_badge(65535), Some(65535));
     }
 
     /// #2536：Craft 面板隐藏购买按钮（C# NPCDialogs.cs:1142）
