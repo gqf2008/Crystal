@@ -1809,3 +1809,52 @@ for (…, idx, x, hint) in acts {
 [正对照②] 表驱动循环写死 38x19 后命中 13 条：menu.rs:283 Title[633/636]=(32,20)、Prguse[1970]=(32,18) …
 VERDICT=PASS（正/负对照）    exit=0
 ```
+### 3.2ae Inventory 窗两个文本口径：`WeightLabel` 是**空格数**、`GoldLabel` 要千分位（2026-09-28）
+
+§3.2j / walgit 线程 `crystal-ab-longtail-windows` 里挂着一句「Inventory 残余 2.9% 里有一小块在
+删除钮 `(291,212)` 附近**尚未定性**（原版那格与 `Prguse2[366]` 对不上）」。本轮把它定性——
+**不是删除钮的问题**。
+
+**① 定性：那一格是 `WeightLabel`（(268,212)），两侧文案口径不同**
+
+| 帧 | `(268,212)` 那一格 | 右边 `(291,212)` |
+|---|---|---|
+| 原版 | **`45`**（纯整数） | 删除钮 `Prguse2[366]` 16x15（位置/尺寸本来就对） |
+| 本端（修前） | **`0/0`** | 同上 |
+
+C# 原文（`Client/MirScenes/Dialogs/InventoryDialog.cs:386`）：
+
+```csharp
+WeightLabel.Text = GameScene.User.Inventory.Count(t => t == null).ToString();   // ← 空格数
+//WeightLabel.Text = (MapObject.User.MaxBagWeight - MapObject.User.CurrentBagWeight).ToString();  // 旧口径，已注释掉
+```
+
+⇒ **背包窗这个标签显示「空格数」**（原版那只 1 级女道士：46 格 − 1 件起始装备 = **45**）。
+"剩余负重 / 空格数"那一对是在**主 HUD** 上（`MainDialogs.cs:464-465` 的 `SpaceLabel`/`WeightLabel`），
+本端 `hud_space_weight_system` 早就是那个口径；出错的是**背包窗**这颗——本端写成
+`"{weight}/{max_weight}"`（且本端 `Inventory.weight` 只由 `refresh_weight` 更新，A/B 那帧就是 `0/0`）。
+
+**② 同窗第二处：`GoldLabel` 缺千分位**
+
+`InventoryDialog.cs:388`：`GoldLabel.Text = GameScene.Gold.ToString("###,###,##0");`
+本端是 `format!("{}", gold)` ⇒ 金币 ≥ 1000 时与原版对不上。改成复用 HUD 的 `format_gold`（同口径）。
+
+**③ 修法**
+
+- 新增纯函数 `inv_weight_text(Option<&Inventory>) -> String`（空格数）——门禁两条：
+  「46 格 − 1 件 = 45」「改 `weight` 不影响文案」；
+- `GoldLabel` 复用 `crate::game::hud::format_gold`（断言 `0 / 45 / 1,000 / 1,234,567`）。
+
+**④ 实机 A/B 复验**
+
+| 项 | 修前 | 修后 |
+|---|---|---|
+| 背包窗 `WeightLabel` | `0/0` | **`46`**（空格数；原版同格 `45`——差 1 是**角色背包内容**：本端 `goldenchr` 空背包、原版 1 件起始装备） |
+| `golden_ab_diff.py` Inventory 整窗 | 3.0% | **2.9%** |
+| 金币千分位 | 无 | `###,###,##0`（本轮 A/B 角色金币 0，**看不出**，靠单测钉住） |
+
+⇒ 那条"删除钮附近未定性"的残留**结案**：删除钮位置/尺寸本来就对
+（`Prguse2[366]` 16x15 @(291,212)，见 §3.2j 的尺寸审计），差异来自**左边那颗空格数标签**。
+
+**门禁**：`cargo test --lib` **863 passed**；`cargo test --test b0001_smoke --test ui_alignment` **2 + 53**；
+实机交互巡回 `ui_interact_sweep.ps1 -ManageServer` **44/44 exit=0**。
