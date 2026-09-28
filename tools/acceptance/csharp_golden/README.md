@@ -2438,6 +2438,13 @@ pwsh tools\acceptance\csharp_golden\npc_sweep.ps1 -SandboxRoot $env:TEMP\golden_
 # ⚠ 起点不能与 NPC 同格（实测 (301,257) 距离 0 时点出来的是角色自己，页型恒 closed）
 ```
 
+> **2026-09-29 补**：`npc_sweep.ps1` 现在自带**两道前置守卫**（都在"起服务端/重启客户端/键盘登录"**之前**判，不合格 `exit 2` 且不碰客户端）：
+> ① **锁屏守卫**（判据同 §3.2ag：前台窗口 `class=Windows.UI.Core.CoreWindow`）——锁屏下点击到不了 winit，
+> 硬跑只会产出 `NPC窗=关` 的假红（本轮 02:03/02:06/02:19 连续三次复测都是锁屏）；确需锁屏下跑用 `-AllowLocked` 显式放行。
+> ② **同格守卫 + 空候选守卫**：起点与目标 NPC 同格时直接拦下（同格点出来的是角色自己）；
+> `-Only/-PlayerX,-Y/-MaxDist` 一个落点都没算出来时也拦下并给出提示（`-Only` 匹配的是**脚本相对路径**，不是名字；
+> 可见范围只有 ±10 格 x / ±11 格 y）。四类走法都实测过：锁屏→exit 2、同格→exit 2、空候选→exit 2、正常配置→继续建点。
+
 **门禁**：本轮只动文档 + `report.rs` 一处注释（无代码逻辑变化）：`cargo test --lib` **866 passed**；
 `cargo test --test b0001_smoke --test ui_alignment` **2 + 53 passed**；
 `ui_interact_sweep.ps1 -ManageServer` **44/44 exit=0**。
