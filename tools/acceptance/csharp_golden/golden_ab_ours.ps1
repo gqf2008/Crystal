@@ -114,6 +114,11 @@ foreach ($k in @('inventory', 'character', 'quest_log', 'settings', 'group', 'fr
                  'game_shop', 'big_map')) {
     Rpc 'dialog' @{ kind = $k; action = 'close' } | Out-Null
 }
+# 【§3.2m】基线把 HUD 两行**显式摆成与原版基线同态**（腰带/技能栏都开着）：`hud_toggle`
+# 支持显式 `on`，比依赖默认值可靠，也给后面两个翻转行一个确定起点（否则那两行的结果
+# 取决于脚本跑到那里时 HUD 恰好是什么状态）。
+Rpc 'hud_toggle' @{ which = 'belt'; on = $true } | Out-Null
+Rpc 'hud_toggle' @{ which = 'skillbar'; on = $true } | Out-Null
 Start-Sleep -Milliseconds 1200
 Rpc 'screenshot' @{ path = $basePng } | Out-Null
 Start-Sleep -Seconds 2
@@ -128,6 +133,11 @@ foreach ($r in $manifest) {
                      'game_shop', 'big_map', $kind)) {
         Rpc 'dialog' @{ kind = $k; action = 'close' } | Out-Null
     }
+    # 【§3.2m】每行都从**基线 HUD 态**起步（腰带/技能栏都开着）：HUD 两行是翻转语义，
+    # 状态会**跨行泄漏**（实测 Skillbar 行取到的帧里腰带还是上一行 Belt 行关掉的样子）。
+    # 显式置位既消除泄漏，也让这两行彼此独立可比。
+    Rpc 'hud_toggle' @{ which = 'belt'; on = $true } | Out-Null
+    Rpc 'hud_toggle' @{ which = 'skillbar'; on = $true } | Out-Null
     Start-Sleep -Milliseconds 700
     # 清场：上一扇窗若被 Show() 守卫拦下，提示框会**留在屏幕上**，污染后面每一张截图
     # （本轮实测：Guilds 之后 Ranking/Help/…/Skillbar 全部带着"你不在任何公会中。" ⇒ 假差异）。
@@ -150,7 +160,11 @@ foreach ($r in $manifest) {
             default { return (Rpc 'dialog' @{ kind = $k; action = 'open' }) }
         }
     }
-    $open = Open-One $kind
+    # 【§3.2m 修】HUD 两行的 opener 是**翻转**语义，所以不能像 `dialog open` 那样幂等重调：
+    # 循环前这一次 + `try=1` 那一次会**互相抵消**（实测 `ui_nodes_at(350,637)` 3 → 0 → 3，
+    # 最后那张帧与原版「按 Z 后腰带消失」对不上，A/B 里表现为"这块没变化"＝§3.2k 留的第二个线索）。
+    # 普通窗 `dialog open` 重复调用无害，故只对 HUD 行跳过循环前这一次，让翻转真正只发生一次。
+    if ($isHudRow) { $open = $null } else { $open = Open-One $kind }
     $png = Join-Path $shots ("ours_win_{0}.png" -f $r.action)
     if (Test-Path -LiteralPath $png) { Remove-Item -LiteralPath $png -Force }
     # 重试：直到这一张与基线**明显不同**（= 窗真的开出来了），最多 8 轮
