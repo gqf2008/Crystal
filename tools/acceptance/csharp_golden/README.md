@@ -565,6 +565,10 @@ owner 2026-09-28 同意解锁工作站后，本节记录重试的过程与结论
 | 目标（鼠标路径） | 差异占比 | 定性 |
 |---|---|---|
 | `game_shop` 分类页签 `Previous/Next`（`Prguse2[197..199]/[207..209]@(120,103)/(120,421)`） | **未采集** | 未采集（帧拿不到） |
+> **2026-09-28 更新**：这条已在 **§3.2y** 定性——驱动补了 `Msg-Drag`（按下-移动-抬起）并做了阴阳两验；
+> `game_shop` 那根 `PositionBar` 是**分类列**滑条（C# 守卫 `CStartIndex + 22 >= CategoryList.Count` 就返回），
+> 本沙箱只有 10 类 ⇒ **行程为 0**，记「无可滚行程 / 本数据下不可判定」，不是"点不动"。原文保留。
+
 | `game_shop` 分类列 `PositionBar`（`Prguse2[205/206]@(120,117)` 拖动） | **未采集** | 未采集 |
 | `npc` 菜单点行 / `npc_goods` 列表滚轮命中区 | **未采集** | 未采集 |
 | `inventory` 页签 ITEMS II / QUEST 切换 | **未采集** | 未采集 |
@@ -1438,3 +1442,37 @@ C# 侧代码是挂着的（`NPCDialog` 构造里 `MouseWheel += NPCDialog_MouseW
 对每个命中帧判"**页型**"（商人页有 `View/Ask` 两条黄字带、Assistant 只有 `Close` 一条；
 注意把扫描 x 限制在 `8..60`、y 限制在 `34..150`，**别把底部 QUEST 按钮的黄字算进来**——
 本轮就是被它骗过一次）→ 命中商人后再点 `View` 抓商品窗。
+
+### 3.2y 驱动新增 `Msg-Drag`（按下-移动-抬起）+ `game_shop` 分类滑条的定性（2026-09-28）
+
+§3.2l-b 的 `game_shop` 那条是「分类列 `PositionBar`（`Prguse2[205/206]@(120,117)`）**拖动**」——
+而驱动此前只有 `Msg-Click`（按下即抬起），**拖不动任何东西**。本轮补上并做了阴阳两验。
+
+**① `Msg-Drag <x> <y> <dx> <dy> [steps] [holdMs]`**（`csharp_client_driver.ps1`）
+
+注入序列：`WM_MOUSEMOVE` → `WM_LBUTTONDOWN(wParam=1)` → **插值**若干步 `WM_MOUSEMOVE` → `WM_LBUTTONUP`。
+坐标系与 `Msg-Click` 一致（**客户区坐标**，窗口摆到 (0,0,1024,768) 时等于屏幕坐标）。
+适用对象是 C# 里 `Movable = true` 且挂了 `OnMoving` 的控件——拖动的位移由
+`MirScene.OnMouseMove → MouseControl.OnMouseMove`（`MouseControl.Moving`）驱动，**不是** `Click` 事件。
+
+**② 阳性（大地图 NPC 列表的 `ScrollBar`）**：`BigMapDialog.cs:125-147` 的 `ScrollBar`
+（`Prguse2[205/206]`、`Movable = true`、`OnMoving` 把 y 映射成 `ScrollOffset`），
+面板 `Title[820]` 760x500 居中 ⇒ (132,134)，`ScrollBar` 初位面板内 (739,61) ⇒ 屏幕 **(871,195)**：
+
+| 动作 | 读数 |
+|---|---|
+| 开窗 → 滑条下拖 130px | 大地图区 **11220 px** 变化（列表滚动 + 滑条位移 408 px）✓ |
+| 再拖回 130px | 仅 **110 px**（回到原状态，残差是世界动画） |
+
+⇒ `Msg-Drag` 可用、可复现。
+
+**③ 阴性/定性：`game_shop` 的分类滑条在本数据下**没有行程****
+
+- C# 里那根 `PositionBar`（`GameshopDialog.cs:143-155`，`Index 205/206`、`Movable = true`）是
+  **分类列**的滑条：`OnMoving` 改的是 `CStartIndex`，而 `DownButton` 的守卫是
+  `if (CStartIndex + 22 >= CategoryList.Count) return;`（`:133-141`）——**分类数 ≤ 22 就滚不动**；
+- 本沙箱的商城数据（`GameShop_Guard.txt`）只有 **10** 类 ⇒ 行程为 0；
+- 实测：`Y` 开商店 → 在屏幕 `(284,267)`（面板 (164,146) + 面板内 (120,117)）拖 60px →
+  商城窗内仅 **164 px**（悬停高亮级）变化、**滑条带 (284,240,20,200) 0 px** ⇒ **滑条没动**；
+- 结论：这一条记为「**无可滚行程 / 本数据下不可判定**」，**不是**"点不动"。
+  （真要有行程，需要一份分类数 > 22 的商城数据；届时用 `Msg-Drag` 复跑即可。）
