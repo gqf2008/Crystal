@@ -705,9 +705,29 @@ pub fn mode_label_y(minimap_big: bool, dy: f32) -> f32 {
     dy + dura_btn_y(minimap_big)
 }
 
-/// 模式标签可见性（C# 构造 Visible=Settings.ModeView，仅 INI，无游戏内开关）
+/// 攻击/技能模式标签可见性（C# **构造** `Visible = Settings.ModeView`，仅 INI，无游戏内开关）
 fn mode_visibility(mode_view: bool) -> Visibility {
     if mode_view {
+        Visibility::Visible
+    } else {
+        Visibility::Hidden
+    }
+}
+
+/// 宠物模式标签可见性（C# `GameScene.UserInformation`，`GameScene.cs:2222-2226`）：
+///
+/// ```csharp
+/// MainDialog.PModeLabel.Visible = User.Class == MirClass.Wizard || User.Class == MirClass.Taoist;
+/// ```
+///
+/// 这条是**赋值**，发生在登录/进图收到 `S.UserInformation` 之后 ⇒ **覆盖**构造里的
+/// `Visible = Settings.ModeView`。所以 P 标签只看职业，**不看** `ModeView`：
+/// 沙箱实测（`ModeView=False` 默认值）原版帧里 S/A 都不画、**P 画着**
+/// （`(895,186)-(1024,200)` 有 270 个 `Color.Orange`），本端当时三个都不画。
+#[must_use]
+pub fn pmode_visible(class: mir2_shared::enums::MirClass) -> Visibility {
+    use mir2_shared::enums::MirClass;
+    if matches!(class, MirClass::Wizard | MirClass::Taoist) {
         Visibility::Visible
     } else {
         Visibility::Hidden
@@ -1492,7 +1512,7 @@ fn spawn_hud(
     // 模式标签（C# AMode/PMode/SModeLabel）：右上小地图正下方，顶→底 S/A/P。
     // X = MiniMap.X-3 = 895；y 随小地图大/小模式（C# Process 每帧重定位，attack_mode_text_system 跟随）。
     // 颜色对齐 C# 命名色：AMode=Yellow、SMode=LimeGreen、PMode=Orange。
-    // 仅当 Settings.ModeView（仅 INI，无游戏内开关）为 true 时可见（C# 构造 Visible=Settings.ModeView）。
+    // S/A 仅当 Settings.ModeView（仅 INI，无游戏内开关）为 true 时可见（C# 构造 `Visible=Settings.ModeView`）。
     let mode_vis = mode_visibility(opt.mode_view);
     let big = mmap.big;
     spawn_mode_label(
@@ -1515,6 +1535,9 @@ fn spawn_hud(
         mode_vis,
         AttackModeText,
     );
+    // P 的可见性**不看 ModeView**：C# `UserInformation`（`GameScene.cs:2226`）按职业覆盖
+    // （Wizard/Taoist 才画）。spawn 时还不知道职业 ⇒ 先 Hidden，
+    // `attack_mode_text_system` 每帧按 `ActorAppearance.class` 置位（见 [`pmode_visible`]）。
     spawn_mode_label(
         &mut commands,
         &cjk,
@@ -1522,7 +1545,7 @@ fn spawn_hud(
         big,
         P_MODE_DY,
         Color::srgb(1.0, 0.647, 0.0),
-        mode_vis,
+        Visibility::Hidden,
         PModeText,
     );
     // #1392：负重/空格（C# WeightLabel/SpaceLabel @(Width-105/Width-30, 101)）
@@ -1706,6 +1729,8 @@ fn attack_mode_text_system(
     mode: Res<crate::game::combat::AttackModeState>,
     // #2633 批次4 步3：pet_mode→`PetModeState`；实体缺失回退 Both（同原 HudState 默认）。
     pet: Query<&PetModeState, With<LocalPlayer>>,
+    // C# `GameScene.cs:2226`：P 标签可见性由**职业**决定（Wizard/Taoist），与 `ModeView` 无关。
+    class: Query<&crate::actor::ActorAppearance, With<LocalPlayer>>,
     opt: Res<OptionState>,
     mmap: Res<MiniMapMode>,
     mut am: Query<
@@ -1713,7 +1738,12 @@ fn attack_mode_text_system(
         (With<AttackModeText>, Without<PModeText>, Without<SModeText>),
     >,
     mut pm: Query<
-        (&mut Text2d, &mut Transform, Option<&Children>),
+        (
+            &mut Text2d,
+            &mut Transform,
+            Option<&Children>,
+            &mut Visibility,
+        ),
         (With<PModeText>, Without<AttackModeText>, Without<SModeText>),
     >,
     mut sm: Query<
@@ -1749,7 +1779,14 @@ fn attack_mode_text_system(
         _ => "宠物:未知".to_string(),
     };
     let py = -mode_label_y(mmap.big, P_MODE_DY);
-    for (mut t, mut tf, children) in &mut pm {
+    let pvis = class
+        .single()
+        .map(|a| pmode_visible(a.class))
+        .unwrap_or(Visibility::Hidden);
+    for (mut t, mut tf, children, mut vis) in &mut pm {
+        if *vis != pvis {
+            *vis = pvis;
+        }
         update_mode_label(&mut t, &mut tf, children, &mut shadows, &p, py);
     }
     let s = if opt.skill_mode_ctrl {
@@ -2728,16 +2765,92 @@ mod tests {
             [s, a, p]
         }
 
+        // S/A 走 `Settings.ModeView`（C# 构造）；P **不**走它（C# `UserInformation` 按职业覆盖，
+        // 见 `pmode_visible`）⇒ spawn 出来一定是 Hidden，随后由每帧系统按职业置位。
         assert_eq!(
             mode_vis(false),
             [Visibility::Hidden; 3],
-            "默认 mode_view=false 三标签应隐藏（对齐 C# Settings.ModeView 默认 false）"
+            "默认 mode_view=false：S/A 隐藏，P 也还是 spawn 时的 Hidden"
         );
         assert_eq!(
             mode_vis(true),
-            [Visibility::Visible; 3],
-            "mode_view=true 三标签应可见"
+            [Visibility::Visible, Visibility::Visible, Visibility::Hidden],
+            "mode_view=true：S/A 可见；P 与 ModeView 无关，spawn 时仍是 Hidden"
         );
+    }
+
+    /// `pmode_visible`：C# `GameScene.cs:2226` 的职业规则（Wizard/Taoist 才画 P 标签）。
+    #[test]
+    fn pmode_visible_follows_class_rule() {
+        use mir2_shared::enums::MirClass;
+        assert_eq!(pmode_visible(MirClass::Wizard), Visibility::Visible);
+        assert_eq!(pmode_visible(MirClass::Taoist), Visibility::Visible);
+        assert_eq!(pmode_visible(MirClass::Warrior), Visibility::Hidden);
+        assert_eq!(pmode_visible(MirClass::Assassin), Visibility::Hidden);
+        assert_eq!(pmode_visible(MirClass::Archer), Visibility::Hidden);
+    }
+
+    /// 每帧系统按 `ActorAppearance.class` 置 P 标签可见性；无 LocalPlayer 时保持 Hidden。
+    /// 阳性对照：同一实体把职业从 Warrior 换成 Taoist，可见性必须跟着翻（不是恒 Hidden）。
+    #[test]
+    fn pmode_label_visibility_tracks_class() {
+        use bevy::ecs::system::RunSystemOnce;
+
+        fn vis(world: &World, e: Entity) -> Visibility {
+            *world.get::<Visibility>(e).unwrap()
+        }
+
+        let mut world = World::new();
+        world.insert_resource(crate::game::combat::AttackModeState::default());
+        world.insert_resource(OptionState::default());
+        world.insert_resource(MiniMapMode::default());
+        let pm = world
+            .spawn((
+                PModeText,
+                Text2d::new("宠物:跟随"),
+                Transform::from_xyz(MODE_LABEL_X, 0.0, 4.0),
+                Visibility::Hidden,
+            ))
+            .id();
+
+        // 无 LocalPlayer：保持 Hidden
+        world
+            .run_system_once(attack_mode_text_system)
+            .expect("系统应成功");
+        assert_eq!(
+            vis(&world, pm),
+            Visibility::Hidden,
+            "无 LocalPlayer 时应保持 Hidden"
+        );
+
+        let player = world
+            .spawn((
+                LocalPlayer,
+                crate::actor::ActorAppearance {
+                    class: mir2_shared::enums::MirClass::Warrior,
+                    gender: mir2_shared::enums::MirGender::Male,
+                    armour: 0,
+                    hair: 0,
+                    weapon: -1,
+                    weapon_effect: 0,
+                    wing_effect: 0,
+                },
+            ))
+            .id();
+        world
+            .run_system_once(attack_mode_text_system)
+            .expect("系统应成功");
+        assert_eq!(vis(&world, pm), Visibility::Hidden, "战士不画 P 标签");
+
+        // 阳性对照：同实体换职业 → 必须变 Visible
+        world
+            .get_mut::<crate::actor::ActorAppearance>(player)
+            .unwrap()
+            .class = mir2_shared::enums::MirClass::Taoist;
+        world
+            .run_system_once(attack_mode_text_system)
+            .expect("系统应成功");
+        assert_eq!(vis(&world, pm), Visibility::Visible, "道士要画 P 标签");
     }
 
     /// 模式标签随小地图大/小模式重定位（C# MiniMapDialog.Process :2082-2087 每帧定位）。
@@ -2773,6 +2886,7 @@ mod tests {
                 PModeText,
                 Text2d::new("宠物:跟随"),
                 Transform::from_xyz(MODE_LABEL_X, 0.0, 4.0),
+                Visibility::Hidden,
             ))
             .id();
 
