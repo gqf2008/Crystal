@@ -26,7 +26,7 @@ use mir2_shared::enums::MirGridType;
 use crate::ui::sprite_ui::{shared_cjk_font, UiCjkFont, UiFont};
 use crate::ui::theme::{
     load_lib_image, spawn_close_button, spawn_icon_button, spawn_image, spawn_item_cell_ui,
-    spawn_label, spawn_panel, UiItemCellData,
+    spawn_label, spawn_outlined_label_block, spawn_panel, UiItemCellData,
 };
 
 /// 背包物品条目（网络 UserInformation 写入）
@@ -245,12 +245,67 @@ pub fn inv_tab_target_page(tab: usize, slots: usize) -> Option<usize> {
 /// C# `InventoryDialog.cs:90-91`、服务端 `ServerRust/src/actors/world/session.rs:7613-7617`
 /// （`ADDINVENTORY` 实际扣的就是这个数）。写成 40 会让**每一档都多报 1M**
 /// （46 格显示 2M、实扣 1M；54 格显示 4M、实扣 3M）。
-pub fn request_expand_confirm(confirm: &mut InvDropConfirm, len: usize) {
+pub fn request_expand_confirm(confirm: &mut InvDropConfirm, len: usize, from_buy: bool) {
     let level = len.saturating_sub(INV_BASE_BAG_SLOTS) / 4;
     let cost = 1_000_000u64 + (level as u64) * 1_000_000u64;
-    confirm.text = format!("花费 {} 金币扩展背包格？", cost);
-    confirm.mode = 2;
+    if from_buy {
+        // C# `InventoryDialog.cs:88-98`（AddButton）→ `ExtraSlots4`（带金币参数）
+        confirm.text = csharp_extra_slots4_text(cost);
+        confirm.mode = CONFIRM_MODE_EXPAND_BUY;
+    } else {
+        // C# `InventoryDialog.cs:230-239`（46 格点 ITEMS II）→ `ExtraSlots8`（文案里写死 1,000,000）
+        confirm.text = CSHARP_EXTRA_SLOTS8_TEXT.to_string();
+        confirm.mode = CONFIRM_MODE_EXPAND_TAB;
+    }
     confirm.visible = true;
+}
+
+/// 扩容确认的两条路径各有一种 mode（文案不同、按钮组相同）：
+/// 页签路径（`ExtraSlots8`）与 BUY 路径（`ExtraSlots4`）。
+pub const CONFIRM_MODE_EXPAND_TAB: u8 = 2;
+pub const CONFIRM_MODE_EXPAND_BUY: u8 = 4;
+
+/// C# `ClientTextKeys.ExtraSlots8`（`Client/Localization/Chinese.json:131`）**逐字复刻**：
+/// ITEMS II 那条提示框只在 46 格时可达（`openLevel` 恒 0），所以 C# 把 1,000,000 写死在文案里。
+pub const CSHARP_EXTRA_SLOTS8_TEXT: &str = "你确定要花费 1,000,000 金币购买额外 8 个栏位吗？下一次购买，你可以解锁额外 4 个栏位，最多可解锁至 40 个栏位。";
+
+/// C# `ClientTextKeys.ExtraSlots4`（`Chinese.json:132`）：
+/// `"你确定要解锁 4 个额外栏位吗？所需金币：{0:###,###}"` —— `{0:###,###}` 是 .NET 自定义数字格式
+/// （千位分组、无小数部分）⇒ `1_000_000` 渲染成 `1,000,000`。
+pub fn csharp_extra_slots4_text(cost: u64) -> String {
+    format!(
+        "你确定要解锁 4 个额外栏位吗？所需金币：{}",
+        group_thousands(cost)
+    )
+}
+
+/// .NET `###,###` 千位分组的实现：从右往左每三位插一个 `,`（整数、无小数）。
+pub fn group_thousands(n: u64) -> String {
+    let s = n.to_string();
+    let bytes = s.as_bytes();
+    let mut out = String::with_capacity(s.len() + s.len() / 3);
+    for (i, b) in bytes.iter().enumerate() {
+        if i > 0 && (bytes.len() - i) % 3 == 0 {
+            out.push(',');
+        }
+        out.push(*b as char);
+    }
+    out
+}
+
+/// 确认框左右两颗钮的**三态美术**（C# `MirMessageBox` 的两套按钮组，`MirControls/MirMessageBox.cs`）：
+///   - `OKCancel` → **OK** `Title[200/201/202]` + **Cancel** `Title[203/204/205]`（`:54-75`）；
+///   - `YesNo`    → **Yes** `Title[206/207/208]` + **No** `Title[210/211/212]`（`:76-97`）。
+///
+/// 扩容两条路径 C# 都用 `OKCancel`（`InventoryDialog.cs:92` / `:232`），而本端过去**一律**画 YesNo
+/// ⇒ 逐格对拍实测：原版 `(544,446)`/`(644,446)` 逐像素等于 `200`/`203`，本端是 `206`/`210`
+/// （README §3.2p）。
+pub fn confirm_button_art(mode: u8) -> ((usize, usize, usize), (usize, usize, usize)) {
+    if mode == CONFIRM_MODE_EXPAND_TAB || mode == CONFIRM_MODE_EXPAND_BUY {
+        ((200, 201, 202), (203, 204, 205))
+    } else {
+        ((206, 207, 208), (210, 211, 212))
+    }
 }
 
 /// 未扩容背包的格数 —— **本端口径**（把腰带排除在外）。
@@ -967,6 +1022,8 @@ pub struct InvDropConfirm {
     pub unique_id: u64,
     pub count: u16,
     /// #1346：0=丢弃 1=删除 2=背包扩容
+    /// §3.2p：4=背包扩容（BUY 按钮路径）。2 与 4 动作相同（都发 `@ADDINVENTORY`），
+    /// 只是文案不同（C# `ExtraSlots8` vs `ExtraSlots4`）；按钮组两者都用 `OKCancel`。
     pub mode: u8,
 }
 
@@ -1181,7 +1238,8 @@ fn inventory_ui_system(
                 // 46 格（未扩容）点 ITEMS II：不切页，弹扩容确认框（C# `MirMessageBox(ExtraSlots8)`
                 // 的等价物；README §3.2n / issue #3332）
                 None => {
-                    request_expand_confirm(&mut confirm, size);
+                    // 页签路径 → C# 的 `ExtraSlots8` 文案（`from_buy = false`）
+                    request_expand_confirm(&mut confirm, size, false);
                     tracing::info!("背包未扩容（{} 格）：ITEMS II 不切页，改为扩容确认", size);
                 }
             },
@@ -2133,8 +2191,9 @@ fn inv_add_del_buttons_system(
     }
     for (e, inter) in &add_btn {
         if edge(e, inter, &mut prev_inter) && can_expand {
-            // 与「46 格时点 ITEMS II」共用同一条确认路径（§3.2n / issue #3332）
-            request_expand_confirm(&mut confirm, len);
+            // 与「46 格时点 ITEMS II」共用同一条确认路径（§3.2n / issue #3332），
+            // 但文案按 C# 用的是 `ExtraSlots4`（带金币）⇒ from_buy = true
+            request_expand_confirm(&mut confirm, len, true);
         }
     }
     for (e, inter) in &del_btn {
@@ -2176,8 +2235,22 @@ fn spawn_inv_confirm(
         Visibility::Hidden,
     ));
     commands.entity(panel).with_children(|p| {
-        spawn_label(p, &cjk, "", 35.0, 35.0, 12.0, Color::WHITE, 9)
-            .insert((InvConfirmWidget, InvConfirmText));
+        // C# `MirMessageBox.Label`：`Location = (35,35)`、`Size = (390,110)`、默认 WordBreak
+        // ⇒ 必须用**定宽**标签才会像原版那样折行；`spawn_label` 是自适应宽，长文案会被拉成
+        // 一行并溢出框外（§3.2p 换成长文案后实机截图实测首行被裁）。
+        spawn_outlined_label_block(
+            p,
+            &cjk,
+            "",
+            35.0,
+            35.0,
+            390.0,
+            12.0,
+            Color::WHITE,
+            Justify::Left,
+            9,
+        )
+        .insert((InvConfirmWidget, InvConfirmText));
         if let (Some(n), Some(h), Some(pr)) = (
             load_lib_image(&mut libs, &mut images, LibraryName::Title, 206),
             load_lib_image(&mut libs, &mut images, LibraryName::Title, 207),
@@ -2200,10 +2273,19 @@ fn inv_confirm_system(
     mut confirm: ResMut<InvDropConfirm>,
     mut click: ResMut<InvClickState>,
     net: Res<NetConnection>,
+    // §3.2p：按钮组按 mode 换图（扩容 = C# `OKCancel` 的 200/203；其余 = `YesNo` 的 206/210）
+    mut libs: ResMut<GameLibraries>,
+    mut images: ResMut<Assets<Image>>,
     mut widgets: Query<&mut Visibility, With<InvConfirmWidget>>,
     mut texts: Query<&mut Text, With<InvConfirmText>>,
-    yes: Query<(Entity, &Interaction), (With<InvConfirmYes>, Without<InvConfirmNo>)>,
-    no: Query<(Entity, &Interaction), (With<InvConfirmNo>, Without<InvConfirmYes>)>,
+    mut yes: Query<
+        (Entity, &Interaction, &mut crate::ui::theme::ImageButton),
+        (With<InvConfirmYes>, Without<InvConfirmNo>),
+    >,
+    mut no: Query<
+        (Entity, &Interaction, &mut crate::ui::theme::ImageButton),
+        (With<InvConfirmNo>, Without<InvConfirmYes>),
+    >,
     mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
 ) {
     fn edge(
@@ -2228,10 +2310,42 @@ fn inv_confirm_system(
             t.0 = s;
         }
     }
+    // 按钮组跟随 mode（`ImageButton` 的三态句柄由 `image_button_system` 每帧写回 ImageNode，
+    // 所以必须改句柄而不是 ImageNode；与 `inv_tab_art_system` 同款做法）。
+    let ((ln, lh, lp), (rn, rh, rp)) = confirm_button_art(confirm.mode);
+    let load = |i: usize, libs: &mut GameLibraries, images: &mut Assets<Image>| {
+        load_lib_image(libs, images, LibraryName::Title, i)
+    };
+    if let (Some(a), Some(b), Some(c)) = (
+        load(ln, &mut libs, &mut images),
+        load(lh, &mut libs, &mut images),
+        load(lp, &mut libs, &mut images),
+    ) {
+        for (_, _, mut btn) in &mut yes {
+            if btn.normal != a {
+                btn.normal = a.clone();
+                btn.hover = b.clone();
+                btn.pressed = c.clone();
+            }
+        }
+    }
+    if let (Some(a), Some(b), Some(c)) = (
+        load(rn, &mut libs, &mut images),
+        load(rh, &mut libs, &mut images),
+        load(rp, &mut libs, &mut images),
+    ) {
+        for (_, _, mut btn) in &mut no {
+            if btn.normal != a {
+                btn.normal = a.clone();
+                btn.hover = b.clone();
+                btn.pressed = c.clone();
+            }
+        }
+    }
     if !confirm.visible {
         return;
     }
-    for (e, inter) in &yes {
+    for (e, inter, _) in &yes {
         if !edge(e, inter, &mut prev_inter) {
             continue;
         }
@@ -2257,8 +2371,10 @@ fn inv_confirm_system(
                 });
                 tracing::info!("🧪 确认使用 Shape4 药水 uid={}", confirm.unique_id);
             }
-            2 => {
-                // #1346：背包扩容（C# AddButton → C.Chat"@ADDINVENTORY"）
+            2 | 4 => {
+                // #1346：背包扩容（C# AddButton / ITEMS II 提示框 → `C.Chat"@ADDINVENTORY"`）
+                // mode 2 = 页签路径（ExtraSlots8 文案）、mode 4 = BUY 路径（ExtraSlots4 文案），
+                // 两者动作相同（§3.2p）。
                 net.send_packet(&mir2_shared::packets::client::chat::Chat {
                     message: "@ADDINVENTORY".to_string(),
                     linked_items: Vec::new(),
@@ -2281,7 +2397,7 @@ fn inv_confirm_system(
         confirm.visible = false;
         click.selected = None;
     }
-    for (e, inter) in &no {
+    for (e, inter, _) in &no {
         if edge(e, inter, &mut prev_inter) {
             confirm.visible = false;
         }
@@ -4031,8 +4147,8 @@ mod tests {
         assert_eq!(inv_tab_target_page(2, INV_BASE_BAG_SLOTS), Some(2));
     }
 
-    /// 扩容确认的两个入口共用同一条路径：费用文案与 `mode = 2`
-    /// （`inv_confirm_system` 的 mode 2 分支发 C# 同款 `@ADDINVENTORY`）。
+    /// 扩容确认的两个入口共用同一条路径（`inv_confirm_system` 的 `2 | 4` 分支都发
+    /// C# 同款 `@ADDINVENTORY`），但**文案按 C# 分成两种**、费用按 C# 与服务端实扣算。
     ///
     /// 费用口径取自 C# `InventoryDialog.cs:90-91` **与服务端实扣**
     /// （`ServerRust/src/actors/world/session.rs:7613-7617`）：`1M + ((len-46)/4) * 1M`。
@@ -4040,19 +4156,67 @@ mod tests {
     /// （46 格会算成 2,000,000）。
     #[test]
     fn expand_confirm_matches_csharp_and_server_cost() {
+        // 页签路径：C# `ExtraSlots8` 原文（文案里写死 1,000,000）
+        for len in [INV_BASE_BAG_SLOTS, INV_BASE_BAG_SLOTS + 8] {
+            let mut c = InvDropConfirm::default();
+            request_expand_confirm(&mut c, len, false);
+            assert_eq!(
+                c.mode, CONFIRM_MODE_EXPAND_TAB,
+                "页签路径 mode（len={len}）"
+            );
+            assert!(c.visible, "扩容确认必须可见（len={len}）");
+            assert_eq!(
+                c.text, CSHARP_EXTRA_SLOTS8_TEXT,
+                "页签路径必须逐字用 C# ExtraSlots8 文案（len={len}）"
+            );
+        }
+        // BUY 路径：C# `ExtraSlots4`（`{0:###,###}` → 千位分组）
         for (len, want) in [
-            (INV_BASE_BAG_SLOTS, "1000000"),      // 46 → openLevel 0
-            (INV_BASE_BAG_SLOTS + 8, "3000000"),  // 54 → openLevel 2
-            (INV_BASE_BAG_SLOTS + 12, "4000000"), // 58 → openLevel 3
+            (INV_BASE_BAG_SLOTS, "1,000,000"),      // 46 → openLevel 0
+            (INV_BASE_BAG_SLOTS + 8, "3,000,000"),  // 54 → openLevel 2
+            (INV_BASE_BAG_SLOTS + 12, "4,000,000"), // 58 → openLevel 3
         ] {
             let mut c = InvDropConfirm::default();
-            request_expand_confirm(&mut c, len);
-            assert_eq!(c.mode, 2, "扩容确认必须是 mode 2（len={len}）");
+            request_expand_confirm(&mut c, len, true);
+            assert_eq!(
+                c.mode, CONFIRM_MODE_EXPAND_BUY,
+                "BUY 路径 mode（len={len}）"
+            );
             assert!(c.visible, "扩容确认必须可见（len={len}）");
-            assert!(
-                c.text.contains(want),
-                "{len} 格的扩容费用应为 {want}（与服务端实扣一致）：{}",
-                c.text
+            assert_eq!(
+                c.text,
+                format!("你确定要解锁 4 个额外栏位吗？所需金币：{want}"),
+                "{len} 格的文案应与 C# ExtraSlots4 + 服务端实扣一致"
+            );
+        }
+        // .NET `{0:###,###}` 的最小实现（整数千位分组）
+        assert_eq!(group_thousands(0), "0");
+        assert_eq!(group_thousands(999), "999");
+        assert_eq!(group_thousands(1_000), "1,000");
+        assert_eq!(group_thousands(1_000_000), "1,000,000");
+        assert_eq!(group_thousands(45_400_000_000), "45,400,000,000");
+    }
+
+    /// §3.2p：确认框按钮组按 mode 走 C# `MirMessageBox` 的两套（`MirControls/MirMessageBox.cs`）：
+    /// `OKCancel` = OK `200/201/202` + Cancel `203/204/205`；`YesNo` = Yes `206/207/208` + No `210/211/212`。
+    ///
+    /// 阳性对照：让 `confirm_button_art` 恒返回 YesNo（修复前的行为）→ 前两条断言红。
+    #[test]
+    fn confirm_button_art_matches_csharp_button_sets() {
+        // 扩容（两条路径）→ OKCancel
+        for mode in [CONFIRM_MODE_EXPAND_TAB, CONFIRM_MODE_EXPAND_BUY] {
+            assert_eq!(
+                confirm_button_art(mode),
+                ((200, 201, 202), (203, 204, 205)),
+                "mode {mode}（扩容）必须是 C# OKCancel 的按钮组"
+            );
+        }
+        // 丢弃(0)/删除(1)/Shape4 药水(3) → YesNo（C# `InventoryDialog.cs:588`、药水确认同族）
+        for mode in [0u8, 1, 3] {
+            assert_eq!(
+                confirm_button_art(mode),
+                ((206, 207, 208), (210, 211, 212)),
+                "mode {mode} 必须是 C# YesNo 的按钮组"
             );
         }
     }
