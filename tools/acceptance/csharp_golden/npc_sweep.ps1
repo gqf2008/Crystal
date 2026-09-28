@@ -34,6 +34,10 @@ param(
     [string]$OutDir = '',
     [switch]$SetPos,
     [switch]$RestartPerPoint,
+    # 锁屏守卫（本脚本每次跑都会**真的去点原版窗口**，锁屏下点击到不了 winit ⇒ 只会产出
+    # "NPC窗=关" 的假红，白烧一轮）。默认：检测到锁屏就 exit 2，不跑。
+    # 已知需要锁屏下跑的场景（例如只想验 setpos/判据本身）用 -AllowLocked 显式放行。
+    [switch]$AllowLocked,
     [string]$Account = '333',
     [string]$Password = 'abbtest123',
     [int]$PosMap = 1,
@@ -59,6 +63,93 @@ if (-not $OutDir) { $OutDir = Join-Path $script:SW 'shots\sweep' }
 if (-not (Test-Path -LiteralPath $OutDir)) { New-Item -ItemType Directory -Force -Path $OutDir | Out-Null }
 
 . "$PSScriptRoot\csharp_client_driver.ps1" -SandboxRoot $script:SW
+
+# ---------------------------------------------------------------- 锁屏守卫
+# 判据同 README §3.2ag：锁屏时前台窗口是 `Windows.UI.Core.CoreWindow`（Windows 默认锁屏界面）。
+# 这道守卫是 2026-09-29 复测时补的：同一台机 02:03 / 02:06 / 02:19 连续三次都是锁屏，
+# 而本脚本在锁屏下**不会报错**——它照样点击、照样截图、照样给出 `NPC窗=关`，
+# 看起来像"原版点不动这只 NPC"，与 §3.2l 记载的那次假红同型。
+function Test-CsDesktopLocked {
+    try {
+        if (-not ('CsLockProbe' -as [type])) {
+            Add-Type -Namespace CsLockProbe -Name U -MemberDefinition @'
+[DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+[DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetClassNameW(IntPtr h, System.Text.StringBuilder s, int n);
+[DllImport("user32.dll")] public static extern IntPtr OpenInputDesktop(int flags, bool inherit, int access);
+[DllImport("user32.dll")] public static extern bool CloseDesktop(IntPtr h);
+'@ | Out-Null
+        }
+        $fg = [CsLockProbe.U]::GetForegroundWindow()
+        $sb = New-Object System.Text.StringBuilder 256
+        [CsLockProbe.U]::GetClassNameW($fg, $sb, 256) | Out-Null
+        $cls = $sb.ToString()
+        # 第二重证据：打不开输入桌面同样是锁屏（阈值与 GetForegroundWindow 互为兜底）
+        $d = [CsLockProbe.U]::OpenInputDesktop(0, $false, 0x0100)
+        if ($d -ne [IntPtr]::Zero) { [CsLockProbe.U]::CloseDesktop($d) | Out-Null }
+        return @{ locked = ($cls -eq 'Windows.UI.Core.CoreWindow'); cls = $cls }
+    } catch {
+        # 探测本身失败时**不拦**（宁可跑，也不要因为探测器的兼容问题把门禁卡死），但要说出来
+        Write-Host ("[lock-guard] 锁屏探测失败（{0}）→ 不拦，继续" -f $_.Exception.Message)
+        return @{ locked = $false; cls = '<probe-failed>' }
+    }
+}
+
+if (-not $AllowLocked) {
+    $lk = Test-CsDesktopLocked
+    if ($lk.locked) {
+        Write-Host ""
+        Write-Host "FAIL(2)[npc_sweep]: 工作站**锁屏**中（前台窗口 class='Windows.UI.Core.CoreWindow'）。"
+        Write-Host "  锁屏下 SetCursorPos/Click 到不了 winit，本脚本只会产出 'NPC窗=关' 的**假红**——"
+        Write-Host "  按 owner 的边界：不硬跑，等解锁。确认要跑就加 -AllowLocked（并自行承担假红风险）。"
+        exit 2
+    }
+    Write-Host ("[lock-guard] 桌面可交互（前台 class='{0}'）" -f $lk.cls)
+}
+
+# ------------------------------------------------ ③' 落点预算（**先算，再碰客户端**）
+# 配置类错误必须在"起服务端 / 重启客户端 / 键盘登录"（每个点 ~1 分钟）**之前**拦下来。
+$pts = @()
+if ($NpcsJson) {
+    # 从 `dbtool npcs <map>` 的 NPC 表算落点 —— 比盲扫格点确定得多。
+    # C# 的点击命中是**格**判定：`MouseCell = MouseLocation/CellSize - OffSet + User.Movement`
+    # （`GameScene.cs:10323`，OffSetX=1024/2/48=10、OffSetY=768/2/32-1=11），
+    # 反过来，NPC 那一格的屏幕盒子是 `[(nx-ux+10)*48, (ny-uy+11)*32)` 起、48x32 大；取盒心点。
+    # 注意这**不是**精灵的绘制原点（绘制是 `(dx+10)*48-10 / (dy+12)*32`），差着一个精灵锚点。
+    if (-not (Test-Path -LiteralPath $NpcsJson)) { throw "NpcsJson 不存在：$NpcsJson（先跑 dbtool npcs <map>）" }
+    $npcs = Get-Content -LiteralPath $NpcsJson -Raw | ConvertFrom-Json
+    $cand = @()
+    foreach ($n in $npcs) {
+        if ($Only -and $n.fileName -notmatch $Only) { continue }
+        $sx = ($n.x - $PlayerX + 10) * 48 + 24
+        $sy = ($n.y - $PlayerY + 11) * 32 + 16
+        $dist = [Math]::Abs($n.x - $PlayerX) + [Math]::Abs($n.y - $PlayerY)
+        if ($dist -gt $MaxDist) { continue }
+        if ($sx -lt 8 -or $sx -gt 1015 -or $sy -lt 8 -or $sy -gt 759) { continue }
+        $cand += [pscustomobject]@{ x = $sx; y = $sy; dist = $dist; file = $n.fileName; name = $n.name }
+    }
+    # 起点**不能与 NPC 同格**：2026-09-29 实测 `-PosX 301 -PosY 257`（= 仓库 NPC 自己那格）时
+    # 点出来的是**角色自己**，页型恒 `closed`，看图才明白（同格时角色精灵压在 NPC 上）。
+    # 这类"配置错"与"原版点不动"在读数上完全一样，所以直接拦下来，别让它变成一条假结论。
+    $same = @($cand | Where-Object { $_.dist -eq 0 })
+    if ($same.Count -gt 0) {
+        Write-Host ""
+        Write-Host ("FAIL(2)[npc_sweep]: 起点与目标 NPC 同格（{0}）——点出来的是角色自己，页型会恒为 closed。" -f (($same | ForEach-Object { $_.file }) -join ','))
+        Write-Host "  改法：把 -PosX/-PosY（以及 -PlayerX/-PlayerY）挪到 NPC **旁边**（距离 1~2 格），再跑。"
+        exit 2
+    }
+    if ($cand.Count -eq 0) {
+        Write-Host ""
+        Write-Host ("FAIL(2)[npc_sweep]: 按 -NpcsJson/-Only/-PlayerX,-Y/-MaxDist 一个落点都没算出来（-Only='{0}' -MaxDist={1}）。" -f $Only, $MaxDist)
+        Write-Host "  提示：`-Only` 匹配的是 NPC 的脚本相对路径（如 'BichonWall/Warehouse1'），不是名字；"
+        Write-Host "        且可见范围只有 ±10 格（x）/±11 格（y），-PlayerX/-PlayerY 要放在目标附近。"
+        exit 2
+    }
+    foreach ($c in ($cand | Sort-Object dist)) {
+        Write-Host ("DB NPC {0} [{1}] 距离={2} → 屏幕格心 ({3},{4})" -f $c.file, $c.name, $c.dist, $c.x, $c.y)
+        $pts += , @($c.x, $c.y)
+    }
+    Write-Host ("按 NPC 表生成 {0} 个落点" -f $pts.Count)
+}
 
 $prguse = Join-Path $script:SW 'Client\Data\Prguse.Lib'
 $probe = Join-Path $PSScriptRoot 'npc_page_probe.py'
@@ -157,33 +248,13 @@ function Send-Escape { [void][CsUi]::SendMessage($global:csHwnd, 0x0100, [IntPtr
 Send-Escape; Send-Escape
 
 # ---------- ③ 扫描 ----------
-$pts = @()
-if ($NpcsJson) {
-    # 从 `dbtool npcs <map>` 的 NPC 表算落点 —— 比盲扫格点确定得多。
-    # C# 的点击命中是**格**判定：`MouseCell = MouseLocation/CellSize - OffSet + User.Movement`
-    # （`GameScene.cs:10323`，OffSetX=1024/2/48=10、OffSetY=768/2/32-1=11），
-    # 反过来，NPC 那一格的屏幕盒子是 `[(nx-ux+10)*48, (ny-uy+11)*32)` 起、48x32 大；取盒心点。
-    # 注意这**不是**精灵的绘制原点（绘制是 `(dx+10)*48-10 / (dy+12)*32`），差着一个精灵锚点。
-    $npcs = Get-Content -LiteralPath $NpcsJson -Raw | ConvertFrom-Json
-    $cand = @()
-    foreach ($n in $npcs) {
-        if ($Only -and $n.fileName -notmatch $Only) { continue }
-        $sx = ($n.x - $PlayerX + 10) * 48 + 24
-        $sy = ($n.y - $PlayerY + 11) * 32 + 16
-        $dist = [Math]::Abs($n.x - $PlayerX) + [Math]::Abs($n.y - $PlayerY)
-        if ($dist -gt $MaxDist) { continue }
-        if ($sx -lt 8 -or $sx -gt 1015 -or $sy -lt 8 -or $sy -gt 759) { continue }
-        $cand += [pscustomobject]@{ x = $sx; y = $sy; dist = $dist; file = $n.fileName; name = $n.name }
+# `-NpcsJson` 的落点已经在 ③'（碰客户端**之前**）算好并校验过；这里只补另两种来源。
+if (-not $NpcsJson) {
+    if ($Points.Count -gt 0) {
+        foreach ($p in $Points) { $xy = $p -split ','; $pts += , @([int]$xy[0], [int]$xy[1]) }
+    } else {
+        foreach ($y in $GridY) { foreach ($x in $GridX) { $pts += , @($x, $y) } }
     }
-    foreach ($c in ($cand | Sort-Object dist)) {
-        Write-Host ("DB NPC {0} [{1}] 距离={2} → 屏幕格心 ({3},{4})" -f $c.file, $c.name, $c.dist, $c.x, $c.y)
-        $pts += , @($c.x, $c.y)
-    }
-    Write-Host ("按 NPC 表生成 {0} 个落点" -f $pts.Count)
-} elseif ($Points.Count -gt 0) {
-    foreach ($p in $Points) { $xy = $p -split ','; $pts += , @([int]$xy[0], [int]$xy[1]) }
-} else {
-    foreach ($y in $GridY) { foreach ($x in $GridX) { $pts += , @($x, $y) } }
 }
 
 # ---------- ④ 逐点：点击 → 判页型 →（商人页）当场点首条链接 → 商品窗 ----------
