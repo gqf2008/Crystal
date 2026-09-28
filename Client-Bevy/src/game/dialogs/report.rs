@@ -24,7 +24,13 @@ use crate::ui::theme::{
 
 /// C# `ReportDialog`（`Client/MirScenes/Dialogs/ReportDialog.cs:15-16`）：`Index = 1633; Library = Libraries.Prguse`
 pub const PANEL: (LibraryName, usize) = (LibraryName::Prguse, 1633);
-/// C# 无显式 `Size` → 用 art 尺寸；本端在数据包缺 `Prguse[1633]` 时按同尺寸深色兜底
+/// C# 无显式 `Size` → 用 art 尺寸；本端在数据包缺 `Prguse[1633]` 时按同尺寸深色兜底。
+///
+/// **实测（2026-09-29，§3.2ao）**：`Data/Prguse.Lib` 的 1631–1635 **整块都是空条目**
+/// （`w=0 h=0 len=0`；沙箱 `Client\Data\Prguse.Lib` 与本仓库这份 **MD5 相同**），且
+/// `Prguse/Prguse2/Prguse3/Title` 四个库里**没有** 360x244 的图 ⇒ 原版这版**面板什么都不画**，
+/// `Location = Center` 用 0 尺寸算成 (512,384)。本端这套 360x244 深色面板是**有意兜底**
+/// （尺寸由子控件外沿反推：关闭钮 336+24、提交钮 219+24），不是"没对齐"。
 pub const PANEL_SIZE: (f32, f32) = (360.0, 244.0);
 /// 关闭键 `Prguse2[360..362]` @(336,3)（`ReportDialog.cs:21-30`，无 `Size` → art 24x21）
 pub const CLOSE_REL: (f32, f32) = (336.0, 3.0);
