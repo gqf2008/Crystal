@@ -297,6 +297,11 @@ pwsh tools\acceptance\csharp_golden\golden_ab_ours.ps1 -SandboxRoot $env:TEMP\go
 | Help / Keybind | 87.6% / 26.6% | 非缺陷：键位表**语言与条目**不同（我方中文动态生成 vs 原版英文固定清单），窗口矩形/控件位置一致（§3.2c 已记）。 |
 | Relationship / Ranking / GameShop / Bigmap | 22.2% / 10.6% / 29.6% / 63.3% | **已定性，见 §3.2g**（注意 `RankingDialog.cs` 与 `GameshopDialog.cs` 也都有 `PageNumberLabel` 一类的翻页控件，`TrustMerchantDialog.cs`/`HelpDialog.cs`/`MailDialogs.cs`/`IntelligentCreatureDialogs.cs`/`CharacterDialog.cs` 同理——**排查时先按这条线核"本端有没有翻页条"**，Friends 就是这么捞出来的）。 |
 
+> **2026-09-28 更新（§3.2f 的「居中窗 ±1px」待办，详见 §3.2ac）**：`golden_ab_diff.py` **默认带**
+> `--max-shift 1`，同批帧复跑后 Friends **25.5% → 6.6%（dx=1）**、Help **87.6% → 10.7%（dx=1）**，
+> 其余窗 dx=dy=0 ⇒ 只有居中窗在这对帧里偏 1px，是**取帧口径**不是本端排版 bug；
+> Friends 的残余里有 3546 px 压在**翻页条那一行**（新线索，留给下一批）。
+
 ### 3.2g 「翻页条」线索套到 Relationship / Ranking / GameShop / Bigmap（2026-09-28）
 
 判据/配方同 §3.2c–§3.2f（原版侧 `golden_kbd_windows.ps1` 键位开窗；我方侧
@@ -916,6 +921,10 @@ foreach ($y in 160,260,360,460,560) { foreach ($x in 200,300,400,500,600,700,800
 实测：同一坐标，先移光标则**大地图 NPC 列表滚动**（`BigMapDialog.cs:368-390`，窗区 408 px 变化）；
 不移光标则一动不动 ⇒ 这就是滚轮注入的**阳性对照**。
 
+> **2026-09-28 更新（见 §3.2ab）**：这条**已撤回**——同法复跑（键盘 B 开窗、光标压在列表上、±3 格）
+> 窗区逐像素 **0**；真因是那一屏的 NPC 列表 `Count == MaximumRows(18)`，`ScrollDown()` 的守卫
+> `ScrollOffset >= Count - MaximumRows` 直接短路，**滚轮本来就该不动**。别再用它当"注入滚轮可达"的证据。
+
 **⑤ NPC 窗滚轮：不动 = C# 守卫的正确行为（不是注入失败）**。该 NPC 的 `#SAY` 只有 4 行，
 而 C# `NPCDialog_MouseWheel`（`NPCDialogs.cs:235-251`）第三行守卫是
 `if (CurrentLines.Count <= MaximumLines) return;`（`MaximumLines = 8`）⇒ 行数不够就不滚。
@@ -1339,6 +1348,10 @@ dotnet run --project .\dbtool\dbtool.csproj -c Release -- <沙箱>\Server dump S
   > 但**箭头可滚**（11926/11925 px）、**大地图滚轮可滚**（382 px）⇒ 原版侧 NPC 窗滚轮本身不发，
   > 与本端（可用）相反；C# 侧根因未定性。
 
+> **2026-09-28 更新（见 §3.2ab）**：已收口——**真实滚轮**（窗口前台已确认 `GetForegroundWindow()==csHwnd`）
+> 与注入滚轮在 11 行 NPC 页上都是 **0 像素变化** ⇒ 不是注入问题，是**原版这一版滚轮不达**；
+> 本端保留滚轮（严格超集），记「刻意背离」。
+
 ### 3.2v §3.2m 的腰带残差 4.1pp 定性（2026-09-28）：是 6 个槽位**数字**的字形，不是画错
 
 §3.2m 收口时留了一句"剩余约 4.1pp（原版 3.3% vs 本端 7.4%）尚未逐像素定性"。本轮把它定性完：
@@ -1631,3 +1644,81 @@ C# `Libraries.MiniMap.Draw(map.MiniMap, viewRect, drawLocation, White, _fade)`�
 `pmode_label_visibility_tracks_class`（阳性对照：同实体换职业要跟着翻））；
 `cargo test --test b0001_smoke --test ui_alignment` **53 passed**；
 实机交互巡回 `ui_interact_sweep.ps1 -ManageServer` **44/44 exit=0**。
+### 3.2ab §3.2w 那条「原版 NPC 窗滚轮不发」的收口：**不是注入问题，是原版这一版滚轮不达**（2026-09-28）
+
+§3.2w 把"沙箱这一版原版 NPC 窗滚轮不生效"记成**根因未定性**。本轮把它收口，并且**顺带撤回 §3.2q
+那条"大地图滚轮"阳性对照**——它当时不是滚轮读数。
+
+**① 真实滚轮也不滚（窗口前台已确认）**
+
+判据：MaterialDealer 的 11 行页（`Materials-0.txt [@Main-1]` = 11 行 > `MaximumLines(8)`，
+右侧箭头可见、箭头可滚），窗口 `SetWindowPos(0,0,1024,768)` 置顶，光标在正文 `(220,120)`：
+
+| 路径 | 窗区（0,0,440,224）文本区逐像素差 |
+|---|---|
+| 注入 `WM_MOUSEWHEEL`（`Msg-Wheel 220 120 -3`） | **0** |
+| **真实滚轮**（`SetForegroundWindow` + 真实 `SetCursorPos` + `mouse_event(MOUSEEVENTF_WHEEL, -120)`×3） | **0** |
+| 真实滚轮反向（+120×3） | **0**（回到原状，全窗逐像素一致） |
+
+关键前置：实测 `GetForegroundWindow() == csHwnd`（**原版客户端本来就是前台窗口**）⇒ 真实滚轮那条
+不是"没送到"。⇒ **在沙箱这一版里，滚轮不达 NPC 窗；这与注入无关。**
+
+**② 撤回 §3.2q 的「大地图滚轮」阳性对照**
+
+同法在键盘 B 打开的大地图上，光标压在 NPC 列表上滚（±3 格）：窗区逐像素 **0**。原因不是"滚轮不达"，
+而是**这一屏的列表根本没有行程**：`BigMapDialog.MaximumRows = 18`，而 BorderVillage 一带
+`ShowOnBigMap` 的 NPC 正好 **18** 条（截图逐行数得 18 行）；`ScrollDown()` 的守卫是
+`if (ScrollOffset >= currentRecord.NPCButtons.Count - MaximumRows) return;`（`BigMapDialog.cs:385-390`）
+⇒ `0 >= 18-18` 直接短路，**滚轮本来就该一动不动**；而 §3.2y 拖 `ScrollBar` 仍然能改列表，
+是因为拖动路径直接写 `ScrollOffset`、**不走**这条守卫。
+⇒ §3.2q 记的那 408 px 要么来自另一个行数 > 18 的地图记录，要么把别的变化读成了滚动；
+**在拿到"行数 > 18 且滚轮确实改了 `ScrollOffset`"的复现之前，不要再用它当"注入滚轮可达"的证据。**
+
+**③ 源码层：滚轮与点击走的是两个不同的静态量**
+
+| 事件 | 派发入口（`Client/MirControls/MirScene.cs`） | 谁被调用 |
+|---|---|---|
+| 点击 | `OnMouseClick:162` —— `if (ActiveControl != null && ActiveControl.IsMouseOver(MPoint) && ActiveControl != this)` | **`ActiveControl`** |
+| 滚轮 | `OnMouseWheel:141` —— `if (MouseControl != null && MouseControl != this)` | **`MouseControl`** |
+
+`MouseControl` 全仓**只有一处赋值**：`MirControl.Highlight()`（`MirControl.cs:808-823`）——
+它先 `MouseControl.Dehighlight()`（把旧值置 null），然后
+`if (ActiveControl != null && ActiveControl != this) return;` **提前返回**（`MouseControl` 停在 null）。
+而 `Highlight()` 只在"光标**不在任何子控件**上"时才被这条链调到（`MirControl.cs:921-929`：
+先递归到最深的 `IsMouseOver` 子控件，找不到才 `Highlight()` 自己）。
+⇒ 页面**箭头是点击语义**（走 `ActiveControl`），所以箭头照样能滚；滚轮走 `MouseControl`，
+它一旦被 `ActiveControl` 早退掐掉就没有落点。
+**本轮没能把这一环单独钉死**（没能做出"让 `MouseControl` 变成 NPC 窗"的正例——正文区悬停、
+先点窗内空白都试过，注入与真实滚轮都不达），所以只记为**最可疑的一环**，不写成定论。
+
+**④ 与本端的对照（刻意背离，不要去"对齐"）**
+
+本端 NPC 窗滚轮**可用**（§3.2u：9 行页 `wheel +3` → `offset 0→1`、`-3` → `1→0`），是**严格超集**；
+原版这一版滚轮不达属客户端缺陷。⇒ 结论：**本端保留滚轮**，不把"原版不滚"当基准；
+这条差异记「刻意背离」，与 §3.2g 的滚动条实现同类。
+
+### 3.2ac §3.2f 那条「居中窗 ±1px」待办收口：`--max-shift` 复跑后的真实残差（2026-09-28）
+
+§3.2f 的待办是「给逐窗对拍加『居中窗允许 ±1px 平移』（或把原版取帧改成真实客户区），**之后再看这批窗的真实差异**」。
+`golden_ab_diff.py` 现在**默认就带** `--max-shift 1`（默认 1，逐窗报 `平移后=<像素>(<占比>, dx=.. dy=..)`），
+本轮用同一批帧（原版 `orig_win_*.png` + 本端 `ours_win_*.png` + `rect_table.json`）复跑，把"之后"这半句做完：
+
+```powershell
+py -3.12 tools\acceptance\csharp_golden\golden_ab_diff.py --shots %TEMP%\golden_sandbox\shots --table %TEMP%\rect_table.json --max-shift 1
+```
+
+| 窗口 | 原始差异 | ±1px 平移后 | 平移量 | 含义 |
+|---|---|---|---|---|
+| **Friends** | 25.5%（18331） | **6.6%（4719）** | dx=1 dy=0 | 与 §3.2f 记的 4783 同量级 ⇒ 主导项确实是那 1px |
+| **Help** | 87.6%（239050） | **10.7%（29293）** | dx=1 dy=0 | 同上；剩下的是**键位表语言/条目**（§3.2c 已定性） |
+| 其余（Inventory/Equipment/Skills/Quests/Options/Group/Relationship/Ranking/GameShop/Bigmap/Keybind） | — | **无位移改善**（dx=dy=0） | — | 它们的差异不是"居中偏 1px"，是真内容/数据差（各自小节已定性） |
+
+⇒ **§3.2f 的待办只剩"口径已加、结论已出"**：居中窗（`Center`）在这对帧里确实整体偏 1px（原版取帧的客户区比 1024 宽 2px），
+**不是本端排版 bug**；其余窗的差异与位移无关。
+
+**顺带一条新线索（未收口，留给下一批）**：Friends 平移后的残余 **4870 px 里 3546 px 压在翻页条那一行**
+（按 20 行分带：屏幕 `y488..507` = 2488 + `y508..527` = 1058，其余各带只有 55–198 px 的 1px 级残差，
+标题带 484 px）。即"翻页条"这块在两边**仍有可见差**（本端是 PR #3320 补的那套：
+`PageNumberLabel (87,216) 83x17` + `Prguse2[240..242]@(70,218)` + `[243..245]@(171,218)`，
+空好友列表时该显示 `1/1` 且两个箭头为禁用帧）。下一轮的前置很清楚：
+**把 `Prguse2[240..245]` 三帧逐张导出来，与本端翻页条那一行逐像素比，判"帧号错"还是"占位/文字错"**。
