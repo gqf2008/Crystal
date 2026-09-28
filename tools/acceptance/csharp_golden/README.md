@@ -1443,6 +1443,10 @@ C# 侧代码是挂着的（`NPCDialog` 构造里 `MouseWheel += NPCDialog_MouseW
 注意把扫描 x 限制在 `8..60`、y 限制在 `34..150`，**别把底部 QUEST 按钮的黄字算进来**——
 本轮就是被它骗过一次）→ 命中商人后再点 `View` 抓商品窗。
 
+> **2026-09-28 更新（见 §3.2z）**：这条已收口。配方固化成了 `npc_sweep.ps1`（点商人不再靠盲扫，
+> 见 §3.2z ②），**但"同中文 locale"这个前提本身不成立**——沙箱那一版原版二进制没有商品价签的本地化键
+> （`PriceGold` 在 `Client.dll`/`Shared.dll` 里一次都不出现），只能出英文 ⇒ 该条结论改为「**不可比**」。
+
 ### 3.2y 驱动新增 `Msg-Drag`（按下-移动-抬起）+ `game_shop` 分类滑条的定性（2026-09-28）
 
 §3.2l-b 的 `game_shop` 那条是「分类列 `PositionBar`（`Prguse2[205/206]@(120,117)`）**拖动**」——
@@ -1476,3 +1480,83 @@ C# 侧代码是挂着的（`NPCDialog` 构造里 `MouseWheel += NPCDialog_MouseW
   商城窗内仅 **164 px**（悬停高亮级）变化、**滑条带 (284,240,20,200) 0 px** ⇒ **滑条没动**；
 - 结论：这一条记为「**无可滚行程 / 本数据下不可判定**」，**不是**"点不动"。
   （真要有行程，需要一份分类数 > 22 的商城数据；届时用 `Msg-Drag` 复跑即可。）
+
+### 3.2z 「点哪只 NPC」不再是盲扫：`dbtool npcs` + 格心落点 + 页型数值判据（2026-09-28）
+
+§3.2q–§3.2x 的 NPC 取证一直是**临时配方**（格点盲扫 + 肉眼判页型 + 手算链接坐标），每轮重抄一遍，
+而且判页型靠眼睛反复被骗。本轮把它固化成一条命令，并把 §3.2x 卡着的那条**结掉——结论是「不可比」**（见 ④）。
+
+**① 新工具三件套**
+
+| 工具 | 干什么 |
+|---|---|
+| `dbtool … npcs [mapIndex]`（新增模式） | 从 `Server.MirDB` 的 `NPCInfoList` 导出该地图的 NPC 表：`index/fileName/name/mapIndex/x/y/image/rate`，落盘 `<serverDir>\..\npcs_<map>.json` |
+| `npc_page_probe.py`（新） | 单帧数值判据：窗美术 vs `Prguse[995]` ⇒ **开没开 NPC 窗**；窗内扫黄字带 ⇒ **页型 + 每条链接的矩形**；顺手判商品窗（`Prguse[1000]` @ (0,224) 244x334） |
+| `npc_sweep.ps1`（新） | 一条命令跑完整链：`-SetPos` 重置起点 →（可选 `-RestartPerPoint`）→ 点击 → **逐点**判页型 → 命中商人页**当场**点最上面那条链接 → 抓商品窗 → 汇总 JSON |
+
+```powershell
+# NPC 表（先停 Client/Server：LoadDB 会动 DB，dbtool 自带 Server.MirDB 还原保护）
+…\dbtool\bin\Release\net8.0-windows\dbtool.exe %TEMP%\golden_sandbox\Server npcs 1
+# 一条命令：固定起点 → 按 NPC 表点名 → 判页型 → 点 View → 抓商品窗
+pwsh -NoProfile -File tools\acceptance\csharp_golden\npc_sweep.ps1 -SandboxRoot $env:TEMP\golden_sandbox `
+     -SetPos -RestartPerPoint -PosMap 1 -PosX 296 -PosY 615 `
+     -NpcsJson $env:TEMP\golden_sandbox\npcs_1.json -PlayerX 296 -PlayerY 615 -MaxDist 20 -Only 'Grocery|Drapery|Blacksmith'
+```
+
+**② 落点公式：点击是「按格」判的，不是按精灵**
+
+`GameScene.cs:10323` 的反函数：`MouseCell = MouseLocation / (48,32) - (10,11) + User.CurrentLocation`
+⇒ 世界格 `(nx,ny)` 的屏幕盒子是 `[(nx-ux+10)*48, (ny-uy+11)*32)`、48x32 大，取**盒心** `(+24,+16)`。
+**别拿精灵的绘制原点**（那是 `(dx+10)*48-10 / (dy+12)*32`，差一个精灵锚点）——§3.2x 就是按那个算的。
+
+实测（起点 `setpos 1 296 615`，三个落点各一击命中）：
+
+| 落点 | DB 里那只 | 结果 |
+|---|---|---|
+| (504,304) | `BorderVillage/Blacksmith` | 商人页 3 条链接（`View` y74..82 / `Repair` y92..100 / `Close` y128..136），点 `View` → **商品窗 0.0863** |
+| (120,144) | `BorderVillage/Grocery` | 商人页 2 条链接，点首条 → **商品窗 0.0970** |
+| (936,144) | `BorderVillage/Drapery` | 被小地图面板挡住（见 ③）；`-HideMinimap` 后同一击开出商人页 + **商品窗 0.1095** |
+
+商品窗"开/关"的判据带：开 ≈ **0.086 / 0.097 / 0.110**，关 ≈ **0.91–0.96**（≈9 倍区分度；工具阈值默认 0.10，
+Drapery 那次 0.1095 略超阈值，看图确认是开着的——阈值偏紧，按 0.15 判更稳）。
+
+**③ 两个把落点打飞的坑（都实测过）**
+
+- **HUD 遮挡**：原版小地图 `MiniMapDialog` `Location = (ScreenWidth-126, 0)` = **(898,0)**、宽 126
+  （`MainDialogs.cs:1780`），面板里的 `BigMapButton`（`:1827-1838`，面板内 `(25,131)`）**点一下就开大地图**。
+  Drapery 的格心 (936,144) 正落在这块上 ⇒ 点出来的是**大地图**：大地图区判据 **0.591** vs 基线 **0.865**，
+  再 Escape 回 0.865；同一坐标**只 hover 不点**时也是 0.865（⇒ 不是悬停触发的）。
+  按 `V`（KeyBinds `Minimap`）收起小地图后，**同一坐标开出 Drapery 的商人页**。
+  工具默认把这块列进 `-Avoid` 跳过并在日志里点名，要用就用 `-HideMinimap`。
+- **点一次角色就被带走**：点 NPC 会让角色朝它挪格，之后按固定起点算的落点全部错位（实测第一击必中、后续全空）。
+  ⇒ 加了 `-RestartPerPoint`：每个落点都 `setpos` + 重启客户端 + 键盘登录重来（代价 ~1 分钟/点）。
+
+**④ 页型判据（黄字带），以及 §3.2x 那条的收口**
+
+窗内扫 `R>200 && G>200 && B<80`（C# 链接 `NewButton` 就是 `ForeColour = Color.Yellow`），按 y 分带：
+
+| 页 | 黄字带（实测） | 判据 |
+|---|---|---|
+| 商人 Blacksmith | `y74..82 x12..37` / `y92..100 x13..48` / `y128..136 x13..43` | 正文区（`y30..170`）里 **≥2 条左对齐短带** |
+| 商人 Grocery / Drapery | 各 2 条 | 同上 |
+| Assistant | `y92..100 x13..43`，**只有一条** | 单条 |
+| 布告板 | 一条长带（`x37..179` 量级） | 带宽 > `--wide`、x0 偏右 |
+
+**底部 QUEST 按钮**的黄字带在 `y202..205 x204..237`（C# `QuestButton.Location = (172, Size.Height-30)`
+= (172,194)）⇒ 判据用 `--link-ymax 170` 排掉——§3.2x 就是被它骗过一次。
+
+**§3.2x 收口：「同中文 locale 的商品窗复帧」= 不可比（原版这一版根本没有这个键）**
+
+§3.2x 把"未采集"归因于"点不到商人"（这一半本轮已解决，见 ②）。更要紧的是**「把原版切成中文」这个前提本身不成立**：
+
+- 仓库源码里 C# 读 `.\Localization\<Language>.json`（`Settings.cs:320-326`，`Language` 取自 `Mir2Config.ini [Game]`）；
+  **沙箱这一版二进制不是这个版本**——`Client.dll` 里有 `Language.ini` 字面量、**没有** `Localization`。
+- 不管走哪条路，**这一版没有商品价签的本地化键**：`Client.dll` 里是硬编码的 `Price: {0} gold` 与
+  `Price: {0} pearl{1}`，而 `PriceGold` / `PricePearl` 在 `Client.dll` / `Shared.dll` 的元数据里**一次都不出现**
+  （`ExtraSlots8/4`、`GameLanguage` 反倒都在）。沙箱 `Client\Language.ini` 里 §3.2x 加的那两条
+  `PriceGold=价格：{0} 金币` / `PricePearl=…` **没有任何效果**——本轮重启客户端后商品窗仍是 `Price: 50 gold`。
+- ⇒ 这一条的结论从"未采集"改成「**不可比**」：原版这一版的商品价签只能出英文，**不存在"两端同中文"的一对帧**。
+  §3.2t 那次"我方中文 vs 原版英文"的结构级对比（名称在 `+0`、价格在 `+14`）就是这条线能拿到的最强证据。
+
+**⑤ 一条口径**：`npc_page_probe.py` 的窗美术阈值默认 0.10（`--threshold`）。
+实测"开"的帧：NPC 窗 **0.020–0.051**、商品窗 **0.086–0.110**；"关"的帧 **0.808–0.958**。

@@ -67,6 +67,7 @@ class Program
         }
         if (mode == "export") { Export(arg2 ?? "db_export.json"); return; }
         if (mode == "setpw") { SetPassword(arg2, args.Length > 3 ? args[3] : null); return; }
+        if (mode == "npcs") { ListNpcs(arg2); return; }
         if (mode == "setpos")
         {
             // setpos <accountId> <mapIndex> <x> <y> [charName]
@@ -81,7 +82,36 @@ class Program
             return;
         }
         Console.WriteLine("usage: dbtool <serverDir> list | dump <TypeFullName> | export <outfile> | " +
-                          "setpw <accountId> <newPassword> | setpos <accountId> <mapIndex> <x> <y> [charName]");
+                          "setpw <accountId> <newPassword> | npcs [mapIndex] | " +
+                          "setpos <accountId> <mapIndex> <x> <y> [charName]");
+    }
+
+    // 列出 Server.MirDB 的 NPCInfoList（`FileName` = 脚本相对路径、`Location` = 世界格），可按地图过滤。
+    // 用途：把原版侧的点击取证从「盲扫格点」升级成「按坐标点」——拿到 FileName 就能先判这一只
+    // 是不是商人（脚本里有 `<View/@BuySell>` 一类），再用 GameScene 的世界→屏幕公式算落点。
+    static void ListNpcs(string mapS)
+    {
+        var env = LoadEnvir(out _);
+        int? map = string.IsNullOrEmpty(mapS) ? (int?)null : int.Parse(mapS);
+        var rows = new List<string>();
+        foreach (var n in Seq(F(env, "NPCInfoList")))
+        {
+            int mi = (int)I(F(n, "MapIndex"));
+            if (map.HasValue && mi != map.Value) continue;
+            var loc = F(n, "Location");
+            rows.Add("  {\"index\":" + I(F(n, "Index")) +
+                     ",\"fileName\":\"" + Esc(S(F(n, "FileName"))) + "\"" +
+                     ",\"name\":\"" + Esc(S(F(n, "Name"))) + "\"" +
+                     ",\"mapIndex\":" + mi +
+                     ",\"x\":" + I(F(loc, "X")) + ",\"y\":" + I(F(loc, "Y")) +
+                     ",\"image\":" + I(F(n, "Image")) + ",\"rate\":" + I(F(n, "Rate")) + "}");
+        }
+        var sb = new StringBuilder();
+        sb.Append("[\n" + string.Join(",\n", rows) + "\n]\n");
+        var outFile = Path.Combine(Root, "..", "npcs_" + (map.HasValue ? map.Value.ToString() : "all") + ".json");
+        outFile = Path.GetFullPath(outFile);
+        File.WriteAllText(outFile, sb.ToString(), new UTF8Encoding(false));
+        Console.WriteLine($"npcs(map={(map.HasValue ? map.Value.ToString() : "all")}): {rows.Count} → {outFile}");
     }
 
     // 改角色落点：Server.MirDatabase.CharacterInfo 的 CurrentMapIndex(Int32) / CurrentLocation(Point)。
