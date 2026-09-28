@@ -916,6 +916,10 @@ foreach ($y in 160,260,360,460,560) { foreach ($x in 200,300,400,500,600,700,800
 实测：同一坐标，先移光标则**大地图 NPC 列表滚动**（`BigMapDialog.cs:368-390`，窗区 408 px 变化）；
 不移光标则一动不动 ⇒ 这就是滚轮注入的**阳性对照**。
 
+> **2026-09-28 更新（见 §3.2ab）**：这条**已撤回**——同法复跑（键盘 B 开窗、光标压在列表上、±3 格）
+> 窗区逐像素 **0**；真因是那一屏的 NPC 列表 `Count == MaximumRows(18)`，`ScrollDown()` 的守卫
+> `ScrollOffset >= Count - MaximumRows` 直接短路，**滚轮本来就该不动**。别再用它当"注入滚轮可达"的证据。
+
 **⑤ NPC 窗滚轮：不动 = C# 守卫的正确行为（不是注入失败）**。该 NPC 的 `#SAY` 只有 4 行，
 而 C# `NPCDialog_MouseWheel`（`NPCDialogs.cs:235-251`）第三行守卫是
 `if (CurrentLines.Count <= MaximumLines) return;`（`MaximumLines = 8`）⇒ 行数不够就不滚。
@@ -1339,6 +1343,10 @@ dotnet run --project .\dbtool\dbtool.csproj -c Release -- <沙箱>\Server dump S
   > 但**箭头可滚**（11926/11925 px）、**大地图滚轮可滚**（382 px）⇒ 原版侧 NPC 窗滚轮本身不发，
   > 与本端（可用）相反；C# 侧根因未定性。
 
+> **2026-09-28 更新（见 §3.2ab）**：已收口——**真实滚轮**（窗口前台已确认 `GetForegroundWindow()==csHwnd`）
+> 与注入滚轮在 11 行 NPC 页上都是 **0 像素变化** ⇒ 不是注入问题，是**原版这一版滚轮不达**；
+> 本端保留滚轮（严格超集），记「刻意背离」。
+
 ### 3.2v §3.2m 的腰带残差 4.1pp 定性（2026-09-28）：是 6 个槽位**数字**的字形，不是画错
 
 §3.2m 收口时留了一句"剩余约 4.1pp（原版 3.3% vs 本端 7.4%）尚未逐像素定性"。本轮把它定性完：
@@ -1631,3 +1639,55 @@ C# `Libraries.MiniMap.Draw(map.MiniMap, viewRect, drawLocation, White, _fade)`�
 `pmode_label_visibility_tracks_class`（阳性对照：同实体换职业要跟着翻））；
 `cargo test --test b0001_smoke --test ui_alignment` **53 passed**；
 实机交互巡回 `ui_interact_sweep.ps1 -ManageServer` **44/44 exit=0**。
+### 3.2ab §3.2w 那条「原版 NPC 窗滚轮不发」的收口：**不是注入问题，是原版这一版滚轮不达**（2026-09-28）
+
+§3.2w 把"沙箱这一版原版 NPC 窗滚轮不生效"记成**根因未定性**。本轮把它收口，并且**顺带撤回 §3.2q
+那条"大地图滚轮"阳性对照**——它当时不是滚轮读数。
+
+**① 真实滚轮也不滚（窗口前台已确认）**
+
+判据：MaterialDealer 的 11 行页（`Materials-0.txt [@Main-1]` = 11 行 > `MaximumLines(8)`，
+右侧箭头可见、箭头可滚），窗口 `SetWindowPos(0,0,1024,768)` 置顶，光标在正文 `(220,120)`：
+
+| 路径 | 窗区（0,0,440,224）文本区逐像素差 |
+|---|---|
+| 注入 `WM_MOUSEWHEEL`（`Msg-Wheel 220 120 -3`） | **0** |
+| **真实滚轮**（`SetForegroundWindow` + 真实 `SetCursorPos` + `mouse_event(MOUSEEVENTF_WHEEL, -120)`×3） | **0** |
+| 真实滚轮反向（+120×3） | **0**（回到原状，全窗逐像素一致） |
+
+关键前置：实测 `GetForegroundWindow() == csHwnd`（**原版客户端本来就是前台窗口**）⇒ 真实滚轮那条
+不是"没送到"。⇒ **在沙箱这一版里，滚轮不达 NPC 窗；这与注入无关。**
+
+**② 撤回 §3.2q 的「大地图滚轮」阳性对照**
+
+同法在键盘 B 打开的大地图上，光标压在 NPC 列表上滚（±3 格）：窗区逐像素 **0**。原因不是"滚轮不达"，
+而是**这一屏的列表根本没有行程**：`BigMapDialog.MaximumRows = 18`，而 BorderVillage 一带
+`ShowOnBigMap` 的 NPC 正好 **18** 条（截图逐行数得 18 行）；`ScrollDown()` 的守卫是
+`if (ScrollOffset >= currentRecord.NPCButtons.Count - MaximumRows) return;`（`BigMapDialog.cs:385-390`）
+⇒ `0 >= 18-18` 直接短路，**滚轮本来就该一动不动**；而 §3.2y 拖 `ScrollBar` 仍然能改列表，
+是因为拖动路径直接写 `ScrollOffset`、**不走**这条守卫。
+⇒ §3.2q 记的那 408 px 要么来自另一个行数 > 18 的地图记录，要么把别的变化读成了滚动；
+**在拿到"行数 > 18 且滚轮确实改了 `ScrollOffset`"的复现之前，不要再用它当"注入滚轮可达"的证据。**
+
+**③ 源码层：滚轮与点击走的是两个不同的静态量**
+
+| 事件 | 派发入口（`Client/MirControls/MirScene.cs`） | 谁被调用 |
+|---|---|---|
+| 点击 | `OnMouseClick:162` —— `if (ActiveControl != null && ActiveControl.IsMouseOver(MPoint) && ActiveControl != this)` | **`ActiveControl`** |
+| 滚轮 | `OnMouseWheel:141` —— `if (MouseControl != null && MouseControl != this)` | **`MouseControl`** |
+
+`MouseControl` 全仓**只有一处赋值**：`MirControl.Highlight()`（`MirControl.cs:808-823`）——
+它先 `MouseControl.Dehighlight()`（把旧值置 null），然后
+`if (ActiveControl != null && ActiveControl != this) return;` **提前返回**（`MouseControl` 停在 null）。
+而 `Highlight()` 只在"光标**不在任何子控件**上"时才被这条链调到（`MirControl.cs:921-929`：
+先递归到最深的 `IsMouseOver` 子控件，找不到才 `Highlight()` 自己）。
+⇒ 页面**箭头是点击语义**（走 `ActiveControl`），所以箭头照样能滚；滚轮走 `MouseControl`，
+它一旦被 `ActiveControl` 早退掐掉就没有落点。
+**本轮没能把这一环单独钉死**（没能做出"让 `MouseControl` 变成 NPC 窗"的正例——正文区悬停、
+先点窗内空白都试过，注入与真实滚轮都不达），所以只记为**最可疑的一环**，不写成定论。
+
+**④ 与本端的对照（刻意背离，不要去"对齐"）**
+
+本端 NPC 窗滚轮**可用**（§3.2u：9 行页 `wheel +3` → `offset 0→1`、`-3` → `1→0`），是**严格超集**；
+原版这一版滚轮不达属客户端缺陷。⇒ 结论：**本端保留滚轮**，不把"原版不滚"当基准；
+这条差异记「刻意背离」，与 §3.2g 的滚动条实现同类。
