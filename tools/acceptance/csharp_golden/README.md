@@ -2231,3 +2231,87 @@ C# 帧实测的 bbox 钉在一起（`(9,33)-(215,66)`、竖线 `x=50`）。
 
 **门禁**：`cargo test --lib` **864 passed**；`b0001_smoke` 2 + `ui_alignment` 53；
 `ui_interact_sweep.ps1 -ManageServer` **44/44 exit=0**。
+### 3.2an 「同状态」对表（第三批）：`npc` 窗**行内链接两态色** —— C# 纯黄/纯红，本端两态都偏（2026-09-29）
+
+继续按「同一逻辑目标 + 同一取帧口径」逐项对表。这一批的对象是 **NPC 对话窗里的行内链接**
+（脚本标记 `<文字/@键>`）。它**不需要原版鼠标**：两态色是**源码常量**，而 §3.2q/§3.2r 当时
+为了"用颜色扫描量链接矩形"已经把**原版两态的原像素**顺手记过一遍，直接复用即可。
+
+**① C# 权威依据（源码）**
+
+`Client/MirScenes/Dialogs/NPCDialogs.cs:506-523`（`NewButton`，即 `R = <((.*?)\/(\@.*?))>`
+这一类的渲染器）：
+
+| 事件 | 赋值 |
+|---|---|
+| 初始 | `ForeColour = Color.Yellow` |
+| `MouseEnter` | `Color.Red` |
+| `MouseLeave` / `MouseDown` | `Color.Yellow` |
+| `MouseUp` | `Color.Red` |
+
+`MirControls/MirLabel.cs:220-233` 把 `ForeColour` 直接交给 `TextRenderer.DrawText`（配 `OutLineColour`
+描边），所以它就是文字填充色。同窗另两类不是这个色：`C = {文字/颜色}` 走 `NewColour`
+（用脚本给的颜色名、无悬停态），`[MONSTER:/NPC:/ITEM:]` 走 `NewLink`（Cyan → 悬停 Orange）——
+本服脚本量到 `MONSTER/NPC/ITEM` 各 **0** 处，故本轮只对 `R` 这一支。
+
+**② 原版帧（复用沙箱 `shots/`：同一只商人 NPC、键盘登录、真置顶 + 真实光标悬停）**
+
+| 帧 | 精确 `(255,255,0)` | 精确 `(255,0,0)` |
+|---|---|---|
+| `orig_lc2_0_before.png`（未悬停） | **191** | 0 |
+| `orig_lc2_1_hover_view.png`（悬停 `View`） | 127 | **64** |
+| `orig_lc2_2_after_click_view.png`（点开商店后） | 207 | 0 |
+
+⇒ 悬停把**被悬停那一段**的 64 px 黄字换成纯红，其余黄字不动；离开/点击后回黄。
+（这就是 §3.2r「悬停 `View` → 窗区 68 px 变化」那条读数的分解。）
+
+**③ 本端缺口**
+
+`Client-Bevy/src/game/dialogs/npc.rs` 的链接段用的是 `(1.0,0.85,0.3)`（≈`255,217,76`）常态、
+`(1.0,0.95,0.4)`（≈`255,242,102`）悬停 ⇒ **常态不是纯黄、悬停根本不是红**。
+
+**④ 修法**
+
+抽出 `npc_link_color(hovered) -> Color`（`Color::Yellow` / `Color::Red`，逐值对应 C#），
+链接段改调它；同一行里的 `{文字/颜色}` 段与纯文本段不受影响（仍按各自颜色/白色画）。
+
+**⑤ 复验（同状态同坐标）**
+
+本端夹具：worktree 产物 + `--ui-scale 1` + 真实 TCP 7000；`@mapmove 0 374 296` 后
+`nearby` 取 NPC 的 `object_id`，再 `npc_call {object_id, key="[@main]"}` 开窗；
+链接矩形直接读 `npc_rows`（View `x[8,34] y[70,86]` / Ask `x[8,27.5] y[88,104]` /
+Close `x[8,40.5] y[124,140]`）；悬停用本端 `cursor {x,y}` 注入链接中心
+（注入的是**窗内逻辑坐标**，不是屏幕坐标——这也是本端比原版好用的地方：
+原版必须真置顶 + 真实光标，本端这条 RPC 能直接指定）。
+
+| 帧 | 链接段常态色 | 悬停段色 |
+|---|---|---|
+| 本端 修前 `ours_pre_normal.png` | `(255,217,76)` × 20 | — |
+| 本端 修前 `ours_pre_hover_view.png` | — | `(255,242,102)` × 8 |
+| 本端 修后 `ours_nl_normal_01.png` | **`(255,255,0)` × 20** | 红 **0** |
+| 本端 修后 `ours_nl_hover_view_01.png` | `(255,255,0)` × 12 | **`(255,0,0)` × 8** |
+| 本端 修后 `ours_nl_hover_ask_01.png` | `(255,255,0)` × 14 | **`(255,0,0)` × 6** |
+
+红字 bbox 也逐段对上：悬停 `View` 红字 `(9,73)-(25,81)`（链接矩形 `8..34 / 70..86`），
+悬停 `Ask` 红字 `(10,94)-(26,99)`（矩形 `8..27.5 / 88..104`）——**只有被悬停那一段变红，
+另两段保持黄**，与 C# 同构。
+
+**⑥ 残余（同状态下仍不同的部分）**
+
+绝对像素数 20 vs C# 191 **不是色差**，是**字形**：本端 GLyph 光栅化落在链接矩形里的饱和像素
+天然比 GDI `TextRenderer` 少（同类残差见 §3.2al/§3.2t）。本项判据是**色值**与
+**"哪一段变红"**，两者现已逐值一致。
+
+**⑦ 顺带定性：`[@XXX]` 整行分支在现网不可达（本轮未改）**
+
+`npc.rs` 另有一条「无标记的行内可点行 → 整行橙」分支（`!has_markup && clickable`）。
+把沙箱 635 个 NPC 脚本逐行过了一遍：`is_clickable_npc_line` 命中 **11433** 行，其中
+**6405** 行走 `<.../@...>`（链接分支），剩下 **5028** 行全是 `[@段头]`
+（服务端 `ServerRust/src/actors/world/npc_script.rs:239-250` 把 `[@xxx]` 当段头消费掉、
+根本不进 `#SAY` 正文；另有 `GM.rar` 的二进制噪声）。⇒ 这条分支在现网数据上**不可达**，
+本轮不动它，只记在这里，免得下次把它误当"没对齐的配色"去改。
+
+**门禁**：`cargo test --lib` **866 passed**（含新增
+`npc_link_colour_matches_csharp_newbutton_yellow_and_red`；阳性对照实做：把 `npc_link_color`
+的悬停分支改回 `(1.0,0.95,0.4)` ⇒ 立即红，读数 `悬停应为 Color.Red (255,0,0)，实得 (255,242.25,102)`）；
+`b0001_smoke` 2 + `ui_alignment` 53；`ui_interact_sweep.ps1 -ManageServer` **44/44 exit=0**。
