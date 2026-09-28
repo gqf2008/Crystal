@@ -129,6 +129,26 @@ function Msg-Key([byte]$vk,[int]$holdMs=90) {
   Start-Sleep -Milliseconds 250
 }
 
+function Msg-Wheel([int]$x,[int]$y,[int]$delta=-3) {
+  # 注入滚轮：`WM_MOUSEWHEEL(0x020A)`，wParam 高位是 delta（一格 = 120；正 = 向上），
+  # lParam 是**屏幕坐标**（所以要把窗口摆到 (0,0,1024,768)，屏幕坐标才等于客户坐标）。
+  #
+  # **调用前必须先把光标移到目标上**（`Move-Image $x $y`）：C# 的滚轮派发链是
+  # `CMain_MouseWheel`（Forms 事件）→ `MirScene.OnMouseWheel` → **`MouseControl.OnMouseWheel`**
+  # （`Client/MirControls/MirScene.cs:136-144`、`Client/Forms/CMain.cs:65/312`），
+  # 而 `MouseControl` 是"光标当前所在控件"——不先移光标，滚轮就没有落点（实测：同一坐标先移光标
+  # 则大地图 NPC 列表会滚，不移则一动不动）。
+  #
+  # 阳性对照（2026-09-28 实测）：大地图（B 键）的 NPC 列表随滚轮变化（窗区 408 px 不同，
+  # `Client/MirScenes/Dialogs/BigMapDialog.cs:368-390`）；阴性：NPC 窗文本行数 ≤ `MaximumLines(8)`
+  # 时按 C# 守卫不动。
+  $h = $global:csHwnd
+  $wp = [IntPtr](($delta -band 0xFFFF) -shl 16)
+  $lp = [IntPtr](($y -shl 16) -bor ($x -band 0xFFFF))
+  [void][CsUi]::SendMessage($h, 0x020A, $wp, $lp)
+  Start-Sleep -Milliseconds 200
+}
+
 function Shot-Cs([string]$label) {
   $h = $global:csHwnd
   $dir = "$script:CS\Client\Screenshots"

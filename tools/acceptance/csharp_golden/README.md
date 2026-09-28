@@ -643,6 +643,9 @@ Shot-Cs 'before'; Move-Image 301 13; Click-Image 301 13; Shot-Cs 'after'
 
 **仍未采集（如实）**
 
+> **2026-09-28 更新**：这条已在 **§3.2q** 部分收口——原版侧**能**打开 NPC 窗了（格点扫描）、
+> 窗内点击/悬停/滚轮三件都做了对照；**行/链接点击仍未驱动**（细节与下一轮前置见 §3.2q）。
+
 - `npc` / `npc_goods` 的菜单点行与滚轮命中区：本轮没跑（要用 `Msg-Click` 先点 NPC 开对话，再点行）。
 - 背包**页序-身份对照表**：只证明"切得动"，还没把每一页与 C# 期望（`INV_TAB_ART` 的选中帧、
   46 格时 ITEMS II = 灰帧 169）逐页对上；另外"从 QUEST 点回 ITEMS"那次没复现（`t1` 与 `t4` 差 98.5%），
@@ -867,6 +870,63 @@ C# GDI 字体的度量差导致折行点差一个字符（原版 `…你可以 /
 **沙箱踩坑（记一笔）**：沙箱那份原版默认跑**英文 locale**（`Client/Language.ini` 是英文），
 第一遍对拍出来的"文案不同"其实是**语言不同**；把沙箱**副本**的 `ExtraSlots8` 换成中文条目后，
 才是同串对拍（仓库里的本地化文件没动）。
+
+### 3.2q 原版侧「NPC 窗」终于能驱动了：格点扫描找 NPC + 窗内点击/悬停/滚轮三件对照（2026-09-28）
+
+§3.2l-b 挂着的最后一条是「`npc`/`npc_goods` 的菜单点行与滚轮命中区 **未采集**」，卡点是
+**原版侧怎么把 NPC 点开**（我方侧 `npc_call` 有 RPC，原版只能在世界里点它）。
+
+**① 打开 NPC：不去求 NPC 坐标，直接做「点击格点扫描」**（配方可复跑）
+
+```powershell
+# 前置：沙箱服务端 + 原版客户端已登录，窗口置顶并摆到 (0,0,1024,768)
+. tools\acceptance\csharp_golden\csharp_client_driver.ps1 -SandboxRoot $env:TEMP\golden_sandbox
+Msg-Key 0x1B                      # Escape：先关掉可能开着的窗
+foreach ($y in 160,260,360,460,560) { foreach ($x in 200,300,400,500,600,700,800) {
+    Move-Image $x $y; Msg-Click $x $y 120; Move-Image 512 760; Start-Sleep -Milliseconds 350
+    Shot-Cs ("sweep_{0}_{1}" -f $x,$y)
+} }
+# 判据：每帧与 `Data/Prguse.Lib[995]`（NPC 窗美术 440x224 @ (0,0)）比**不透明像素不符率**
+#   art_match.py --rect 0 0 440 224 --candidates 995  → 命中帧的不符率会从 ~0.95 掉到 ~0.02
+```
+
+实测：35 击里 **(800,360)** 那一击打开了 NPC 窗（`BorderVillage`，一个 Bounty Board），
+此后所有帧都保持 0.023——**窗区判据有 40 倍区分度**（0.023 vs 0.95）。
+窗的位置/尺寸与 §3.3 的矩形表完全一致（`NPCDialog` = `Prguse[995]`，`Location (0,0)`、`Size [440,224]`）。
+
+**② 窗内点击有效（判别探针）**：点窗内**关闭钮**（C# `NPCDialogs.cs:136-146`，
+框内 `(413,3)`、`Prguse2[360]`、图头 24x21 ⇒ 钮心 `(425,13)`）→ 窗区 **97896 px** 变化（窗关了），
+再点 (800,360) 又开 ✔ 可反复。⇒「窗内点击整体有效」，后面链接点不动就**不是**注入问题。
+
+**③ 悬停有效（新加的对照手段）**：`MirButton` 悬停会换图（`HoverIndex`），所以"注入的光标移动
+有没有被客户端处理"可以**直接读像素**：把光标悬到关闭钮上 → 那一格 24x21 里 **177 px** 变成 hover 图；
+移开 → 变回 177 px。这条以后可以当所有"hover 型"交互的通用阳性对照。
+
+**④ 滚轮**：驱动新增 `Msg-Wheel <x> <y> [delta]`（`WM_MOUSEWHEEL`，`wParam` 高位 = delta，
+`lParam` 是**屏幕坐标** ⇒ 先 `SetWindowPos` 到 (0,0)）。
+**关键前置：调用前必须先 `Move-Image` 把光标移到目标上**——C# 的派发链是
+`CMain_MouseWheel` → `MirScene.OnMouseWheel` → **`MouseControl.OnMouseWheel`**
+（`CMain.cs:65/312`、`MirScene.cs:136-144`），`MouseControl` 取的是"光标所在控件"。
+实测：同一坐标，先移光标则**大地图 NPC 列表滚动**（`BigMapDialog.cs:368-390`，窗区 408 px 变化）；
+不移光标则一动不动 ⇒ 这就是滚轮注入的**阳性对照**。
+
+**⑤ NPC 窗滚轮：不动 = C# 守卫的正确行为（不是注入失败）**。该 NPC 的 `#SAY` 只有 4 行，
+而 C# `NPCDialog_MouseWheel`（`NPCDialogs.cs:235-251`）第三行守卫是
+`if (CurrentLines.Count <= MaximumLines) return;`（`MaximumLines = 8`）⇒ 行数不够就不滚。
+要验"滚得动"必须找**超过 8 行**的 NPC 页——本轮没找到，如实记为**未采集**（不是"点不动"）。
+
+**⑥ 行/链接点击：本轮未驱动（如实）**。该页第 4 行是
+`<Newbie Guild Recruitment/@NR1> {Level1~25./KHAKI}`（前半 `R` 型 = 可点 `NewButton`、
+后半 `C` 型 = 仅上色不可点），但：
+
+- 在 `y=78/80`（第 3 行）与 `y=95`（第 4 行）各扫了 6 个 x，**悬停无红字、点击窗区 0 变化、
+  聊天区 0 变化**（该分支的可见效果是 `AddToGuild` + `LocalMessage`，所以两者都查了）；
+- 同一时刻的关闭钮可点、可悬停 ⇒ 排除"注入失效"。
+
+⇒ 结论只到"**链接标签没被命中**"，具体是标签 `Location = TextLabel[i].Location + (measure(前缀)-10, 0)`
+（前缀是那 20 个空格）与视觉文本位置不一致，还是该 build 的行内控件没接上，**未定性**。
+下一轮的前置很清楚：先写一个小工具，把 `y=34+18i` 每一行的**整条带**做一遍 hover 扫描并打印
+"哪一列开始变红"，用红字范围反推链接矩形，再点它。
 
 ## 3.3 逐窗几何对表（不需要原版交互，2026-09-26 起）
 
