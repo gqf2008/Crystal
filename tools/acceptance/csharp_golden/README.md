@@ -3216,6 +3216,79 @@ py -3.12 tools\acceptance\csharp_golden\win_locate.py --shot <png> --lib Data\Pr
 
 **门禁**：本轮只动文档，无产品代码变化。
 
+### 3.2bq 镶嵌面板（`SocketDialog`）第二处缺口：**装备格上的 Ctrl+右键**开不出来、且面板恒贴背包 —— 已修（2026-09-30）
+
+继续按「逐行核 C# 的入口表」往下走，`MirItemCell.OnMouseClick`（`MirItemCell.cs:239-247`）给的是一张
+**按 GridType 分派**的表：**Ctrl+右键 → `OpenItem()`**，而 `OpenItem()`（`:363-368`）只放行
+`GridType ∈ {Inventory, Equipment}` ⇒ **背包格与装备格都能开镶嵌面板**，且两扇宿主窗不同。
+
+**① C# 真值**
+
+| 项 | C# | 依据 |
+|---|---|---|
+| 入口 | `OnMouseClick`：`if (CMain.Ctrl) { OpenItem(); break; }`（**不带 Ctrl 的右键**才走 `UseItem()`→装/卸） | `MirItemCell.cs:229-247` |
+| 允许的来源格 | `GridType != Equipment && GridType != Inventory` → return | `MirItemCell.cs:363-368` |
+| 面板图号 | `Index = 20 + (Slots.Length - 1)`（1..12 孔） | `SocketDialog.cs:95` |
+| 关闭钮 | `CloseButton.Location = (Size.Width - 23, 3)` | `SocketDialog.cs:99` |
+| 定位（背包来源） | `x = inv.X + (inv.W - w)/2`，`y = inv.Y + inv.H + 5` | `SocketDialog.cs:108-110` |
+| 定位（**装备来源**） | `x = char.X + (char.W - w)/2`，**`y = char.Y + char.H + 5`** | `SocketDialog.cs:112-118` |
+
+两扇宿主窗 C# 都 `Movable = true`（背包未设 Location；`CharacterDialog.cs:35`）⇒ 公式读的是**当前**位置。
+
+**② 本端修前（两处缺口）**：只有背包格的 Ctrl+右键（`inv_socket_open_system`），**装备格没有入口**；
+而且面板**恒按背包公式**定位 ⇒ 哪怕接上装备格，也会贴到背包下方（y=241）而不是人窗下方（y=385）。
+
+**③ 修法**：`socket.rs` 加 `SocketSource{Inventory, Equipment}` + 纯函数 `socket_origin_for(...)`
+（两条公式逐值复刻，`Point` 是 int ⇒ `floor` 整除）；装备来源的原点读**运行期** `Node.left/top`
+（`DialogRoot(Character)`）、尺寸读 `Title[504]` 真实值（兜底 264x380）；`character.rs` 的
+`char_equip_system` 在右键分支里先判 Ctrl——是则开镶嵌面板（来源=Equipment），否则照旧卸下。
+
+**④ 实机（本端 mock，`--ui-scale 1`）**
+
+```powershell
+# 起客户端（mock）→ dialog open inventory / character
+# A) 背包来源：Ctrl 按住 + 右键 带孔铁剑（格 6）
+key {key:"ctrl",action:"down"}; click {x:249,y:53,button:"right"}; key {key:"ctrl",action:"up"}
+dialog_rect {kind:"socket"}      # → (99,241,118x62)
+# B) 装备来源：先穿到身上，再对武器格 Ctrl+右键
+equip_item {unique_id:9007}; key {key:"ctrl",action:"down"}; click {x:909,y:113,button:"right"}; key {…,"up"}
+dialog_rect {kind:"socket"}      # → (833,385,118x62)
+```
+
+| 来源 | 实机矩形 | 公式核对 |
+|---|---|---|
+| 背包（0,0 / 316x236） | **(99,241,118x62)** | `0+floor((316-118)/2)=99`、`0+236+5=241` ✓ |
+| **装备**（人窗 760,0 / 264x380） | **(833,385,118x62)** | `760+floor((264-118)/2)=833`、**`0+380+5=385`** ✓ |
+
+日志留痕：`💎 打开镶嵌面板: 带孔铁剑 (2 孔)` 与 `💎 打开镶嵌面板（装备）: 带孔铁剑 (2 孔)`；
+不带 Ctrl 的右键仍是 `🛡️ 右键卸下装备 带孔铁剑 (uid=9007)`（没被新分支吃掉）。
+帧：`%TEMP%\golden_sandbox\shots\ours_socket_{inv,equip}_source.png`。
+（面板 118x62 = `Prguse3[21]`（2 孔），与 C# `Index = 20 + slots - 1` 一致。）
+
+**⑤ 顺带改的三处夹具/口径（都附理由）**
+
+1. **两个入口改读 `resolve_cursor(探针优先, 真光标兜底)`**（`inventory.rs` / `character.rs`）：
+   修前读 `window.cursor_position()`，夹具注入的点击**拿不到**（本轮第一遍就是这么失败的）。
+   正常游玩无探针 ⇒ 仍读真光标，**行为不变**；与 §3.2bc 那条"改读真实光标"不冲突（那条是拖动系统）。
+2. **`key` RPC 补 `{"action":"down"|"up"}`** + 新探针 **`keys_probe`**：Ctrl 这类修饰键要**按住**才谈得上
+   Ctrl+右键，而修前 `key` 只能"按下+抬起"、也**无从判断到底按住没有**。`keys_probe` 直接读
+   `ButtonInput<KeyCode>`，实测 `false → true → false`。
+3. **新夹具 `equip_item {unique_id}`**（与背包双击装备同一条 `C.EquipItem{grid: Inventory, to: 0}` 路径）：
+   装备格的取证要"先有穿在身上的物品"，而夹具**拖不动**（按下会起"拖整窗"，实测把背包窗拖走了）、
+   **双击也不稳**（第二次点击落到别格）。
+
+> **夹具坑记一笔（这次踩了两个）**：① 本端背包网格是 **8 列**（`GRID_COLS = 8`，与 C#
+> `InventoryDialog.Grid = new MirItemCell[8*10]` 同口径）——按"6 列"算会把格 6 算成 (27,86)，
+> 实际那是**格 8**；判据用 `ui_nodes_at` / `bag_probe` 给的 cell 号，别靠印象。
+> ② `click {drag_to}` 拖**物品**会被 `dialog_drag_system` 当成"拖整窗"（它只认 bevy_ui `Button` 命中，
+> 背包格不是 Button）——要挪物品用 `inv_select` + 点击，或本轮的 `equip_item`。
+
+**⑥ 门禁**（`Client-Bevy`）：`cargo check --tests` 0 error；`cargo test --lib` **890 passed / 0 failed**
+（新增 `socket_origin_follows_source_grid_like_csharp_show`：两条公式 + 人窗被拖动后仍跟随）；
+`cargo test --test b0001_smoke --test ui_alignment` **2 + 53 passed**；本轮改动文件的 `cargo fmt -- --check` 无差异。
+
+**仍未采集**：原版侧同状态帧（要在沙箱里真鼠标点 NPC 拿带孔物品 + Ctrl+右键），属 §3.2l 那批——需解锁。
+
 ### 3.2bm §3.2bl 的最后留白收口：`MirMessageBox` 的**原版现帧**拿到了（换入口，锁屏也能取）；并钉死 `game_shop` 买钮那条路**取不到帧的两条硬前置**（2026-09-29）
 
 §3.2bl 留的唯一留白是「原版侧**同状态帧**」（沙箱里点商品格买钮后的 `MirMessageBox`）。本轮把它定性收口：

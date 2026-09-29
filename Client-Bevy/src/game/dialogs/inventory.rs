@@ -2514,13 +2514,18 @@ fn inv_socket_open_system(
     keys: Res<ButtonInput<KeyCode>>,
     windows: Query<&Window>,
     origin: Res<InventoryOrigin>,
+    probe: Res<crate::control::CursorProbe>,
     mut socket: ResMut<crate::game::dialogs::socket::SocketState>,
 ) {
     if !mouse.just_pressed(MouseButton::Right) || !keys.pressed(KeyCode::ControlLeft) {
         return;
     }
-    let Ok(window) = windows.single() else { return };
-    let Some(cursor) = window.cursor_position() else {
+    // 光标：探针优先、真光标兜底（`resolve_cursor`）——**正常游玩无探针时行为不变**，
+    // 夹具注入 click 时按探针命中（否则实机取证只能靠真光标，历史上一路没验过这条路）。
+    let Some(cursor) = crate::control::resolve_cursor(
+        probe.pos,
+        windows.single().ok().and_then(|w| w.cursor_position()),
+    ) else {
         return;
     };
     let Ok(inv) = inv_q.single() else { return };
@@ -2541,6 +2546,8 @@ fn inv_socket_open_system(
             if let Some(item) = inv.items.get(i).and_then(|s| s.as_ref()) {
                 if !item.slots.is_empty() {
                     socket.item = Some(item.clone());
+                    // C# `OpenItem()` 传的是**来源格**（`MirItemCell.GridType`）——背包格 ⇒ Inventory
+                    socket.source = crate::game::dialogs::socket::SocketSource::Inventory;
                     mgr.open(DialogKind::Socket);
                     tracing::info!("💎 打开镶嵌面板: {} ({} 孔)", item.name, item.slots.len());
                 }

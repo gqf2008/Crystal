@@ -444,6 +444,19 @@ enum ControlCommand {
         unique_id: u64,
         count: u32,
     },
+    /// 装备动作（现成包 `C.EquipItem`）：与背包**双击装备**同一路径
+    /// （`game/dialogs/inventory.rs` 的 `use_or_equip` → `EquipItem{grid: Inventory, to: 0}`，
+    /// `to=0` 由服务端按物品类型自动判定槽位）。
+    /// 为什么需要：装备格上的 C# 语义（`MirItemCell` 的 **Ctrl+右键 → 镶嵌面板**、
+    /// 右键卸下）都要**先有穿在身上的物品**才能取证，而夹具既拖不动（按下会起"拖整窗"）
+    /// 也双击不稳（窗口被拖走后第二次点击落到别格）。
+    EquipItem {
+        unique_id: u64,
+    },
+    /// `keys_probe`：读**实时** `ButtonInput<KeyCode>`（修饰键有没有真的按住）。
+    KeysProbe {
+        reply: Sender<String>,
+    },
     /// ② 复活动作（现成包 `C.TownRevive`，空体）：与死亡提示框的「回城复活」按钮同一路径。
     /// 判据是状态翻转（dead→false、hp 0→>0、位置回到绑定点），不是"点了没报错"。
     TownRevive,
@@ -604,11 +617,14 @@ enum ControlCommand {
         text: String,
         reply: Sender<String>,
     },
-    /// 合成**功能键**（2026-09-26）：`{"key":"enter|escape|backspace|tab"}`。
+    /// 合成**功能键**（2026-09-26）：`{"key":"enter|escape|backspace|tab|shift|ctrl"}`。
     /// `type_text` 只管"字符"，而打开聊天输入行（Enter）、取消（Escape）、删字（Backspace）
     /// 这些**非字符键**同样要能被夹具驱动——否则"键盘路径"只测得了一半。
+    /// `{"action":"down"|"up"}`（2026-09-30 补）：只发**一个**状态，用来"按住修饰键 + 点击"
+    /// （例：Ctrl+右键开镶嵌面板）。
     Key {
         key: String,
+        hold: Option<ButtonState>,
         reply: Sender<String>,
     },
     /// 只读探针：建角对话框状态（可见性/名字/焦点/职业/性别/名字是否合法）。
@@ -686,12 +702,55 @@ pub fn resolve_cursor(probe: Option<Vec2>, window: Option<Vec2>) -> Option<Vec2>
 
 /// 功能键名 → `KeyboardInput` 并投递（`type_text` 只管字符，非字符键走这里）。
 /// 返回 `false` = 键名不认识（调用方应回报，别静默）。
-fn inject_named_key(keys: &mut MessageWriter<KeyboardInput>, name: &str) -> bool {
+///
+/// `hold`（2026-09-30 补）：`Some(Pressed)` / `Some(Released)` 只发**一个**状态——给
+/// 「按住修饰键 + 点击」这类夹具用（例：C# `MirItemCell.cs:239-247` 的 **Ctrl+右键 → 镶嵌面板**）。
+/// `None` = 既有的「发一对」（按下 + 抬起），行为不变。
+fn inject_named_key_state(
+    keys: &mut MessageWriter<KeyboardInput>,
+    name: &str,
+    hold: Option<ButtonState>,
+) -> bool {
     use bevy::input::keyboard::KeyCode;
+    // Ctrl：`KeyCode::ControlLeft` + `Key::Control`（与 `keys.pressed(ControlLeft|ControlRight)`
+    // 的既有判据一致，见 `game/dialogs/inventory.rs:2519`、`game/dialogs/character.rs` 的镶嵌入口）
+    if name.eq_ignore_ascii_case("ctrl") || name.eq_ignore_ascii_case("control") {
+        let state = hold.unwrap_or(ButtonState::Pressed);
+        keys.write(KeyboardInput {
+            key_code: KeyCode::ControlLeft,
+            logical_key: Key::Control,
+            state,
+            text: None,
+            repeat: false,
+            window: Entity::PLACEHOLDER,
+        });
+        if hold.is_none() {
+            keys.write(KeyboardInput {
+                key_code: KeyCode::ControlLeft,
+                logical_key: Key::Control,
+                state: ButtonState::Released,
+                text: None,
+                repeat: false,
+                window: Entity::PLACEHOLDER,
+            });
+        }
+        return true;
+    }
     // Shift 是「单按切换中/英」用的（`pinyin_ime` 的 `ShiftToggle` 要 Pressed + Released，
     // 且 `repeat=false`）；只发 Pressed 不切，所以这里发一对（#3260 夹具切英文输入用）。
     // 注意：必须在下面的 `match` **之前**处理——否则会先撞上 `_ => return false`。
     if name.eq_ignore_ascii_case("shift") {
+        if let Some(state) = hold {
+            keys.write(KeyboardInput {
+                key_code: KeyCode::ShiftLeft,
+                logical_key: Key::Shift,
+                state,
+                text: None,
+                repeat: false,
+                window: Entity::PLACEHOLDER,
+            });
+            return true;
+        }
         for state in [ButtonState::Pressed, ButtonState::Released] {
             keys.write(KeyboardInput {
                 key_code: KeyCode::ShiftLeft,
@@ -712,15 +771,27 @@ fn inject_named_key(keys: &mut MessageWriter<KeyboardInput>, name: &str) -> bool
             "tab" => (KeyCode::Tab, Key::Tab, None),
             _ => return false,
         };
+    // 既有行为（`hold = None`）：**只发 Pressed、不补 Released**，与改动前逐位一致；
+    // 显式 `action=down|up` 时才按该状态发一条。
+    let state = hold.unwrap_or(ButtonState::Pressed);
     keys.write(KeyboardInput {
         key_code,
         logical_key,
-        state: ButtonState::Pressed,
-        text: text.map(|t| t.into()),
+        state,
+        text: if state == ButtonState::Pressed {
+            text.map(|t| t.into())
+        } else {
+            None
+        },
         repeat: false,
         window: Entity::PLACEHOLDER,
     });
     true
+}
+
+/// 既有调用点（`type_text` 的非字符键）保持原签名：默认「发一对」。
+fn inject_named_key(keys: &mut MessageWriter<KeyboardInput>, name: &str) -> bool {
+    inject_named_key_state(keys, name, None)
 }
 
 /// 悬停/点击命中用的光标来源（探针优先，其次真实窗口光标）。
@@ -781,6 +852,11 @@ struct ControlQueries<'w, 's> {
     /// 与 `chat_filter`/`window` 同理挂在 `ControlQueries`——`apply_control_commands` 的参数表
     /// 已到 16 个 SystemParam 上限。
     keys: MessageWriter<'w, KeyboardInput>,
+    /// `keys_probe`（2026-09-30 补）：键盘按键的**实时** `ButtonInput` 状态。
+    /// 为什么需要：`key {key:"ctrl",action:"down"}` 这类"按住修饰键"的注入有没有真的进到
+    /// `ButtonInput<KeyCode>`，从 RPC 回包与日志都看不出来（`click` 的命中栈只反映鼠标）——
+    /// 没有这条探针，Ctrl+右键这类路径的实机取证只能靠猜（本轮的镶嵌面板入口就是这条）。
+    key_state: Res<'w, ButtonInput<KeyCode>>,
     /// ⑤ 探针用：本地玩家背包组件（占用/总格数、重量）
     bag: Query<'w, 's, &'static crate::game::player_state::Inventory, With<LocalPlayer>>,
     /// `combat_probe` 用：本地玩家状态标志——`auto_attack_system` 的 run_if 是
@@ -1687,6 +1763,31 @@ fn handle_conn(mut stream: std::net::TcpStream, tx: Sender<ControlCommand>) {
                     json!({"ok": true, "unique_id": unique_id, "count": count})
                 }
             }
+            // 装备动作（`C.EquipItem`，与背包双击装备同路径）：`equip_item {unique_id}`
+            "equip_item" => {
+                let unique_id = params
+                    .get("unique_id")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0);
+                if unique_id == 0 {
+                    json!({"error": "missing unique_id（背包实例的 unique_id）"})
+                } else {
+                    let _ = tx.send(ControlCommand::EquipItem { unique_id });
+                    json!({"ok": true, "unique_id": unique_id})
+                }
+            }
+            // 修饰键实时状态探针：`keys_probe` → `ButtonInput<KeyCode>`（ctrl/shift）
+            "keys_probe" => {
+                let (reply_tx, reply_rx) = bounded::<String>(1);
+                if tx.send(ControlCommand::KeysProbe { reply: reply_tx }).is_ok() {
+                    let s = reply_rx
+                        .recv_timeout(std::time::Duration::from_secs(2))
+                        .unwrap_or_else(|_| "{}".to_string());
+                    serde_json::from_str::<Value>(&s).unwrap_or_else(|_| json!({}))
+                } else {
+                    json!({"error": "control channel closed"})
+                }
+            }
             // ④ 交任务：finish_quest {quest_index, selected_item_index?（默认 -1 = 不选奖励）}
             "finish_quest" => {
                 let quest_index = params
@@ -2109,10 +2210,18 @@ fn handle_conn(mut stream: std::net::TcpStream, tx: Sender<ControlCommand>) {
                 if key.is_empty() {
                     json!({"error": "missing key"})
                 } else {
+                    // action（2026-09-30 补）：`down`/`up` 只发一个状态（按住修饰键 + 点击的夹具用；
+                    // 例：Ctrl+右键 → 镶嵌面板）。缺省 = 既有行为（只发 Pressed）。
+                    let hold = match params.get("action").and_then(|v| v.as_str()) {
+                        Some("down") => Some(ButtonState::Pressed),
+                        Some("up") => Some(ButtonState::Released),
+                        _ => None,
+                    };
                     let (reply_tx, reply_rx) = bounded::<String>(1);
                     if tx
                         .send(ControlCommand::Key {
                             key: key.clone(),
+                            hold,
                             reply: reply_tx,
                         })
                         .is_ok()
@@ -2502,9 +2611,9 @@ fn drain_control_outside_game(
                 }
                 let _ = reply.try_send(json!({"ok": true, "chars": n}).to_string());
             }
-            ControlCommand::Key { key, reply } => {
+            ControlCommand::Key { key, hold, reply } => {
                 tracing::info!("🎮 control key: {key}");
-                let ok = inject_named_key(&mut keys, &key);
+                let ok = inject_named_key_state(&mut keys, &key, hold);
                 let _ = reply.try_send(
                     if ok {
                         json!({"ok": true, "key": key})
@@ -3079,9 +3188,9 @@ fn apply_control_commands(
                         .to_string(),
                 );
             }
-            ControlCommand::Key { key, reply } => {
+            ControlCommand::Key { key, hold, reply } => {
                 tracing::info!("🎮 control key（Game）: {key}");
-                let ok = inject_named_key(&mut q.keys, &key);
+                let ok = inject_named_key_state(&mut q.keys, &key, hold);
                 let _ = reply.try_send(
                     if ok {
                         json!({"ok": true, "key": key})
@@ -4181,6 +4290,26 @@ fn apply_control_commands(
                 // 与背包拖出/丢弃确认 Yes **同一个包**（`dialogs/inventory.rs` 同款）
                 net.send_packet(&build_drop_item(unique_id, count));
                 tracing::info!("🎮 control drop_item: unique_id={unique_id} count={count}");
+            }
+            ControlCommand::EquipItem { unique_id } => {
+                // 与背包双击装备**同一个包**：`C.EquipItem{grid: Inventory, unique_id, to: 0}`
+                // （`to=0` 由服务端按物品类型自动判定装备槽，见 `gate/actor.rs:2248`）
+                net.send_packet(&mir2_shared::packets::client::item::EquipItem {
+                    grid: mir2_shared::enums::MirGridType::Inventory,
+                    unique_id,
+                    to: 0,
+                });
+                tracing::info!("🎮 control equip_item: unique_id={unique_id}");
+            }
+            ControlCommand::KeysProbe { reply } => {
+                let s = json!({
+                    "ok": true,
+                    "ctrl_left": q.key_state.pressed(KeyCode::ControlLeft),
+                    "ctrl_right": q.key_state.pressed(KeyCode::ControlRight),
+                    "shift_left": q.key_state.pressed(KeyCode::ShiftLeft),
+                })
+                .to_string();
+                let _ = reply.try_send(s);
             }
             ControlCommand::TownRevive => {
                 // 与死亡提示框「回城复活」按钮发的**同一个包**（C# TownRevive，空体）
