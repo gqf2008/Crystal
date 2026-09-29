@@ -3115,3 +3115,41 @@ C# 读的是真实鼠标位置，故给 `CursorSource` 加 `real()`（只看真�
 `QuestDetailDialog.DisplayQuestDetails`），而本端这条链要先开日记再点行、且行高/组头会让落点依赖数据——
 本轮只做了代码同源改造（与列表窗那条已被实机验证的改法逐字相同），**没有**跑通"详情窗拖动"的实机取证，
 留到能稳定驱动该链路时补。
+
+### 3.2bd NPC 侧任务列表窗单元④：`MirMessageBox(你必须选择一个奖励物品)`（本窗最后一个用户可见缺口）（2026-09-29）
+
+§3.2ax/§3.2ba 一直挂着这条：C# `_finishButton.Click`（`QuestDialogs.cs:121-141`）在**有可选奖励但没选**时
+`new MirMessageBox(ClientTextKeys.YouMustSelectRewardItem).Show(); return;`；本端此前**只拦下发包**，
+点完成**什么反应都没有**（玩家不知道为什么不交任务）。
+
+**逐条对 C#**：
+
+| 件 | C# | 本端 |
+|---|---|---|
+| 触发 | `Reward.SelectedItemIndex < 0 && QuestInfo.RewardsSelectItem.Count > 0`（`:130-137`） | `finish_needs_reward_pick(可选奖励数, 已选)`（**用未过滤条数**，与原版同口径）+ 单测 |
+| 弹框 | `MirMessageBox(message)`（`MirMessageBox.cs:14-52`）：`Prguse[360]` 456x190 **居中** = (284,289)、文本 `@(35,35)` 390x110、OK `Title[200/201/202] @(360,157)` | 同几何（`LIST_NOTICE_*`），文案取 `ClientTextKeys.YouMustSelectRewardItem` = 「你必须选择一个奖励物品。」（`Chinese.json:681`） |
+| OK | `OKButton.Click += Dispose()`（`:52`） | `state.notice = false`（面板随之隐藏） |
+| 放行 | 选好奖励后正常发 `C.FinishQuest{QuestIndex, SelectedItemIndex}` | 同（`finish_selected_index` 给出**未过滤**下标；无可选奖励时 -1） |
+
+**实机实测**（`--mock --auto-enter --ui-scale 1` + `npc_call 4242 [@QUEST]` + `dialog open quest_list`；
+夹具给该 NPC 的任务补一条 `ChangeQuest(taken=true, completed=true)` ⇒ 完成钮才出现）：
+
+| 步骤 | 实测 |
+|---|---|
+| 未选奖励点「完成」(561,448) | `quest_list_probe.notice` **false → true**；`win_locate Prguse[360]` 命中 **(284,289)**、不符率 **0.0252**；日志「未选定奖励物品，不发送 FinishQuest（弹提示框）」⇒ **没有**发包 |
+| 点 OK (682,458) | 命中 `76x25 [root=QuestList]` ⇒ `notice` **true → false**，同一模板匹配已找不到该面板（框已关） |
+| 先点可选奖励格 0 (507,396) | `selected_reward` **0**；日志「🎁 选择奖励：木剑×1（未过滤下标 0）」 |
+| 再点「完成」 | `notice` 仍 **false**（不弹框）；日志「📜 交付任务 #2 给比奇老兵送信（选定奖励下标 0）」⇒ 发了 `FinishQuest{selected_item_index: 0}` |
+
+**顺带修了夹具自身的坑**：`mock/state.rs` 的 `quest_reward()` 给的是 `RequiredGender::NONE`（**无位**），
+而 C# `FilterRewards` 用 `HasFlag` ⇒ 位掩码 0 任何性别都不通过、可选格一个都不画（看起来像"本端没实现奖励格"）。
+新增 `quest_reward_both_genders()` 并让 NPC 任务的可选奖励用它——这是**夹具**问题，不是产品缺陷。
+
+**照抄的原版怪癖（记一笔）**：提示框判据用的是**未过滤**的 `RewardsSelectItem.Count`，所以当可选奖励
+全被性别过滤掉时，原版会"弹出提示却没有任何可选的格子"（走不出去）——本端同口径照抄，不"修正"。
+
+**门禁**：`cargo check`（lib+bin）0 error；`cargo test --lib` **882 passed / 0 failed**（+1 守卫单测）；
+`cargo test --test b0001_smoke --test ui_alignment` **2 + 53 passed**。
+
+**仍未做**：C# 的 `Modal = true`（弹框期间拦其它输入）——本端只做了显隐与 OK；以及 §3.2bc 记的
+详情窗拖动实机复验、原版同状态内容帧。

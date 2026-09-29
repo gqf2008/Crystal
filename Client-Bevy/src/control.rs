@@ -4296,6 +4296,8 @@ fn apply_control_commands(
                     "start": q.quest_list.start,
                     "top_line": q.quest_list.top_line,
                     "selected_reward": q.quest_list.selected_reward,
+                    // #3368 单元④：`MirMessageBox(YouMustSelectRewardItem)` 是否在弹
+                    "notice": q.quest_list.notice,
                 });
                 tracing::info!("🎮 control quest_list_probe: bound={} catalog={}", payload["bound_npc"], payload["catalog_infos"]);
                 let _ = reply.send(payload.to_string());

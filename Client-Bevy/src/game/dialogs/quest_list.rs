@@ -99,6 +99,17 @@ pub const LIST_REWARD_CELL_COUNT: usize = 5;
 /// C# 奖励区标题 `Title[17] @ (20,66)`（`QuestReward_BeforeDraw`，`:1459`）
 pub const LIST_REWARD_TITLE_POS: (f32, f32) = (20.0, 66.0);
 
+/// `ClientTextKeys.YouMustSelectRewardItem`（`Client/Localization/Chinese.json:681`）——
+/// C# `_finishButton.Click` 在有可选奖励但没选时弹 `MirMessageBox(本串)`（`QuestDialogs.cs:130-137`）。
+pub const QUEST_REWARD_PICK_ASK: &str = "你必须选择一个奖励物品。";
+/// C# `MirMessageBox(message)`：面板 `Prguse[360]` 456x190 **居中**（`MirMessageBox.cs:23-26`
+/// `((ScreenWidth-W)/2, (ScreenHeight-H)/2)` = (284,289)），文本 `@(35,35)` 390x110（`:29-37`），
+/// OK 钮 `Title[200/201/202] @ (360,157)`（`:42-52`，`Click += Dispose`）。
+pub const LIST_NOTICE_PANEL: (f32, f32) = (284.0, 289.0);
+pub const LIST_NOTICE_SIZE: (f32, f32) = (456.0, 190.0);
+pub const LIST_NOTICE_TEXT_POS: (f32, f32) = (35.0, 35.0);
+pub const LIST_NOTICE_OK_POS: (f32, f32) = (360.0, 157.0);
+
 /// `ClientTextKeys.AvailableQuestList`（`Client/Localization/Chinese.json:682`）
 pub fn available_quest_label(count: usize) -> String {
     format!("可接任务列表：{count}")
@@ -224,7 +235,13 @@ pub fn quest_list_buttons(entry: Option<&NpcQuestEntry>, taken_count: usize) -> 
     }
 }
 
-/// C# `QuestCell.Location`（固定排 `(i*45 + 15, 24)`，可选排 `(i*45 + 15, 89)`，`:1537`/`:1561`）
+/// C# `_finishButton.Click`（`QuestDialogs.cs:130-137`）：**有可选奖励但没选**时拦下并弹提示框
+/// （`MirMessageBox(YouMustSelectRewardItem)`），而不是静默什么都不发生。
+pub fn finish_needs_reward_pick(select_reward_count: usize, selected_reward: Option<usize>) -> bool {
+    select_reward_count > 0 && selected_reward.is_none()
+}
+
+    /// C# `QuestCell.Location`（固定排 `(i*45 + 15, 24)`，可选排 `(i*45 + 15, 89)`，`:1537`/`:1561`）
 /// ——相对奖励区原点。
 pub fn reward_cell_offset(fixed: bool, slot: usize) -> (f32, f32) {
     (
@@ -288,6 +305,8 @@ pub struct QuestListState {
     pub top_line: usize,
     /// C# `Reward.SelectedItemIndex`（`QuestDialogs.cs:1402`；**未过滤**下标，-1/None = 未选）
     pub selected_reward: Option<usize>,
+    /// C# `_finishButton.Click` 里那个 `MirMessageBox(YouMustSelectRewardItem)` 是否在弹（`:130-137`）
+    pub notice: bool,
 }
 
 impl QuestListState {
@@ -302,6 +321,7 @@ impl QuestListState {
         self.start = 0;
         self.top_line = 0;
         self.selected_reward = None;
+        self.notice = false;
     }
 
     /// C# `RefreshInterface` 的 `maxIndex` 夹取（`:299-303`）。
@@ -351,6 +371,12 @@ pub struct QuestListAccept;
 /// 完成钮（C# `QuestListDialog._finishButton`，`Title[273..275]`）
 #[derive(Component)]
 pub struct QuestListFinish;
+/// 提示框面板（C# `MirMessageBox(message)`，`Prguse[360]` 456x190 居中）
+#[derive(Component)]
+pub struct QuestListNotice;
+/// 提示框的 OK 钮（C# `MirMessageBox.OKButton`，`Title[200..202] @(360,157)`）
+#[derive(Component)]
+pub struct QuestListNoticeOk;
 
 /// 本窗「消息区 + 奖励区」的逐部件标记（同 `quest_log::QuestRewardPart` 的口径，但父窗是列表窗：
 /// C# 两扇窗各持一个 `QuestMessage`/`QuestRewards` 实例，故部件各自成组）。
@@ -702,6 +728,58 @@ fn spawn_quest_list(
             .insert((QuestListFinish, Visibility::Hidden));
         }
     });
+
+    // #3368 单元④：`MirMessageBox(YouMustSelectRewardItem)`（C# `_finishButton.Click` 里那张）——
+    // 规格照 `MirMessageBox.cs`：面板 `Prguse[360]` 456x190 居中 @(284,289)、文本 @(35,35) 390x110、
+    // OK `Title[200..202] @(360,157)`。挂 `AlwaysVisible`（显隐由 `state.notice` 驱动，
+    // 与列表窗自身开合解耦；C# 是 `Modal=true`，本端暂不做输入拦截——见 README §3.2bd）。
+    if let Some(bg) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 360) {
+        let notice = spawn_panel(
+            &mut commands,
+            bg,
+            LIST_NOTICE_PANEL.0,
+            LIST_NOTICE_PANEL.1,
+            LIST_NOTICE_SIZE.0,
+            LIST_NOTICE_SIZE.1,
+            41,
+        );
+        commands.entity(notice).insert((
+            QuestListNotice,
+            DialogRoot(DialogKind::QuestList),
+            crate::game::dialogs::AlwaysVisible,
+            Visibility::Hidden,
+        ));
+        commands.entity(notice).with_children(|p| {
+            spawn_label(
+                p,
+                &cjk,
+                QUEST_REWARD_PICK_ASK,
+                LIST_NOTICE_TEXT_POS.0,
+                LIST_NOTICE_TEXT_POS.1,
+                QUEST_MSG_FONT_PX,
+                Color::WHITE,
+                9,
+            );
+            if let (Some(n), Some(h), Some(pr)) = (
+                load_lib_image(&mut libs, &mut images, LibraryName::Title, 200),
+                load_lib_image(&mut libs, &mut images, LibraryName::Title, 201),
+                load_lib_image(&mut libs, &mut images, LibraryName::Title, 202),
+            ) {
+                spawn_icon_button(
+                    p,
+                    n,
+                    h,
+                    pr,
+                    LIST_NOTICE_OK_POS.0,
+                    LIST_NOTICE_OK_POS.1,
+                    76.0,
+                    25.0,
+                    10,
+                )
+                .insert(QuestListNoticeOk);
+            }
+        });
+    }
 }
 
 /// 本窗每帧：显隐跟 `DialogManager`、绑定当前 NPC、按 C# `RefreshInterface` 渲染行。
@@ -918,7 +996,34 @@ struct QuestListDetail<'w, 's> {
             &'static mut Visibility,
             Option<&'static mut ImageNode>,
         ),
-        Without<QuestListPart>,
+        (
+            Without<QuestListPart>,
+            Without<QuestListNotice>,
+            Without<QuestListNoticeOk>,
+        ),
+    >,
+    /// 提示框面板（`Prguse[360]`）——显隐由 `state.notice` 驱动（C# `MirMessageBox`）
+    notice: Query<
+        'w,
+        's,
+        &'static mut Visibility,
+        (
+            With<QuestListNotice>,
+            Without<QuestListPart>,
+            Without<QuestListNoticeOk>,
+            Without<QuestListWidget>,
+        ),
+    >,
+    /// 提示框 OK 钮（C# `OKButton.Click += Dispose`）
+    notice_ok: Query<
+        'w,
+        's,
+        (Entity, &'static Interaction),
+        (
+            With<QuestListNoticeOk>,
+            Without<QuestListPart>,
+            Without<QuestListNotice>,
+        ),
     >,
     /// 面板原点（拖窗后按节点实测原点换算消息区/奖励格的屏幕位置）
     panel: Query<'w, 's, &'static Node, (With<QuestListWidget>, Without<QuestListPart>)>,
@@ -1327,6 +1432,23 @@ fn quest_list_detail_system(
         Some((title, lines, x, y)) => tooltip.update(13, true, title, lines, x, y),
         None => tooltip.update(13, false, String::new(), Vec::new(), 0.0, 0.0),
     }
+
+    // ---- #3368 单元④：`MirMessageBox(YouMustSelectRewardItem)` 的显隐与 OK ----
+    for mut vis in &mut detail.notice {
+        *vis = if open && state.notice {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
+    }
+    if open && state.notice {
+        for (e, inter) in &detail.notice_ok {
+            if edge(e, inter, &mut prev_inter) {
+                // C# `OKButton.Click += Dispose()`（`MirMessageBox.cs:52`）
+                state.notice = false;
+            }
+        }
+    }
     let list = npc_available_quests(&catalog, &log, state.bound_npc, me_level, me_class);
     let entry = state
         .selected
@@ -1384,28 +1506,29 @@ fn quest_list_detail_system(
             if !entry.as_ref().map(|x| x.completed).unwrap_or(false) {
                 continue;
             }
-            match crate::game::dialogs::quest_log::finish_selected_index(
+            if finish_needs_reward_pick(info.rewards_select_item.len(), state.selected_reward) {
+                // C# `new MirMessageBox(YouMustSelectRewardItem).Show(); return;`（`:130-137`）
+                state.notice = true;
+                tracing::info!("📜 未选定奖励物品，不发送 FinishQuest（弹提示框）");
+                continue;
+            }
+            // 选好了（或本来就没有可选奖励）：`finish_selected_index` 给出服务端要的下标（无可选时 -1）
+            let Ok(selected) = crate::game::dialogs::quest_log::finish_selected_index(
                 &info.rewards_select_item,
                 state.selected_reward,
-            ) {
-                Ok(selected) => {
-                    net.send_packet(&mir2_shared::packets::client::quest::FinishQuest {
-                        quest_index: info.index,
-                        selected_item_index: selected,
-                    });
-                    tracing::info!(
-                        "📜 交付任务 #{} {}（选定奖励下标 {}）",
-                        info.index,
-                        info.name,
-                        selected
-                    );
-                }
-                Err(msg) => {
-                    // C# 这里弹 `MirMessageBox(YouMustSelectRewardItem)`；本端只拦发包 + 记日志
-                    // （提示框留待后续单元，见 README §3.2ax）
-                    tracing::info!("📜 未选定奖励物品，不发送 FinishQuest：{msg}");
-                }
-            }
+            ) else {
+                continue;
+            };
+            net.send_packet(&mir2_shared::packets::client::quest::FinishQuest {
+                quest_index: info.index,
+                selected_item_index: selected,
+            });
+            tracing::info!(
+                "📜 交付任务 #{} {}（选定奖励下标 {}）",
+                info.index,
+                info.name,
+                selected
+            );
         }
     }
 
@@ -1699,5 +1822,19 @@ mod tests {
                 "top={top} 往返应一致"
             );
         }
+    }
+
+    /// C# `_finishButton.Click`（`QuestDialogs.cs:130-137`）：**有可选奖励但没选** → 拦下并弹
+    /// `MirMessageBox(YouMustSelectRewardItem)`；没有可选奖励时不弹（直接交任务）。
+    #[test]
+    fn finish_pick_guard_matches_csharp() {
+        assert!(finish_needs_reward_pick(2, None), "有可选奖励未选 → 拦 + 弹框");
+        assert!(!finish_needs_reward_pick(2, Some(0)), "选好了 → 放行");
+        assert!(!finish_needs_reward_pick(0, None), "本来就没有可选奖励 → 放行");
+        // 文案/几何取自 C# `MirMessageBox`（面板 Prguse[360] 456x190 居中、OK Title[200..202]）
+        assert_eq!(QUEST_REWARD_PICK_ASK, "你必须选择一个奖励物品。");
+        assert_eq!(LIST_NOTICE_PANEL, (284.0, 289.0));
+        assert_eq!(LIST_NOTICE_SIZE, (456.0, 190.0));
+        assert_eq!(LIST_NOTICE_OK_POS, (360.0, 157.0));
     }
 }
