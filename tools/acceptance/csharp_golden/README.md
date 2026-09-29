@@ -2557,3 +2557,57 @@ py -3.12 tools\acceptance\csharp_golden\golden_ab_diff.py `
 （`Quests` 的 ±0.6pp 与 Belt/Skillbar 的整帧波动都不指向代码改动。）
 
 **门禁**：本轮只动文档，无代码变化。
+### 3.2ar 「鼠标驱动」那批窗的两端同状态 A/B：`storage / craft / market / npc_awake` —— 捞出 1 处真缺口（npc_awake 的位置）（2026-09-29）
+
+§3.2ao⑤ 留下的「需要原版侧真鼠标点 NPC」那批，owner 解锁后本轮跑完。**解锁判据两条都过**：
+前台窗口 `class=CASCADIA_HOSTING_WINDOW_CLASS`（不是 `Windows.UI.Core.CoreWindow`）、桌面级
+`CopyFromScreen` 采样非纯色。
+
+**① 夹具：NPC 对话窗的**行内链接**要用「真光标 `Move-Image` + `Msg-Click`」，`Click-Image` 会只 hover 不点**
+
+```powershell
+# 打开 NPC 窗（npc_sweep 内部就是这一对）：
+npc_sweep.ps1 -SetPos -RestartPerPoint -PosMap 1 -PosX <px> -PosY <py> `
+   -NpcsJson %TEMP%\golden_sandbox\npcs_1.json -PlayerX <px> -PlayerY <py> -MaxDist 6 -Only '<npc>'
+# 点行内链接（本端 RPC 侧同理：先 Move-Image 把真光标压到链接上，再 Msg-Click）：
+Move-Image <lx> <ly>; Msg-Click <lx> <ly> 220
+```
+
+- `npc_sweep` 点 NPC 与点链接用的都是 **`Move-Image` + `Msg-Click`**（脚本第 284/305 行）——storage 就是这么开出来的。
+- 本轮手动用 **`Click-Image`（SetCursorPos + mouse_event）连试两次都没点动** `CraftsLady` 的 `Crafting` 链接：
+  截图里链接变成**红色 hover**、页面一字未变（`npc_page_probe` 因此报 `no-yellow-text` —— **别把这个读数当成"页面变了"**，
+  链接被悬停成红色后就扫不到黄字了）。改成 `Move-Image` + `Msg-Click` 立刻开出 craft 窗（0.0393）。
+- ⇒ 口径：**判据必须是"目标窗真的出现在期望位置"**（全屏模板匹配），不是"黄字带没了"。
+
+**② 四窗两端读数（C# 用全屏 `cv2.matchTemplate` 找面板美术的真实落点；本端用 `dialog_rect` + `art_match`）**
+
+| 窗 | C# 实测（全屏模板匹配） | 本端 | 结论 |
+|---|---|---|---|
+| `storage` | `Prguse[586]` **@(0,0)**，不符率 **0.0269** | `(0,0,388,346)`，art 0.026 | 一致 |
+| `market` | `Title[786]` **@(0,0)**，不符率 **0.0855** | `(0,0,492,478)`，art 0.098 | 一致 |
+| `craft` | `Prguse[1109]` **@(431,236)**，不符率 **0.0393** | `(-12,236,337,215)`（背包在 (0,0) 时） | 锚点公式一致（`inv.X-12, inv.Y+236`）、**绝对值随背包位置**：C# 开 NPC 窗会把背包推到 `(44x,0)`（`NPCDialog.Show()` 里 `InventoryDialog.Location = (Size.Width+5, Y)`），本端不推 ⇒ 这一维不可比 |
+| `npc_awake` | `Title[710]` **@(0,224)**，不符率 **0.1125** | 修前 `(0,0,360,420)` | **真缺口**（见 ③） |
+
+**③ 捞到的真缺口：`npc_awake` 贴在 NPC 对话窗**正下方**，不是左上角**
+
+C# `NPCAwakeDialog` 类里写的是 `Location = new Point(0, 0)`（`NPCDialogs.cs:1884`），但 `GameScene`
+构造时**逐实例覆盖**：`NPCAwakeDialog = new NPCAwakeDialog { …, Location = new Point(0,
+GameScene.Scene.NPCDialog.Size.Height) }`（**`GameScene.cs:307`**）。`NPCDialog` = `Prguse[995]` 440x224
+⇒ 真位置 **(0,224)**。原版帧的全屏模板匹配也正好命中 **(0,224)**（0.1125），肉眼可见窗口上沿贴在 NPC 窗底边。
+
+修法（`Client-Bevy/src/game/dialogs/npc_awake.rs`）：新增 `PANEL_ORIGIN = (0.0, 224.0)` 并在 spawn 用上，
+注释写明"类里的 (0,0) 会被 `GameScene.cs:307` 覆盖"；单测
+`main_item_cell_matches_csharp_mir_item_cell_default` 里加断言（阳性对照实做：把 `PANEL_ORIGIN`
+改回 `(0,0)` ⇒ 该测试立即红）。
+
+**复验（同状态）**：本端修后 `dialog_rect {kind:'npc_awake'}` = **(0,224,360,420)**；
+`art_match --rect 0 224 360 420 --candidates 710` = **0.050**；本端帧全屏模板匹配最佳落点也是 **(0,224)**（0.0519）
+⇒ 与 C# 同锚点。
+
+**④ 顺带记一条工具口径缺口**：`tools/acceptance/csharp_golden/window_rect_table.py` 的期望值读的是
+**类里的** `Location`，对 `NPCAwakeDialog` 给成 `(0,0,360,420)`——只要本端也画在 (0,0)，
+§3.3 那张几何表就会**判 OK（假绿）**。本轮的真值来自实机模板匹配，别再按那张表判这一行
+（`GameScene` 里逐实例覆盖 `Location` 的窗全仓只有这一处，已 grep 过）。
+
+**门禁**：`cargo test --lib` **866 passed**（含新增断言；阳性对照实做）；
+`b0001_smoke` 2 + `ui_alignment` 53；`ui_interact_sweep.ps1 -ManageServer` 见 PR 正文。
