@@ -745,6 +745,8 @@ struct SpawnContext<'a> {
     dragon_info: Option<&'a db::DragonInfo>,
     rarity: crate::util::config::RarityConfig,
     routes: &'a HashMap<String, Vec<RoutePoint>>,
+    /// #2867 续：`(quest_index, finish) -> [npc db_index]`，给 `ObjectNpc.QuestIDs` 反查用。
+    quest_npc_links: &'a HashMap<(i32, bool), Vec<i32>>,
 }
 
 #[derive(serde::Deserialize)]
@@ -13608,7 +13610,7 @@ fn build_object_colour_changed_packet(object_id: u32, name_colour: i32) -> Vec<u
 }
 
 /// 构建 ObjectNpc 数据包（普通 NPC：name_colour/colour 均为 0）
-fn build_object_npc_packet(npc: &NpcSpawn, object_id: u32) -> Vec<u8> {
+fn build_object_npc_packet(npc: &NpcSpawn, object_id: u32, quest_ids: &[i32]) -> Vec<u8> {
     build_object_npc_packet_full(
         &npc.name,
         npc.image,
@@ -13618,10 +13620,12 @@ fn build_object_npc_packet(npc: &NpcSpawn, object_id: u32) -> Vec<u8> {
         npc.y,
         npc.direction,
         object_id,
+        quest_ids,
     )
 }
 
 /// 构建 ObjectNpc 数据包（通用；征服旗子用 Image/Colour，C# ConquestGuildFlagInfo.Spawn）
+#[allow(clippy::too_many_arguments)]
 fn build_object_npc_packet_full(
     name: &str,
     image: u16,
@@ -13631,6 +13635,7 @@ fn build_object_npc_packet_full(
     y: i32,
     direction: u8,
     object_id: u32,
+    quest_ids: &[i32],
 ) -> Vec<u8> {
     use mir2_shared::enums::ServerPacketIds;
     let mut body = Vec::new();
@@ -13643,7 +13648,12 @@ fn build_object_npc_packet_full(
     body.extend_from_slice(&x.to_le_bytes()); // location_x
     body.extend_from_slice(&y.to_le_bytes()); // location_y
     body.push(direction); // direction
-    body.extend_from_slice(&0i32.to_le_bytes()); // quest_ids count=0
+                          // #2867 续：这本 NPC 脚本 `[QUESTS]` 段登记的任务号（C# `NPCObject.QuestIDs`，
+                          // `Server/MirObjects/NPCObject.cs:392-393`）。客户端 NPC 侧任务列表窗（`QuestListDialog`）吃它。
+    body.extend_from_slice(&(quest_ids.len() as i32).to_le_bytes());
+    for q in quest_ids {
+        body.extend_from_slice(&q.to_le_bytes());
+    }
 
     build_packet_bytes(ServerPacketIds::ObjectNpc as i16, &body)
 }
@@ -13748,6 +13758,7 @@ fn send_map_spawns_to_session(
     map_index: u16,
     npcs: &HashMap<u32, NpcState>,
     monsters: &HashMap<u32, MonsterState>,
+    quest_npc_links: &HashMap<(i32, bool), Vec<i32>>,
 ) {
     // 按 object_id 升序下发（HashMap 迭代序不确定，排序后包序可复现）
     let mut npc_ids: Vec<u32> = npcs
@@ -13768,6 +13779,7 @@ fn send_map_spawns_to_session(
                 db_index: npc.db_index,
             },
             npc.object_id,
+            &quest::quest_ids_for_npc(quest_npc_links, npc.db_index),
         );
         try_send_to_client(gate_ref, session_id, packet);
     }
@@ -13843,7 +13855,12 @@ async fn spawn_npcs_and_monsters(
     for npc in &config.npcs {
         let object_id = *next_object_id;
         *next_object_id += 1;
-        let packet = build_object_npc_packet(npc, object_id);
+        // #2867 续：把本 NPC 脚本 `[QUESTS]` 段登记的任务号一并下发（C# `NPCObject.QuestIDs`）
+        let packet = build_object_npc_packet(
+            npc,
+            object_id,
+            &quest::quest_ids_for_npc(ctx.quest_npc_links, npc.db_index),
+        );
         if let Err(e) = gate_ref
             .tell(SendToClient {
                 session_id,
@@ -14246,8 +14263,15 @@ async fn spawn_conquest_flags(
             *next_object_id += 1;
             let (image, colour) = conquest::conquest_flag_appearance(owner_flag);
             let packet = build_object_npc_packet_full(
-                &flag.name, image, // C# ConquestGuildFlagInfo.Spawn 默认 Image=1000
-                0, colour, flag.x, flag.y, 0, object_id,
+                &flag.name,
+                image, // C# ConquestGuildFlagInfo.Spawn 默认 Image=1000
+                0,
+                colour,
+                flag.x,
+                flag.y,
+                0,
+                object_id,
+                &[],
             );
             if let Err(e) = gate_ref
                 .tell(SendToClient {
@@ -15849,7 +15873,8 @@ mod tests {
     #[test]
     fn test_build_object_npc_packet_full() {
         use mir2_shared::packets::server::objects::ObjectNpc;
-        let bytes = build_object_npc_packet_full("沙巴克旗", 1000, 0, 0x00FF0000, 10, 20, 0, 42);
+        let bytes =
+            build_object_npc_packet_full("沙巴克旗", 1000, 0, 0x00FF0000, 10, 20, 0, 42, &[]);
         let mut cursor = std::io::Cursor::new(&bytes[4..]);
         let pkt = ObjectNpc::read_body(&mut cursor).expect("parse ObjectNpc");
         assert_eq!(pkt.object_id, 42);
@@ -15860,6 +15885,17 @@ mod tests {
         assert_eq!(pkt.location_y, 20);
         assert_eq!(pkt.direction, mir2_shared::enums::MirDirection::Up);
         assert!(pkt.quest_ids.is_empty());
+    }
+
+    /// #2867 续：非空 quest_ids 也要原样落到包里（客户端 NPC 侧任务列表窗吃这串）
+    #[test]
+    fn test_build_object_npc_packet_carries_quest_ids() {
+        use mir2_shared::packets::server::objects::ObjectNpc;
+        let bytes = build_object_npc_packet_full("任务使者", 1001, 0, 0, 10, 20, 0, 43, &[12, 30]);
+        let mut cursor = std::io::Cursor::new(&bytes[4..]);
+        let pkt = ObjectNpc::read_body(&mut cursor).expect("parse ObjectNpc");
+        assert_eq!(pkt.object_id, 43);
+        assert_eq!(pkt.quest_ids, vec![12, 30]);
     }
 
     /// 易主广播目标：仅命中指定领地旗子（C# ConquestGuildFlagInfo.Broadcast）

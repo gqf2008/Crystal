@@ -107,6 +107,7 @@ impl WorldActor {
                 dest_map_index,
                 &self.npcs,
                 &self.monsters,
+                &self.quest_npc_links,
             );
             *self.map_spawn_reuses.entry(dest_map_index).or_insert(0) += 1;
             Vec::new()
@@ -118,6 +119,7 @@ impl WorldActor {
                 dragon_info: self.dragon_info.as_ref(),
                 rarity: self.rarity_cfg.clone(),
                 routes: &self.routes,
+                quest_npc_links: &self.quest_npc_links,
             };
             let (npcs, monsters) = spawn_npcs_and_monsters(
                 self.gate_ref.clone(),

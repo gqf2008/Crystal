@@ -1259,6 +1259,7 @@ impl Message<StartGameRequest> for WorldActor {
             dragon_info: self.dragon_info.as_ref(),
             rarity: self.rarity_cfg.clone(),
             routes: &self.routes,
+            quest_npc_links: &self.quest_npc_links,
         };
         // 地图级生成物单真源（对齐 C# `Map.Objects`）：该图已物化过生成物时，
         // 本会话只按既有 object_id 重放，不再各自生成一份——否则同图两个玩家
@@ -1276,6 +1277,7 @@ impl Message<StartGameRequest> for WorldActor {
                 spawn_map_index,
                 &self.npcs,
                 &self.monsters,
+                &self.quest_npc_links,
             );
             info!(
                 "Map {} spawns reused for session {} (npcs={} monsters={})",
@@ -2228,6 +2230,7 @@ impl Message<WorldMoveRequest> for WorldActor {
                             dragon_info: self.dragon_info.as_ref(),
                             rarity: self.rarity_cfg.clone(),
                             routes: &self.routes,
+                            quest_npc_links: &self.quest_npc_links,
                         };
                         let dest_file_clone = dest_file.clone();
                         // 地图级生成物单真源：目标图已物化则重放既有对象（见 StartGame 路径同款注释）
@@ -2240,6 +2243,7 @@ impl Message<WorldMoveRequest> for WorldActor {
                                 dest_map_u16,
                                 &self.npcs,
                                 &self.monsters,
+                                &self.quest_npc_links,
                             );
                             *self.map_spawn_reuses.entry(dest_map_u16).or_insert(0) += 1;
                             Vec::new()

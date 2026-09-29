@@ -73,6 +73,29 @@ pub(crate) fn quest_client_npc_ids(
     (start, finish)
 }
 
+/// #2867 续：某只 NPC **脚本 `[QUESTS]` 段登记的全部任务号**（正数=可接、负数=可交，两者都算），
+/// 去重并升序——就是 C# `S.ObjectNPC.QuestIDs` 那串东西。
+///
+/// C# 依据：`Server/MirObjects/NPC/NPCScript.cs:685-720 ParseQuests` 把 `[QUESTS]` 页登记进
+/// `NPCObject.Quests`，`NPCObject.GenerateNPC`（`Server/MirObjects/NPCObject.cs:383-394`）
+/// 把它当 `QuestIDs` 发给客户端；客户端 `QuestListDialog`（NPC 侧任务列表窗）就吃这串。
+///
+/// 入参是 **NPC 的 db_index**（不是 per-session 的 object_id）：`quest_npc_links` 是在世界启动时
+/// 由脚本页汇总的 `(quest, finish) -> [npc db_index]`（见 `build_quest_npc_links`）。
+pub(crate) fn quest_ids_for_npc(
+    links: &std::collections::HashMap<(i32, bool), Vec<i32>>,
+    npc_db_index: i32,
+) -> Vec<i32> {
+    let mut out: Vec<i32> = links
+        .iter()
+        .filter(|(_, npc_indexes)| npc_indexes.contains(&npc_db_index))
+        .map(|((quest_index, _), _)| *quest_index)
+        .collect();
+    out.sort_unstable();
+    out.dedup();
+    out
+}
+
 impl WorldActor {
     /// #2014：quest 是否已关联到任意 NPC（`[QUESTS]` 段落 / npc_infos 两列）；
     /// 未关联（数据未配置）时不做 NPC 强制校验。
@@ -718,5 +741,27 @@ mod tests {
         assert_eq!(quest_client_npc_ids(&ids, 2), (1002, 1002));
         // 未关联任务 → (0, 0)
         assert_eq!(quest_client_npc_ids(&ids, 42), (0, 0));
+    }
+
+    /// #2867 续：`S.ObjectNPC.QuestIDs` 用的反向映射——某只 NPC（按 db_index）登记的任务号，
+    /// 去重升序、可接/可交两类都算（C# `NPCObject.cs:392-393`：`from q in Quests select q.Index`）。
+    #[test]
+    fn quest_ids_for_npc_is_sorted_dedup_and_covers_accept_and_finish() {
+        let mut links: HashMap<(i32, bool), Vec<i32>> = HashMap::new();
+        links.insert((30, false), vec![5]); // NPC db_index 5 可接 30
+        links.insert((12, true), vec![5]); // NPC db_index 5 可交 12
+        links.insert((12, false), vec![5, 6]); // 5 与 6 都可接 12（两处登记同一任务号）
+        links.insert((98, false), vec![7]); // 只有 db_index 7
+
+        assert_eq!(
+            quest_ids_for_npc(&links, 5),
+            vec![12, 30],
+            "去重 + 升序 + 可接可交都算"
+        );
+        assert_eq!(quest_ids_for_npc(&links, 7), vec![98]);
+        assert!(
+            quest_ids_for_npc(&links, 99).is_empty(),
+            "没登记过任务的 NPC 回空表"
+        );
     }
 }

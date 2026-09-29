@@ -2757,3 +2757,51 @@ NPC 窗的 Quest 按钮切到它（并跟 `NPCDialog.Hide()` 级联隐藏），�
 > **没有 quests，也没有 NPC 的 info 索引**（`ClientQuestInfo.npc_index/finish_npc_index` 是 infra 索引，
 > 与运行期 `object_id` 对不上）。⇒ 要做这扇窗，得先在协议/服务端补「这只 NPC 提供哪些任务」
 > （或补 object_id → NPCInfo 索引的映射），再在客户端把它渲染出来——**跨端改动**，记在这里当下一批的入口。
+
+> **2026-09-29 再补（动手前逐条核 C#，上述推断被推翻 2/3）**：
+> ① **"客户端吃 `S.ObjectNPC.QuestIDs`" 是错的**——全仓 grep `QuestIDs` 只有两处：`Shared/ServerPackets.cs:2859`
+> 的字段定义 + `Server/MirObjects/NPCObject.cs:392` 的**服务端写入**；**客户端从不读它**。
+> ② 客户端那份 `Quests` 的真实来源是 `GameScene.QuestInfoList.Where(c => c.NPCIndex == ObjectID)`
+> （`Client/MirObjects/NPCObject.cs:60` 的 `Load`），即**客户端自己的任务定义表**按 `NpcIndex == 本 NPC 的 ObjectID` 过滤。
+> ③ **"本端 `npc_index/finish_npc_index` 是 infra 索引、对不上 object_id" 也不成立**——那是 #2867 之前的状态；
+> 现在 `build_client_quest_info`（`ServerRust/src/actors/world/mod.rs:12311-12323`）走
+> `quest::quest_client_npc_ids(quest_npc_object_ids(links, 生成出的 NPC), q.index)`，下发的**就是本会话生成出来的
+> NPC object_id**（C# `NpcIndex = LoadedObjectID`），e2e 断言见 `e2e.rs:1431-1453`。
+> ⇒ 结论：**这扇窗的客户端数据源已经就绪**（`QuestCatalog.infos` 里 `npc_index == npc.object_id` 的那批），
+> 不需要新的协议字段；剩下的纯粹是**客户端渲染那扇窗**。
+
+### 3.2av `ObjectNpc.QuestIDs` 不再硬编码 0（包体与原版服务端保真）＋ §3.2au 补记的两处纠偏（2026-09-29）
+
+本轮起手是按 §3.2au 补记说的「先补协议」去做服务端的 `QuestIDs`；**做到一半逐条核 C#，发现那条推断不成立**
+（见上一节的 2026-09-29 再补）。服务端这半截改动**仍然保留**——它的价值不是"客户端前置条件"，而是
+**包体内容与原版服务端一致**：C# 服务端本来就发真表（`Server/MirObjects/NPCObject.cs:392`），
+本端此前恒定 `count=0` 是一处**静默的分歧**。客户端那扇窗**不依赖它**。
+
+**改动**（`ServerRust/src/actors/world/`）：
+
+- `quest.rs` 新增 `quest_ids_for_npc(&quest_npc_links, npc_db_index) -> Vec<i32>`：把世界启动时由脚本
+  `[QUESTS]` 页汇总的 `(quest_index, finish) -> [npc db_index]` **反查**成「本 NPC 登记的任务号」，
+  去重 + 升序；可接（正数）与可交（负数）两类都算。
+- `mod.rs` 的 `build_object_npc_packet[_full]` 尾部从**硬编码 `quest_ids count=0`** 改成写真表
+  （`ObjectNpc.quest_ids`）。4 个调用点都补上：首生 `spawn_npcs_and_monsters`（走 `SpawnContext.quest_npc_links`）、
+  进场/换图重放 `send_map_spawns_to_session`（新增形参，3 个调用点：`map_sync.rs` 1 处 + `session.rs` 2 处）、
+  征服旗子（传 `&[]`——旗子不是 NPC 脚本，本就没有任务）。
+
+**C# 依据（服务端侧）**：`Server/MirObjects/NPC/NPCScript.cs:685-720 ParseQuests` 把 `[QUESTS]` 页登记进
+`NPCObject.Quests`；`Server/MirObjects/NPCObject.cs:383-394 GetInfo` 把它当 `QuestIDs` 下发。
+**消费方：没有**——C# 客户端不读这个字段（grep 证实，见上一节再补②）。
+
+**验证**：`ServerRust` 门禁——`cargo test` **858 passed / 0 failed**（含本轮新增的
+`quest_ids_for_npc_is_sorted_dedup_and_covers_accept_and_finish`、`test_build_object_npc_packet_carries_quest_ids`，
+以及改写成传 `&[]` 的 `test_build_object_npc_packet_full`）；`cargo fmt -- --check` 干净。
+（本机 `cargo clippy --lib -- -D warnings` 会红 1 条，但**不在本轮文件里**——`src/gate/actor.rs:2598
+clippy::chunks_exact_to_as_chunks`，是本地 rustc/clippy **1.98.1** 的新 lint；CI 钉的是 **1.95.0**，与本改动无关。）
+
+**仍未做（缺口维持 §3.2au 原状，但入口变清晰了）**：
+
+- 客户端 `Client-Bevy/src/network/packets/handle_world.rs:206-217` 的 `ObjectNpc` 分支**仍把 `p.quest_ids` 丢掉**。
+  按上面的纠偏，**这条路本来也不必接**——要接的是 `QuestCatalog.infos` 按 `npc_index/finish_npc_index == object_id` 过滤；
+- `QuestListDialog`（面板 `Prguse[950]` @(487,0)）本端仍未实现（窗身份/位置/画源见 §3.2au ①②③）。
+  数据源就绪（#2867 的 quest info 已带 object_id），**下一批可以直接做窗**，不必再动协议；
+  可复用本端 `quest_log.rs` 已有的 `QuestMessage`/`QuestRewards`（坐标 `QUEST_MSG_ORIGIN`/`QUEST_REWARD_ORIGIN`
+  本就是从 `QuestListDialog` 抄的），差的是**面板身份（950 @487,0）、行列表来源、接受/完成钮的窗内归属**。
