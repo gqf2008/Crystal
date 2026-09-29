@@ -402,6 +402,41 @@ mod tests {
     use bevy::ecs::system::RunSystemOnce;
     use bevy::window::{PrimaryWindow, Window};
 
+    /// ① 的 z 带纪律：动态置顶**永远**不许越过模态层。
+    ///
+    /// 背景：逐窗巡回连点 45 扇窗后，被点窗的 z 一路涨到 400+，盖过了固定 z 的遮挡节点（59）
+    /// ⇒ 弹框期间点下层窗照样生效。本用例把「重排」的算术钉死在带内。
+    #[test]
+    fn dialog_z_band_stays_below_modal_layer() {
+        use crate::game::dialogs::modal_layer::MODAL_BLOCKER_Z;
+        assert!(
+            MODAL_BLOCKER_Z > DIALOG_Z_MAX,
+            "遮挡层 {MODAL_BLOCKER_Z} 必须高于动态带顶 {DIALOG_Z_MAX}"
+        );
+        for n in 1..=60usize {
+            let zs = compact_zs(n);
+            assert_eq!(zs.len(), n);
+            assert!(
+                zs.windows(2).all(|w| w[0] <= w[1]),
+                "n={n}：新 z 必须非降序（排名靠后的不能更靠下）"
+            );
+            assert!(
+                zs.iter().all(|z| (DIALOG_Z_MIN..=DIALOG_Z_MAX).contains(z)),
+                "n={n}：新 z 必须落在 [{DIALOG_Z_MIN},{DIALOG_Z_MAX}]"
+            );
+        }
+        assert_eq!(compact_zs(0), Vec::<i32>::new());
+        assert_eq!(compact_zs(1), vec![DIALOG_Z_MAX], "只有一个 kind 时直接到带顶");
+        assert_eq!(compact_zs(2), vec![DIALOG_Z_MIN, DIALOG_Z_MAX]);
+        let zs = compact_zs(26);
+        assert_eq!((zs[0], zs[25]), (DIALOG_Z_MIN, DIALOG_Z_MAX), "26 个恰铺满");
+        let zs = compact_zs(40);
+        assert!(
+            zs.iter().all(|z| *z <= DIALOG_Z_MAX),
+            "kind 多于带容量时顶端并列在带顶，不越界"
+        );
+    }
+
     #[test]
     fn state_dialog_sync_truth_table() {
         let mut m = DialogManager::default();
@@ -894,11 +929,12 @@ mod tests {
             .find(|(r, _)| r.0 == DialogKind::Character)
             .map(|(_, g)| g.0)
             .expect("角色面板存在");
-        // Mail 新打开 → 整体抬到 50（最高 40 + 10），内部层级差 10 保留
+        // ①（2026-09-30）：带内重排 —— 两个 kind 时排名靠后的拿带顶 55，
+        // 另一个留在带底 30；同 kind 整体平移 ⇒ 内部层级差 10 保留（40/30 → 55/45）。
         let mut sorted = mail_gz.clone();
         sorted.sort_unstable();
-        assert_eq!(sorted, vec![40, 50], "Mail 两面板抬到 40/50，内部层级保留");
-        assert_eq!(char_gz, 30, "Character 未置顶保持原值");
+        assert_eq!(sorted, vec![45, 55], "Mail 两面板重排到 45/55，内部层级保留");
+        assert_eq!(char_gz, DIALOG_Z_MIN, "Character 留在带底");
     }
 
     /// S1 回归：孤儿弹窗（邀请/确认框）挂 `DialogRoot` + `AlwaysVisible` 后——
@@ -1245,6 +1281,34 @@ pub struct DialogZ {
     pub top: i32,
 }
 
+/// 非模态对话框动态层的**带**：`bump_dialog_z` 每次把被点窗 +10 送到最前，
+/// 若这一跳会越过上限，则把**所有**对话框按「当前 z 排名」重新压回带内（见 [`compact_zs`]）。
+///
+/// 为什么必须有上限（2026-09-30，walgit `crystal-modal-layer-batch` ① 实测踩到）：
+/// 逐窗巡回连点 45 扇窗后，被点窗的 z 一路涨到 400+，**盖过了固定 z 的模态层**
+/// （遮挡节点 59 / 模态面板 60）⇒ 弹框期间点下层窗照样生效（`(modal)block` 判据红）。
+/// 带顶取 55：高于全部静态非模态 z（本仓最大 51 = `roll.rs` 的结果图），低于遮挡层 59；
+/// 带底取 30（= 动态层起点），免得长时间巡回把对话框压到 HUD 之下。
+pub const DIALOG_Z_MIN: i32 = 30;
+pub const DIALOG_Z_MAX: i32 = 55;
+
+/// 排名压缩：把 `n` 个已按 z 升序排好的对话框映射回 `[DIALOG_Z_MIN, DIALOG_Z_MAX]`。
+///
+/// 不变式（单测钉住）：非降序、`<= DIALOG_Z_MAX`、`>= DIALOG_Z_MIN`；`n=1` 取带顶。
+pub fn compact_zs(n: usize) -> Vec<i32> {
+    match n {
+        0 => Vec::new(),
+        1 => vec![DIALOG_Z_MAX],
+        _ => {
+            let span = DIALOG_Z_MAX - DIALOG_Z_MIN;
+            let step = (span / (n as i32 - 1)).max(1);
+            (0..n)
+                .map(|i| (DIALOG_Z_MIN + i as i32 * step).min(DIALOG_Z_MAX))
+                .collect()
+        }
+    }
+}
+
 /// 根面板 Node 矩形（屏幕坐标：根面板是 UI 根的子节点，left/top 即绝对坐标）。
 /// bevy_ui 对话框根面板均显式设置 Px 尺寸；非 Px 回退 0（防御）。
 pub(crate) fn node_rect(node: &Node) -> (f32, f32, f32, f32) {
@@ -1520,26 +1584,53 @@ fn bump_dialog_z(
     z: &mut DialogZ,
     dialogs: &mut Query<(Entity, &DialogRoot, &Visibility, &Node, &mut GlobalZIndex)>,
 ) {
-    let mut max_gz = i32::MIN;
-    let mut any = false;
+    // 1) 每个 kind 当前的最大 z（同一扇窗的多个根共享一个层，整体平移才不破坏内部层级）
+    let mut per_kind: std::collections::HashMap<DialogKind, i32> = std::collections::HashMap::new();
     for (_, r, _, _, gz) in dialogs.iter() {
-        if r.0 == kind {
-            max_gz = max_gz.max(gz.0);
-            any = true;
-        }
+        per_kind
+            .entry(r.0)
+            .and_modify(|v| *v = (*v).max(gz.0))
+            .or_insert(gz.0);
     }
-    if !any {
+    let Some(_) = per_kind.get(&kind) else {
         return;
+    };
+
+    // 2) 按当前 z 升序排名，被点窗放到最后（最前）
+    let mut order: Vec<DialogKind> = per_kind.keys().copied().collect();
+    order.sort_by_key(|k| per_kind.get(k).copied().unwrap_or(0));
+    order.retain(|k| *k != kind);
+    order.push(kind);
+
+    // 3) 排名 → 带内新 z（非降序、≤ 带顶）
+    let zs = compact_zs(order.len());
+    let mut new_z: std::collections::HashMap<DialogKind, i32> = std::collections::HashMap::new();
+    for (i, k) in order.iter().enumerate() {
+        new_z.insert(*k, zs[i]);
     }
-    let top = z.top.max(max_gz + 10);
-    z.top = top + 10;
-    let delta = top - max_gz;
+
+    // 4) 逐实体按 kind 的 delta 平移（同 kind 共享 delta ⇒ 内部相对层级不变）
+    let mut applied = false;
     for (_, r, _, _, mut gz) in dialogs.iter_mut() {
-        if r.0 == kind {
+        let (Some(new), Some(old)) = (new_z.get(&r.0), per_kind.get(&r.0)) else {
+            continue;
+        };
+        let delta = *new - *old;
+        if delta != 0 {
             gz.0 += delta;
+            applied = true;
         }
     }
-    tracing::info!("📌 置顶对话框 {:?}（z={}）", kind, top);
+    if let Some(t) = new_z.get(&kind) {
+        z.top = *t;
+    }
+    tracing::info!(
+        "📌 置顶对话框 {:?}（z={}，带内重排 {} 个 kind，实际平移={}）",
+        kind,
+        new_z.get(&kind).copied().unwrap_or(0),
+        order.len(),
+        applied
+    );
 }
 
 pub struct DialogsPlugin;
