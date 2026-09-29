@@ -2961,3 +2961,67 @@ py -3.12 tools/acceptance/csharp_golden/win_locate.py --shot <帧> --lib "Data\P
    或给 mock 补一份绑定到某 NPC object_id 的任务定义。
 2. **原版那一侧的同一状态帧**（`QuestListDialog` 在 (487,0) 的内容级 A/B）——需要 C# 沙箱 + 解锁窗口，
    本批未做。
+
+### 3.2az NPC 侧任务列表窗**内容级取证**：实机挖出「行不动」并修好；mock 夹具 + `quest_list_probe`（2026-09-29）
+
+§3.2ay 把「窗的身份/位置」验到了；剩下的缺口是**内容**——行、消息区、奖励区、接受/完成钮在实机上到底画没画。
+本轮把这段补齐，并且**真挖出一个缺陷**。
+
+#### ① 取证夹具（新增，可复现）
+
+难点：这扇窗的内容**按 C# 语义本就该空**——没有 NPC 会话（`GetObject(0) == null`）或任务没绑到该 NPC 时，
+列表就是 0 行。所以"截图里没字"分不清是"空得对"还是"根本没画"。为此加了三件东西：
+
+| 件 | 内容 | 为什么这么加 |
+|---|---|---|
+| mock 任务定义 | `mock_npc_quest_info()`（`network/mock/state.rs`）：`index=2, npc_index=npc_index=finish_npc_index=MOCK_QUEST_NPC_ID(4242)`，9 行描述（含 `{文本/颜色}` 段与 `[ITEM:..]` 链接）、1 件固定 + 2 件可选奖励 | 既有 demo 定义 `npc_index=0` 不属于任何 NPC；没有"绑到某只 NPC 的定义"就永远取不到内容 |
+| `[@QUEST]` 路径下发 | `CallNPC` 的 `[@QUEST]` 页里也发一次同一份定义（`Magic` 分支原本就发，两条路径同源） | 取证不必先施法：`npc_call {object_id:4242,key:"[@QUEST]"}` 一步进状态 |
+| `quest_list_probe` RPC | 只读返回 `bound_npc / npc_object_id / catalog_infos / catalog_npc_indexes / selected / start / top_line / selected_reward` | 这扇窗的"空"有多种成因，截图分不清；probe 直接给状态真值（同 `quest_probe`/`npc_rows` 的路子） |
+
+#### ② 实机挖出的缺陷：**行标签永远不可见**（已修）
+
+probe 说 `catalog_infos=1 / bound_npc=4242 / selected=2`，但行区**亮像素 0**——`quest_list_ui_system`
+只更新了行文本、**从没把行的 `Visibility` 置为 `Visible`**（行槽在 spawn 时是 `Visibility::Hidden`）。
+C# 里 `RefreshInterface` 每行是**新建控件**（按 `Quests.Count` 逐个 `new QuestRow`），本端是固定 5 槽位，
+所以显隐必须显式写——漏写就是"窗开着、一行字都看不见"。
+
+**修复**：行渲染循环同时写 `*vis`（越界槽位清空并隐藏）。修后同一夹具下：row 0 文本带亮像素 **159**、
+相邻空槽 **0**（第二行确实隐藏）。
+
+#### ③ 内容级实测（master `dca87c36b` + 本 PR，`--mock --auto-enter --ui-scale 1`）
+
+先 `npc_call {"object_id":4242,"key":"[@QUEST]"}`（NPC 窗开、mock 下发该 NPC 的任务定义），
+再 `dialog open quest_list`，截图后按区域读像素：
+
+| 区域 | 实测（亮像素 >180） | 判据 |
+|---|---|---|
+| 行 0（任务名 `(9,36)` 起 200x18） | **159** | 行文字已画（修复前 0） |
+| 行 1 空槽 | **0** | 越界行确实隐藏 |
+| 消息区 10 行 `(497,135)` 280x160 | **1875**（首行 127 / 第 2 行 157） | 首行黄标题 + 正文都画出来 |
+| 奖励区 经验图标 `Prguse[966]` @(502,309) / 金币 `[965]` @(592,309) | **35 / 35** | 偏移链按 `reward_exp>0` 走零偏移 |
+| 奖励区标题 `Title[17]` @(512,373) | **87** | 区标题已画 |
+| 固定格 0 / 可选格 0 物品图 `(505,329)` / `(505,394)` | **20 / 20** | 两排奖励格都有物品图 |
+| 接受钮 `(527,436)` 68x25 | **76** | `ReDisplayButtons`：未接+未满员 ⇒ 接受钮可见 |
+| 选中高亮 `Prguse[956]` | 与"空列表"那帧逐列 diff：变化区间 **x 496..772**、右段(x≥610，无文字)**982 px** | 高亮确实画了（252 宽，起于 521=面板 487+9+25，与 C# `SelectedImage @(25,0)` 对齐）。注：`win_locate.py` 对**这一格**模板匹配失败（0.36）——它拿 Lib 原始像素比屏幕，而这格是**带 alpha 叠在面板美术上**的，像素值必然被底色改写；判据改用"与空列表帧的差分区间" |
+
+#### ④ 顺带发现 + 一处**防御性**改动（不是本轮空目录的原因，必须说清楚）
+
+- 观察：`--mock --auto-enter`（不施法）时 `catalog_infos=0`；查证发现 mock 的任务定义发送挂在
+  **`ClientPacketIds::Magic`** 分支（施法才发），`--quest-data-test` 之所以有数据正是因为它在游戏内施法。
+  ⇒ **不是丢包**，是本轮最初"登录串丢包"的推断错了，已在 §3.2az 更正。
+- 但**真服务端**把任务定义放在 **StartGame 那一串**里（`ServerRust/src/actors/world/session.rs:1344`
+  `send_quest_infos`，注释写着"必须在 NPC 生成之后下发"）。而客户端是：写侧
+  （`network_system`，**无状态门**）↔ 读侧 `quest_log_server_events` 原本挂着
+  `run_if(in_state(AppState::Game))`——**生产/消费两侧门控不一致**，登录串在 Select 帧被解码时
+  `ServerEvent::QuestInfo` 就没人读、2 帧后过期。这是**潜在**时序风险，**未在实机复现**
+  （本轮复现的是 mock 不施法不发数据，与门控无关）。
+- 处置：摄入侧去掉状态门（与写侧对齐）+ 新增单测
+  `quest_info_is_ingested_outside_game_state`（**阳性对照实做**：把门加回去该测试立即 FAIL）。
+  该系统的参数只有 `MessageReader<ServerEvent>` + 两个插件期就 init 的资源，任何状态跑都安全；
+  渲染/交互那几支仍留在 Game 门内。**如实标注：这是防御性收敛，不是已复现缺陷的修复。**
+
+**门禁**：`cargo check`（lib+bin）0 error；`cargo test --lib` **880 passed / 0 failed**；
+`cargo test --test b0001_smoke --test ui_alignment` **2 + 53 passed**。
+
+**仍未采集**：**原版那一侧的同状态内容帧**（需 C# 沙箱 + 解锁窗口；§3.2au 那张是 Jane 的列表，
+数据与本夹具不同，只能做区域级对照，不能做逐像素 A/B）。
