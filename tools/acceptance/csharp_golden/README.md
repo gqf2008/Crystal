@@ -3105,6 +3105,68 @@ py -3.12 tools\acceptance\csharp_golden\win_locate.py --shot <png> --lib Data\Pr
 （含 40 窗点 X 关的 `interact_gate::sweep_windows_close_via_standard_close_button`）；
 `cargo test --test b0001_smoke --test ui_alignment` **2 + 53 passed**。
 
+### 3.2bo `NPCDropDialog` 的第二处缺口：放了物品后**不报价**（C# 会拼价格）—— 已修（2026-09-30）
+
+§3.2bn 把面板/两颗钮对齐后，把 `NPCDropPanel_BeforeDraw` **再往下读**（`NPCDialogs.cs:1815-1853`）
+发现第二处真缺口：**放了物品后 C# 会把「这一单多少钱」拼进 `InfoLabel`，本端从来只画固定提示**。
+
+**① C# 原文（`TargetItem != null` 分支）**：按档把价格拼到 `text` 后面，再拼 `ClientTextKeys.Gold2`
+（`Client/Localization/Chinese.json:668` = "金币"）：
+
+| 档 | C# 表达式 | 依据 |
+|---|---|---|
+| Sell | `TargetItem.Price() / 2`（**uint 整除**） | `:1818-1819` |
+| Repair | `TargetItem.RepairPrice() * GameScene.NPCRate` | `:1821-1822` |
+| SpecialRepair | `TargetItem.RepairPrice() * 3 * NPCRate` | `:1824-1825` |
+| Disassemble | `TargetItem.DisassemblePrice()` | `:1827-1828` |
+| Downgrade / Reset | `DowngradePrice()` / `ResetPrice()` | `:1830-1834` |
+| Refine / ReplaceWedRing | `Info.RequiredAmount * 10 * NPCRate` | `:1836-1841` |
+
+两个价格函数是 C# `Shared/Data/ItemData.cs:516-563` 的 `Price()` / `RepairPrice()`
+（另加 `DisassemblePrice :583` / `DowngradePrice :594` / `ResetPrice :605`）。
+
+**② 本端修法（逐行照抄 C#，含截断语义）**
+
+- `game/dialogs/inventory.rs`：`InvItem` 补四个 C# 报价要用的量——`info_durability`
+  （C# `Info.Durability`）、`added_stats_count`（`AddedStats.Count`）、`rental`（`RentalInformation != null`）、
+  `awake_level`（`Awake.GetAwakeLevel()`）；一个源头 `network/packets/mod.rs::to_inv_item` 填充。
+  新增 `csharp_price/repair_price/disassemble_price/downgrade_price/reset_price`：
+  **`(uint)` 向零截断、`Math.Floor` 显式向下、f32 单精度、`uint` 回绕** 全部照抄。
+- `game/dialogs/sell_panel.rs`：`InfoLabel` 分两种状态——**空面板**仍是本仓的整句提示；
+  **放了物品**换成与 C# 同构的「短标签 + 报价 + 金币」。这不是"另发明一套"：整句提示 + 报价会
+  画到面板外面（`InfoLabel` 在面板内 (30,10)、面板只有 176 宽、12px/字 ⇒ 整句就 144px）。
+- `network/server_event.rs`：`NpcSellPanel` 补 `rate`（C# `GameScene.NPCRate`，
+  `GameScene.cs:264`），`handle_npc_items.rs` 从 `NPCGoods.rate` 填；分解/降级/重置那三条包
+  C# 不刷 `NPCRate`（沿用上一次），本端服务端面板包恒发 1.0（`world/mod.rs:4019-4025`）故填 1.0。
+  `SellPanelState` 的手写 `Default` 给 `rate = 1.0`（`f32::default()` 是 0，会让报价恒为 0）。
+
+**③ 判据（公式）+ 实机（渲染）**
+
+公式单测用的就是**服务端那两条同源测试的同款夹具**（`ServerRust/src/actors/world/item.rs:6869-6910`）：
+
+| 夹具（price/infoDura/maxDura/curDura/count） | `Price()` | `RepairPrice()` |
+|---|---|---|
+| 100/50/50/50/3 | 300 | **0**（满耐久，C# 同款测试值） |
+| 100/50/50/25/1 | 87 | **13**（C# 同款测试值） |
+| 101/50/50/50/1 | **100**（`(uint)(50*1.01)=50` 的截断路径） | — |
+
+实机（本端 mock，`npc_call 4242 [@SREPAIR]` / `[@SELL]` → `inv_select {slot:2}`（木剑，price=10）
+→ `click {x:321,y:316}`（面板内投放区中心）→ `ui_nodes_at` 取 `InfoLabel` 节点矩形）：
+
+| 帧 | `InfoLabel` 节点矩形 | 渲染出来的字（放大裁剪目检 + 宽度核对） |
+|---|---|---|
+| 空面板 | (294,234) **144x15** | `放入物品后点确认特殊修理`（12 字 × 12px = 144） |
+| 放入木剑（SpecialRepair） | (294,234) **90x15** | `特殊修理：0金币`（木剑 `info.durability=0` ⇒ C# `RepairPrice()` 恒 0） |
+| 放入木剑（Sell） | (294,234) **66x15** | `出售：5金币`（`Price()/2 = 10/2 = 5`） |
+
+放大帧：`%TEMP%\golden_sandbox\shots\ours_sellpanel_price_zoom_{pair,sell}.png`；
+整帧：`ours_sellpanel_price_{hint,srepair,sell}.png`。
+⇒ 「放了物品就有报价」这一条**实机收口**；**仍未采集**的是**原版侧**同状态帧（要解锁 + 真鼠标，属 §3.2l 那批）。
+
+**④ 门禁**（`Client-Bevy`）：`cargo check --tests` 0 error；`cargo test --lib` **889 passed / 0 failed**
+（新增 3 条：公式、报价文案、租用 ×2）；`cargo test --test b0001_smoke --test ui_alignment` **2 + 53 passed**；
+本轮改动的 6 个文件 `cargo fmt -- --check` **无差异**（master 其余文件的既有 fmt 漂移 70 处不属本轮，未动）。
+
 ### 3.2bm §3.2bl 的最后留白收口：`MirMessageBox` 的**原版现帧**拿到了（换入口，锁屏也能取）；并钉死 `game_shop` 买钮那条路**取不到帧的两条硬前置**（2026-09-29）
 
 §3.2bl 留的唯一留白是「原版侧**同状态帧**」（沙箱里点商品格买钮后的 `MirMessageBox`）。本轮把它定性收口：

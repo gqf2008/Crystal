@@ -489,6 +489,9 @@ pub(crate) fn handle_progress(
             if awakening_system::NPCDisassemble::read_body(&mut cur).is_ok() {
                 server_events.write(ServerEvent::NpcSellPanel {
                     panel_type: mir2_shared::enums::PanelType::Disassemble,
+                    // C# 这三条路**不**刷 `GameScene.NPCRate`（沿用上一次 NPC 交互的值）；
+                    // 本端 Rust 服务端的面板包恒发 1.0（`world/mod.rs:4019-4025`），故这里同值。
+                    rate: 1.0,
                 });
                 tracing::debug!("🔧 NPC 分解面板（NPCDropDialog）");
             }
@@ -498,6 +501,7 @@ pub(crate) fn handle_progress(
             if awakening_system::NPCDowngrade::read_body(&mut cur).is_ok() {
                 server_events.write(ServerEvent::NpcSellPanel {
                     panel_type: mir2_shared::enums::PanelType::Downgrade,
+                    rate: 1.0,
                 });
                 tracing::debug!("⬇️ NPC 降级面板（NPCDropDialog）");
             }
@@ -507,6 +511,7 @@ pub(crate) fn handle_progress(
             if awakening_system::NPCReset::read_body(&mut cur).is_ok() {
                 server_events.write(ServerEvent::NpcSellPanel {
                     panel_type: mir2_shared::enums::PanelType::Reset,
+                    rate: 1.0,
                 });
                 tracing::debug!("🔄 NPC 重置面板（NPCDropDialog）");
             }

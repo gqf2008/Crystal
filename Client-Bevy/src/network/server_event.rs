@@ -905,6 +905,9 @@ pub enum ServerEvent {
     /// NPCGoods（Sell/Repair/SpecialRepair）：出售/修理面板
     NpcSellPanel {
         panel_type: mir2_shared::enums::PanelType,
+        /// C# `GameScene.NPCRate`（`Client/MirScenes/GameScene.cs:264`：`public static float NPCRate`）
+        /// —— 修理/特修/精炼报价要乘它（`NPCDialogs.cs:1822/1825/1841`）。
+        rate: f32,
     },
     /// UserInformation：进图初始化同步（HUD/技能/背包/装备/物品名缓存）
     /// P3-3（2026-09-22）：`S.NewItemInfo` 的载荷（按需请求物品信息后的回包）。

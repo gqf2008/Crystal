@@ -28,11 +28,13 @@ use crate::ui::theme::{
 use mir2_shared::enums::PanelType;
 
 /// 出售/修理面板状态
-#[derive(Resource, Default)]
+#[derive(Resource)]
 pub struct SellPanelState {
     pub visible: bool,
     /// 当前模式（Sell / Repair / SpecialRepair）
     pub mode: Option<PanelType>,
+    /// C# `GameScene.NPCRate`（npc 的价格倍率，来自 `NPCGoods.rate`）——修理/特修报价要乘它。
+    pub rate: f32,
     /// 面板中的目标物品（原版 C# NPCDropDialog.TargetItem）
     pub target: Option<InvItem>,
     /// C# `NPCDropDialog.Hold`（按住/自动确认开关）：把物品放进面板后**立即确认**
@@ -40,6 +42,23 @@ pub struct SellPanelState {
     pub hold: bool,
     /// 本帧是否要按 `hold` 语义自动确认（放进物品那一帧置位，确认逻辑复用同一段）
     pub auto_confirm: bool,
+}
+
+/// 默认倍率 **1.0**（不是 `f32::default()` 的 0）：C# 的 `GameScene.NPCRate` 是静态量，
+/// 每次 NPC 面板包都会刷新；本端所有面板包都带 `rate`（Rust 服务端恒发 1.0，
+/// `ServerRust/src/actors/world/mod.rs:4019-4025`），只有「分解/降级/重置」那三条
+/// **不带 rate 的**包会沿用上一次的值 —— 给 0 会让这些档的报价恒为 0。
+impl Default for SellPanelState {
+    fn default() -> Self {
+        Self {
+            visible: false,
+            mode: None,
+            rate: 1.0,
+            target: None,
+            hold: false,
+            auto_confirm: false,
+        }
+    }
 }
 
 const DIALOG_X: f32 = 264.0;
@@ -116,6 +135,76 @@ pub fn sell_panel_prompt(mode: Option<PanelType>) -> &'static str {
         Some(PanelType::Downgrade) => "放入物品后点确认降级",
         Some(PanelType::Reset) => "放入物品后点确认重置",
         _ => "放入物品后点确认出售",
+    }
+}
+
+/// C# 各档 `InfoLabel` 的**短标签**（`NPCDialogs.cs:1756-1805` 的 `text = ClientTextKeys.X`，
+/// 取值见 `Client/Localization/Chinese.json`：`Sale`="出售：" / `Repair`="修理：" /
+/// `SpecialRepair`="特殊修理：" / `ItemWillBeDestroyed`="物品将被摧毁" / `Downgrade` / `Reset` /
+/// `Refine` / `CheckRefine` / `ReplaceWedRing`）。
+///
+/// 本端**空面板**时画的是 `sell_panel_prompt`（自解释的整句提示，本仓既有口径）；
+/// **放了物品**时改画与 C# 同构的「短标签 + 报价 + 金币」——因为整句提示太长，
+/// 再拼报价会画到面板外面（`InfoLabel` 在面板内 (30,10)，面板只有 176 宽、12px/字）。
+pub fn sell_panel_short_label(mode: Option<PanelType>) -> &'static str {
+    match mode {
+        Some(PanelType::Repair) => "修理：",
+        Some(PanelType::SpecialRepair) => "特殊修理：",
+        Some(PanelType::Disassemble) => "分解：",
+        Some(PanelType::Downgrade) => "降级：",
+        Some(PanelType::Reset) => "重置：",
+        Some(PanelType::Refine) => "精炼：",
+        Some(PanelType::CheckRefine) => "查看精炼：",
+        Some(PanelType::ReplaceWedRing) => "替换婚戒：",
+        _ => "出售：",
+    }
+}
+
+/// C# `NPCDropDialog.NPCDropPanel_BeforeDraw`（`NPCDialogs.cs:1815-1853`）的**报价尾部**：
+/// 放了物品（`TargetItem != null`）时按档把价格拼到 `text` 后面，再拼 `ClientTextKeys.Gold2`（"金币"）：
+///
+/// | 档 | C# 表达式 |
+/// |---|---|
+/// | Sell | `TargetItem.Price() / 2`（uint 整除） |
+/// | Repair | `TargetItem.RepairPrice() * GameScene.NPCRate` |
+/// | SpecialRepair | `TargetItem.RepairPrice() * 3 * NPCRate` |
+/// | Disassemble | `TargetItem.DisassemblePrice()` |
+/// | Downgrade | `TargetItem.DowngradePrice()` |
+/// | Reset | `TargetItem.ResetPrice()` |
+/// | Refine / ReplaceWedRing | `Info.RequiredAmount * 10 * NPCRate` |
+///
+/// `* NPCRate` 在 C# 里是 `uint * float` ⇒ **单精度浮点**，拼进字符串时用当前区域设置格式化；
+/// 本端用 `f32` + `Display`（整数值打出来就是 `13`、非整是 `19.5`，与 C# 的 `float.ToString()` 同形）。
+pub fn sell_panel_quote(mode: Option<PanelType>, item: &InvItem, rate: f32) -> String {
+    match mode {
+        Some(PanelType::Sell) | None => format!("{}", item.csharp_price() / 2),
+        Some(PanelType::Repair) => format!("{}", item.csharp_repair_price() as f32 * rate),
+        Some(PanelType::SpecialRepair) => {
+            format!("{}", (item.csharp_repair_price() as f32 * 3.0) * rate)
+        }
+        Some(PanelType::Disassemble) => format!("{}", item.csharp_disassemble_price()),
+        Some(PanelType::Downgrade) => format!("{}", item.csharp_downgrade_price()),
+        Some(PanelType::Reset) => format!("{}", item.csharp_reset_price()),
+        Some(PanelType::Refine) | Some(PanelType::ReplaceWedRing) => {
+            format!("{}", (item.required_amount as f32 * 10.0) * rate)
+        }
+        _ => format!("{}", item.csharp_price() / 2),
+    }
+}
+
+/// `InfoLabel` 最终文案：没放物品 → 整句提示；放了物品 → C# 同构的「短标签 + 报价 + 金币」。
+pub fn sell_panel_info_text(
+    mode: Option<PanelType>,
+    target: Option<&InvItem>,
+    rate: f32,
+) -> String {
+    match target {
+        Some(item) => format!(
+            "{}{}金币",
+            sell_panel_short_label(mode),
+            sell_panel_quote(mode, item, rate)
+        ),
+        None => sell_panel_prompt(mode).to_string(),
     }
 }
 
@@ -301,7 +390,7 @@ fn sell_panel_ui_system(
         };
     }
     for (mut text, _) in &mut info_texts {
-        let new = sell_panel_prompt(state.mode).to_string();
+        let new = sell_panel_info_text(state.mode, state.target.as_ref(), state.rate);
         if text.0 != new {
             text.0 = new;
         }
@@ -522,8 +611,9 @@ fn sell_panel_server_events(
 ) {
     use crate::network::server_event::ServerEvent;
     for ev in events.read() {
-        if let ServerEvent::NpcSellPanel { panel_type } = ev {
+        if let ServerEvent::NpcSellPanel { panel_type, rate } = ev {
             sell_panel.mode = Some(*panel_type);
+            sell_panel.rate = *rate;
             sell_panel.target = None;
             sell_panel.auto_confirm = false;
             sell_panel.visible = true;
@@ -644,5 +734,83 @@ mod tests {
         assert!(!hold_button_visible(Some(PanelType::Downgrade)));
         assert!(!hold_button_visible(Some(PanelType::Reset)));
         assert!(!hold_button_visible(Some(PanelType::ReplaceWedRing)));
+    }
+
+    /// 报价公式与 C# 逐值对齐：`Price()` / `RepairPrice()`（`Shared/Data/ItemData.cs:516-563`）。
+    /// 用的就是**服务端那两条同源测试的同款夹具**（`ServerRust/src/actors/world/item.rs:6869-6910`
+    /// 的 `repair_cost_matches_csharp_repair_price` / `price_truncates_max_dura_r_like_csharp`），
+    /// 这样两侧对 C# 的期望值互相咬合。
+    fn fixture(price: u32, info_dur: u16, max_dura: u16, cur_dura: u16, count: u16) -> InvItem {
+        InvItem {
+            price,
+            info_durability: info_dur,
+            max_dura,
+            current_dura: cur_dura,
+            count,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn quote_prices_match_csharp_useritem_formulas() {
+        // 满耐久堆叠（price=100 / durability=50 / max=cur=50 / count=3）：
+        //   Price() = 100 * 3 = 300；RepairPrice() = 100*3 - 300 = 0
+        let full = fixture(100, 50, 50, 50, 3);
+        assert_eq!(full.csharp_price(), 300);
+        assert_eq!(full.csharp_repair_price(), 0);
+        // 半耐久单件（cur=25）：Price() = floor(25 + 25*0.5 + 50) = 87；RepairPrice() = 100 - 87 = 13
+        let damaged = fixture(100, 50, 50, 25, 1);
+        assert_eq!(damaged.csharp_price(), 87);
+        assert_eq!(damaged.csharp_repair_price(), 13);
+        // price=101/durability=50 → r=1.01，C# `p=(uint)(50*1.01)=50`（截断不是四舍五入）
+        let odd = fixture(101, 50, 50, 50, 1);
+        assert_eq!(odd.csharp_price(), 100);
+        // 报价文案：Sell = Price()/2（uint 整除）、Repair/SpecialRepair 乘 NPCRate
+        assert_eq!(sell_panel_quote(Some(PanelType::Sell), &full, 1.0), "150");
+        assert_eq!(
+            sell_panel_quote(Some(PanelType::Repair), &damaged, 1.0),
+            "13"
+        );
+        assert_eq!(
+            sell_panel_quote(Some(PanelType::SpecialRepair), &damaged, 1.0),
+            "39"
+        );
+        // 倍率：C# `RepairPrice() * NPCRate` 是 uint*float ⇒ 13 * 1.5 = 19.5
+        assert_eq!(
+            sell_panel_quote(Some(PanelType::Repair), &damaged, 1.5),
+            "19.5"
+        );
+    }
+
+    /// 放了物品后 `InfoLabel` 换成「短标签 + 报价 + 金币」（C# `NPCDialogs.cs:1815-1853`）；
+    /// 空面板仍是本仓的整句提示。
+    #[test]
+    fn info_text_shows_price_only_when_item_is_placed() {
+        let damaged = fixture(100, 50, 50, 25, 1);
+        assert_eq!(
+            sell_panel_info_text(Some(PanelType::Repair), None, 1.0),
+            "放入物品后点确认修理"
+        );
+        assert_eq!(
+            sell_panel_info_text(Some(PanelType::Repair), Some(&damaged), 1.0),
+            "修理：13金币"
+        );
+        assert_eq!(
+            sell_panel_info_text(Some(PanelType::SpecialRepair), Some(&damaged), 1.0),
+            "特殊修理：39金币"
+        );
+        assert_eq!(
+            sell_panel_info_text(Some(PanelType::Sell), Some(&damaged), 1.0),
+            "出售：43金币"
+        );
+    }
+
+    /// 租用中的物品 `RepairPrice()` **×2**（C# `RentalInformation != null` 分支）。
+    #[test]
+    fn rental_item_repair_price_doubles() {
+        let mut it = fixture(100, 50, 50, 25, 1);
+        assert_eq!(it.csharp_repair_price(), 13);
+        it.rental = true;
+        assert_eq!(it.csharp_repair_price(), 26);
     }
 }
