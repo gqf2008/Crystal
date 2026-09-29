@@ -61,7 +61,14 @@ pub const CONFIRM_BTN_POS: (f32, f32) = (114.0, 62.0);
 pub const CONFIRM_FRAMES: (usize, usize, usize) = (290, 291, 292);
 
 /// C# `HoldButton.Visible`：`BeforeDraw` 先置 true，再按 `PanelType` 关闭
-/// （`NPCDialogs.cs:1741/1772/1785/1789/1793/1799` —— 分解/降级/重置/精炼/查看精炼不显示）
+/// （`NPCDialogs.cs:1741` 置 true；:`1772/1785/1789/1793/1799/1804` 六处 `HoldButton.Visible = false`
+/// —— 分解 / 降级 / 重置 / 精炼 / 查看精炼 / **换婚戒** 不显示）。
+///
+/// ⚠️ 2026-09-30 补第 6 个：`ReplaceWedRing`（`NPCDialogs.cs:1804`）。
+/// 本端 `mode` 目前只能取到 Sell/Repair/SpecialRepair（`handle_npc_items.rs` 的 NPCGoods 分支
+/// 只放行这三种，`NPCReplaceWedRing` 包在 `handle_progress.rs:1348` 只解码记账），
+/// 所以这条在现在是**潜在**不一致；但本函数是"C# BeforeDraw 的逐值对表"，
+/// 少一档就会在下一次接线时悄悄画错，故补齐并加断言钉住。
 pub fn hold_button_visible(mode: Option<PanelType>) -> bool {
     !matches!(
         mode,
@@ -70,6 +77,7 @@ pub fn hold_button_visible(mode: Option<PanelType>) -> bool {
             | Some(PanelType::Reset)
             | Some(PanelType::Refine)
             | Some(PanelType::CheckRefine)
+            | Some(PanelType::ReplaceWedRing)
     )
 }
 
@@ -92,7 +100,12 @@ pub struct SellPanelDrop;
 /// 面板提示文案（C# `NPCDropDialog` 各 PanelType 的 `text`，NPCDialogs.cs:1760-1805）
 pub fn sell_panel_prompt(mode: Option<PanelType>) -> &'static str {
     match mode {
-        Some(PanelType::Repair) | Some(PanelType::SpecialRepair) => "放入物品后点确认修理",
+        Some(PanelType::Repair) => "放入物品后点确认修理",
+        // 2026-09-30：C# 这两档是**两条不同的本地化键**——`ClientTextKeys.Repair` = "修理：" 与
+        // `ClientTextKeys.SpecialRepair` = "特殊修理："（`Client/Localization/Chinese.json:659-660`），
+        // 本端过去把 SpecialRepair 并进 Repair 一档 ⇒ 特殊修理面板画的是普通修理的提示，
+        // **模式区分丢失**（同 §3.2at 对 Disassemble/Downgrade/Reset 的处理：不能落回别档文案）。
+        Some(PanelType::SpecialRepair) => "放入物品后点确认特殊修理",
         Some(PanelType::Refine) => "放入武器后点确认精炼",
         Some(PanelType::CheckRefine) => "放入物品后点确认查看精炼",
         // C# 这三档的 `InfoLabel` 文案（`NPCDialogs.cs:1770-1789`）：
@@ -573,6 +586,17 @@ mod tests {
             sell_panel_prompt(Some(PanelType::Repair)),
             "放入物品后点确认修理"
         );
+        // C# `Repair` 与 `SpecialRepair` 是两条本地化键（"修理：" / "特殊修理："，
+        // `Client/Localization/Chinese.json:659-660`）⇒ 本端两档文案必须**不同**，
+        // 否则特殊修理面板与普通修理面板逐像素一样（实机曾如此，见 README §3.2bn）。
+        assert_eq!(
+            sell_panel_prompt(Some(PanelType::SpecialRepair)),
+            "放入物品后点确认特殊修理"
+        );
+        assert_ne!(
+            sell_panel_prompt(Some(PanelType::Repair)),
+            sell_panel_prompt(Some(PanelType::SpecialRepair))
+        );
         assert_eq!(
             sell_panel_prompt(Some(PanelType::Sell)),
             "放入物品后点确认出售"
@@ -609,7 +633,8 @@ mod tests {
         assert_eq!(HOLD_FRAMES, (293, 294, 295), "C# HoldButton 三帧");
         assert_eq!(CONFIRM_BTN_POS, (114.0, 62.0), "C# ConfirmButton @(114,62)");
         assert_eq!(CONFIRM_FRAMES, (290, 291, 292), "C# ConfirmButton 三帧");
-        // C# `HoldButton.Visible`：分解/降级/重置/精炼/查看精炼不显示
+        // C# `HoldButton.Visible`：分解/降级/重置/精炼/查看精炼/**换婚戒**不显示
+        // （`NPCDialogs.cs:1772/1785/1789/1793/1799/1804` 共六处）
         assert!(hold_button_visible(Some(PanelType::Sell)));
         assert!(hold_button_visible(Some(PanelType::Repair)));
         assert!(hold_button_visible(Some(PanelType::SpecialRepair)));
@@ -618,5 +643,6 @@ mod tests {
         assert!(!hold_button_visible(Some(PanelType::Disassemble)));
         assert!(!hold_button_visible(Some(PanelType::Downgrade)));
         assert!(!hold_button_visible(Some(PanelType::Reset)));
+        assert!(!hold_button_visible(Some(PanelType::ReplaceWedRing)));
     }
 }

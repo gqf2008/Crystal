@@ -421,6 +421,29 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                             );
                                             tracing::info!("🧰 [MOCK] 出售面板打开请求");
                                         }
+                                        // #3449：[@REPAIR] / [@SREPAIR] —— 修理 / 特修面板。
+                                        // 与 `[@SELL]` 同一路径（都是 `NPCDropDialog`，面板 `Prguse2[351]` @(264,224)），
+                                        // 只换 `panel_type`；原版侧这一页是 `<Repair>` / `<Special/@SRepair>`
+                                        // （`ServerRust/src/actors/world/npc.rs:227-234` 走 `send_npc_panel`，
+                                        // 与 Rust 服务端同款：NPCGoods 带 panel_type，而不是 C# 的 NPCRepair 包）。
+                                        // 用途：README §3.2ar ③ 一直记着「本端修理窗实机未采集」——有了这两页就能直接开窗取证。
+                                        if key == "[@REPAIR]" || key == "[@SREPAIR]" {
+                                            let panel_type = if key == "[@SREPAIR]" {
+                                                mir2_shared::enums::PanelType::SpecialRepair
+                                            } else {
+                                                mir2_shared::enums::PanelType::Repair
+                                            };
+                                            send(
+                                                &to_client,
+                                                &server::npc_interaction::NPCGoods {
+                                                    list: vec![],
+                                                    rate: 1.0,
+                                                    panel_type,
+                                                    hide_added_stats: false,
+                                                },
+                                            );
+                                            tracing::info!("🧰 [MOCK] 修理面板打开请求: {:?}", panel_type);
+                                        }
                                         // #535：[@TESTROLL] —— 掷骰（C# RollDialog，自动掷 2 秒后回调 [page]）
                                         if key == "[@TESTROLL]" {
                                             send(

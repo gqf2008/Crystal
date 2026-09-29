@@ -3048,6 +3048,63 @@ C# 里 `RefreshInterface` 每行是**新建控件**（按 `Quests.Count` 逐个 
 **门禁**：`cargo check`（lib+bin）0 error；`cargo test --lib` **880 passed / 0 failed**；
 `cargo test --test b0001_smoke --test ui_alignment` **2 + 53 passed**。
 
+### 3.2bn §3.2ar ③ 的「本端修理窗实机未采集」**收口**：`Prguse2[351]` @(264,224)＋两颗钮逐像素 0；顺带两处 C# 逐行对表修正（2026-09-30）
+
+§3.2ar ① 把 C# 侧那扇修理/特修面板（`NPCDropDialog`，`Prguse2[351]` 176x147 @(264,224)）实机量过了，
+③ 留着「**本端这一半未采集**」：当时本端沙箱那一格附近没有可点 NPC（`nearby` radius 8/20/60 连续 `count=0`）。
+本轮换路子收口——**不需要世界里真有修理 NPC**。
+
+**① 为什么可以绕过"世界里找 NPC"**：Rust 服务端的修理/特修**不是** C# 那种独立包，而是
+`NPCGoods` 带 `panel_type`（`ServerRust/src/actors/world/npc.rs:227-234` 的 `EngineNpcAction::Repair/SpecialRepair`
+→ `send_npc_panel`，实现见 `ServerRust/src/actors/world/mod.rs:4019-4045`：`NPCGoods{ list: [], panel_type, .. }`），
+客户端也只认这三种（`handle_npc_items.rs` 的 `Sell | Repair | SpecialRepair` 分支 → `NpcSellPanel`）。
+⇒ **mock 回一发同款包就能开窗**。夹具补了两页（`network/mock/mod.rs`，与既有 `[@SELL]` 同款）：
+
+```powershell
+client_bevy.exe --mock --auto-enter --ui-scale 1 --control-port 9000
+# RPC npc_call 4242 带 key：
+#   {"object_id":4242,"key":"[@REPAIR]"}   → PanelType::Repair
+#   {"object_id":4242,"key":"[@SREPAIR]"}  → PanelType::SpecialRepair
+# 然后 {"method":"screenshot","params":{"path":"…\\ours_panel_srepair.png"}}
+py -3.12 tools\acceptance\csharp_golden\win_locate.py --shot <png> --lib Data\Prguse2.Lib --index 351
+```
+
+**② 实机结果（本端侧，mock；三帧存 `%TEMP%\golden_sandbox\shots\ours_sellpanel_{sell,repair,srepair}.png`）**
+
+| 目标 | Sell | Repair | SpecialRepair | C# 期望（`NPCDialogs.cs:1740-1760`） |
+|---|---|---|---|---|
+| 面板 `Prguse2[351]` | **(264,224)** | **(264,224)** | **(264,224)** | `Location = (264, NPCDialog.Size.Height=224)` |
+| 确认钮 `Title[290]` | — | — | **(378,286)** 不符率 **0.0000** | `ConfirmButton @(114,62)` ⇒ 面板 +(114,62) |
+| 按住钮 `Title[293]` | — | — | **(378,260)** 不符率 **0.0000** | `HoldButton @(114,36)`，这三档 `Visible=true` |
+
+面板本身的不符率 0.153~0.164（同一面板上叠着表单/两颗钮/提示文字，§3.2ar 的 C# 侧同类读数是 0.2482）——
+**位置这一维逐值对上，两颗钮逐像素 0**。⇒ §3.2ar ③ 的「本端实机未采集」**结案**。
+
+**③ 顺带两处 C# 逐行对表修正**（都出自把 `NPCDropPanel_BeforeDraw` 逐行核一遍）
+
+1. **`hold_button_visible` 少一档**：C# 有 **6** 处 `HoldButton.Visible = false`
+   （`NPCDialogs.cs:1772/1785/1789/1793/1799/**1804**`：分解/降级/重置/精炼/查看精炼/**换婚戒**），
+   本端只覆盖前 5 档 ⇒ 补 `ReplaceWedRing` 并加断言。当前 `mode` 取不到这一档
+   （`NPCReplaceWedRing` 包在 `handle_progress.rs:1348` 只解码记账），故这是**潜在**不一致；
+   但该函数是"C# BeforeDraw 的逐值对表"，少一档会在下次接线时悄悄画错。
+2. **`sell_panel_prompt` 把 `SpecialRepair` 并进了 `Repair`**：C# 是**两条**本地化键
+   （`Client/Localization/Chinese.json:659-660`：`"Repair": "修理："` / `"SpecialRepair": "特殊修理："`），
+   而本端两档同一串 ⇒ **模式区分丢失**（同 §3.2at 对 Disassemble/Downgrade/Reset 的处理：不能落回别档文案）。
+   实机可见（`InfoLabel` 在面板内 (30,10)，12px/字）：
+
+   | 对比 | 面板区 diff（修前） | 面板区 diff（修后） | bbox（面板内） |
+   |---|---|---|---|
+   | Sell ↔ Repair | 191 | 191 | (126,10)-(149,22) |
+   | **Repair ↔ SpecialRepair** | **0**（逐像素一样！） | **436** | (126,10)-(173,22) |
+   | Sell ↔ SpecialRepair | 191 | 439 | (126,10)-(173,22) |
+
+   bbox 正好是提示文字尾部 2 / 4 个字的位置（"出售"/"修理" → 2 字；"特殊修理" → 4 字），
+   即修前 `SpecialRepair` 面板画的就是普通修理的提示。
+
+**④ 门禁**（`Client-Bevy`）：`cargo check --tests` 0 error；`cargo test --lib` **886 passed / 0 failed**
+（含 40 窗点 X 关的 `interact_gate::sweep_windows_close_via_standard_close_button`）；
+`cargo test --test b0001_smoke --test ui_alignment` **2 + 53 passed**。
+
 ### 3.2bm §3.2bl 的最后留白收口：`MirMessageBox` 的**原版现帧**拿到了（换入口，锁屏也能取）；并钉死 `game_shop` 买钮那条路**取不到帧的两条硬前置**（2026-09-29）
 
 §3.2bl 留的唯一留白是「原版侧**同状态帧**」（沙箱里点商品格买钮后的 `MirMessageBox`）。本轮把它定性收口：
