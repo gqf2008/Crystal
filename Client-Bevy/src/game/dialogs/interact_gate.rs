@@ -27,7 +27,7 @@ use crate::resources::libraries::{Libraries, LibraryName};
 use crate::scenes::AppState;
 use bevy::prelude::*;
 
-/// 巡回脚本 `$kinds` 的 A 类窗口（41 项）＋ `hero_manage`（脚本里单独走状态窗路径，
+/// 巡回脚本 `$kinds` 的 A 类窗口（42 项）＋ `hero_manage`（脚本里单独走状态窗路径，
 /// 同样要「点 X 关」，故并入本门禁）。
 const SWEEP_KINDS: &[(&str, DialogKind)] = &[
     ("inventory", DialogKind::Inventory),
@@ -69,6 +69,8 @@ const SWEEP_KINDS: &[(&str, DialogKind)] = &[
     ("storage", DialogKind::Storage),
     ("item_rental_browse", DialogKind::ItemRentalBrowse),
     ("quest_detail", DialogKind::QuestDetail),
+    // #3368：NPC 侧任务列表窗（C# `QuestListDialog`）——有标准关闭钮（`Prguse2[360..362]` @289,3）
+    ("quest_list", DialogKind::QuestList),
     ("input_box", DialogKind::InputBox),
     // #3209：写邮件窗（状态驱动，RPC 直接切 `MailState.compose`）——同样要「点 X 关」
     ("mail_compose", DialogKind::MailCompose),
@@ -526,7 +528,7 @@ fn sweep_kind_list_matches_live_manifest() {
     };
 
     let manifest_kinds = names("sweep");
-    assert_eq!(manifest_kinds.len(), 41, "清单 sweep 应是 41 项");
+    assert_eq!(manifest_kinds.len(), 42, "清单 sweep 应是 42 项");
 
     // 本模块比清单多一项 hero_manage（清单把它登记在 excluded：走状态窗专用段）
     let ours: Vec<&str> = SWEEP_KINDS

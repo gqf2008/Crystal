@@ -45,6 +45,7 @@
     "storage",
     "item_rental_browse",
     "quest_detail",
+    "quest_list",
     "input_box",
     "mail_compose"
   ],

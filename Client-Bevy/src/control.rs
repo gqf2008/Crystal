@@ -2172,7 +2172,7 @@ fn handle_conn(mut stream: std::net::TcpStream, tx: Sender<ControlCommand>) {
 
 /// snake_case 对话框名 → DialogKind（#2586）。
 ///
-/// 覆盖除 `GuestTrade`/`Memo`/`FishingStatus` 外的全部 46 个变体（`DialogKind` 共 49 个）——
+/// 覆盖除 `GuestTrade`/`Memo`/`FishingStatus` 外的全部 47 个变体（`DialogKind` 共 50 个）——
 /// 三者都没有独立开关语义：`GuestTrade` 由网络 trade 会话与 Trade 成对驱动（dialogs/trade.rs）、
 /// `Memo` 由好友窗「备注」动作打开、`FishingStatus` 随钓鱼流程 `S.FishingUpdate.Fishing` 显隐，
 /// 故不做 RPC 映射（调用会回 unknown dialog kind）。
@@ -2187,6 +2187,9 @@ fn parse_dialog_kind(s: &str) -> Option<DialogKind> {
         "inventory" => D::Inventory,
         "character" => D::Character,
         "quest_log" => D::QuestLog,
+        // #3368：NPC 侧任务列表窗（C# `QuestListDialog`，`Prguse[950]` @(487,0)）——
+        // 与热键开的 `quest_log`（日记 `Prguse[961]`）区分，两者是不同面板/入口的窗。
+        "quest_list" => D::QuestList,
         "settings" => D::Settings,
         "menu" => D::Menu,
         "game_shop" => D::GameShop,
@@ -2303,6 +2306,7 @@ fn has_rpc_mapping(kind: DialogKind) -> bool {
         | D::Storage
         | D::HeroManage
         | D::QuestDetail
+        | D::QuestList
         | D::InputBox
         // #3209：写邮件窗纳入 RPC 开关（判据仪器）——几何/控件位置要能被夹具实测，
         // 而不是只能靠读代码相信它对齐。
@@ -4603,10 +4607,10 @@ mod tests {
         assert_eq!(resolve_cursor(None, None), None);
     }
 
-    /// `parse_dialog_kind` 可解析的全部名字（48 个名字 → 45 个变体：含 trust_merchant /
+    /// `parse_dialog_kind` 可解析的全部名字（49 个名字 → 46 个变体：含 trust_merchant /
     /// npc_drop / hero_skill 三个别名）。与交互巡回清单
     /// （`tools/acceptance/interact_sweep_manifest.json`）共用同一套名字空间。
-    const RPC_KIND_NAMES: [&str; 48] = [
+    const RPC_KIND_NAMES: [&str; 49] = [
         "inventory",
         "character",
         "quest_log",
@@ -4654,6 +4658,9 @@ mod tests {
         "item_rental_browse",
         "hero_manage",
         "quest_detail",
+        // #3368：NPC 侧任务列表窗（C# `QuestListDialog`）——独立 RPC 名，
+        // 便于夹具把「NPC 窗 Quest 钮开的那扇」单独打开对表
+        "quest_list",
         "input_box",
     ];
 
@@ -4664,7 +4671,8 @@ mod tests {
         let all = RPC_KIND_NAMES;
         // #2599：trust_merchant/npc_drop 是历史别名（→ Market/Npc，真实现移壳后保留工具兼容），
         // 与 market/npc 重复映射——互异断言计数时先去掉这 2 个别名。
-        // 名单与 witness 一致：每个可解析名都有 RPC 映射；DialogKind 共 48 个变体（#2892 批58 删 HeroSkill），
+        // 名单与 witness 一致：每个可解析名都有 RPC 映射；DialogKind 共 49 个变体（#2892 批58 删 HeroSkill；
+        // #3368 增 QuestList），
         // GuestTrade/Memo/FishingStatus 刻意排除——枚举级穷尽由 has_rpc_mapping 的无通配 match 编译期保证）
         let parsed: Vec<DialogKind> = all.iter().map(|s| parse_dialog_kind(s).unwrap()).collect();
         let uniq: Vec<&DialogKind> = {
@@ -4673,11 +4681,11 @@ mod tests {
             seen.dedup_by_key(|k| format!("{k:?}"));
             seen
         };
-        assert_eq!(all.len(), 48);
+        assert_eq!(all.len(), 49);
         assert_eq!(
             uniq.len(),
-            45,
-            "48 个名字（含 trust_merchant/npc_drop/hero_skill 三个别名）应映射到 45 个不同变体"
+            46,
+            "49 个名字（含 trust_merchant/npc_drop/hero_skill 三个别名）应映射到 46 个不同变体"
         );
         // 名单与 witness 一致：每个可解析名都有 RPC 映射
         assert!(
