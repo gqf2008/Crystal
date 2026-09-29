@@ -3298,3 +3298,35 @@ owner 直令那批（§3.2l）的前置都已成立：① 工作站当前**解�
 
 **仍未做**：C# 的 `Modal = true`（弹框期间拦其它输入）——本端只做了显隐与 OK；以及 §3.2bc 记的
 详情窗拖动实机复验、原版同状态内容帧。
+
+### 3.2bi `game_shop` 筛选按钮的**选中态**画源修好（`ImageButton.normal` vs 直接写 `ImageNode`）（2026-09-29）
+
+线索来自 §3.2bh 的同一对同状态帧：第 0 档区段页签（`Show All`）在**原版帧**里最像 `Title[771]`（选中帧，
+0.288；常态 `770` 是 0.805），而**本端帧**在 (302,214) 是 `Title[770]`（**0.000**）。
+先用当前客户端**重取一帧**排除"旧帧过时"：新帧仍是 `770`（0.000）⇒ **真缺陷**。
+
+**根因（一行说清）**：`ui::theme::image_button_system` 每帧按 `Interaction` 覆盖 `ImageNode`
+（`None → ImageButton.normal`），而 `game_shop` 的筛选按钮系统**直接写 `ImageNode`** 表示选中 ⇒ 被它盖回去。
+C# 的语义本来就不是"叠一张图"，而是**换按钮的基础索引**：`GameshopDialog.cs:625-628`
+`if (SectionFilter == "Show All") allItems.Index = 771;`。
+
+**修法**：新增 `ShopFilterArt { normal, selected }` 记两态；选中时把 **`ImageButton.normal`** 换成 selected 帧
+（hover/pressed 保持 spawn 值），**不再**直接写 `ImageNode`，交给通用系统按 `Interaction` 渲染。
+
+**实机复验**（mock，`dialog open game_shop`，`art_match` 比对固定格）：
+
+| 状态 | 第 0 档 (302,214) | 第 1 档 (373,214) |
+|---|---|---|
+| 默认（`section_filter="Show All"`） | **`771`(选中) 0.000**（修前 `770` 0.000 / `771` 0.766） | `776` 0.000 |
+| 点第 1 档中心 (409,226) 后（`TopItems`，商品 2→1 条） | **回 `770` 0.000** | **`777`(选中) 0.000** |
+
+**顺带记一条夹具坑（与 §3.2y 的"点了没反应"同类）**：页签精灵 72x24 的**左上角点** (373,214) 会被
+上面的面板根吃掉（`hits` 回的是 `696x476 [root=GameShop]`），要点**中心** (409,226) 才落到按钮
+（`hits` 回 `72x24 [root=GameShop]`）。凡"按整格边界算落点"的夹具都可能踩这条。
+
+**同模式排查**：按"查询里同时有 `&mut ImageButton` 又直接写 `ImageNode`"扫全仓
+`Client-Bevy/src/game/dialogs/`，**只有 game_shop 命中**（mail 那处的 `ImageNode` 是只读）。
+下次做同类"选中态"窗时先跑这条 grep。
+
+**门禁**：`cargo check`（lib+bin）0 error；`cargo test --lib` **885 passed / 0 failed**；
+`cargo test --test b0001_smoke --test ui_alignment` **2 + 53 passed**。

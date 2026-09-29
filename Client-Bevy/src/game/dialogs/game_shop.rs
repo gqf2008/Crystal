@@ -351,6 +351,19 @@ pub enum ShopFilterBtn {
     Section(usize),
 }
 
+/// 筛选按钮的两态美术（常态 / 选中）。
+///
+/// **为什么要有这个组件**：选中态必须写进 `theme::ImageButton.normal`，不能直接写 `ImageNode`——
+/// `theme::image_button_system` 每帧按 `Interaction` 覆盖 `ImageNode`（`None → ImageButton.normal`），
+/// 直接写会被它盖掉（实测：`section_filter="Show All"` 时第 0 档恒画常态帧 `Title[770]`，
+/// 而原版画选中帧 `771`——见 README §3.2bi）。C# 也是同一个语义：选中改的是按钮的 `Index`
+/// （`GameshopDialog.cs:625-628` `allItems.Index = 771`），不是单独叠一张图。
+#[derive(Component)]
+pub struct ShopFilterArt {
+    pub normal: Handle<Image>,
+    pub selected: Handle<Image>,
+}
+
 /// 职业筛选按钮：`(C# ClassFilter 值, 常态帧, 选中/hover 帧, x)`，y 统一 37/38（C# 常量）
 pub const CLASS_FILTERS: [(&str, usize, usize, f32); 6] = [
     ("Show All", 751, 752, 539.0),
@@ -1085,18 +1098,21 @@ fn shop_filter_button_visuals_system(
     shop: Res<GameShopState>,
     mut q: Query<(
         &ShopFilterBtn,
-        &crate::ui::theme::ImageButton,
-        &mut ImageNode,
+        &mut crate::ui::theme::ImageButton,
+        &ShopFilterArt,
     )>,
 ) {
-    for (kind, ib, mut node) in &mut q {
+    for (kind, mut ib, art) in &mut q {
         let active = match kind {
             ShopFilterBtn::Class(i) => shop.class_filter == CLASS_FILTERS[*i].0,
             ShopFilterBtn::Section(i) => shop.section_filter == SECTION_FILTERS[*i].0,
         };
-        let want = if active { &ib.pressed } else { &ib.normal };
-        if node.image != *want {
-            node.image = want.clone();
+        // 只改 `ImageButton.normal`（= C# 改按钮 `Index`），**不直接写 ImageNode**：
+        // `theme::image_button_system` 每帧按 Interaction 覆盖 ImageNode，直接写会被盖掉。
+        // hover/pressed 两帧保持 spawn 时的值（C# 这两档也各自有固定帧）。
+        let want = if active { &art.selected } else { &art.normal };
+        if ib.normal != *want {
+            ib.normal = want.clone();
         }
     }
 }
@@ -1219,8 +1235,14 @@ fn spawn_game_shop(
                 load_lib_image(&mut libs, &mut images, LibraryName::Title, *a_i),
             ) {
                 let (w, h) = lib_img_size(&images, &n);
-                spawn_icon_button(p, n, a.clone(), a, *x, CLASS_BTN_Y[i], w, h, 10)
-                    .insert(ShopFilterBtn::Class(i));
+                spawn_icon_button(p, n.clone(), a.clone(), a.clone(), *x, CLASS_BTN_Y[i], w, h, 10)
+                    .insert((
+                        ShopFilterBtn::Class(i),
+                        ShopFilterArt {
+                            normal: n,
+                            selected: a,
+                        },
+                    ));
             }
         }
         // 区段筛选四档（C# `SectionFilter` @(138|209|280|351, 68)，常态 770/776/772/774、
@@ -1231,8 +1253,15 @@ fn spawn_game_shop(
                 load_lib_image(&mut libs, &mut images, LibraryName::Title, *a_i),
             ) {
                 let (w, h) = lib_img_size(&images, &n);
-                let mut cmds = spawn_icon_button(p, n, a.clone(), a, *x, SECTION_BTN_Y, w, h, 10);
-                cmds.insert(ShopFilterBtn::Section(i));
+                let mut cmds =
+                    spawn_icon_button(p, n.clone(), a.clone(), a.clone(), *x, SECTION_BTN_Y, w, h, 10);
+                cmds.insert((
+                    ShopFilterBtn::Section(i),
+                    ShopFilterArt {
+                        normal: n,
+                        selected: a,
+                    },
+                ));
                 if i == 3 {
                     // C# `New.Visible = false`（`GameshopDialog.cs:263`）——照原版保持不可见
                     cmds.insert(Visibility::Hidden);
