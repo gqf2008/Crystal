@@ -598,6 +598,103 @@ pub fn lookup_by_name(name: &str) -> Option<SpellFx> {
     SPELL_FX.iter().find(|(n, _)| *n == name).map(|(_, fx)| *fx)
 }
 
+/// C# 施法音效条目（`PlayerObject.cs` 的 `case MirAction.AttackRange2:` + `case MirAction.Spell:`
+/// 共用块：`SoundManager.PlaySound(20000 + (ushort)Spell * 10 [+ k])`，与 `new Effect(...)` 同 case）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CastSound {
+    /// 音效 id —— **已按 C# `Spell` 值算好**。
+    /// ⚠️ 本端 `SharedRust::Spell` 整体是 C# 的 **+3**（`None = 3` vs C# `None = 0`）：
+    /// 这张表由生成器读 `Shared/Enums.cs` 的 **C# 值**算，**别**改成用本端枚举值现算，
+    /// 否则每个法术的音效都会错到 M{值+3} 那个文件（那个文件通常也存在，不会报错）。
+    pub id: u32,
+    /// C# 写的是 `+ (Gender == MirGender.Male ? 0 : 1)` ⇒ **女号 +1**
+    pub gender_bit: bool,
+}
+
+/// 查表：施法音效（`female` = 施法者不是男性；C# `Gender != MirGender.Male`）
+pub fn cast_sound_id(spell: Spell, female: bool) -> Option<u32> {
+    lookup_cast_sound(&format!("{spell:?}")).map(|s| s.id + u32::from(s.gender_bit && female))
+}
+
+/// 按 C# 枚举名查施法音效表
+pub fn lookup_cast_sound(name: &str) -> Option<CastSound> {
+    SPELL_CAST_SOUND
+        .iter()
+        .find(|(n, _)| *n == name)
+        .map(|(_, s)| *s)
+}
+
+// ==== SPELL_CAST_SOUND_BEGIN（由 Client-Bevy/tools/spell_effects_from_csharp.py 生成，勿手改）====
+/// 原版「施法音效」表（`Client/MirObjects/PlayerObject.cs` 的 `case MirAction.AttackRange2:` +
+/// `case MirAction.Spell:` 共用块：落点与 `new Effect(...)` 在同一 case 里）。
+/// `id` 按 **C# Spell 值**算好——本端 `Spell` 枚举整体是 C# +3，直接拿本端枚举值算会整段错位。
+/// `gender_bit`：C# 写成 `+ (Gender == MirGender.Male ? 0 : 1)`，**女号 +1**。
+#[rustfmt::skip]  // 生成块：保持每条一行，便于 diff 与 --write 幂等
+pub const SPELL_CAST_SOUND: &[(&str, CastSound)] = &[
+    ("FireBall", CastSound { id: 20310, gender_bit: false }),
+    ("Healing", CastSound { id: 20610, gender_bit: false }),
+    ("Repulsion", CastSound { id: 20320, gender_bit: false }),
+    ("ElectricShock", CastSound { id: 20330, gender_bit: false }),
+    ("Poisoning", CastSound { id: 20630, gender_bit: false }),
+    ("GreatFireBall", CastSound { id: 20340, gender_bit: false }),
+    ("HellFire", CastSound { id: 20350, gender_bit: false }),
+    ("SoulFireBall", CastSound { id: 20640, gender_bit: false }),
+    ("SummonSkeleton", CastSound { id: 20650, gender_bit: false }),
+    ("StormEscape", CastSound { id: 20550, gender_bit: false }),
+    ("Teleport", CastSound { id: 20370, gender_bit: false }),
+    ("Blink", CastSound { id: 21510, gender_bit: false }),
+    ("Hiding", CastSound { id: 20670, gender_bit: false }),
+    ("Haste", CastSound { id: 20930, gender_bit: false }),
+    ("Fury", CastSound { id: 20160, gender_bit: false }),
+    ("ImmortalSkin", CastSound { id: 20170, gender_bit: false }),
+    ("FireBang", CastSound { id: 20380, gender_bit: false }),
+    ("FireWall", CastSound { id: 20390, gender_bit: false }),
+    ("HealingCircle", CastSound { id: 20860, gender_bit: false }),
+    ("MoonMist", CastSound { id: 21060, gender_bit: false }),
+    ("TrapHexagon", CastSound { id: 20730, gender_bit: false }),
+    ("EnergyRepulsor", CastSound { id: 20720, gender_bit: false }),
+    ("FireBurst", CastSound { id: 20970, gender_bit: false }),
+    ("SummonShinsu", CastSound { id: 20780, gender_bit: false }),
+    ("UltimateEnhancer", CastSound { id: 20770, gender_bit: false }),
+    ("FrostCrunch", CastSound { id: 20410, gender_bit: false }),
+    ("Purification", CastSound { id: 20740, gender_bit: false }),
+    ("FlameField", CastSound { id: 20490, gender_bit: false }),
+    ("Trap", CastSound { id: 20980, gender_bit: false }),
+    ("MoonLight", CastSound { id: 21000, gender_bit: false }),
+    ("SwiftFeet", CastSound { id: 21020, gender_bit: false }),
+    ("LightBody", CastSound { id: 20950, gender_bit: false }),
+    ("PoisonSword", CastSound { id: 20990, gender_bit: false }),
+    ("DarkBody", CastSound { id: 21030, gender_bit: false }),
+    ("ThunderStorm", CastSound { id: 20420, gender_bit: false }),
+    ("MassHealing", CastSound { id: 20750, gender_bit: false }),
+    ("IceStorm", CastSound { id: 20460, gender_bit: false }),
+    ("MagicShield", CastSound { id: 20430, gender_bit: false }),
+    ("TurnUndead", CastSound { id: 20440, gender_bit: false }),
+    ("MagicBooster", CastSound { id: 20510, gender_bit: false }),
+    ("PetEnhancer", CastSound { id: 20850, gender_bit: false }),
+    ("Revelation", CastSound { id: 20700, gender_bit: false }),
+    ("ProtectionField", CastSound { id: 20120, gender_bit: false }),
+    ("Rage", CastSound { id: 20130, gender_bit: false }),
+    ("Vampirism", CastSound { id: 20450, gender_bit: false }),
+    ("BattleCry", CastSound { id: 21530, gender_bit: true }),
+    ("TwinDrakeBlade", CastSound { id: 20060, gender_bit: false }),
+    ("Entrapment", CastSound { id: 20070, gender_bit: false }),
+    ("BladeAvalanche", CastSound { id: 20110, gender_bit: false }),
+    ("SlashingBurst", CastSound { id: 20150, gender_bit: false }),
+    ("CounterAttack", CastSound { id: 20145, gender_bit: false }),
+    ("CrescentSlash", CastSound { id: 21050, gender_bit: true }),
+    ("FlashDash", CastSound { id: 20940, gender_bit: true }),
+    ("Mirroring", CastSound { id: 20480, gender_bit: false }),
+    ("Blizzard", CastSound { id: 20500, gender_bit: false }),
+    ("MeteorStrike", CastSound { id: 20520, gender_bit: false }),
+    ("HeavenlySword", CastSound { id: 20960, gender_bit: false }),
+    ("ElementalBarrier", CastSound { id: 21310, gender_bit: false }),
+    ("OneWithNature", CastSound { id: 21390, gender_bit: false }),
+    ("FireBounce", CastSound { id: 20340, gender_bit: false }),
+    ("MeteorShower", CastSound { id: 20340, gender_bit: false }),
+];
+// ==== SPELL_CAST_SOUND_END ====
+
 /// 施法特效实体：跟随施法者播帧（原版 `Effect(..., ob)` 跟随对象）
 #[derive(Component, Debug, Clone, Copy)]
 pub struct SpellFxAnim {
@@ -847,6 +944,48 @@ mod tests {
             missing.is_empty(),
             "这些表项在本端 Spell 枚举里不存在（生成脚本或枚举名漂了）: {missing:?}"
         );
+    }
+
+    /// #3393：施法音效表——键必须是真 Spell，且 id 按 **C# 值**算（不是本端枚举值）。
+    #[test]
+    fn spell_cast_sound_table_matches_csharp_values() {
+        let mut known = std::collections::HashSet::new();
+        for raw in 0..=255u8 {
+            if let Ok(sp) = Spell::try_from(raw) {
+                known.insert(format!("{sp:?}"));
+            }
+        }
+        let missing: Vec<&str> = SPELL_CAST_SOUND
+            .iter()
+            .map(|(n, _)| *n)
+            .filter(|n| !known.contains(*n))
+            .collect();
+        assert!(
+            missing.is_empty(),
+            "施法音效表里有本端 Spell 枚举不存在的键: {missing:?}"
+        );
+        assert_eq!(SPELL_CAST_SOUND.len(), 61, "C# 施法块共 61 条 PlaySound");
+        // 抽样逐值对 C#：`20000 + (ushort)Spell * 10`（C# FireBall = 31、GreatFireBall = 34、GreatFireBall 被
+        // FireBounce/MeteorShower 复用）、`+ 5`（CounterAttack）、固定 `139*10`（OneWithNature）
+        assert_eq!(cast_sound_id(Spell::FireBall, false), Some(20310));
+        assert_eq!(cast_sound_id(Spell::GreatFireBall, false), Some(20340));
+        assert_eq!(cast_sound_id(Spell::FireBounce, false), Some(20340));
+        assert_eq!(cast_sound_id(Spell::CounterAttack, false), Some(20145));
+        assert_eq!(cast_sound_id(Spell::OneWithNature, false), Some(21390));
+        // 女号 +1（C# `+ (Gender == MirGender.Male ? 0 : 1)`）
+        assert_eq!(cast_sound_id(Spell::BattleCry, false), Some(21530));
+        assert_eq!(cast_sound_id(Spell::BattleCry, true), Some(21531));
+        assert_eq!(cast_sound_id(Spell::CrescentSlash, true), Some(21051));
+        // 男号不加（非 gender_bit 的条目两个性别同值）
+        assert_eq!(cast_sound_id(Spell::Healing, true), Some(20610));
+        // 表里不该用的"本端枚举值版"：`20000 + 34*10 = 20340` 是 GreatFireBall，不是 FireBall
+        assert_ne!(
+            cast_sound_id(Spell::FireBall, false),
+            Some(20000 + (Spell::FireBall as u32) * 10),
+            "本端 Spell 是 C# +3，直接拿枚举值算会整段错位"
+        );
+        // 不在表里的法术（C# 施法块里没有 PlaySound 的那些）→ None
+        assert_eq!(cast_sound_id(Spell::None, false), None);
     }
 
     /// 门禁：时长换算——原版 `interval` 是**整段**时长，每帧 = interval/frames

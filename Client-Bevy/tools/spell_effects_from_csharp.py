@@ -29,6 +29,8 @@ OUT_RANGE_BEGIN = "// ==== RANGE_MISSILE_BEGIN"
 OUT_RANGE_END = "// ==== RANGE_MISSILE_END ===="
 OUT_OBJECT_BEGIN = "// ==== OBJECT_FX_BEGIN"
 OUT_OBJECT_END = "// ==== OBJECT_FX_END ===="
+OUT_SOUND_BEGIN = "// ==== SPELL_CAST_SOUND_BEGIN"
+OUT_SOUND_END = "// ==== SPELL_CAST_SOUND_END ===="
 # `S.ObjectEffect` 的处理在 GameScene.cs 的 ObjectEffect 方法里，到 RangeAttack 为止
 OBJ_BEGIN_MARK = "private void ObjectEffect(S.ObjectEffect p)"
 OBJ_END_MARK = "private void RangeAttack(S.RangeAttack p)"
@@ -189,6 +191,118 @@ def render_range_missiles(rows):
         )
     lines.append("];")
     lines.append(OUT_RANGE_END)
+    return "\n".join(lines)
+
+
+def parse_spell_cast_sounds(text, cs_spells):
+    """抓「施法音效」：`case MirAction.AttackRange2:` + `case MirAction.Spell:` 共用的那个
+    `switch (Spell)`（`PlayerObject.cs:1753-1765` 起）——C# 在这里和 `new Effect(...)` 一起
+    `SoundManager.PlaySound(20000 + (ushort)Spell * 10 [+ k])`。
+
+    必须做花括号深度跟踪：文件里还有另外几处 `switch (Spell)`（帧相位 / Attack1 / Attack4 /
+    远程箭），不按块限定会把它们混进来。音效 id 一律走 `_spell_cast_sound`（不认识就报错，禁止猜）。
+    """
+    lines = text.split("\n")
+    # `case MirAction.AttackRange2:` 在文件里出现多次（帧表 / altAnim / SetAction / 本块 / 帧相位），
+    # 其中**紧跟 `case MirAction.Spell:`** 的有两处（`SetAction` 的 1577 行与渲染/特效块的 1753 行）。
+    # 逐候选解析，取 PlaySound 条数最多的那个当"施法音效块"，并要求它**足够大**（<40 条即报错，
+    # 免得 C# 一重构就静默退化成几行）。
+    candidates = []
+    for i, l in enumerate(lines):
+        if re.search(r"case MirAction\.AttackRange2:", l):
+            for j in range(i, min(i + 4, len(lines))):
+                if "case MirAction.Spell:" in lines[j]:
+                    candidates.append(j)
+                    break
+    if not candidates:
+        raise ValueError("找不到 `case MirAction.Spell:`（施法音效块入口）")
+    best = max(candidates, key=lambda s: len(_parse_spell_sound_block(lines, s, cs_spells)))
+    out = _parse_spell_sound_block(lines, best, cs_spells)
+    if len(out) < 40:
+        raise ValueError(
+            "施法音效块只解析到 %d 条（<40）——块定位规则需复核（candidates=%r）"
+            % (len(out), [c + 1 for c in candidates])
+        )
+    return out
+
+
+def _parse_spell_sound_block(lines, start, cs_spells):
+    """从 `case MirAction.Spell:` 起，解析其后第一个 `switch (Spell)` 块里的 `PlaySound`。"""
+    depth = 0
+    pending = False
+    sw_depth = None
+    spell = None
+    out = []
+    for ln in lines[start:]:
+        stripped = ln.strip()
+        opens = ln.count("{")
+        closes = ln.count("}")
+        if re.search(r"switch\s*\(\s*Spell\s*\)", ln):
+            pending = True
+            spell = None
+        elif stripped.startswith("case ") and sw_depth is not None and depth == sw_depth:
+            m = re.match(r"case Spell\.(\w+):", stripped)
+            spell = m.group(1) if m else None
+        if sw_depth is not None and depth < sw_depth:
+            break
+        if pending and "{" in ln:
+            sw_depth = depth + opens
+            pending = False
+        m2 = re.search(r"PlaySound\((.*)\);", ln)
+        if m2 and spell:
+            sid, gender = _spell_cast_sound(m2.group(1), spell, cs_spells)
+            out.append((spell, sid, gender))
+        depth += opens - closes
+    return out
+
+
+def _spell_cast_sound(expr, spell, cs_spells):
+    """`PlaySound(<expr>)` → `(id, gender_bit)`。**不认识的形式直接报错**（禁止猜）。"""
+    e = re.sub(r"\s+", " ", expr.strip())
+    m = re.fullmatch(r"20000 \+ \(ushort\)Spell \* 10", e)
+    if m:
+        if spell not in cs_spells:
+            raise ValueError("Shared/Enums.cs 的 Spell 里没有 %s" % spell)
+        return 20000 + cs_spells[spell] * 10, False
+    m = re.fullmatch(r"20000 \+ \(ushort\)Spell \* 10 \+ (\d+)", e)
+    if m:
+        if spell not in cs_spells:
+            raise ValueError("Shared/Enums.cs 的 Spell 里没有 %s" % spell)
+        return 20000 + cs_spells[spell] * 10 + int(m.group(1)), False
+    m = re.fullmatch(
+        r"20000 \+ \(ushort\)Spell \* 10 \+ \(Gender == MirGender\.Male \? 0 : 1\)", e
+    )
+    if m:
+        if spell not in cs_spells:
+            raise ValueError("Shared/Enums.cs 的 Spell 里没有 %s" % spell)
+        return 20000 + cs_spells[spell] * 10, True
+    m = re.fullmatch(r"20000 \+ \(ushort\)Spell\.(\w+) \* 10", e)
+    if m:
+        other = m.group(1)
+        if other not in cs_spells:
+            raise ValueError("Shared/Enums.cs 的 Spell 里没有 %s" % other)
+        return 20000 + cs_spells[other] * 10, False
+    m = re.fullmatch(r"20000 \+ (\d+) \* 10", e)
+    if m:
+        return 20000 + int(m.group(1)) * 10, False
+    raise ValueError("未识别的施法音效实参（禁止猜）: %r（spell=%s）" % (expr, spell))
+
+
+def render_spell_cast_sounds(rows):
+    lines = [OUT_SOUND_BEGIN + "（由 Client-Bevy/tools/spell_effects_from_csharp.py 生成，勿手改）===="]
+    lines.append("/// 原版「施法音效」表（`Client/MirObjects/PlayerObject.cs` 的 `case MirAction.AttackRange2:` +")
+    lines.append("/// `case MirAction.Spell:` 共用块：落点与 `new Effect(...)` 在同一 case 里）。")
+    lines.append("/// `id` 按 **C# Spell 值**算好——本端 `Spell` 枚举整体是 C# +3，直接拿本端枚举值算会整段错位。")
+    lines.append("/// `gender_bit`：C# 写成 `+ (Gender == MirGender.Male ? 0 : 1)`，**女号 +1**。")
+    lines.append("#[rustfmt::skip]  // 生成块：保持每条一行，便于 diff 与 --write 幂等")
+    lines.append("pub const SPELL_CAST_SOUND: &[(&str, CastSound)] = &[")
+    for spell, sid, gender in rows:
+        lines.append(
+            "    (\"%s\", CastSound { id: %d, gender_bit: %s }),"
+            % (spell, sid, "true" if gender else "false")
+        )
+    lines.append("];")
+    lines.append(OUT_SOUND_END)
     return "\n".join(lines)
 
 
@@ -643,6 +757,8 @@ def main():
     obj_cases, obj_notes = parse_object_effects(gs_text, cs_monsters, cs_spells, cs_soundlist)
     obj_block = render_object_effects(obj_cases, obj_notes)
     obj_entries = sum(len(v) for _, v in obj_cases)
+    snd_rows = parse_spell_cast_sounds(text, cs_spells)
+    snd_block = render_spell_cast_sounds(snd_rows)
     print(
         "# C# MirAction.Spell 分支共 %d 条 Effect，其中魔法库条目 %d 条；施法弹道 %d 条；远程攻击弹道 %d 条"
         % (len(rows), len(entries), len(missiles), len(ranges))
@@ -651,11 +767,13 @@ def main():
         "# C# GameScene.ObjectEffect 分支共 %d 个 case、%d 条 Effect"
         % (len(obj_cases), obj_entries)
     )
+    print("# C# 施法音效块共 %d 条 PlaySound" % len(snd_rows))
     if not a.write:
         print(block)
         print(missile_block)
         print(range_block)
         print(obj_block)
+        print(snd_block)
         return
     out = Path("Client-Bevy/src/game/spell_effects.rs")
     txt = out.read_text(encoding="utf-8")
@@ -673,9 +791,13 @@ def main():
     i = txt.index(OUT_OBJECT_BEGIN)
     j = txt.index(OUT_OBJECT_END) + len(OUT_OBJECT_END)
     out.write_text(txt[:i] + obj_block + txt[j:], encoding="utf-8")
+    txt = out.read_text(encoding="utf-8")
+    i = txt.index(OUT_SOUND_BEGIN)
+    j = txt.index(OUT_SOUND_END) + len(OUT_SOUND_END)
+    out.write_text(txt[:i] + snd_block + txt[j:], encoding="utf-8")
     print(
-        "# 已写回 %s（特效 %d 条 / 施法弹道 %d 条 / 远程弹道 %d 条 / 对象特效 %d 条）"
-        % (out, len(entries), len(missiles), len(ranges), obj_entries)
+        "# 已写回 %s（特效 %d 条 / 施法弹道 %d 条 / 远程弹道 %d 条 / 对象特效 %d 条 / 施法音效 %d 条）"
+        % (out, len(entries), len(missiles), len(ranges), obj_entries, len(snd_rows))
     )
 
 
