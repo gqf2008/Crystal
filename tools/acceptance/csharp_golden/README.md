@@ -1175,6 +1175,35 @@ py -3.12 tools/acceptance/csharp_golden/control_size_audit.py `
 - **首轮 30 条待核队列已全部核完并清零**（`control_size_audit_known.txt` 现为空队列，只剩判定口径注释）：
   17 处按图头改尺寸（PR #3255）+ 菜单 13 颗钮（PR #3256）。
 
+### 3.4b 全屏定位：`win_locate.py`（**不知道窗口画在哪**时用它；矩形给错时 `art_match` 一律判"没画"）
+
+**为什么需要**：`art_match.py` 只在**给定矩形**里比——矩形给错就直接判"没画"。而 2026-09-29 那批
+缺口恰恰是"画在别的坐标上"：`npc_awake` 实际在 **(0,224)**（C# `GameScene.cs:307` 逐实例覆盖，
+本端画在 (0,0)）、觉醒 NPC 的「分解」开的是投放面板 `Prguse2[351]`@**(264,224)**、
+NPC 窗 Quest 按钮在 C# 开的是 `QuestListDialog` `Prguse[950]`@**(487,0)**。三处当时都是现写
+`cv2.matchTemplate` 一行行跑出来的——本工具把它固化，并把当时的口径写成判据。
+
+```powershell
+# 整个屏幕找某一帧（不需要知道它该在哪）
+py -3.12 tools\acceptance\csharp_golden\win_locate.py --shot <帧.png> --lib Data\Prguse.Lib --index 950
+# 顺带判"该在不在 (487,0)"：给了 --expect 就同时判位置（容差 --tol-px，默认 2px）
+py -3.12 ... --shot <帧.png> --lib Data\Prguse.Lib --index 950 --expect 487,0 --tol-px 3
+# 自检（正/负对照）
+py -3.12 ... --lib Data\Prguse.Lib --selftest
+```
+
+**判据**：`ratio = 不符像素 / 该帧**不透明**像素数`（`alpha < --alpha` 不参与，单像素 RGB 差之和 > `--tol` 计 1，
+与 `art_match.py` 同口径）；退出码 0/1。`--selftest` 两条对照：
+
+* **正**：把库里一帧贴到合成帧的**已知坐标 (137,221)** → 必须报到 **(137,221)** 且不符率 < 0.02（实测 0.0000）；
+* **负**：同一帧去搜**没贴它的空帧** → 不符率必须明显更差（相对判据 `r2 > 0.25 且 r2 > r1 + 0.2`）。
+  ⚠️ 别用固定阈值：**深色美术贴在深色底上"看起来也还行"**（实测 `Prguse[50]` 只有 0.2076、
+  挑亮点占比 ≥25% 的帧也只有 0.4685），所以负对照必须与"贴了它那帧"**相对**比。
+
+**实数据复核（同一批帧）**：`Prguse[950]` 在 C# 那一帧的最佳落点 **(485,0)**（期望 (487,0)±3px 命中，
+不符率 0.0891）；⚠️ 在**本端日记帧**上它也能报到 0.1134@(192,60)——因为 `Prguse[950]/[961]`
+**两窗美术同尺寸且很像**（§3.3 已记），"是哪一扇"要看**位置**与源码索引，不能只看 ratio 接近。
+
 ### 3.5 窗口触发：`dialog_trigger_audit.py`（「窗口存在 ≠ 功能存在」）
 
 **为什么需要**：2026-09-27 逐窗核长尾窗时发现 `chat_notice`（顶部公告横幅）——窗、面板、
@@ -2719,3 +2748,12 @@ tool_locator 0.040、other 0.000，置信度 0.940 —— "继续把同法套到
 NPC 窗的 Quest 按钮切到它（并跟 `NPCDialog.Hide()` 级联隐藏），热键/HUD 那条路仍开日记；做完再按同状态 A/B 复验两扇窗。
 
 **门禁**：本轮只动文档，无代码变化（本端现有行为保持原样）。
+
+> **2026-09-29 补（查实现依赖时发现的更大一层）**：这扇窗**不只是"加个窗口"**——
+> C# 的列表内容是 `NPCObject.GetAvailableQuests()`（`Client/MirObjects/NPCObject.cs:390-424`）：
+> ① 已接且 `QuestInfo.FinishNPCIndex == 本 NPC` 的（可交付）；② 本 NPC 自己那份 `Quests` 列表里
+> `CanAccept` 且没完成的（可接受）。②那份列表来自 **`NPCInfo.Quests`**——而本端共享包
+> `ClientNPCInfo`（`SharedRust/src/data/client_data.rs:759-766`）只有 `object_id/name/location/icon/can_teleport_to`，
+> **没有 quests，也没有 NPC 的 info 索引**（`ClientQuestInfo.npc_index/finish_npc_index` 是 infra 索引，
+> 与运行期 `object_id` 对不上）。⇒ 要做这扇窗，得先在协议/服务端补「这只 NPC 提供哪些任务」
+> （或补 object_id → NPCInfo 索引的映射），再在客户端把它渲染出来——**跨端改动**，记在这里当下一批的入口。
