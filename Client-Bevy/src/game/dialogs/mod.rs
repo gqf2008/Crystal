@@ -51,6 +51,9 @@ pub mod npc_goods;
 pub mod option;
 pub mod potion_belt;
 pub mod quest_log;
+/// NPC 侧任务列表窗（C# `QuestListDialog`，`Prguse[950]` @(487,0)）——与热键开的任务日记
+/// （`quest_log`，`Prguse[961]`）是**两扇不同的窗**，见 `quest_list.rs` 头注。
+pub mod quest_list;
 pub mod quest_tracking;
 pub mod ranking;
 pub mod refine;
@@ -137,6 +140,11 @@ pub enum DialogKind {
     /// `QuestDialogs.cs:463-628`）。由任务日记行左键打开（`QuestSingleQuestItem._questLabel.Click`，
     /// `QuestDialogs.cs:1928-1935`）；`Movable = true` 独立拖动，故独立 kind 不复用 `QuestLog`
     QuestDetail,
+    /// #3368：C# `QuestListDialog`（**NPC 侧**任务列表窗，`Prguse[950]` 316x466 @(487,0)，
+    /// `QuestDialogs.cs:15-36`）。与 `QuestLog`（热键开的任务日记 `Prguse[961]` @(192,60)）
+    /// 是两扇不同的窗：面板/位置/内容/入口都不同（§3.2au 在案）。入口 = NPC 窗的 Quest 按钮
+    /// （`NPCDialogs.cs:181`），故独立 kind——否则两扇窗会被 kind 级显隐/拖动连带。
+    QuestList,
     /// #2892 批C：C# `MirInputBox`（玩家取名提示框，`Prguse[660]` 288x156 居中，
     /// `Modal = true` / `Movable = false`）。服务端发起：`S.GuildNameRequest`（行会取名）、
     /// `S.GuildRequestWar`（宣战目标行会名，`GameScene.cs:5784-5802`）。
@@ -213,6 +221,7 @@ pub const CLOSEALL_DIRECT: &[DialogKind] = &[
     DialogKind::Market,
     DialogKind::QuestLog,
     DialogKind::QuestDetail,
+    DialogKind::QuestList,
     DialogKind::NpcAwake,
     DialogKind::Refine,
     DialogKind::BigMap,
@@ -227,15 +236,17 @@ pub const CLOSEALL_DIRECT: &[DialogKind] = &[
 /// 当时可见时才发生（C# `if (NPCDialog.Visible) NPCDialog.Hide();`）：
 /// NPCGoods/NPCSubGoods/NPCCraftGoods/NPCDrop→`NpcGoods`、NPCAwakeDialog→`NpcAwake`、
 /// RefineDialog→`Refine`、StorageDialog→`Storage`、TrustMerchantDialog→`Market`、
-/// QuestListDialog→`QuestLog`、RollControl→`Roll`、GuildTerritoryDialog→`GuildTerritory`、
-/// BigButtonDialog（本端无独立窗）。
+/// QuestListDialog→`QuestList`（**#3368 起不再指向 `QuestLog`**：此前本端没有 NPC 侧列表窗，
+/// 用任务日记顶替，故级联写的是 `QuestLog`；C# 的 `NPCDialog.Hide()` 里只有 `QuestListDialog`，
+/// 日记窗 `QuestDiaryDialog` **不在**级联里，`NPCDialogs.cs:1026-1038`）、
+/// RollControl→`Roll`、GuildTerritoryDialog→`GuildTerritory`、BigButtonDialog（本端无独立窗）。
 pub const CLOSEALL_NPC_CASCADE: &[DialogKind] = &[
     DialogKind::NpcGoods,
     DialogKind::NpcAwake,
     DialogKind::Refine,
     DialogKind::Storage,
     DialogKind::Market,
-    DialogKind::QuestLog,
+    DialogKind::QuestList,
     DialogKind::Roll,
     DialogKind::GuildTerritory,
 ];
@@ -1662,6 +1673,7 @@ impl Plugin for DialogsPlugin {
                 compass::CompassPlugin,
                 npc::NpcDialogPlugin,
                 quest_log::QuestLogPlugin,
+                quest_list::QuestListPlugin,
             ),
             (
                 group::GroupPlugin,

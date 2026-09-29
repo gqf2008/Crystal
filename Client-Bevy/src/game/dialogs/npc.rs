@@ -447,7 +447,10 @@ fn npc_ui_system(
             Visibility::Hidden
         };
         if edge(e, inter, &mut prev_inter) && npc.visible && has_quest {
-            mgr.toggle(DialogKind::QuestLog);
+            // #3368：C# `QuestButton.Click => GameScene.Scene.QuestListDialog.Toggle()`
+            // （`NPCDialogs.cs:181`）——开的是 **NPC 侧任务列表窗**（`Prguse[950]` @487,0），
+            // 不是热键/HUD 那扇任务日记（`QuestLog`，`Prguse[961]` @192,60）。
+            mgr.toggle(DialogKind::QuestList);
         }
     }
     if !npc.visible {

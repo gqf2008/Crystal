@@ -2881,7 +2881,7 @@ fn panel_sprites_batch_b2_match_csharp() {
 #[test]
 fn panel_sprites_batch_b3_match_csharp() {
     use client_bevy::game::dialogs::{
-        big_map, buff, chat_notice, fishing, guild, minimap, npc, quest_log,
+        big_map, buff, chat_notice, fishing, guild, minimap, npc, quest_list, quest_log,
     };
     require_assets!("panel_sprites_batch_b3_match_csharp");
     let mut libs = Libs::new();
@@ -2956,6 +2956,27 @@ fn panel_sprites_batch_b3_match_csharp() {
     assert_eq!((qw, qh), quest_log::DIARY_SIZE, "[尺寸] 任务详情同 316x466");
     assert_eq!(quest_log::DETAIL_POS, (SW / 2.0 + 20.0, 60.0));
 
+    // #3368 NPC 侧任务列表窗：C# `QuestListDialog.Index = 950; Library = Prguse`，
+    // `Location = (NPCDialog.Size.Width + 47, 0)`（`QuestDialogs.cs:33-36`）——
+    // 与上面的任务日记（961 @192,60）/任务详情（960 @532,60）是**三扇不同的窗**。
+    let (lw, lh) = libs.size(quest_list::LIST_PANEL.0, quest_list::LIST_PANEL.1);
+    assert_eq!(
+        (lw, lh),
+        quest_list::LIST_SIZE,
+        "[尺寸] NPC 侧任务列表 Prguse[950] 316x466"
+    );
+    assert_eq!(
+        (lw, lh),
+        (qw, qh),
+        "C# 三扇任务窗共用同一张 316x466 底图尺寸（950/960/961）"
+    );
+    assert_eq!(
+        quest_list::LIST_POS,
+        (npc::PANEL_W + 47.0, 0.0),
+        "[坐标] C# `Location = (NPCDialog.Size.Width + 47, 0)` = (487,0)"
+    );
+    assert_eq!(quest_list::LIST_POS, (487.0, 0.0));
+
     // Buff：`Prguse2[20..30]` 11 档 art 尺寸逐一核对（布局基准），右缘恒 898（C# 右锚 `newX`）
     for (i, expected) in buff::PANEL_SIZES.iter().enumerate() {
         let real = libs.size(LibraryName::Prguse2, 20 + i);
@@ -2992,7 +3013,7 @@ fn panel_sprites_batch_b3_match_csharp() {
         "[坐标] C# `Location = Center`"
     );
 
-    println!("  ✓ 批B 面板精灵核对（三）：Npc/ChatNotice/MiniMap/BigMap/Fishing/QuestDiary+Detail/Buff(11 档)");
+    println!("  ✓ 批B 面板精灵核对（三）：Npc/ChatNotice/MiniMap/BigMap/Fishing/QuestDiary+Detail+List/Buff(11 档)");
 }
 
 /// #2892 批B（四）：两条药水/英雄腰带 + 耐久面板。
@@ -4410,7 +4431,7 @@ fn hero_equipment_dialog_aligned() {
 /// 新增变体会让 [`kind_alignment_tests`] 的非穷尽 match **编译失败**，强制回到本文件登记；
 /// 「登记表本身漏了尾部变体」（编译期查不出）由
 /// [`dialog_kind_registry_covers_all_variants`] 用 `Reflect` 的 `EnumInfo` 对账。
-const DIALOG_KIND_COUNT: usize = 50;
+const DIALOG_KIND_COUNT: usize = 51;
 
 /// 全窗口列表（判别值顺序；守卫断言 `ALL[i] as usize == i`）。
 const ALL_DIALOG_KINDS: [client_bevy::game::dialogs::DialogKind; DIALOG_KIND_COUNT] = [
@@ -4459,6 +4480,8 @@ const ALL_DIALOG_KINDS: [client_bevy::game::dialogs::DialogKind; DIALOG_KIND_COU
     client_bevy::game::dialogs::DialogKind::ItemRentalBrowse,
     client_bevy::game::dialogs::DialogKind::HeroManage,
     client_bevy::game::dialogs::DialogKind::QuestDetail,
+    // #3368：NPC 侧任务列表窗（C# `QuestListDialog`）——判别值紧跟 QuestDetail（枚举声明序）
+    client_bevy::game::dialogs::DialogKind::QuestList,
     client_bevy::game::dialogs::DialogKind::InputBox,
     client_bevy::game::dialogs::DialogKind::Memo,
     client_bevy::game::dialogs::DialogKind::FishingStatus,
@@ -4477,7 +4500,8 @@ fn kind_alignment_tests(kind: client_bevy::game::dialogs::DialogKind) -> &'stati
         // 口径见 `inventory_bigmap_constants` 的文档注释
         K::Inventory | K::BigMap => &["inventory_bigmap_aligned", "inventory_bigmap_constants"],
         K::Character => &["character_dialog_aligned"],
-        K::QuestLog | K::QuestDetail => &["panel_sprites_batch_b3_match_csharp"],
+        // #3368：NPC 侧任务列表窗与日记/详情同批（面板 950/960/961 同尺寸，坐标各自核对）
+        K::QuestLog | K::QuestDetail | K::QuestList => &["panel_sprites_batch_b3_match_csharp"],
         K::Settings => &["settings_dialog_aligned"],
         K::Menu => &["menu_dura_aligned"],
         K::GameShop

@@ -2805,3 +2805,56 @@ clippy::chunks_exact_to_as_chunks`，是本地 rustc/clippy **1.98.1** 的新 li
   数据源就绪（#2867 的 quest info 已带 object_id），**下一批可以直接做窗**，不必再动协议；
   可复用本端 `quest_log.rs` 已有的 `QuestMessage`/`QuestRewards`（坐标 `QUEST_MSG_ORIGIN`/`QUEST_REWARD_ORIGIN`
   本就是从 `QuestListDialog` 抄的），差的是**面板身份（950 @487,0）、行列表来源、接受/完成钮的窗内归属**。
+
+### 3.2aw NPC 侧任务列表窗**开出来**了：新增 `DialogKind::QuestList`（`Prguse[950]` @487,0）——§3.2au 的窗口缺口收口（单元①）（2026-09-29）
+
+§3.2au 记的缺口（NPC 窗 Quest 钮在 C# 开 `QuestListDialog`、本端却开任务日记）本轮**按 C# 补了窗**，
+并把它从「日记窗的别名」拆成独立 `DialogKind::QuestList`。本单元收口**窗的身份/位置/行列表来源/入口/级联**；
+消息区+奖励区+接受/完成钮留单元②（见文末）。
+
+**逐条对 C# 的布局**（`Client/MirScenes/Dialogs/QuestDialogs.cs:15-250`）：
+
+| 元素 | C# | 本端 |
+|---|---|---|
+| 面板 | `Prguse[950]` 316x466，`Location = (NPCDialog.Size.Width + 47, 0)` | `quest_list.rs` `LIST_PANEL`/`LIST_SIZE`/`LIST_POS`（用 `npc::PANEL_W`=440 算出 **487**，不写死） |
+| 标题 | `Title[14]` @(18,9) | 同 |
+| 关闭 | `Prguse2[360..362]` @(289,3) | 同（复用 `quest_log::CLOSE_POS`） |
+| 帮助 | `Prguse2[257..259]` @(266,3) → `HelpDialog.DisplayPage` | 同（开 `DialogKind::Help`） |
+| 上/下翻页 | `Prguse[951..953]` @(291,35) / `Prguse[957..959]` @(291,83) | 同（含 C# 的「非首/末行则移选中，否则整表翻页」两条分支） |
+| 行 | `QuestRow` x5 `Location=(9, 36 + i*19)`、`Size=(200,17)` | 同（`LIST_ROW_*`），未选中无高亮 |
+| 选中高亮 | `Prguse[956]` @ 行内 (25,0) | 同（`QuestListRowMark`） |
+| 任务计数 | `_availableQuestLabel` @(210,8)，`AvailableQuestList` = 「可接任务列表：{0}」 | 同（`available_quest_label`） |
+| 离开 | `Title[276..278]` @(205,436) | 同 |
+
+**行列表来源**（这轮纠偏的直接落点）：`NPCObject.GetAvailableQuests()`（`Client/MirObjects/NPCObject.cs:390-424`）
+——① 已接且 `FinishNPCIndex == 本 NPC ObjectID`（可交付）；② 本 NPC 提供（`NPCIndex == ObjectID`）且 `CanAccept`。
+本端实现为纯函数 `npc_available_quests(catalog, log, npc_object_id, level, class)`，直接读 `QuestCatalog.infos`
+（`npc_index`/`finish_npc_index` 自 #2867 起就是**本会话 NPC object_id**）——**不需要 §3.2au 补记设想的协议改动**。
+
+**入口与级联**（照 C# 逐条）：
+
+- NPC 窗 Quest 钮 `mgr.toggle(DialogKind::QuestList)`（`NPCDialogs.cs:181` `QuestListDialog.Toggle()`）；
+  热键/HUD 那条路仍开日记 `QuestLog`（`QuestDiaryDialog` 是另一扇窗）。
+- `CLOSEALL_NPC_CASCADE` 里的 `QuestLog` 换成 `QuestList`——C# `NPCDialog.Hide()` 的级联表
+  （`NPCDialogs.cs:1026-1038`）只有 `QuestListDialog`，**日记窗不在里面**（此前本端没有这扇窗、用日记顶替，
+  注释里写着「QuestListDialog→`QuestLog`」，本轮按真身改正）。
+- `CLOSEALL_DIRECT`（ESC 关窗表）加 `QuestList`（C# `GameScene.cs:692` 的 Closeall 里有它）。
+- 本窗 Hide 连带 `NPCDialog.Hide()`（`QuestDialogs.cs:242-247`）：本端在关闭/离开钮里同时置 `npc.visible=false`，
+  交给既有的 NPC 级联边沿处理。
+
+**配套登记**（漏登记会被门禁拦下）：RPC 名 `quest_list`（`control.rs` 的 `parse_dialog_kind`/`has_rpc_mapping`/
+`RPC_KIND_NAMES`）、交互巡回 `interact_gate.rs` 的 `SWEEP_KINDS`、`interact_sweep_manifest.json` 的 `sweep`
+（41→42 项，`docs/DELIVERY.md` §5.3 标题同步）。本窗有标准关闭钮 `Prguse2[360..362]`，进「点 X 关」跑法。
+
+**验证**：`Client-Bevy` `cargo test --lib` **874 passed / 0 failed**（新增 7 条：可接表来源三态、去重、
+已完成剔除、行版式、`bind` 只在换 NPC 时重置、`StartIndex` 夹取、计数文案）。
+**实机 A/B 未采集**（本轮只到离线门禁）——按仓库规矩这里写明：**未采集**，下一步用 `dialog open quest_list`
+配 §3.4b 的 `win_locate.py` 实测面板落点，再按 §3.2 系做两端同状态对表。
+
+**单元②（未做，缺口保持开着）**：消息区（`QuestMessage` @(10,135) 280x160 + 上 `Prguse2[197..199]` @(292,136) /
+下 `[207..209]` @(292,282) / 位置条 `[205/206]` @(292,149)）、奖励区（`QuestRewards` @(5,307) 313x130）、
+接受 `Title[270..272]` @(40,436) / 完成 `Title[273..275]` @(40,436)。这三块本端 `quest_log.rs` 已有同坐标实现
+（在**详情窗**上），单元②把它们按「父窗 = QuestListDialog」搬过来。
+另：NPC 窗 Quest 钮的**显隐**目前仍是文本启发式（脚本行含「可接受任务」），C# 是
+`npc.GetAvailableQuests().Any()`（`NPCDialogs.cs:1006-1020`）——留到单元②一并按目录口径改
+（改它要动 `npc_ui_system` 的参数预算，见该函数 16 参注释）。
