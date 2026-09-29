@@ -2920,3 +2920,44 @@ clippy::chunks_exact_to_as_chunks`，是本地 rustc/clippy **1.98.1** 的新 li
 2. 「必须先选奖励物品」的 `MirMessageBox` 提示框（本端只拦发包）；
 3. 位置条**拖动**（`PositionBar_OnMoving`）——本端只跟随 `TopLine` 移动，未做拖拽反向写回；
 4. 标题行**加粗**（无同字体粗体档）。
+
+### 3.2ay NPC 侧任务列表窗的**本端实机取证**（§3.2aw/§3.2ax 的「未采集」收口第一半）（2026-09-29）
+
+§3.2aw/§3.2ax 都写着「实机 A/B 未采集」。本轮用**常驻 control RPC**把本端实跑了一遍，把**本端那一半**
+补齐（**两端同状态逐像素对表仍需原版客户端**，见文末）。
+
+**夹具**（本次实跑，可复现）：
+
+```powershell
+# 1) 用带 Data 的主检出重建客户端（worktree 没有 Data/，必须在主检出跑）
+cd Client-Bevy; (Get-Item build.rs).LastWriteTime = Get-Date; cargo build
+# 2) 起客户端：mock 网络 + 自动进游戏 + 逻辑缩放 1（与原版同尺度）
+#    注意 PATH 必须带 msys64\ucrt64\bin，否则 0xC0000135（缺 DLL），进程静默退出
+$env:PATH='D:\toolchains\msys64\ucrt64\bin;'+$env:PATH
+.\target\debug\client_bevy.exe --mock --auto-enter --ui-scale 1 --window-title questlist-verify
+# 3) 驱动（JSON-RPC over TCP 127.0.0.1:9000）
+pwsh tools/acceptance/rpc.ps1 -Method dialog      -Params '{"kind":"quest_list","action":"open"}'
+pwsh tools/acceptance/rpc.ps1 -Method dialog_rect -Params '{"kind":"quest_list","fallback":"root"}'
+pwsh tools/acceptance/rpc.ps1 -Method screenshot  -Params '{"path":"<绝对路径>.png"}'
+py -3.12 tools/acceptance/csharp_golden/win_locate.py --shot <帧> --lib "Data\Prguse.Lib" --index 950 --expect 487,0 --tol-px 3
+```
+
+**实测结果**（master `3e718401c` 构建，`--ui-scale 1`）：
+
+| 判据 | 实测 | C# 期望 | 结论 |
+|---|---|---|---|
+| 根面板矩形（`dialog_rect` fallback=root） | `(487, 0, 316, 466)` | `Location = (NPCDialog.Width+47, 0)` = (487,0)、316x466 | **一致** |
+| 关闭钮中心/尺寸 | `tf=(788.0, 13.5)`、`24x21` | `Prguse2[360..362] @(289,3)` 原生 24x21 ⇒ 中心 (788,13.5) | **一致** |
+| 全屏模板匹配 `Prguse[950]` | 最佳落点 **(487,0)**，不符率 **0.0231**（3376/146323 不透明像素） | §3.2au 的原版实测：**(485,0)**、不符率 0.0944 | 本端落点是**公式精确值**；原版那 2px 与更高的不符率来自原版整帧里的其它窗/内容（该节已注明） |
+| 点关闭钮是否真关 | `click(788,13)` → 命中 `4421v0 24x21 [root=QuestList]` → 复查 `dialog_rect` 返回 `close button not found`（窗已隐） | `closeButton.Click += Hide()`（`QuestDialogs.cs:243`） | **一致** |
+| 运行期健康 | 日志无 `B0001`/`panic`/`ERROR`/`WARN`；仅 `control dialog: QuestList -> open=true` + 置顶 z 记录 | — | 新增的两个系统（行列表/消息+奖励）无查询冲突 |
+
+**仍然未采集的部分（如实留痕，不推数）**：
+
+1. **内容级两端对表**（消息区 10 行文本、奖励区图标/格子、接受/完成钮的显隐态）——本次夹具是 mock 网络，
+   其任务定义 `npc_index = 0`（`network/mock/mod.rs:2117-2120`），按 C# 语义（`MapControl.GetObject(0) == null`）
+   **本就不该**出现在任何 NPC 的列表里，故本端窗口是空列表、消息区与奖励区按代码隐藏——**没有内容可比**。
+   要采这一段，需要一次**带任务数据的真实会话**（连 Rust 服务端 → 走到有任务的 NPC → `npc_call` → `dialog open quest_list`）
+   或给 mock 补一份绑定到某 NPC object_id 的任务定义。
+2. **原版那一侧的同一状态帧**（`QuestListDialog` 在 (487,0) 的内容级 A/B）——需要 C# 沙箱 + 解锁窗口，
+   本批未做。
