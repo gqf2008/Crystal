@@ -719,6 +719,7 @@ fn char_equip_system(
     panel_origin: Query<&Node, With<CharDialogWidget>>,
     probe: Res<crate::control::CursorProbe>,
     mut socket: ResMut<crate::game::dialogs::socket::SocketState>,
+    mut chat: ResMut<crate::game::chat::ChatState>,
 ) {
     // 右键卸下装备（原版 C# MirItemCell 右键 → UseItem → Equipment → RemoveItem）
     // #2633 批次4 步6：读 Loadout 组件（实体缺失默认空，同旧 HudState.equipment 默认 [None;14]）
@@ -776,9 +777,39 @@ fn char_equip_system(
                                         item.slots.len()
                                     );
                                 }
-                                break;
-                            }
-                            net.send_packet(&mir2_shared::packets::client::item::RemoveItem {
+                                    break;
+                                }
+                                // #3391：C# `MirItemCell.OnMouseClick` 右键分支——Ctrl（镶嵌）之后是
+                                // **Shift（物品链接）**，两者都不是才 `UseItem()`→装备格即卸下。
+                                if keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight)
+                                {
+                                    let text = crate::game::chat::item_link_text(&item.name);
+                                    if !crate::game::chat::can_link_item(
+                                        chat.input_text.chars().count(),
+                                        text.chars().count(),
+                                    ) {
+                                        chat.add_line(
+                                            "无法链接物品，消息长度超过限制",
+                                            crate::game::chat::chat_color(
+                                                mir2_shared::enums::ChatType::System,
+                                            ),
+                                            crate::game::chat::ChatChannel::System,
+                                        );
+                                    } else {
+                                        chat.pending_links.push(
+                                            mir2_shared::data::item::ChatItem {
+                                                unique_id: item.unique_id,
+                                                title: item.name.clone(),
+                                                grid: mir2_shared::enums::MirGridType::Equipment,
+                                            },
+                                        );
+                                        chat.input_text.push_str(&text);
+                                        chat.input_active = true;
+                                        tracing::info!("🔗 聊天物品链接（装备）: {}", item.name);
+                                    }
+                                    break;
+                                }
+                                net.send_packet(&mir2_shared::packets::client::item::RemoveItem {
                                 grid: mir2_shared::enums::MirGridType::Inventory,
                                 unique_id: item.unique_id,
                                 to: 0,

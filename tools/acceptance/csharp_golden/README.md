@@ -3289,6 +3289,61 @@ dialog_rect {kind:"socket"}      # → (833,385,118x62)
 
 **仍未采集**：原版侧同状态帧（要在沙箱里真鼠标点 NPC 拿带孔物品 + Ctrl+右键），属 §3.2l 那批——需解锁。
 
+### 3.2br 背包「Shift+右键 = 物品链接」按 C# 补上；顺带捞出一条 **P0**：`#2736` 把背包格命中判据的**极性写反**（2026-09-30）
+
+继续核 C# `MirItemCell.OnMouseClick`（`MirItemCell.cs:229-330`）的右键/左键分派表，这一格是
+**Shift+右键 = 把物品链接塞进聊天框**（`SetChatText("<名字> ")` + `LinkedItems.Add`），
+发送时随 `C.Chat{linked_items}` 带走、由服务端换成 `%名字#uid%`。
+
+**① C# 真值**：`MirItemCell.cs:249-268`
+`text = string.Format("<{0}> ", Item.FriendlyName)`；
+`ChatTextBox.Text.Length + text.Length > Globals.MaxChatLength(=80, Shared/Globals.cs:17)` ⇒
+`ReceiveChat(UnableLinkItemMessageTooLong)` 并 return；否则 `LinkedItems.Add(new ChatItem{UniqueID,Title,Grid})`
++ `SetChatText(text)`（`MainDialogs.cs:703-714`：**追加** + 聚焦）。发送时 `LinkedItems` 整份带走再清空
+（`MainDialogs.cs:739-751`）。服务端换标记见 `ServerRust/src/actors/world/mod.rs:10254`（`replace_linked_item_markers`）——
+**本端协议/服务端早就支持**，只缺客户端这一半。
+
+**② 本端补法**：`chat.rs` 加 `ChatState.pending_links` + 纯函数 `item_link_text` / `can_link_item`
+（`MAX_CHAT_LENGTH = 80`）；`C.Chat` 发送时 `linked_items: std::mem::take(&mut chat.pending_links)`；
+`inventory.rs` / `character.rs` 的右键分支按 C# 顺序 **Ctrl（镶嵌）→ Shift（链接）→ UseItem** 接上；
+mock 回显按服务端语义把 `<名字>` 换成 `%名字#uid%`（夹具要靠这条断言"链接真发出去了"）。
+
+**③ 实机（本端 mock）**
+
+| 步骤 | 实测 |
+|---|---|
+| Shift 按住 + 右键 木剑（格 2） | `state`：`chat_input_active=true`、`chat_input_text='<木剑> '`（= C# `SetChatText` 的追加形态） |
+| 回车发送 | mock 回显 `[刀客] %木剑#9005%`、日志 `💬 [MOCK] 聊天: %木剑#9005%（链接 1 条）` |
+| 右键 金创药（格 4，不带修饰键） | 袋内少一件 + `💊 使用物品 uid=9001` ⇒ **右键使用也恢复了**（见 ④） |
+
+**④ 顺带捞出的 P0：`slot_at` 的锁定判据极性写反（`#2736` 引入）**
+
+核 Shift+右键时先发现"按了没反应"，加 `[diag]` 打印出 `cursor=(101.0,53.0) shift=true slot=None`——
+光标明明在**有物品的格 2**上，但 `slot_at` 返回 `None`。根因是这一行（`inventory.rs` 的闭包）：
+
+```rust
+// inv_clickable_slot(slot, locked) 的语义是"这一格可点吗"（!is_locked）
+inv_slot_at(...).filter(|i| !inv_clickable_slot(*i, locked))   // ✗ 只保留【锁定】格
+```
+
+⇒ **所有未锁定格都点不中**：左键选中 / 右键使用 / 双击使用 / 删除模式 / Shift 拆分 / Alt 快速出售
+**全部失效**（C# 里这些都在 `MirItemCell.OnMouseClick` 同一入口上）。修法：抽成纯函数
+[`clickable_slot_at`]（`filter(|i| inv_clickable_slot(*i, locked))`）+ 单测
+`clickable_slot_at_excludes_locked_slots`（未锁→命中格 2；锁住→None；邻格不受影响；窗外 None）。
+
+**阳性对照（落地时实做）**：把 filter 改回 `!inv_clickable_slot(...)` ⇒ 该测试**立即红**
+（`assertion left == right failed`）；改回正确极性 ⇒ 892 条全绿。
+实机对照：修前右键金创药无 `使用物品`、修后同一步就有（上表第 3 行）。
+
+**为什么此前几轮没发现**：既有夹具走的是 `inv_select`（RPC 直接写 `InvClickState.selected`）与
+`ui_nodes_at`（bevy_ui 命中栈），**都绕开了 `slot_at`**；`MirItemCell` 那一格只有真点才走它。
+
+**⑤ 门禁**（`Client-Bevy`）：`cargo check --tests` 0 error；`cargo test --lib` **892 passed / 0 failed**
+（+2：链接文案/长度守卫、锁定极性）；`cargo test --test b0001_smoke --test ui_alignment` **2 + 53 passed**；
+本轮改动文件 `cargo fmt -- --check` 无差异。
+
+**未采集**：原版侧同状态帧（Shift+右键链接在沙箱里要真鼠标，属 §3.2l 那批）。
+
 ### 3.2bm §3.2bl 的最后留白收口：`MirMessageBox` 的**原版现帧**拿到了（换入口，锁屏也能取）；并钉死 `game_shop` 买钮那条路**取不到帧的两条硬前置**（2026-09-29）
 
 §3.2bl 留的唯一留白是「原版侧**同状态帧**」（沙箱里点商品格买钮后的 `MirMessageBox`）。本轮把它定性收口：

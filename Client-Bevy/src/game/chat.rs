@@ -270,6 +270,11 @@ pub struct ChatState {
     pub prefix: String,
     /// #813：最近私聊对象（C# ChatPanel LastPM；/ 键召回）
     pub last_pm: Option<String>,
+    /// #3391：待发出的物品链接（C# `ChatDialog.LinkedItems`，`MainDialogs.cs:569`）。
+    /// Shift+右键物品格 → `LinkedItems.Add(new ChatItem{UniqueID,Title,Grid})` + 文本框追加 `<名字> `；
+    /// 发送时随 `C.Chat{linked_items}` 一起发出并由服务端换成 `%名字#uid%`（`ServerRust/src/actors/world/mod.rs:10254`
+    /// 的 `replace_linked_item_markers`），之后清空（`MainDialogs.cs:739-751`）。
+    pub pending_links: Vec<mir2_shared::data::item::ChatItem>,
 }
 
 impl Default for ChatState {
@@ -285,8 +290,24 @@ impl Default for ChatState {
             size: 0,
             prefix: String::new(),
             last_pm: None,
+            pending_links: Vec::new(),
         }
     }
+}
+
+/// C# `Globals.MaxChatLength`（`Shared/Globals.cs:17` = 80）——聊天框与"链接后总长"的上限。
+pub const MAX_CHAT_LENGTH: usize = 80;
+
+/// C# `MirItemCell.cs:253`：`string.Format("<{0}> ", Item.FriendlyName)`——链接时插进文本框的那段。
+pub fn item_link_text(name: &str) -> String {
+    format!("<{name}> ")
+}
+
+/// C# `MirItemCell.cs:255` 的守卫：`ChatTextBox.Text.Length + text.Length > Globals.MaxChatLength`
+/// ⇒ 拒绝并提示 `UnableLinkItemMessageTooLong`（`Client/Localization/Chinese.json:252`
+/// = "无法链接物品，消息长度超过限制"）。返回 `false` = 太长。
+pub fn can_link_item(current_len: usize, add_len: usize) -> bool {
+    current_len + add_len <= MAX_CHAT_LENGTH
 }
 
 impl ChatState {
@@ -1541,7 +1562,8 @@ pub(crate) fn chat_input_system(
                 if !msg.is_empty() {
                     net.send_packet(&mir2_shared::packets::client::chat::Chat {
                         message: msg.clone(),
-                        linked_items: Vec::new(),
+                        // #3391：C# `MainDialogs.cs:739` 发送时把 `LinkedItems` **整份带走**并清空
+                        linked_items: std::mem::take(&mut chat.pending_links),
                     });
                     // 本地回显（C# MainDialogs 发送时本地加入聊天面板；真实服务器不回发给自己）。
                     // 指令消息（/w /g /guild /s ! 等）服务器会回发对应频道回显 → 本地不再回显避免重复。
@@ -2458,6 +2480,21 @@ mod tests {
         assert_eq!(first_item_uid("没有链接的消息"), None);
         assert_eq!(first_item_uid("%名字#abc%"), None);
         assert_eq!(first_item_uid("前文 %a#1% 后文 %b#2%"), Some(1));
+    }
+
+    /// #3391：Shift+右键物品 → 链接文案与长度守卫，逐值对 C# `MirItemCell.cs:253-268`。
+    #[test]
+    fn item_link_text_and_length_guard_match_csharp() {
+        // `string.Format("<{0}> ", Item.FriendlyName)`
+        assert_eq!(item_link_text("木剑"), "<木剑> ");
+        // C# `Globals.MaxChatLength = 80`（`Shared/Globals.cs:17`）：
+        // 守卫是 `ChatTextBox.Text.Length + text.Length > MaxChatLength` ⇒ 等于 80 仍放行
+        assert!(can_link_item(0, 4));
+        assert!(can_link_item(76, 4));
+        assert!(!can_link_item(77, 4), "77+4=81 > 80 应拒");
+        // 逐**字符**算（不是字节）：CJK 名每个算 1（`<`+`>`+空格 各 1）
+        assert_eq!(item_link_text("带孔铁剑").chars().count(), 7);
+        assert!(can_link_item(0, item_link_text("带孔铁剑").chars().count()));
     }
 
     /// 物品链接命中区对照 C# ChatPanel（行 (231,672+i*13)、行高 13、4 行；行区间 [行顶, 行顶+13)）。
