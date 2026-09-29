@@ -65,6 +65,13 @@ pub const LIST_ROW_DY: f32 = 19.0;
 pub const LIST_ROW_SIZE: (f32, f32) = (200.0, 17.0);
 /// C# `SelectedImage = Prguse[956] @ (25, 0)`（`:931-937`）
 pub const LIST_ROW_SEL_X: f32 = 25.0;
+/// C# `QuestRow.IconImage = Prguse[961+icon] @ (3,0)`（`:940-947` + `:980-982`）
+pub const LIST_ROW_ICON_X: f32 = 3.0;
+/// C# `QuestRow.RequirementLabel @ (20,0) Size=(178,17)`（`:949-956`）
+pub const LIST_ROW_LEVEL_X: f32 = 20.0;
+/// C# `QuestRow.NameLabel @ (60,0) Size=(140,17)`（`:958-965`）
+pub const LIST_ROW_NAME_X: f32 = 60.0;
+pub const LIST_ROW_NAME_W: f32 = 140.0;
 /// C# `_availableQuestLabel @ (210, 8)`（`:203-208`）
 pub const LIST_AVAILABLE_POS: (f32, f32) = (210.0, 8.0);
 /// C# 上/下翻页钮（`:47-70`）
@@ -241,7 +248,66 @@ pub fn finish_needs_reward_pick(select_reward_count: usize, selected_reward: Opt
     select_reward_count > 0 && selected_reward.is_none()
 }
 
-    /// C# `QuestCell.Location`（固定排 `(i*45 + 15, 24)`，可选排 `(i*45 + 15, 89)`，`:1537`/`:1561`）
+/// C# `ClientQuestInfo.GetQuestIcon(bool taken, bool completed)`（`Shared/Data/ClientData.cs:476-511`）——
+/// **纯函数**：只由 (任务类型, 已接, 已完成) 决定。无匹配类型时回 `None`（C# 的 switch 没有 default）。
+pub fn quest_row_icon(
+    quest_type: mir2_shared::enums::QuestType,
+    taken: bool,
+    completed: bool,
+) -> mir2_shared::enums::QuestIcon {
+    use mir2_shared::enums::{QuestIcon, QuestType};
+    match quest_type {
+        QuestType::General | QuestType::Repeatable => {
+            if completed {
+                QuestIcon::QuestionYellow
+            } else if taken {
+                QuestIcon::QuestionWhite
+            } else {
+                QuestIcon::ExclamationYellow
+            }
+        }
+        QuestType::Daily => {
+            if completed {
+                QuestIcon::QuestionBlue
+            } else if taken {
+                QuestIcon::QuestionWhite
+            } else {
+                QuestIcon::ExclamationBlue
+            }
+        }
+        QuestType::Story => {
+            if completed {
+                QuestIcon::QuestionGreen
+            } else if taken {
+                QuestIcon::QuestionWhite
+            } else {
+                QuestIcon::ExclamationGreen
+            }
+        }
+        _ => QuestIcon::None,
+    }
+}
+
+/// C# `QuestRow.UpdateInterface`（`QuestDialogs.cs:980-982`）：
+/// `Index = 961 + (int)Quest.Icon + ((int)Quest.Icon > 3 ? 15 : 0)`（`Library = Prguse`）。
+///
+/// ⚠️ 本端枚举是 **C# 原值 +3**（`SharedRust/src/enums.rs:619-632`：None=3…QuestionGreen=56），
+/// 故先减 3 回到 C# 值，再套同一条公式（`> 3` 判据也跟着用 C# 值，别用本端值判）。
+pub fn quest_row_icon_index(icon: mir2_shared::enums::QuestIcon) -> usize {
+    let cs = (icon as u8).saturating_sub(3) as usize; // 回到 C# 枚举值
+    961 + cs + if cs > 3 { 15 } else { 0 }
+}
+
+/// C# `RequirementLabel.Text = MinLevelNeeded > 0 ? "Lv " + MinLevelNeeded : ""`（`:985`）。
+pub fn quest_row_level_text(min_level_needed: i32) -> String {
+    if min_level_needed > 0 {
+        format!("Lv {min_level_needed}")
+    } else {
+        String::new()
+    }
+}
+
+/// C# `QuestCell.Location`（固定排 `(i*45 + 15, 24)`，可选排 `(i*45 + 15, 89)`，`:1537`/`:1561`）
 /// ——相对奖励区原点。
 pub fn reward_cell_offset(fixed: bool, slot: usize) -> (f32, f32) {
     (
@@ -356,6 +422,9 @@ pub struct QuestListDown;
 /// 第 i 行（C# `Rows[i]`）
 #[derive(Component)]
 pub struct QuestListRow(pub usize);
+/// 第 i 行的「Lv N」标签（C# `QuestRow.RequirementLabel`）
+#[derive(Component)]
+pub struct QuestListRowLevel(pub usize);
 /// 第 i 行的选中高亮 `Prguse[956]`
 #[derive(Component)]
 pub struct QuestListRowMark(pub usize);
@@ -406,6 +475,8 @@ pub enum QuestListPart {
     /// 消息区叠加部件（`{文本/颜色}` 彩色段 / 链接）：行槽 `slot` 的第 `seg` 个叠加标签
     /// （C# `QuestMessage._textButtons`，`:1036` + `NewColour` `:1336-1353` / `NewLink` `:1355-1382`）
     Overlay { slot: usize, seg: usize },
+    /// 行图标 `Prguse[961+icon]`（C# `QuestRow.IconImage`，`:940-947` + `:980-982`）：第 `slot` 行
+    RowIcon(usize),
 }
 
 pub struct QuestListPlugin;
@@ -545,13 +616,43 @@ fn spawn_quest_list(
             ) {
                 mark.insert((QuestListRowMark(i), Visibility::Hidden));
             }
-            // 行名（C# `QuestRow.NameLabel @ (60,0)`；本端直接以整行做点击面，
-            // 文字起点贴 (9,36+19i) 便于整屏定位工具读数）
+            // 行图标 `Prguse[961+icon]` @(3,0)（C# `QuestRow.IconImage`，`:940-947`/`:980-982`）——
+            // 具体图号逐帧按 `GetQuestIcon(类型, 已接, 已完成)` 换（在 `quest_list_detail_system` 里画，
+            // 那里有 Lib/Image 资源）
+            if let Some(white) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 961) {
+                p.spawn((
+                    Node {
+                        position_type: PositionType::Absolute,
+                        left: Val::Px(LIST_ROW_ORIGIN.0 + LIST_ROW_ICON_X),
+                        top: Val::Px(y),
+                        width: Val::Px(0.0),
+                        height: Val::Px(0.0),
+                        ..default()
+                    },
+                    ImageNode::new(white),
+                    QuestListPart::RowIcon(i),
+                    Visibility::Hidden,
+                    ZIndex(10),
+                ));
+            }
+            // 「Lv N」`@(20,0)`（C# `QuestRow.RequirementLabel`，`:949-956`/`:985`）
             spawn_label(
                 p,
                 &cjk,
                 "",
-                LIST_ROW_ORIGIN.0,
+                LIST_ROW_ORIGIN.0 + LIST_ROW_LEVEL_X,
+                y,
+                12.0,
+                Color::WHITE,
+                11,
+            )
+            .insert((QuestListRowLevel(i), Visibility::Hidden));
+            // 行名 `@(60,0)`（C# `QuestRow.NameLabel`，`:958-965`）
+            spawn_label(
+                p,
+                &cjk,
+                "",
+                LIST_ROW_ORIGIN.0 + LIST_ROW_NAME_X,
                 y,
                 12.0,
                 Color::WHITE,
@@ -807,15 +908,33 @@ fn quest_list_ui_system(
     mut widgets: Query<&mut Visibility, With<QuestListWidget>>,
     mut rows: Query<
         (&mut Text, &mut Visibility, &QuestListRow),
-        (Without<QuestListWidget>, Without<QuestListAvailableLabel>),
+        (
+            Without<QuestListWidget>,
+            Without<QuestListAvailableLabel>,
+            Without<QuestListRowLevel>,
+        ),
     >,
     mut marks: Query<
         (&mut Visibility, &QuestListRowMark),
         (Without<QuestListWidget>, Without<QuestListRow>),
     >,
+    // 行内「Lv N」标签（C# `QuestRow.RequirementLabel`）
+    mut levels: Query<
+        (&mut Text, &mut Visibility, &QuestListRowLevel),
+        (
+            Without<QuestListWidget>,
+            Without<QuestListRow>,
+            Without<QuestListRowMark>,
+            Without<QuestListAvailableLabel>,
+        ),
+    >,
     mut label: Query<
         &mut Text,
-        (With<QuestListAvailableLabel>, Without<QuestListRow>),
+        (
+            With<QuestListAvailableLabel>,
+            Without<QuestListRow>,
+            Without<QuestListRowLevel>,
+        ),
     >,
     buttons: Query<(
         Entity,
@@ -875,6 +994,20 @@ fn quest_list_ui_system(
         // 逐个 new），本端是固定 5 个槽位，故显隐要显式写——**漏写就是「窗开着但一行字都看不见」**
         // （#3368 实机取证抓到：`catalog_infos=1 / selected=2` 却 row 区亮像素 0）
         *vis = if open && entry.is_some() {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
+    }
+    // 「Lv N」（C# `QuestRow.RequirementLabel.Text`，`QuestDialogs.cs:985`）
+    for (mut text, mut vis, lv) in &mut levels {
+        let info = list
+            .get(state.start + lv.0)
+            .and_then(|e| catalog.infos.iter().find(|c| c.index == e.quest));
+        text.0 = info
+            .map(|c| quest_row_level_text(c.min_level_needed))
+            .unwrap_or_default();
+        *vis = if open && info.is_some() {
             Visibility::Visible
         } else {
             Visibility::Hidden
@@ -1090,6 +1223,8 @@ fn quest_list_detail_system(
         .single()
         .map(|(p, a)| (p.level, a.class as u8, a.gender))
         .unwrap_or((1, 0, mir2_shared::enums::MirGender::Male));
+    // 可接/可交列表（本行之后的两处消费点都要用：行图标在 parts 循环里、按钮态在按钮循环里）
+    let list = npc_available_quests(&catalog, &log, state.bound_npc, me_level, me_class);
     // 固定排不过滤、可选排过滤（C# `:1533-1553`，固定排那行 `FilterRewards` 被注释掉）
     let fixed: Vec<&mir2_shared::data::shared_data::QuestItemReward> = info
         .map(|i| i.rewards_fixed_item.iter().collect())
@@ -1329,6 +1464,43 @@ fn quest_list_detail_system(
                 }
                 None => *vis = Visibility::Hidden,
             },
+            // 行图标：C# `IconImage.Index = 961 + (int)Icon + (Icon > 3 ? 15 : 0)`（`:980-982`），
+            // `Icon = QuestInfo.GetQuestIcon(Taken, Completed)`（`ClientData.cs:525-531`）
+            QuestListPart::RowIcon(slot) => {
+                let Some(entry) = list.get(state.start + slot).copied() else {
+                    *vis = Visibility::Hidden;
+                    continue;
+                };
+                let Some(ci) = catalog.infos.iter().find(|c| c.index == entry.quest) else {
+                    *vis = Visibility::Hidden;
+                    continue;
+                };
+                let icon = quest_row_icon(ci.quest_type, entry.taken, entry.completed);
+                let idx = quest_row_icon_index(icon);
+                let Some(handle) = crate::ui::sprite_ui::ui_image(
+                    &mut libs,
+                    &mut images,
+                    &mut cache,
+                    LibraryName::Prguse,
+                    idx,
+                ) else {
+                    *vis = Visibility::Hidden;
+                    continue;
+                };
+                let (w, h) = libs
+                    .0
+                    .get_image(LibraryName::Prguse, idx)
+                    .map(|i| (i.width.max(0) as f32, i.height.max(0) as f32))
+                    .unwrap_or((0.0, 0.0));
+                node.width = Val::Px(w);
+                node.height = Val::Px(h);
+                if let Some(mut img) = image {
+                    if img.image != handle {
+                        img.image = handle;
+                    }
+                }
+                *vis = show(true);
+            }
             QuestListPart::RewardIcon(kind) => {
                 let (on, x) = match kind {
                     0 => (exp > 0, rx + 10.0),
@@ -1449,7 +1621,6 @@ fn quest_list_detail_system(
             }
         }
     }
-    let list = npc_available_quests(&catalog, &log, state.bound_npc, me_level, me_class);
     let entry = state
         .selected
         .and_then(|id| list.iter().find(|e| e.quest == id).copied());
@@ -1836,5 +2007,82 @@ mod tests {
         assert_eq!(LIST_NOTICE_PANEL, (284.0, 289.0));
         assert_eq!(LIST_NOTICE_SIZE, (456.0, 190.0));
         assert_eq!(LIST_NOTICE_OK_POS, (360.0, 157.0));
+    }
+
+    /// C# `ClientQuestInfo.GetQuestIcon`（`Shared/Data/ClientData.cs:476-511`）：类型 × (已接, 已完成)。
+    #[test]
+    fn row_icon_follows_csharp_get_quest_icon() {
+        use mir2_shared::enums::{QuestIcon, QuestType};
+        // General / Repeatable
+        assert_eq!(
+            quest_row_icon(QuestType::General, false, false),
+            QuestIcon::ExclamationYellow
+        );
+        assert_eq!(
+            quest_row_icon(QuestType::General, true, false),
+            QuestIcon::QuestionWhite
+        );
+        assert_eq!(
+            quest_row_icon(QuestType::General, true, true),
+            QuestIcon::QuestionYellow
+        );
+        assert_eq!(
+            quest_row_icon(QuestType::Repeatable, true, true),
+            QuestIcon::QuestionYellow
+        );
+        // Daily → Blue 系；Story → Green 系
+        assert_eq!(
+            quest_row_icon(QuestType::Daily, false, false),
+            QuestIcon::ExclamationBlue
+        );
+        assert_eq!(
+            quest_row_icon(QuestType::Daily, true, true),
+            QuestIcon::QuestionBlue
+        );
+        assert_eq!(
+            quest_row_icon(QuestType::Story, false, false),
+            QuestIcon::ExclamationGreen
+        );
+        assert_eq!(
+            quest_row_icon(QuestType::Story, true, true),
+            QuestIcon::QuestionGreen
+        );
+        // 已接未完成（两类都）→ QuestionWhite
+        assert_eq!(
+            quest_row_icon(QuestType::Daily, true, false),
+            QuestIcon::QuestionWhite
+        );
+        assert_eq!(
+            quest_row_icon(QuestType::Story, true, false),
+            QuestIcon::QuestionWhite
+        );
+    }
+
+    /// C# `QuestRow.UpdateInterface`（`QuestDialogs.cs:980-982`）：`961 + icon + (icon > 3 ? 15 : 0)`，
+    /// 判据用 **C# 枚举值**——本端枚举是 +3 的镜像（`SharedRust/src/enums.rs:619-632`），
+    /// 直接拿本端值套公式会整体偏 3 张图。
+    #[test]
+    fn row_icon_index_matches_csharp_formula() {
+        use mir2_shared::enums::QuestIcon;
+        // C# 值 0/1/2/3 → 不加 15
+        assert_eq!(quest_row_icon_index(QuestIcon::None), 961);
+        assert_eq!(quest_row_icon_index(QuestIcon::QuestionWhite), 962);
+        assert_eq!(quest_row_icon_index(QuestIcon::ExclamationYellow), 963);
+        assert_eq!(quest_row_icon_index(QuestIcon::QuestionYellow), 964);
+        // C# 值 5/6 → +15
+        assert_eq!(quest_row_icon_index(QuestIcon::ExclamationBlue), 981);
+        assert_eq!(quest_row_icon_index(QuestIcon::QuestionBlue), 982);
+        // C# 值 52/53 → +15
+        assert_eq!(quest_row_icon_index(QuestIcon::ExclamationGreen), 1028);
+        assert_eq!(quest_row_icon_index(QuestIcon::QuestionGreen), 1029);
+    }
+
+    /// C# `RequirementLabel.Text`（`QuestDialogs.cs:985`）：`MinLevelNeeded > 0` 才显示「Lv N」。
+    #[test]
+    fn row_level_text_matches_csharp() {
+        assert_eq!(quest_row_level_text(0), "");
+        assert_eq!(quest_row_level_text(-1), "");
+        assert_eq!(quest_row_level_text(1), "Lv 1");
+        assert_eq!(quest_row_level_text(35), "Lv 35");
     }
 }
