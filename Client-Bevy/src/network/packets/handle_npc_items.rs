@@ -382,6 +382,7 @@ pub(crate) fn handle_npc_items(
                             ) {
                                 server_events.write(ServerEvent::NpcSellPanel {
                                     panel_type: p.panel_type,
+                                    rate: p.rate,
                                 });
                                 tracing::info!("🧰 NPC 面板: {:?}", p.panel_type);
                                 return true;

@@ -65,9 +65,88 @@ pub struct InvItem {
     pub weight: u16,
     /// 价格（C# ItemInfo.Price）
     pub price: u32,
+    /// 模板耐久（C# `ItemInfo.Durability`）——与实例 `max_dura` 不同：**修理/出售报价**用的是模板值
+    /// （`Shared/Data/ItemData.cs:516-563` 的 `Price()` / `RepairPrice()`）。
+    pub info_durability: u16,
+    /// 附加属性条数（C# `UserItem.AddedStats.Count`）——`Price()` 的 `×(Count*0.1+1)` 因子。
+    pub added_stats_count: u8,
+    /// 是否租用中（C# `UserItem.RentalInformation != null`）——`RepairPrice()` 租用物 **×2**。
+    pub rental: bool,
+    /// 觉醒等级（C# `UserItem.Awake.GetAwakeLevel()`）——`DisassemblePrice()`/`DowngradePrice()` 用。
+    pub awake_level: u8,
 }
 
 impl InvItem {
+    /// C# `UserItem.Price()`（`Shared/Data/ItemData.cs:516-541`）——**逐行对表**：
+    /// ```
+    /// uint p = Info.Price;
+    /// if (Info.Durability > 0) {
+    ///     float r = (Info.Price / 2F) / Info.Durability;
+    ///     p = (uint)(MaxDura * r);
+    ///     r = MaxDura > 0 ? CurrentDura / (float)MaxDura : 0;
+    ///     p = (uint)Math.Floor(p / 2F + (p / 2F) * r + Info.Price / 2F);
+    /// }
+    /// p = (uint)(p * (AddedStats.Count * 0.1F + 1F));
+    /// return p * Count;            // 全是 uint 运算（C# 里 `uint * ushort` 选 uint 重载）
+    /// ```
+    /// 整数截断语义与 C# 一致（`(uint)` 是向零截断、`Math.Floor` 显式向下取整）；
+    /// f32 与 C# `float` 同为 IEEE-754 单精度，乘除顺序也照抄。
+    pub fn csharp_price(&self) -> u32 {
+        let mut p = self.price;
+        if self.info_durability > 0 {
+            let mut r = (self.price as f32 / 2.0) / self.info_durability as f32;
+            p = (self.max_dura as f32 * r) as u32;
+            r = if self.max_dura > 0 {
+                self.current_dura as f32 / self.max_dura as f32
+            } else {
+                0.0
+            };
+            p = ((p as f32 / 2.0) + ((p as f32 / 2.0) * r) + (self.price as f32 / 2.0)).floor()
+                as u32;
+        }
+        p = (p as f32 * (self.added_stats_count as f32 * 0.1 + 1.0)) as u32;
+        p.wrapping_mul(self.count as u32)
+    }
+
+    /// C# `UserItem.RepairPrice()`（`Shared/Data/ItemData.cs:543-563`）。
+    pub fn csharp_repair_price(&self) -> u32 {
+        if self.info_durability == 0 {
+            return 0;
+        }
+        let mut p = self.price;
+        p = ((self.max_dura as f32 * ((self.price as f32 / 2.0) / self.info_durability as f32))
+            + (self.price as f32 / 2.0))
+            .floor() as u32;
+        p = (p as f32 * (self.added_stats_count as f32 * 0.1 + 1.0)) as u32;
+        let cost = p
+            .wrapping_mul(self.count as u32)
+            .wrapping_sub(self.csharp_price());
+        if self.rental {
+            cost.wrapping_mul(2)
+        } else {
+            cost
+        }
+    }
+
+    /// C# `UserItem.DisassemblePrice()`（`Shared/Data/ItemData.cs:583-592`）。
+    pub fn csharp_disassemble_price(&self) -> u32 {
+        let p = 1500u32.wrapping_mul(self.grade as u32);
+        (p as f32 * ((self.added_stats_count as f32 + self.awake_level as f32) * 0.1 + 1.0)) as u32
+    }
+
+    /// C# `UserItem.DowngradePrice()`（`Shared/Data/ItemData.cs:594-603`）。
+    pub fn csharp_downgrade_price(&self) -> u32 {
+        let p =
+            3000u32.wrapping_mul(1u32.wrapping_add((self.awake_level as u32 + 1).wrapping_mul(2)));
+        p.wrapping_mul(self.grade as u32)
+    }
+
+    /// C# `UserItem.ResetPrice()`（`Shared/Data/ItemData.cs:605-614`）。
+    pub fn csharp_reset_price(&self) -> u32 {
+        let p = 3000u32.wrapping_mul(self.grade as u32);
+        (p as f32 * (self.added_stats_count as f32 * 0.2 + 1.0)) as u32
+    }
+
     /// 是否可装备（Weapon/Armour/Helmet/Torch/Necklace/Bracelet/Ring/Amulet/Belt/Boots/Stone/Mount）
     pub fn is_equipment(&self) -> bool {
         use mir2_shared::enums::ItemType;
@@ -3458,6 +3537,10 @@ mod tests {
             soul_bound_id: -1,
             weight: 0,
             price: 0,
+            info_durability: 0,
+            added_stats_count: 0,
+            rental: false,
+            awake_level: 0,
         }
     }
 

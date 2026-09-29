@@ -203,6 +203,11 @@ pub(crate) fn to_inv_item(item: &mir2_shared::data::item::UserItem) -> InvItem {
         soul_bound_id: item.soul_bound_id,
         weight: item.info.as_ref().map(|i| i.weight as u16).unwrap_or(0),
         price: item.info.as_ref().map(|i| i.price).unwrap_or(0),
+        // C# 报价公式用的四个量（`Shared/Data/ItemData.cs:516-614`）：
+        info_durability: item.info.as_ref().map(|i| i.durability).unwrap_or(0),
+        added_stats_count: item.added_stats.len() as u8,
+        rental: item.rental_information.is_some(),
+        awake_level: item.awake.awake_level() as u8,
     }
 }
 
