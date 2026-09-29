@@ -2863,14 +2863,32 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                             3 => "刺客",
                                             _ => "刀客",
                                         };
+                                        // #3391：与 Rust 服务端同款——`C.Chat.linked_items` 在正文里换成
+                                        // `%Title#UniqueID%` 标记（`ServerRust/src/actors/world/mod.rs:10254`
+                                        // 的 `replace_linked_item_markers`）。夹具要靠这条回显断言"链接真的发出去了"。
+                                        let mut message = p.message.clone();
+                                        for ci in &p.linked_items {
+                                            // 客户端发送前会 `trim()`，所以带尾空格的形态可能已被去掉——
+                                            // 两种形态都换（与服务端 `replace_linked_item_markers` 的"按标题定位"同理）。
+                                            for pat in [format!("<{}> ", ci.title), format!("<{}>", ci.title)] {
+                                                message = message.replace(
+                                                    &pat,
+                                                    &format!("%{}#{}%", ci.title, ci.unique_id),
+                                                );
+                                            }
+                                        }
                                         send(
                                             &to_client,
                                             &server::chat::Chat {
-                                                message: format!("[{}] {}", name, p.message),
+                                                message: format!("[{}] {}", name, message),
                                                 chat_type: ChatType::Normal,
                                             },
                                         );
-                                        tracing::info!("💬 [MOCK] 聊天: {}", p.message);
+                                        tracing::info!(
+                                            "💬 [MOCK] 聊天: {}（链接 {} 条）",
+                                            message,
+                                            p.linked_items.len()
+                                        );
                                     }
                                 }
                                 x if x == ClientPacketIds::UseItem as i16 => {

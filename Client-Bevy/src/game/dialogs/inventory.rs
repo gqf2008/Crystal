@@ -1036,6 +1036,24 @@ pub fn inv_slot_at(
 #[derive(Component, Clone, Copy)]
 pub struct InvSlot(pub usize);
 
+/// 光标 → **可点击**背包格：[`inv_slot_at`] 的几何 + C# `MirItemCell.Locked` 的剔除。
+///
+/// **极性说明**（2026-09-30 修）：`inv_clickable_slot(slot, locked)` 的语义是"这一格可点吗"
+/// （`!is_locked`），所以"剔除锁定格"应当写成 `.filter(|i| inv_clickable_slot(*i, locked))`。
+/// `#2736` 落地时写成了 `.filter(|i| !inv_clickable_slot(*i, locked))` —— 那等于**只保留锁定格**，
+/// 于是**所有未锁定格都点不中**：左键选中 / 右键使用 / 双击使用 / 删除模式 / Shift 拆分 /
+/// Alt 快速出售**全部失效**（实机 `slot=None`，见 README §3.2br）。这里抽成纯函数并加测试钉住。
+pub fn clickable_slot_at(
+    cx: f32,
+    cy: f32,
+    page: usize,
+    size: usize,
+    origin: (f32, f32),
+    locked: &InvLockedSlots,
+) -> Option<usize> {
+    inv_slot_at(cx, cy, page, size, origin).filter(|i| inv_clickable_slot(*i, locked))
+}
+
 /// 双击检测 + 背包/英雄背包「当前选中」共享选择态（C# GameScene.SelectedCell 语义）。
 ///
 /// **所有权（#2631）**：本状态归 inventory 模块所有；一切变更经下方公开方法进行，
@@ -2627,6 +2645,8 @@ fn inv_item_action_system(
         Res<InventoryOrigin>,
         Query<(&Node, &Visibility), With<DialogRoot>>,
         ResMut<InvLockedSlots>,
+        // #3391：Shift+右键物品 → 物品链接进聊天框（C# `ChatDialog.LinkedItems`）
+        ResMut<crate::game::chat::ChatState>,
     ),
     // 弹窗模态门：上一帧有弹窗 → 本帧点击视为弹窗按钮，不处理格子（原版 C# Modal）
     mut last_modal: Local<bool>,
@@ -2698,7 +2718,8 @@ fn inv_item_action_system(
     let slot_at = |cx: f32, cy: f32, locked: &InvLockedSlots| -> Option<usize> {
         // 命中复用 [`inv_slot_at`]（几何与仓库/交易/英雄对话框同一真源），
         // 再按 C# `MirItemCell.Locked` 剔除锁定格（Craft 放入材料后来源格不响应点击）。
-        inv_slot_at(cx, cy, page, size, (ox, oy)).filter(|i| !inv_clickable_slot(*i, locked))
+        // 极性见 [`clickable_slot_at`] 的注释（#2736 曾写反）。
+        clickable_slot_at(cx, cy, page, size, (ox, oy), locked)
     };
 
     // 弹窗模态门（原版 C# Modal：弹窗打开期间/刚关闭帧不响应格子点击）
@@ -2853,6 +2874,35 @@ fn inv_item_action_system(
     if mouse.just_pressed(MouseButton::Right) {
         if let Some(i) = slot_at(cursor.x, cursor.y, &misc.4) {
             if let Some(item) = inv.items.get(i).and_then(|s| s.as_ref()) {
+                // #3391：C# `MirItemCell.OnMouseClick` 右键分支的顺序是
+                //   Ctrl（镶嵌面板，本端由 `inv_socket_open_system` 先接管）→ **Shift（物品链接）** → UseItem。
+                // 这里接"Shift+右键 = 把 `<名字> ` 追加进聊天框 + 记一条 `LinkedItems`"，
+                // 长度守卫与提示口径照抄 `MirItemCell.cs:253-268`（`Globals.MaxChatLength = 80`）。
+                if keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight) {
+                    let text = crate::game::chat::item_link_text(&item.name);
+                    if !crate::game::chat::can_link_item(
+                        misc.5.input_text.chars().count(),
+                        text.chars().count(),
+                    ) {
+                        misc.5.add_line(
+                            "无法链接物品，消息长度超过限制",
+                            crate::game::chat::chat_color(mir2_shared::enums::ChatType::System),
+                            crate::game::chat::ChatChannel::System,
+                        );
+                    } else {
+                        misc.5
+                            .pending_links
+                            .push(mir2_shared::data::item::ChatItem {
+                                unique_id: item.unique_id,
+                                title: item.name.clone(),
+                                grid: MirGridType::Inventory,
+                            });
+                        misc.5.input_text.push_str(&text);
+                        misc.5.input_active = true;
+                        tracing::info!("🔗 聊天物品链接: {}", item.name);
+                    }
+                    return;
+                }
                 let mut lock_reason = None;
                 let outcome = use_or_equip(
                     item,
@@ -2977,6 +3027,39 @@ pub fn pick_auto_hp_potion<'a>(items: impl Iterator<Item = &'a InvItem>) -> Opti
 mod tests {
     use super::*;
     use mir2_shared::enums::ItemType;
+
+    /// #2736 回归：`slot_at` 的锁定极性（2026-09-30 修）。
+    ///
+    /// 语义：`InvLockedSlots::lock(...)` 锁住的格**不该**响应点击（C# `MirItemCell.Locked`），
+    /// 未锁的格**必须**能命中。修前写成 `!inv_clickable_slot(...)` ⇒ 只保留锁定格，
+    /// **所有未锁定格都点不中**（实机 `slot=None`：左键选中/右键使用/双击使用/删除/拆分/Alt 出售全失效）。
+    /// 阳性对照（落地时实做）：把 [`clickable_slot_at`] 的 filter 改回 `!inv_clickable_slot(...)` ⇒
+    /// 本测试立即红。
+    #[test]
+    fn clickable_slot_at_excludes_locked_slots() {
+        // 8 列布局：格 2 = 第 0 行第 2 列 → (83,37)-(119,69)，取中心 (101,53)
+        let origin = (0.0, 0.0);
+        let mut locked = InvLockedSlots::default();
+        // 未锁定：命中格 2
+        assert_eq!(
+            clickable_slot_at(101.0, 53.0, 0, 40, origin, &locked),
+            Some(2)
+        );
+        // 锁住格 2（Craft 放入材料后的来源格语义）→ 不再命中
+        locked.lock(InvLockReason::Craft, 2);
+        assert_eq!(
+            clickable_slot_at(101.0, 53.0, 0, 40, origin, &locked),
+            None,
+            "锁定格不响应点击"
+        );
+        // 相邻格不受影响（锁定是按格，不是整窗）
+        assert_eq!(
+            clickable_slot_at(138.0, 53.0, 0, 40, origin, &locked),
+            Some(3)
+        );
+        // 窗口外
+        assert_eq!(clickable_slot_at(5.0, 5.0, 0, 40, origin, &locked), None);
+    }
 
     /// 背包窗 `WeightLabel`（(268,212)）= **空格数**（C# `InventoryDialog.cs:386`
     /// `WeightLabel.Text = User.Inventory.Count(t => t == null).ToString()`）。
