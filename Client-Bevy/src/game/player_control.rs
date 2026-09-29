@@ -288,11 +288,22 @@ struct UiLockState<'w> {
     drag: Res<'w, crate::game::dialogs::window_drag::WindowDragState>,
     quest_track: Res<'w, crate::game::dialogs::quest_tracking::QuestTrackingState>,
     quest_log: Res<'w, crate::game::dialogs::quest_log::QuestLogState>,
+    notice: Res<'w, crate::game::dialogs::notice_box::NoticeBox>,
 }
 
 /// 选中物品/数量框/丢弃确认/快捷键分配均为模态交互；右击和按住移动也必须让路。
-fn modal_ui_locked(selected: bool, amount: bool, confirm: bool, assign_key: bool) -> bool {
-    selected || amount || confirm || assign_key
+///
+/// `notice` = 通用 `MirMessageBox`（`notice_box.rs`）可见。原版 `MirMessageBox.Modal = true`
+/// （`MirMessageBox.cs:19`）⇒ `MirControl.IsMouseOver` 对**任意点**返回真（`MirControl.cs:825-828`），
+/// 世界点击同样被吞。此前本端只做了显隐与 OK，弹框期间点世界仍会寻路（§3.2bd 记的缺口）。
+fn modal_ui_locked(
+    selected: bool,
+    amount: bool,
+    confirm: bool,
+    assign_key: bool,
+    notice: bool,
+) -> bool {
+    selected || amount || confirm || assign_key || notice
 }
 
 impl UiLockState<'_> {
@@ -302,6 +313,7 @@ impl UiLockState<'_> {
             self.amount.visible,
             self.confirm.visible,
             self.assign_key.visible,
+            self.notice.is_visible(),
         )
     }
 
@@ -1899,11 +1911,40 @@ mod tests {
 
     #[test]
     fn modal_ui_lock_truth_table() {
-        assert!(!modal_ui_locked(false, false, false, false));
-        assert!(modal_ui_locked(true, false, false, false));
-        assert!(modal_ui_locked(false, true, false, false));
-        assert!(modal_ui_locked(false, false, true, false));
-        assert!(modal_ui_locked(false, false, false, true));
+        assert!(!modal_ui_locked(false, false, false, false, false));
+        assert!(modal_ui_locked(true, false, false, false, false));
+        assert!(modal_ui_locked(false, true, false, false, false));
+        assert!(modal_ui_locked(false, false, true, false, false));
+        assert!(modal_ui_locked(false, false, false, true, false));
+        // C# MirMessageBox.Modal：提示框可见本身就是一道锁（其余四项全假时也要锁）
+        assert!(modal_ui_locked(false, false, false, false, true));
+        assert!(modal_ui_locked(true, true, true, true, true));
+    }
+
+    /// 通用 MirMessageBox 的可见性就是 C# `Modal` 的生效期（`MirMessageBox.cs:19`）。
+    ///
+    /// 两个条件**都要**：有文案 **且** 面板真的建出来了。后者是独立复核（2026-09-29）
+    /// 提出的退化路径——`Prguse[360]` 缺资产时 `spawn_notice_box` 早退，没有面板也没有
+    /// OK 钮，若只看 `text` 就会锁住世界输入而屏上无任何可见 UI。
+    #[test]
+    fn notice_box_visible_means_modal() {
+        use crate::game::dialogs::notice_box::NoticeBox;
+        let mut n = NoticeBox::default();
+        assert!(!n.is_visible());
+        // 只有文案、面板未就绪 ⇒ 不算模态（否则会把显示层退化升级成输入锁）
+        n.show("你没有任何宠物。");
+        assert!(n.text.is_some());
+        assert!(!n.is_visible(), "面板未就绪时不得据此锁世界输入");
+        // 面板建好 + 有文案 ⇒ 模态生效
+        n.panel_ready = true;
+        assert!(n.is_visible());
+        // OK / 回车 / ESC 清文案 ⇒ 不再是模态
+        n.text = None;
+        assert!(!n.is_visible());
+        // 退出 Game 销毁面板 ⇒ 同样不是模态
+        n.show("x");
+        n.panel_ready = false;
+        assert!(!n.is_visible());
     }
 
     #[test]
