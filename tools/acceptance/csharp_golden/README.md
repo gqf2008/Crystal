@@ -1254,7 +1254,26 @@ py -3.12 tools/acceptance/csharp_golden/dialog_trigger_audit.py --repo . --opene
 ```powershell
 dotnet run --project .\dbtool\dbtool.csproj -c Release -- <沙箱>\Server export <沙箱>\db_export.json
 dotnet run --project .\dbtool\dbtool.csproj -c Release -- <沙箱>\Server dump Server.MirDatabase.CharacterInfo
+dotnet run --project .\dbtool\dbtool.csproj -c Release -- <沙箱>\Server setgold <accountId> <gold> [credit]
 ```
+
+**`setgold`（2026-09-30 补）**：改 `Server.MirDatabase.AccountInfo` 的 `Gold` / `Credit`
+（两个都是 `UInt32` 公开字段；客户端的 `GameScene.Gold/Credit` 就来自这里），只调 `SaveAccounts()`
+写 `Server.MirADB`，**不碰 `SaveDB()`**（与 `setpw`/`setpos` 同一条保存路径，见下 §5 的坑）。
+用途是**解锁原版侧"要花钱才到得了"的分支**——例如 `MirGameShopCell.BuyProduct()` 里
+`Item.GoldPrice * Quantity <= GameScene.Gold` 不过就只发系统聊天、**不弹确认框**（README §3.2bm）。
+
+```powershell
+# 停掉沙箱服务端再改（服务端运行时会把它自己的内存状态写回 MirADB）
+Get-CimInstance Win32_Process -Filter "Name='Server.exe'" |
+  ? { $_.ExecutablePath -eq "$env:TEMP\golden_sandbox\Server\Server.exe" } | % { Stop-Process -Id $_.ProcessId -Force }
+dotnet run --project .\dbtool\dbtool.csproj -c Release -- "$env:TEMP\golden_sandbox\Server" setgold 333 1000000
+# 回读：export 里 accounts[].gold（本轮实测 0 → 1000000 → 0 三段都逐值一致）
+```
+
+实测（2026-09-30，原版沙箱）：`setgold 333 1000000` → `readback: 333 gold=1000000 credit=0`；
+`export` 复读 `"accountId":"333" … "gold":1000000`；再用 `setgold 333 0 0` 还原回 0（`Server.MirDB`
+哈希前后不变 = `offline-bak`，即 `ProtectGameDb()` 生效）。
 
 实测（原版 `MirADB` 2025-12-22 / `Server.Library.dll` 2025-10-05）：
 
@@ -3046,8 +3065,9 @@ C# 里 `RefreshInterface` 每行是**新建控件**（按 `Quests.Count` 逐个 
 orig_shop_ok / orig_post_buy2 / orig_gold_buy / orig_credit_buy / orig_c3_buy / orig_q0 / orig_q1`）：
 `win_locate Prguse[360]` 全屏最优落点**没有一张落在 (284,289)**（最优 0.2799~0.5490）⇒ **与源码判定一致**。
 上一轮「点买钮没框」**不是点击没到位**（`Title[778]` 确实从 (359,383) 让位到 (359,543)，说明点击被控件消费）。
-⇒ 要拿这条路的帧，得先**给角色金币**（`Server.MirADB`；现有 dbtool 只有 `setpw/setpos`，**没有 setgold**），
-属**数据准备**，不是判据缺失。
+⇒ 要拿这条路的帧，得先**给角色金币**（`Server.MirADB`）。dbtool 原来只有 `setpw/setpos`，本轮给它补了
+**`setgold`**（用法见 §4；实测 `333` 的 gold `0 → 1000000 → 0` 三段逐值一致），属**数据准备**、
+不是判据缺失 —— 解锁工作站后"给钱 + 点买钮"就是一条命令的事。
 
 **② 拿不到的真因之二：抓帧时工作站又锁屏了（环境）**
 
