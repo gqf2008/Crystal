@@ -3344,6 +3344,60 @@ inv_slot_at(...).filter(|i| !inv_clickable_slot(*i, locked))   // ✗ 只保留�
 
 **未采集**：原版侧同状态帧（Shift+右键链接在沙箱里要真鼠标，属 §3.2l 那批）。
 
+### 3.2bs 物品升级的「格特效」：`S.ItemUpgraded` → `Prguse[410..418]` 9 帧 + 音效（2026-09-30）
+
+§3.2br 把 `MirItemCell` 的入口表核完后，顺手核了它的**下游反馈**：C# `GameScene.ItemUpgraded`
+（`GameScene.cs:4565-4578`）在替换物品之后会调 `InventoryDialog.DisplayItemGridEffect(item.UniqueID, 0)`
+（英雄背包那一路调 `HeroInventoryDialog` 的同名方法）。
+
+**① C# 真值**（`InventoryDialog.cs:445-475`）：`MirAnimatedControl`
+`AnimationCount = 9` / `AnimationDelay = 150` / `Index = 410` / `Library = Prguse` /
+`Location = cell.Location` / `Loop = false`（播完 `AfterAnimation` → `Dispose`）/
+`UseOffSet = true`（绘制点 = 格原点 + 该帧艺术偏移）/ `NotControl = true` / `Blending = true`；
+音效 `SoundManager.PlaySound(20000 + (ushort)Spell.MagicShield * 10)`。
+
+**② 本端补法**：`inventory.rs` 加 `ItemUpgradeFxRequest`（消息）+ `ItemUpgradeFxState` + `item_upgrade_fx_system`；
+`inventory_events` 的 `ItemUpgraded` 分支在**背包**替换成功时投请求（英雄背包那一路**未接线**，如实记）；
+起播时按 uid 去重并推 `ITEM_UPGRADE_FX_SOUND` 到既有音效队列（`ItemUseFeedback.sounds`）。
+
+> ⚠️ **`Spell` 枚举的 +3 坑（本轮踩到并钉住）**：C# `Spell.MagicShield = **43**`，而本端
+> `SharedRust` 的 `Spell` 整体是 C# 的 **+3**（`None = 3` vs C# `None = 0`）⇒ `Spell::MagicShield as u8 = 46`。
+> 音效 id 必须按 **C# 值**算：`20000 + 43*10 = **20430**` → 文件 `M43-0.wav`（`Sound/` 下确实存在）；
+> 若照抄"直接用枚举值"会得到 20460 → `M46-0.wav`——**也是一个存在的文件**，所以错了不会报错、只会悄悄放错声音。
+> 单测 `item_upgrade_fx_frames_and_sound_match_csharp` 里用 `assert_ne!` 把这条钉住。
+
+**③ 实机（本端 mock，`--upgrade-test` 触发 `S.ItemUpgraded`，物品 = 木剑 uid 9005 @格 2）**
+
+`ui_nodes_at` 每 ~90ms 打一次探针点 `(107,53)`（9 帧都覆盖的那个点），拿到**整段 9 帧**：
+
+| 观测时刻 | 命中节点矩形（z=61，面板相对） | 对应帧 | 核对（格原点 83,37 + 帧偏移） |
+|---|---|---|---|
+| t≈0 | (104,50,8x7) | `Prguse[410]` | 83+21=104、37+13=50 ✓ |
+| t≈90–180 | (100,46,16x15) | `[411]` | +17/+9 ✓ |
+| t≈270 | (96,42,24x22) | `[412]` | +13/+5 ✓ |
+| t≈360 | (94,39,28x28) | `[413]` | +11/+2 ✓ |
+| t≈450 | (92,38,32x30) | `[414]` | +9/+1 ✓ |
+| t≈540–630 | (95,41,24x25) | `[415]` | +12/+4 ✓ |
+| t≈720 | (97,43,24x21) | `[416]` | +14/+6 ✓ |
+| t≈810 | (100,46,16x15) | `[417]` | +17/+9 ✓ |
+| t≈900–990 | (104,50,8x7) | `[418]` | +21/+13 ✓ |
+| t≳1080 | **节点消失** | — | 9 帧 × 150ms = 1350ms 播完销毁 ✓（探针滞后约 0.1–0.4s） |
+
+日志：`✨ 物品升级格特效起播 uid=9005`；中段帧截图 `shots\ours_itemupgrade_fx_mid.png`。
+**阴性对照**：把 `--upgrade-test` 关掉（不触发 `ItemUpgraded`）时探针点**没有** z=61 节点。
+
+**④ 如实留痕（未做/偏差）**
+
+1. **加色混合没复刻**：C# 该控件 `Blending = true`（加色叠加），本端 UI 图片按普通 alpha 画——
+   峰值帧的"泛光"会更淡。属**画法偏差**，不是几何/时序差（帧序、帧位、时长、音效都对上）。
+2. **英雄背包那一路未接线**：C# `HeroInventoryDialog.DisplayItemGridEffect` 同样存在，
+   本端 `ItemUpgraded` 只判背包（`updated` 为真才投请求）；英雄格特效记为**未实现**。
+3. **原版侧同状态帧未采集**（要在沙箱里真鼠标点 NPC 触发升级链），属 §3.2l 那批。
+
+**⑤ 门禁**（`Client-Bevy`）：`cargo check --tests` 0 error；`cargo test --lib` **893 passed / 0 failed**
+（+1：帧推进/音效 id/格坐标）；`cargo test --test b0001_smoke --test ui_alignment` **2 + 53 passed**；
+本轮改动文件 `cargo fmt -- --check` 无差异。
+
 ### 3.2bm §3.2bl 的最后留白收口：`MirMessageBox` 的**原版现帧**拿到了（换入口，锁屏也能取）；并钉死 `game_shop` 买钮那条路**取不到帧的两条硬前置**（2026-09-29）
 
 §3.2bl 留的唯一留白是「原版侧**同状态帧**」（沙箱里点商品格买钮后的 `MirMessageBox`）。本轮把它定性收口：

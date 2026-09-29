@@ -25,8 +25,8 @@ use mir2_shared::enums::MirGridType;
 
 use crate::ui::sprite_ui::{shared_cjk_font, UiCjkFont, UiFont};
 use crate::ui::theme::{
-    load_lib_image, spawn_close_button, spawn_icon_button, spawn_image, spawn_item_cell_ui,
-    spawn_label, spawn_outlined_label_block, spawn_panel, UiItemCellData,
+    load_lib_image, spawn_close_button, spawn_icon_button, spawn_image, spawn_image_native,
+    spawn_item_cell_ui, spawn_label, spawn_outlined_label_block, spawn_panel, UiItemCellData,
 };
 
 /// 背包物品条目（网络 UserInformation 写入）
@@ -493,6 +493,9 @@ impl Plugin for InventoryDialogPlugin {
         app.init_resource::<InvDropConfirm>();
         app.init_resource::<InvPendingAmount>();
         app.init_resource::<ItemUseFeedback>();
+        // #3392：物品升级格特效（活动表 + 请求消息）
+        app.init_resource::<ItemUpgradeFxState>();
+        app.add_message::<ItemUpgradeFxRequest>();
         app.init_resource::<InventoryOrigin>();
         app.init_resource::<InvUiState>();
         // #2631：背包自我右移让位（交易开窗解耦；背包实体/Origin 归本模块所有）
@@ -523,6 +526,8 @@ impl Plugin for InventoryDialogPlugin {
                 inv_locked_icon_system,
                 inv_tooltip_system,
                 inv_socket_open_system,
+                // #3392：物品升级格特效（起播/推进/收尾）
+                item_upgrade_fx_system,
                 inv_item_action_system,
                 inv_confirm_system,
                 inv_add_del_buttons_system,
@@ -604,6 +609,8 @@ pub(crate) fn inventory_events(
         With<LocalPlayer>,
     >,
     mut locked: ResMut<InvLockedSlots>,
+    // #3392：`ItemUpgraded` → 格特效请求（起播在 `item_upgrade_fx_system`）
+    mut fx_requests: MessageWriter<ItemUpgradeFxRequest>,
 ) {
     use crate::network::server_event::ServerEvent;
     let Ok((mut inv, mut loadout)) = inv_q.single_mut() else {
@@ -799,6 +806,13 @@ pub(crate) fn inventory_events(
                     }
                 }
                 tracing::info!("⬆️ 物品升级替换: {}", item.name);
+                // C# `GameScene.ItemUpgraded`（`:4565-4578`）：**背包格**那一路会播 `DisplayItemGridEffect`
+                // （英雄背包那一路是 `HeroInventoryDialog.DisplayItemGridEffect`，本端英雄格暂未接）。
+                if updated {
+                    fx_requests.write(ItemUpgradeFxRequest {
+                        uid: item.unique_id,
+                    });
+                }
             }
             ServerEvent::ItemDeleted { unique_id } => {
                 // #228：背包按 unique_id 删除（消耗/删除）
@@ -1007,6 +1021,17 @@ pub struct InventoryPlaceAt(pub f32);
 /// 对齐 C# InventoryDialog：page 0=道具（0..min(40,size)），1=道具2（40..size-1），
 /// 位置 (i%8, (i/8)%5) 复用同一 8x5 区域（C# Grid Location = y%5）。
 /// origin 取 [`InventoryOrigin`]——背包可能已被推位/拖动。
+/// 格 `slot` 的**面板相对**左上角（8 列布局；`inv_grid_sync_system` 生成格子用的就是这套坐标，
+/// 也是 [`inv_slot_at`] 命中公式里去掉 `origin` 的部分——单一真源）。
+pub fn inv_cell_rel_origin(slot: usize) -> (f32, f32) {
+    let col = slot % GRID_COLS;
+    let row = (slot / GRID_COLS) % GRID_ROWS;
+    (
+        9.0 + col as f32 * (CELL_W + 1.0),
+        37.0 + row as f32 * (CELL_H + 1.0),
+    )
+}
+
 pub fn inv_slot_at(
     cx: f32,
     cy: f32,
@@ -1021,10 +1046,9 @@ pub fn inv_slot_at(
         _ => return None,
     };
     for i in range {
-        let x = i % GRID_COLS;
-        let y = (i / GRID_COLS) % GRID_ROWS;
-        let sx = origin.0 + 9.0 + x as f32 * (CELL_W + 1.0);
-        let sy = origin.1 + 37.0 + y as f32 * (CELL_H + 1.0);
+        let (sx, sy) = inv_cell_rel_origin(i);
+        let sx = origin.0 + sx;
+        let sy = origin.1 + sy;
         if cx >= sx && cx <= sx + CELL_W && cy >= sy && cy <= sy + CELL_H {
             return Some(i);
         }
@@ -1035,6 +1059,61 @@ pub fn inv_slot_at(
 /// 背包格子索引（0..MAX_INV_SLOTS-1）
 #[derive(Component, Clone, Copy)]
 pub struct InvSlot(pub usize);
+
+// ===== 物品升级「格特效」（C# `InventoryDialog.DisplayItemGridEffect`，#3392）=====
+
+/// C# `InventoryDialog.DisplayItemGridEffect(id, type = 0)`（`InventoryDialog.cs:445-475`）：
+/// `S.ItemUpgraded` 时在**该物品所在格**播一段特效并放音，播完 `Dispose`。
+/// 参数逐值照抄：`AnimationCount = 9`、`AnimationDelay = 150`、`Index = 410`、
+/// `Library = Prguse`、`Location = cell.Location`、`Loop = false`（⇒ 播完销毁）、
+/// `UseOffSet = true`（⇒ 绘制点 = 格原点 + 该帧艺术偏移）、`NotControl = true`。
+pub const ITEM_UPGRADE_FX_FIRST: usize = 410;
+pub const ITEM_UPGRADE_FX_FRAMES: usize = 9;
+pub const ITEM_UPGRADE_FX_DELAY_MS: f32 = 150.0;
+
+/// C# `SoundManager.PlaySound(20000 + (ushort)Spell.MagicShield * 10)`（`InventoryDialog.cs:472-473`）。
+///
+/// **算的是 C# 的 `Spell` 值**：C# `Spell.MagicShield = 43` ⇒ **20430**（文件 `M43-0.wav`）。
+/// ⚠️ **别写成 `Spell::MagicShield as u8`**：本端 `Spell` 枚举整体是 C# 的 **+3**
+/// （`None = 3` 而 C# `None = 0`，见 `SharedRust/src/enums.rs`），直接用会算成 20460 → `M46-0.wav`
+/// （**错文件**，且错得很安静）。这条坑对所有"由 Spell 值推 C# 公式 id"的地方都成立。
+pub const ITEM_UPGRADE_FX_SOUND: u32 = 20430;
+
+/// 纯函数：特效起播后过了 `elapsed_ms` → 当前帧号；`None` = 已播完（C# `Loop=false` → `AfterAnimation` → Dispose）。
+/// 帧长 150ms、共 9 帧 ⇒ 总时长 1350ms（与 C# 的 `AnimationCount * AnimationDelay` 同口径）。
+pub fn item_upgrade_fx_frame(elapsed_ms: f32) -> Option<usize> {
+    if elapsed_ms.is_nan() || elapsed_ms < 0.0 {
+        return Some(0);
+    }
+    let idx = (elapsed_ms / ITEM_UPGRADE_FX_DELAY_MS) as usize;
+    (idx < ITEM_UPGRADE_FX_FRAMES).then_some(idx)
+}
+
+/// 请求在某个 uid 的格子上播特效（由 [`inventory_events`] 在 `ItemUpgraded` 时投递，
+/// 起播/推进交给 [`item_upgrade_fx_system`]——避免给事件系统再加 `Time`/`Assets` 参数）。
+#[derive(Message, Debug, Clone, Copy)]
+pub struct ItemUpgradeFxRequest {
+    pub uid: u64,
+}
+
+/// 特效节点（挂在背包面板下，随面板拖动）
+#[derive(Component, Clone, Copy)]
+pub struct ItemUpgradeFxNode {
+    pub uid: u64,
+}
+
+struct ActiveItemFx {
+    uid: u64,
+    start: f64,
+    node: Option<Entity>,
+}
+
+/// 活动特效表（同 uid 不重复起播；C# 是每次 `DisplayItemGridEffect` 都新建一个 `MirAnimatedControl`，
+/// 但同一格连点两次会叠两个——本端按 uid 去重，避免重复音效）。
+#[derive(Resource, Default)]
+pub struct ItemUpgradeFxState {
+    active: Vec<ActiveItemFx>,
+}
 
 /// 光标 → **可点击**背包格：[`inv_slot_at`] 的几何 + C# `MirItemCell.Locked` 的剔除。
 ///
@@ -1869,6 +1948,105 @@ fn inv_selection_system(
             bg.0 = target;
         }
     }
+}
+
+/// #3392：物品升级「格特效」的起播 / 推进 / 收尾（C# `InventoryDialog.DisplayItemGridEffect`）。
+///
+/// - 收 [`ItemUpgradeFxRequest`]：物品**当前在背包里**才起播＋放音（C# `GetCell(uid).Item == null → return`，
+///   那种情况**连音都不放**）；同一 uid 已在播则忽略（C# 会叠一个 `MirAnimatedControl`，本端按 uid 去重）。
+/// - 推进：`elapsed_ms / 150` 取帧，`Prguse[410 + frame]`，绘制点 = 格左上角 + 该帧艺术偏移（`UseOffSet`）。
+/// - 收尾：满 9 帧（1350ms）⇒ 销毁；物品在播的过程中被移走/卖掉 ⇒ 本帧起停播（与 C# 找不到格一致）。
+#[allow(clippy::too_many_arguments)]
+fn item_upgrade_fx_system(
+    mut commands: Commands,
+    mut requests: MessageReader<ItemUpgradeFxRequest>,
+    mut state: ResMut<ItemUpgradeFxState>,
+    time: Res<Time>,
+    mut libs: ResMut<GameLibraries>,
+    mut images: ResMut<Assets<Image>>,
+    inv_q: Query<&Inventory, With<LocalPlayer>>,
+    panel: Query<Entity, With<InventoryPanel>>,
+    mut nodes: Query<(&mut ImageNode, &mut Node), With<ItemUpgradeFxNode>>,
+    mut feedback: ResMut<ItemUseFeedback>,
+) {
+    let now = time.elapsed_secs_f64();
+    let inv = inv_q.single().ok();
+    let slot_of = |uid: u64| -> Option<usize> {
+        inv?.items
+            .iter()
+            .position(|s| s.as_ref().map(|i| i.unique_id) == Some(uid))
+    };
+    for r in requests.read() {
+        if slot_of(r.uid).is_none() || state.active.iter().any(|fx| fx.uid == r.uid) {
+            continue;
+        }
+        state.active.push(ActiveItemFx {
+            uid: r.uid,
+            start: now,
+            node: None,
+        });
+        feedback.sounds.push(ITEM_UPGRADE_FX_SOUND);
+        tracing::info!("✨ 物品升级格特效起播 uid={}", r.uid);
+    }
+    if state.active.is_empty() {
+        return;
+    }
+    let Ok(panel_e) = panel.single() else { return };
+    let mut keep = Vec::with_capacity(state.active.len());
+    for mut fx in std::mem::take(&mut state.active) {
+        let elapsed = ((now - fx.start) * 1000.0) as f32;
+        let Some(frame) = item_upgrade_fx_frame(elapsed) else {
+            if let Some(e) = fx.node.take() {
+                commands.entity(e).despawn();
+            }
+            continue;
+        };
+        let idx = ITEM_UPGRADE_FX_FIRST + frame;
+        let Some(slot) = slot_of(fx.uid) else {
+            continue;
+        };
+        let (sx, sy) = inv_cell_rel_origin(slot);
+        let Some(info) = libs.0.get_image(LibraryName::Prguse, idx) else {
+            continue;
+        };
+        let (px, py) = (sx + info.offset_x as f32, sy + info.offset_y as f32);
+        match fx.node {
+            Some(e) => {
+                if let Ok((mut img, mut node)) = nodes.get_mut(e) {
+                    if let Some(h) =
+                        load_lib_image(&mut libs, &mut images, LibraryName::Prguse, idx)
+                    {
+                        img.image = h;
+                    }
+                    node.left = Val::Px(px);
+                    node.top = Val::Px(py);
+                    node.width = Val::Px(info.width.max(0) as f32);
+                    node.height = Val::Px(info.height.max(0) as f32);
+                }
+            }
+            None => {
+                let mut spawned: Option<Entity> = None;
+                commands.entity(panel_e).with_children(|p| {
+                    if let Some(mut ec) = spawn_image_native(
+                        p,
+                        &mut libs,
+                        &mut images,
+                        LibraryName::Prguse,
+                        idx,
+                        px,
+                        py,
+                        61,
+                    ) {
+                        spawned = Some(ec.id());
+                        ec.insert(ItemUpgradeFxNode { uid: fx.uid });
+                    }
+                });
+                fx.node = spawned;
+            }
+        }
+        keep.push(fx);
+    }
+    state.active = keep;
 }
 
 /// #1544：消费物品使用反馈队列（PlayItemSound 音效 + CanUseItem 拒绝提示）
@@ -3028,6 +3206,31 @@ mod tests {
     use super::*;
     use mir2_shared::enums::ItemType;
 
+    /// #3392：物品升级格特效的帧推进与音效 id（逐值对 C# `InventoryDialog.DisplayItemGridEffect`）。
+    #[test]
+    fn item_upgrade_fx_frames_and_sound_match_csharp() {
+        // `AnimationCount = 9`、`AnimationDelay = 150` ⇒ 0..8 帧、150ms/帧、共 1350ms
+        assert_eq!(item_upgrade_fx_frame(0.0), Some(0));
+        assert_eq!(item_upgrade_fx_frame(149.9), Some(0));
+        assert_eq!(item_upgrade_fx_frame(150.0), Some(1));
+        assert_eq!(item_upgrade_fx_frame(1349.0), Some(8));
+        assert_eq!(item_upgrade_fx_frame(1350.0), None, "9 帧播完即销毁");
+        assert_eq!(item_upgrade_fx_frame(9999.0), None);
+        // 起播首帧前（负值/NaN）当第 0 帧，别 panic
+        assert_eq!(item_upgrade_fx_frame(-1.0), Some(0));
+        // 音效：C# `20000 + (ushort)Spell.MagicShield * 10`，C# `Spell.MagicShield = 43`
+        assert_eq!(ITEM_UPGRADE_FX_SOUND, 20000 + 43 * 10);
+        assert_ne!(
+            ITEM_UPGRADE_FX_SOUND,
+            20000 + (mir2_shared::enums::Spell::MagicShield as u32) * 10,
+            "本端 Spell 是 C# +3（None=3 vs 0），直接拿枚举值算会落到 M46-0.wav（错文件）"
+        );
+        // 格坐标与 `inv_slot_at` 同一真源（8 列）
+        assert_eq!(inv_cell_rel_origin(0), (9.0, 37.0));
+        assert_eq!(inv_cell_rel_origin(2), (83.0, 37.0));
+        assert_eq!(inv_cell_rel_origin(8), (9.0, 70.0));
+    }
+
     /// #2736 回归：`slot_at` 的锁定极性（2026-09-30 修）。
     ///
     /// 语义：`InvLockedSlots::lock(...)` 锁住的格**不该**响应点击（C# `MirItemCell.Locked`），
@@ -3217,6 +3420,8 @@ mod tests {
         app.add_plugins(MinimalPlugins);
         app.add_message::<crate::network::server_event::ServerEvent>();
         app.init_resource::<InvLockedSlots>();
+        // #3392：inventory_events 会投格特效请求（ItemUpgraded）
+        app.add_message::<ItemUpgradeFxRequest>();
         app.add_systems(Update, inventory_events);
         let e = app
             .world_mut()
@@ -3306,6 +3511,8 @@ mod tests {
         app.add_plugins(MinimalPlugins);
         app.add_message::<crate::network::server_event::ServerEvent>();
         app.init_resource::<InvLockedSlots>();
+        // #3392：inventory_events 会投格特效请求（ItemUpgraded）
+        app.add_message::<ItemUpgradeFxRequest>();
         app.add_systems(Update, inventory_events);
         app.world_mut()
             .spawn((LocalPlayer, Inventory::default(), Loadout::default()));
