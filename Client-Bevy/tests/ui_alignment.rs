@@ -947,6 +947,9 @@ fn character_dialog_aligned() {
 
 /// 背包/大地图**常量**单独成测（不依赖 `Data/` 资产，CI 上真跑）。
 ///
+/// #3368 单元②补：NPC 侧任务列表窗的**纯几何常量**也放在这里（同款理由——
+/// 写进 `panel_sprites_batch_b3_match_csharp` 会被 `require_assets!` 整段跳过，CI 上等于没跑）。
+///
 /// 独立审查发现：这些断言原先都排在 `require_assets!` **之后**，而 CI 没有
 /// `Data/`（`.gitignore:368`）→ 整个测试提前 `return`，防漂移断言在 CI 上等于
 /// 没跑（`inventory_bigmap_aligned` 曾在 master 上红了一整轮而 CI 全绿）。
@@ -955,6 +958,50 @@ fn character_dialog_aligned() {
 fn inventory_bigmap_constants() {
     use client_bevy::game::dialogs::big_map as bm;
     use client_bevy::game::dialogs::inventory as inv;
+
+    // ---- #3368 NPC 侧任务列表窗（C# `QuestListDialog`，`QuestDialogs.cs:15-250`）----
+    // 面板/坐标：`Index = 950; Library = Prguse`、`Location = (NPCDialog.Width + 47, 0) = (487,0)`
+    {
+        use client_bevy::game::dialogs::npc as npc;
+        use client_bevy::game::dialogs::quest_list as ql;
+        assert_eq!(ql::LIST_SIZE, (316.0, 466.0), "面板 316x466（与 960/961 同底图）");
+        assert_eq!(ql::LIST_POS, (npc::PANEL_W + 47.0, 0.0), "C# Location 公式");
+        assert_eq!(ql::LIST_POS, (487.0, 0.0), "NPCDialog.Width=440 ⇒ (487,0)");
+        // 行：`Rows = new QuestRow[5]`、`Location = (9, 36 + i*19)`、`Size = (200,17)`
+        assert_eq!(ql::LIST_ROW_COUNT, 5);
+        assert_eq!(ql::LIST_ROW_ORIGIN, (9.0, 36.0));
+        assert_eq!(ql::LIST_ROW_DY, 19.0);
+        assert_eq!(ql::LIST_ROW_SIZE, (200.0, 17.0));
+        assert_eq!(ql::LIST_ROW_SEL_X, 25.0, "选中高亮 Prguse[956] @(25,0)");
+        // 计数标签 `_availableQuestLabel @ (210,8)`；翻页钮 (291,35)/(291,83)
+        assert_eq!(ql::LIST_AVAILABLE_POS, (210.0, 8.0));
+        assert_eq!(ql::LIST_UP_POS, (291.0, 35.0));
+        assert_eq!(ql::LIST_DOWN_POS, (291.0, 83.0));
+        // 标题/关闭/帮助/离开
+        assert_eq!(ql::LIST_TITLE_INDEX, 14);
+        assert_eq!(ql::LIST_HELP_POS, (266.0, 3.0), "Prguse2[257..259]");
+        assert_eq!(ql::LIST_LEAVE_POS, (205.0, 436.0), "Title[276..278]");
+        // 消息区：`Location=(10,135) Size=(280,160) PosMinY=149 PosMaxY=263`（行高 10 行）
+        assert_eq!(ql::LIST_MSG_ORIGIN, (10.0, 135.0));
+        assert_eq!(ql::LIST_MSG_W, 280.0);
+        assert_eq!(ql::LIST_MSG_LINE_COUNT, 10);
+        assert_eq!((ql::LIST_MSG_POS_MIN_Y, ql::LIST_MSG_POS_MAX_Y), (149, 263));
+        assert_eq!(ql::LIST_MSG_UP_POS, (292.0, 136.0));
+        assert_eq!(ql::LIST_MSG_DOWN_POS, (292.0, 282.0));
+        assert_eq!(ql::LIST_MSG_BAR_POS, (292.0, 149.0));
+        // 接受/完成钮同落点 `(40,436)`（C# 两钮同 Location，靠显隐二选一）
+        assert_eq!(ql::LIST_ACCEPT_POS, (40.0, 436.0));
+        assert_eq!(ql::LIST_ACCEPT_SPRITES, (270, 271, 272));
+        assert_eq!(ql::LIST_FINISH_SPRITES, (273, 274, 275));
+        // 奖励区（`QuestRewards @(5,307)`，固定排 y=24 / 可选排 y=89，x = 15 + 45i）
+        assert_eq!(
+            client_bevy::game::dialogs::quest_log::QUEST_REWARD_ORIGIN,
+            (5.0, 307.0)
+        );
+        assert_eq!(ql::reward_cell_offset(true, 0), (15.0, 24.0));
+        assert_eq!(ql::reward_cell_offset(false, 4), (195.0, 89.0));
+        assert_eq!(ql::LIST_REWARD_CELL_COUNT, 5);
+    }
 
     // ---- 背包（C# InventoryDialog.cs）常量 == C# 字面值（防漂移）----
     // 窗口原点：C# 构造器未设 Location（InventoryDialog.cs:25-31）→ MirControl
@@ -4500,8 +4547,13 @@ fn kind_alignment_tests(kind: client_bevy::game::dialogs::DialogKind) -> &'stati
         // 口径见 `inventory_bigmap_constants` 的文档注释
         K::Inventory | K::BigMap => &["inventory_bigmap_aligned", "inventory_bigmap_constants"],
         K::Character => &["character_dialog_aligned"],
-        // #3368：NPC 侧任务列表窗与日记/详情同批（面板 950/960/961 同尺寸，坐标各自核对）
-        K::QuestLog | K::QuestDetail | K::QuestList => &["panel_sprites_batch_b3_match_csharp"],
+        // #3368：NPC 侧任务列表窗与日记/详情同批（面板 950/960/961 同尺寸，坐标各自核对）；
+        // 纯几何常量另走 `inventory_bigmap_constants`（无 `Data/` 也跑，见该测试文档）
+        K::QuestLog | K::QuestDetail => &["panel_sprites_batch_b3_match_csharp"],
+        K::QuestList => &[
+            "panel_sprites_batch_b3_match_csharp",
+            "inventory_bigmap_constants",
+        ],
         K::Settings => &["settings_dialog_aligned"],
         K::Menu => &["menu_dura_aligned"],
         K::GameShop

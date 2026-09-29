@@ -379,6 +379,27 @@ fn npc_scroll_arrows_system(
     }
 }
 
+/// #3368：NPC 窗**任务钮**判据用到的外部状态打包。
+///
+/// C# `NPCDialog.CheckQuestButtonDisplay`（`NPCDialogs.cs:1006-1020`）用
+/// `npc.GetAvailableQuests().Any()` 决定 Quest 钮显隐——不是"脚本里有可接任务字样"。
+/// 本端 `npc_ui_system` 已到 Bevy 的参数上限（16），故连同原有的关闭钮查询一起打包。
+#[derive(bevy::ecs::system::SystemParam)]
+pub struct NpcQuestAccess<'w, 's> {
+    pub catalog: Res<'w, crate::game::dialogs::quest_log::QuestCatalog>,
+    pub log: Res<'w, crate::game::dialogs::quest_log::QuestLogState>,
+    pub player: Query<
+        'w,
+        's,
+        (
+            &'static crate::game::player_state::Progression,
+            &'static crate::actor::ActorAppearance,
+        ),
+        With<crate::actor::LocalPlayer>,
+    >,
+    pub close: Query<'w, 's, (Entity, &'static Interaction), With<NpcClose>>,
+}
+
 fn npc_ui_system(
     mut commands: Commands,
     mut npc: ResMut<NpcDialogState>,
@@ -388,11 +409,14 @@ fn npc_ui_system(
     mut mgr: ResMut<crate::game::dialogs::DialogManager>,
     net: Res<NetConnection>,
     mouse: Res<ButtonInput<MouseButton>>,
+    // #3368 单元②：任务钮的**显隐判据**（C# `CheckQuestButtonDisplay` 走
+    // `npc.GetAvailableQuests().Any()`）需要任务目录/已接日志/玩家等级职业——
+    // 本系统已到 Bevy 的参数上限，故与关闭钮查询一起打包（`NpcQuestAccess`）。
+    quest_access: NpcQuestAccess,
     // 命中判定走统一光标来源：**探针优先**（#2767）——NPC 窗是自绘文本、
     // 不是 bevy_ui 按钮，click/cursor RPC 注入的 PointerInput/HoverMap 到不了它，
     // 只有探针能进这条路。无探针时读真实光标，正常游玩行为不变。
     cursor_src: crate::control::CursorSource,
-    close: Query<(Entity, &Interaction), With<NpcClose>>,
     // cascade 边沿状态：只在「可见→不可见」那一帧触发（实机交互 sweep 修正）
     mut npc_prev_visible: Local<bool>,
     mut quest_btns: Query<
@@ -436,10 +460,22 @@ fn npc_ui_system(
     }
 
     // 任务按钮（C# CheckQuestButtonDisplay：NPC 有可用任务才显示）
-    let has_quest = npc
-        .lines
-        .iter()
-        .any(|l| l.contains("可接受任务") || l.contains("可完成任务"));
+    // #3368：判据换成 C# 的口径——`npc.GetAvailableQuests().Any()`（`NPCDialogs.cs:1016-1019`），
+    // 即「本 NPC 提供且可接」∪「本 NPC 可交付」。此前用脚本行含「可接受任务/可完成任务」
+    // 的文本启发式：对没有可接任务（等级/职业不符、已接满、已完成）的 NPC 会**多显示**按钮。
+    let (me_level, me_class) = quest_access
+        .player
+        .single()
+        .map(|(p, a)| (p.level, a.class as u8))
+        .unwrap_or((1, 0));
+    let has_quest = !crate::game::dialogs::quest_list::npc_available_quests(
+        &quest_access.catalog,
+        &quest_access.log,
+        npc.npc_object_id,
+        me_level,
+        me_class,
+    )
+    .is_empty();
     for (e, inter, mut vis) in &mut quest_btns {
         *vis = if npc.visible && has_quest {
             Visibility::Visible
@@ -484,7 +520,7 @@ fn npc_ui_system(
     *npc_prev_visible = true;
 
     // 关闭（bevy_ui Interaction 边沿）
-    for (e, inter) in &close {
+    for (e, inter) in &quest_access.close {
         if edge(e, inter, &mut prev_inter) {
             npc.visible = false;
         }
@@ -965,6 +1001,9 @@ mod tests {
         app.init_resource::<crate::game::dialogs::sell_panel::SellPanelState>();
         app.init_resource::<crate::game::dialogs::storage::StorageState>();
         app.init_resource::<DialogManager>();
+        // #3368：任务钮判据走 `npc_available_quests`（读 QuestCatalog/QuestLogState）
+        app.init_resource::<crate::game::dialogs::quest_log::QuestCatalog>();
+        app.init_resource::<crate::game::dialogs::quest_log::QuestLogState>();
         app.insert_resource(NetConnection::default());
         app.insert_resource(bevy::input::ButtonInput::<bevy::input::mouse::MouseButton>::default());
         app.init_resource::<crate::control::CursorProbe>();
@@ -1255,6 +1294,8 @@ mod tests {
         });
         app.insert_resource(GameData::default());
         app.world_mut().spawn(Window::default());
+        app.init_resource::<crate::game::dialogs::quest_log::QuestCatalog>();
+        app.init_resource::<crate::game::dialogs::quest_log::QuestLogState>();
 
         {
             let mut npc = app.world_mut().resource_mut::<NpcDialogState>();
@@ -1344,6 +1385,9 @@ mod tests {
         app.init_resource::<crate::control::CursorProbe>();
         app.insert_resource(NetConnection::default());
         app.insert_resource(GameData::default());
+        // #3368：任务钮判据走 `npc_available_quests`（读 QuestCatalog/QuestLogState）
+        app.init_resource::<crate::game::dialogs::quest_log::QuestCatalog>();
+        app.init_resource::<crate::game::dialogs::quest_log::QuestLogState>();
         app.insert_resource(bevy::input::ButtonInput::<bevy::input::mouse::MouseButton>::default());
         app.world_mut().spawn(Window::default());
         app.add_systems(Update, npc_ui_system);
