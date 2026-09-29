@@ -3187,6 +3187,42 @@ pwsh tools/acceptance/rpc.ps1 -Method dialog_rect -Params '{"kind":"timer","fall
 
 **门禁**：只动文档；`cargo test --lib` / 集成与上一批同一份代码（未受影响）。
 
+### 3.2bg 拿**原版留下的帧**当靶子：NPC 侧任务列表窗的**行内容**补齐（图标 + `Lv N` + 名字 x=60）（2026-09-29）
+
+§3.2ay/§3.2az 里一直记着"原版那一侧的同状态内容帧未采集"。本轮工作站**已解锁**，本可以重跑沙箱，
+结果先发现**帧已经在手边**：`%TEMP%\golden_sandbox\shots\orig_questlist.png`（2026-09-29 13:05:57，
+§3.2au 那轮点 Jane 的 Quest 按钮时留下的）——直接拿它当靶子比读源码更快，也省一轮沙箱驱动。
+
+**对表方式**：两帧同状态（NPC 侧任务列表窗开着），面板原点 C# 是 (485,0)、本端是 (487,0)
+（§3.2au 的 2px 透明边偏移），故先把 C# 的 x 归一到面板相对坐标再比。
+
+**量到的结构差（真缺口）**：行内内容 C# 有**三件**，本端上一批只画了**名字**、起点还贴在面板内 x=9：
+
+| 元件 | C#（`QuestRow`，`QuestDialogs.cs:916-991`） | 本端（补前） | 本端（补后，实测） |
+|---|---|---|---|
+| 图标 | `IconImage = Prguse[961+Icon+(Icon>3?15:0)] @ 行内(3,0)` | **无** | `win_locate Prguse[964]` 命中 **(499,36) 不符率 0.0000** ⇒ 面板 12（= 行 9 + 3） |
+| 等级 | `RequirementLabel @ 行内(20,0)`，`"Lv " + MinLevelNeeded`（`>0` 才显示） | **无** | 文字亮带落在面板 29..51（= 行 20..） |
+| 名字 | `NameLabel @ 行内(60,0) Size=(140,17)` | 贴在行内 (9,0) | 落在面板 69..（= 行 60） |
+
+**原版帧的列分布（同一行带 y=36..53）**：紧邻面板左缘有两段面板美术（面板 2..4、7），
+随后 `497..511`（面板 12..26）= **图标**、`518..535`（面板 33..50）= **Lv 文字**、`540..705` = 名字/分隔带。
+本端补后：`499..515`（面板 12..28）= 图标、`516..538`（面板 29..51）= Lv、`542..707` = 名字带
+⇒ **三段的相对位置与原版逐一对应**（同一行动作，两侧数据不同故字形宽度不同）。
+
+**图标编号是纯函数**：C# `ClientQuestProgress.Icon => QuestInfo.GetQuestIcon(Taken, Completed)`
+（`Shared/Data/ClientData.cs:476-531`），本端照抄成 `quest_row_icon()`；图号公式
+`961 + (int)Icon + ((int)Icon > 3 ? 15 : 0)` 里的判据是**C# 枚举值**——本端枚举是 C# 值 **+3**
+（`None=3…QuestionGreen=56`，`SharedRust/src/enums.rs:619-632`），故先减 3 再套公式，否则整体偏 3 张图。
+（本轮夹具 = General + 已接 + 已完成 ⇒ `QuestionYellow` ⇒ `961+3 = 964` ✓ 与模板匹配一致。）
+
+**门禁**：`cargo test --lib` **885 passed / 0 failed**（+3 条：`GetQuestIcon` 九态、
+图号公式含 +15 档、`Lv` 文案）；`cargo test --test b0001_smoke --test ui_alignment` **2 + 53 passed**。
+实机截图与读数为本机 mock 夹具（`npc_call 4242 [@QUEST]` + `dialog open quest_list`）。
+
+**顺带记一条真机夹具坑（B0001）**：给行加「Lv」标签后，新查询与既有的 `Text` 查询**未互斥**，
+`cargo test --lib` 直接 B0001 红（`quest_list_ui_system` 里三条 `&mut Text` 查询要两两 `Without`）。
+已按 `Without<QuestListRowLevel>` / `Without<QuestListAvailableLabel>` 补齐。
+
 ### 3.2bd NPC 侧任务列表窗单元④：`MirMessageBox(你必须选择一个奖励物品)`（本窗最后一个用户可见缺口）（2026-09-29）
 
 §3.2ax/§3.2ba 一直挂着这条：C# `_finishButton.Click`（`QuestDialogs.cs:121-141`）在**有可选奖励但没选**时
