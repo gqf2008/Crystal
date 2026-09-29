@@ -3029,6 +3029,100 @@ C# 里 `RefreshInterface` 每行是**新建控件**（按 `Quests.Count` 逐个 
 **门禁**：`cargo check`（lib+bin）0 error；`cargo test --lib` **880 passed / 0 failed**；
 `cargo test --test b0001_smoke --test ui_alignment` **2 + 53 passed**。
 
+### 3.2bm §3.2bl 的最后留白收口：`MirMessageBox` 的**原版现帧**拿到了（换入口，锁屏也能取）；并钉死 `game_shop` 买钮那条路**取不到帧的两条硬前置**（2026-09-29）
+
+§3.2bl 留的唯一留白是「原版侧**同状态帧**」（沙箱里点商品格买钮后的 `MirMessageBox`）。本轮把它定性收口：
+**这一帧在当前沙箱里拿不到**，两条原因都取到了实证；同时用一条**不需要鼠标、也不需要 Alt** 的入口，
+把 `MirMessageBox` 的**原版现帧**补上了（面板/按钮几何与"谁弹出来"无关）。
+
+**① 拿不到的真因之一：那个角色买不起（数据，不是点偏）**
+
+`dbtool <沙箱>\Server export` 实测：账号 `333`（角色 女道士 / 范德萨法）**gold = 0、credit = 0**（三个账号全 0）。
+按 `Client/MirControls/MirGameShopCell.cs:193-228`：`pType` 只在「勾了对应支付方式 **且** `Item.CanBuyCredit/CanBuyGold`」
+时才不是 `-1`；即便 `pType = 1`（金币），还要过 `if (Item.GoldPrice * Quantity <= GameScene.Gold)` ——
+金币 0 时对任何**有价**商品恒 false ⇒ 走 `else` **只发系统聊天**（`YouCantAffordSelectedItem`）、**不弹框**。
+
+回扫上一轮全部 12 张买路帧（`orig_buy_confirm / orig_buy_pre / orig_buybox / orig_shop_buy / orig_shop2_buy /
+orig_shop_ok / orig_post_buy2 / orig_gold_buy / orig_credit_buy / orig_c3_buy / orig_q0 / orig_q1`）：
+`win_locate Prguse[360]` 全屏最优落点**没有一张落在 (284,289)**（最优 0.2799~0.5490）⇒ **与源码判定一致**。
+上一轮「点买钮没框」**不是点击没到位**（`Title[778]` 确实从 (359,383) 让位到 (359,543)，说明点击被控件消费）。
+⇒ 要拿这条路的帧，得先**给角色金币**（`Server.MirADB`；现有 dbtool 只有 `setpw/setpos`，**没有 setgold**），
+属**数据准备**，不是判据缺失。
+
+**② 拿不到的真因之二：抓帧时工作站又锁屏了（环境）**
+
+按 §3.2ag 的硬判据：前台窗口 class = `Windows.UI.Core.CoreWindow`、标题「Windows 默认锁屏界面」、
+rect `(0,0)-(2560,1440)`；桌面级 `CopyFromScreen` 恒 `#005495`（§3 的旁证）。
+锁屏下**两条鼠标路径都死**（本轮补了带判别力的对照，见 ⑤.2）。
+
+**③ 拿到了什么：`MirMessageBox` 的原版现帧 —— 换入口，锁屏/无鼠标也能取**
+
+`MirMessageBox` 的面板与按钮几何是**构造函数里写死**的（`Client/MirControls/MirMessageBox.cs:23/26/34/42-138`），
+与「谁把它弹出来」无关。所以用**登录场景那条自动路径**取帧：`LoginScene.cs:84-89` 的
+`_connectBox = new MirMessageBox(AttemptingConnectServer, Cancel)`，`Shown` 里 `Network.Connect()` 后 `Show()`，
+**服务端不可达时它常驻**（`:95-96` 每帧刷 "Attempting to connect (n)"；`:163` 只有收到 `ClientVersion` 才 `Dispose()`）。
+
+```powershell
+# 沙箱服务端停掉 → 起原版客户端 → 登录场景就会常驻一个 MirMessageBox → F12 取帧
+Get-CimInstance Win32_Process -Filter "Name='Server.exe'" |
+  ? { $_.ExecutablePath -eq "$env:TEMP\golden_sandbox\Server\Server.exe" } | % { Stop-Process -Id $_.ProcessId -Force }
+Start-Process "$env:TEMP\golden_sandbox\Client\Client.exe" -WorkingDirectory "$env:TEMP\golden_sandbox\Client"
+# 等 ~25s（登录场景加载）后：
+. tools\acceptance\csharp_golden\csharp_client_driver.ps1 -SandboxRoot $env:TEMP\golden_sandbox
+Init-CsClient; Shot-Cs connectbox        # → shots\orig_connectbox.png
+py -3.12 tools\acceptance\csharp_golden\win_locate.py `
+  --shot $env:TEMP\golden_sandbox\shots\orig_connectbox.png --lib Data\Prguse.Lib --index 360
+```
+
+实测（`shots\orig_connectbox.png` 与 `orig_connectbox2.png`，两帧数字完全相同）：
+
+| 目标 | 最佳落点 | 不符率 |
+|---|---|---|
+| 面板 `Prguse[360]`（456x190） | **(284,289)** | **0.0290**（2514/86600） |
+| `Title[203]`（Cancel **常态**） | **(644,446)** | **0.0000**（0/1900） |
+| 负对照 `Title[200]`（OK 常态）同点 | (644,446) | 0.2558 ⇒ **FAIL**（命中是特异的，不是碰巧） |
+
+**面板残余逐区分解**（同一帧对 `Data\Prguse.Lib[360]` 比：α>32 且 RGB 和差 >60）：86600 个不透明像素里
+**不符 2514 = 文案矩形 (panel+35,35,390x110) 1148 + Cancel 钮覆盖区 (panel+360,157,76x25) 1366 +
+chrome 其余 0**。⇒ **面板 chrome 逐像素相同**，差的全是「文字」和「压在面板上的那颗钮」。
+
+**④ 这条对表把 §3.2bl 缺的那一格补到什么程度**
+
+- 面板原点：**原版 (284,289) / 本端 (284,289)**（§3.2bl 实机 0.0442）—— 同一个值。
+  （456x190 居中 ⇒ `MirMessageBox.cs:26` 的 `((1024-456)/2,(768-190)/2) = (284,289)`；§3.2p 也量过同值。）
+- 右下钮槽位：本轮实测 `(644,446) = 面板+(360,157)` **逐像素 0**；而 `MirMessageBox.cs:90-92`（YesNo 的 **No**）
+  与 `:134-136`（**Cancel** 变体）是同一个 `Location = new Point(360, 157)` ⇒ 商城里
+  `ConfirmPurchaseItemGold` 那个 YesNo 框的**右下钮位置由实测锚定**；左下 Yes 的 `(260,157)`（`:80-82`，
+  §3.2p 逐像素 0）与两颗钮的图号也已对过。
+- **框内两端对拍在上游已做完**（§3.2p：两侧都切中文 locale、**同一串文案** ⇒ 两钮带 0.0000 / 框体其余 ≈42px /
+  整框 8.47% / 文案区 17.00%，残差定性为 **CJK vs GDI 字体度量**）。
+  ⇒ §3.2bl 这一格剩下的只是「**商城那条文案**在 C# 侧渲染成什么样」，属**未采集**（受 ①② 双重前置挡住），
+  不是几何/画源缺口。
+
+**⑤ 顺带三条修正（下一轮直接用）**
+
+1. **锁屏下「注入 Alt」不成立**：`CMain.Alt` 只由 `e.Alt` 赋（`Client/Forms/CMain.cs:134-139 / 186-191`），
+   而注入 `WM_SYSKEYDOWN(VK_MENU)` **不会**让它为真。实测：Alt（sys-down）+`Q` 的行为与**单键 `Q` 完全一致**
+   ——两次都开的是 `Quests`（`RequireAlt = 0`，`KeyBindSettings.cs:219`），两次帧里 `Prguse[360]` 的
+   全屏最优同为 `(49,339)/0.3785`。⇒ **锁屏时别指望 `Alt+X` / `Alt+Q`（`KeyBindSettings.cs:328/330`）
+   这条「非鼠标」的 `MirMessageBox` 入口。**
+2. **锁屏下鼠标两条路径都死的判别力对照**：`SetCursorPos` **能**移动光标（实测 `(1200,400) → (1069,329)`，
+   返回 True），但**没有一个鼠标消息到达客户端** —— 用「F9 开背包 + 点关闭钮 (301,13)」作对照：
+   `Msg-Click` 后帧差 **62 px**、真实 `Click-Image` 后帧差 **129 px**（都 = 没关）。真因是
+   `CMain.MPoint` 只在 `CMain_MouseMove` 里由 `Cursor.Position` 更新（`CMain.cs:176`），锁屏下客户端收不到
+   鼠标消息 ⇒ `MPoint` 陈旧 ⇒ `MirScene.OnMouseClick` 的 `ActiveControl.IsMouseOver(CMain.MPoint)`
+   （`MirScene.cs:147-165`）打不中。
+3. **沙箱账号密码**：本次用 **`333` / `333333`** 登录成功（服务端日志 `User logged in` +
+   `女道士 has connected`）。`make_sandbox -Force` 会把**原版 DB** 拷回来 ⇒ 密码回到**原版密码 `333333`**；
+   §3.2b 那段 `setpw 333 abbtest123` 只在**显式改过之后**成立（上一轮一直停在登录/选角界面，就是拿旧密码
+   `abbtest123` 登的）。
+
+**收尾状态**：沙箱的 `Client.exe` / `Server.exe` 本轮**已停**（不留 7100 占用）；上一轮那批 `orig_*` 帧都留在
+`%TEMP%\golden_sandbox\shots\`，本轮新帧 = `orig_connectbox{,2}.png` / `orig_q_*.png` / `orig_t*_*.png` /
+`orig_lm_*.png` / `orig_k_inv_*.png`。
+
+**门禁**：本轮只动文档，无产品代码变化。
+
 **仍未采集**：**原版那一侧的同状态内容帧**（需 C# 沙箱 + 解锁窗口；§3.2au 那张是 Jane 的列表，
 数据与本夹具不同，只能做区域级对照，不能做逐像素 A/B）。
 
