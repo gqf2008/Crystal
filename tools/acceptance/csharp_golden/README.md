@@ -3331,6 +3331,45 @@ C# 的语义本来就不是"叠一张图"，而是**换按钮的基础索引**�
 **门禁**：`cargo check`（lib+bin）0 error；`cargo test --lib` **885 passed / 0 failed**；
 `cargo test --test b0001_smoke --test ui_alignment` **2 + 53 passed**。
 
+### 3.2bk §3.2bj 的「详情窗拖动未采集」**收口：能跑，之前是夹具用法问题**（2026-09-29）
+
+§3.2bj 记的"拖动拿不到"本轮复现并推翻——按下面配方一次就成：
+
+```powershell
+# 1) 起客户端（需要 --quest-data-test 让目录里有任务定义）
+.\target\debug\client_bevy.exe --mock --auto-enter --quest-data-test --ui-scale 1
+# 2) 让 mock 下发「14 行描述」的那条任务（quest 1 只有 8 行描述，不够一页）
+pwsh tools/acceptance/rpc.ps1 -Method npc_call     -Params '{"object_id":4242,"key":"[@QUEST]"}'
+pwsh tools/acceptance/rpc.ps1 -Method quest_detail -Params '{"quest_id":2}'
+# 3) 取当前面板原点（该窗 Movable，被拖过就不是 (532,60) 了）
+pwsh tools/acceptance/rpc.ps1 -Method dialog_rect  -Params '{"kind":"quest_detail","fallback":"root"}'
+# 4) **用 ui_nodes_at 回读条的节点矩形**，拿它的中心当按压点
+pwsh tools/acceptance/rpc.ps1 -Method ui_nodes_at   -Params '{"x":825,"y":108}'   # → rect [825,106,12,18] z=12
+pwsh tools/acceptance/rpc.ps1 -Method click         -Params '{"x":831,"y":115,"drag_to":{"x":831,"y":200}}'
+```
+
+**实测（本轮）**：
+
+| 判据 | 实测 |
+|---|---|
+| 按压命中 | `hits: ["5168v0 12x18 [root=QuestDetail]"]` ← 就是位置条节点 |
+| 状态 | `detail_top_line` **0 → 3**（`interval = (261−46)/(24−16) = 26`） |
+| 窗**没被误拖** | `dialog_rect` 前后都是 `(532,60,316,466)` |
+| 条**跟手** | 条节点 rect **y: 106 → 184**（= 面板 46 + 3×26 ✓，`ui_nodes_at` 回读） |
+
+⇒ **§3.2bc ③（拖动读真实光标）实机验证通过**；§3.2bj 的"未采集"作废。
+
+**两条教训（正是 §3.2bj 两次失败的原因）**：
+
+1. **消息区必须先 >16 行**：quest 1（8 行描述）根本没有位置条，按在"推定的条位置"上其实按到**消息标签**
+   ⇒ 被该窗的窗拖动系统接管，**整扇窗被拖走**（§3.2bj 里"条跑到 (813,88)"就是这么来的——那是窗位移 (-12,-20) 的结果）；
+2. **按压点要用 `ui_nodes_at` 回读的条节点矩形中心**，别用"面板原点 + C# 常量"推出来的点——该窗 `Movable = true`，原点随时会变。
+
+（另注：拖动后 `win_locate Prguse2[205]` 找不到条是**正常的**——鼠标正停在条上，通用按钮系统把它切到 hover 帧了；
+判条的位置用 `ui_nodes_at` 更稳。）
+
+**门禁**：本轮只动文档，无产品代码变化。
+
 ### 3.2bj 探针补「详情窗状态」＋ §3.2bc ③（详情窗位置条拖动）复验：**仍未采集，但原因具体化**（2026-09-29）
 
 **① 探针扩展（本轮落地）**：`quest_list_probe` 原来只回 NPC 侧列表窗的状态，详情窗（`QuestDetailDialog`）
