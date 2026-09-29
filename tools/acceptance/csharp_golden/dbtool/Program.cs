@@ -67,6 +67,7 @@ class Program
         }
         if (mode == "export") { Export(arg2 ?? "db_export.json"); return; }
         if (mode == "setpw") { SetPassword(arg2, args.Length > 3 ? args[3] : null); return; }
+        if (mode == "setgold") { SetGold(arg2, args.Length > 3 ? args[3] : null, args.Length > 4 ? args[4] : null); return; }
         if (mode == "npcs") { ListNpcs(arg2); return; }
         if (mode == "gameshop") { ListGameShop(arg2); return; }
         if (mode == "setpos")
@@ -83,7 +84,8 @@ class Program
             return;
         }
         Console.WriteLine("usage: dbtool <serverDir> list | dump <TypeFullName> | export <outfile> | " +
-                          "setpw <accountId> <newPassword> | npcs [mapIndex] | gameshop [outfile] | " +
+                          "setpw <accountId> <newPassword> | setgold <accountId> <gold> [credit] | " +
+                          "npcs [mapIndex] | gameshop [outfile] | " +
                           "setpos <accountId> <mapIndex> <x> <y> [charName]");
     }
 
@@ -271,6 +273,56 @@ class Program
         if (saveAcc == null) { Console.WriteLine("SaveAccounts() not found"); return; }
         saveAcc.Invoke(env, null);
         Console.WriteLine("saved Server.MirADB");
+    }
+
+    // 给账号发钱：`Server.MirDatabase.AccountInfo.Gold` / `.Credit`（两个都是 `UInt32` 公开字段）。
+    // 用途：客户端的 `GameScene.Gold/Credit` 就来自这里，而 `MirGameShopCell.BuyProduct()`
+    // （`Client/MirControls/MirGameShopCell.cs:193-228`）要过 `Item.GoldPrice * Quantity <= GameScene.Gold`
+    // 才会弹 `MirMessageBox(ConfirmPurchaseItemGold, YesNo)`——金币 0 时**只发系统聊天**、不弹框，
+    // 于是沙箱里点十次买钮也取不到那扇"原版同状态帧"（见 README §3.2bm）。
+    // 只调 `SaveAccounts()`（写 Server.MirADB），**不碰 `SaveDB()`**——与 setpw/setpos 同一条保存路径
+    //（离线 LoadDB() 时 MapInfoList/ItemInfoList 是空的，SaveDB() 会把 Server.MirDB 写坏）。
+    static void SetGold(string accountId, string goldS, string creditS)
+    {
+        if (string.IsNullOrEmpty(accountId) || string.IsNullOrEmpty(goldS))
+        {
+            Console.WriteLine("usage: setgold <accountId> <gold> [credit]");
+            return;
+        }
+        if (!uint.TryParse(goldS, out var gold))
+        {
+            Console.WriteLine("gold must be a uint32");
+            return;
+        }
+        uint credit = 0u;
+        if (!string.IsNullOrEmpty(creditS) && !uint.TryParse(creditS, out credit))
+        {
+            Console.WriteLine("credit must be a uint32");
+            return;
+        }
+        var env = LoadEnvir(out var err);
+        if (err.Length > 0) { Console.WriteLine("accounts did not load: " + err); return; }
+        var target = Seq(F(env, "AccountList")).FirstOrDefault(a => S(F(a, "AccountID")) == accountId);
+        if (target == null) { Console.WriteLine("account not found: " + accountId); return; }
+        var goldField = target.GetType().GetField("Gold", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+        var creditField = target.GetType().GetField("Credit", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+        if (goldField == null || creditField == null) { Console.WriteLine("Gold/Credit field not found on " + target.GetType().FullName); return; }
+        Console.WriteLine($"account {accountId}: gold {I(F(target, "Gold"))} -> {gold}, credit {I(F(target, "Credit"))} -> {credit}");
+        goldField.SetValue(target, gold);
+        creditField.SetValue(target, credit);
+        CheckWalletSavePath(env, target, accountId);
+    }
+
+    // 写 Server.MirADB（与 setpw/setpos 同一条路径），写完回读一遍确认落盘值。
+    static void CheckWalletSavePath(object env, object target, string accountId)
+    {
+        var envirType = allTypes.First(t => t.FullName == "Server.MirEnvir.Envir");
+        var saveAcc = envirType.GetMethod("SaveAccounts", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance,
+                                          null, Type.EmptyTypes, null);
+        if (saveAcc == null) { Console.WriteLine("SaveAccounts() not found"); return; }
+        saveAcc.Invoke(env, null);
+        Console.WriteLine("saved Server.MirADB");
+        Console.WriteLine($"readback: {accountId} gold={I(F(target, "Gold"))} credit={I(F(target, "Credit"))}");
     }
 
     static object LoadEnvir(out string loadAccountsError)
