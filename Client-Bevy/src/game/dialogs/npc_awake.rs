@@ -37,6 +37,18 @@ use crate::ui::theme::{
 /// #2892 批B：面板精灵与 C# 原生尺寸（C# `NPCAwakeDialog.Index = 710; Library = Libraries.Title`）
 pub const PANEL: (LibraryName, usize) = (LibraryName::Title, 710);
 pub const PANEL_SIZE: (f32, f32) = (360.0, 420.0);
+/// 面板原点：**不是**类构造器里写的 `(0,0)`。
+///
+/// C# `NPCAwakeDialog` 的 `Location = new Point(0, 0)`（`NPCDialogs.cs:1884`）会被 `GameScene`
+/// 构造时**逐实例覆盖**：`NPCAwakeDialog = new NPCAwakeDialog { …, Location = new Point(0,
+/// GameScene.Scene.NPCDialog.Size.Height) }`（`GameScene.cs:307`）。`NPCDialog` = `Prguse[995]`
+/// 440x224 ⇒ 真位置是 **(0,224)**，即**贴在 NPC 对话窗正下方**。
+///
+/// 2026-09-29 实机取证（README §3.2ar）：原版点 `Awaken` 后把 `Title[710]` 做**全屏模板匹配**，
+/// 命中的是 **(0,224)**（不符率 0.11），而本端原先按类里的 (0,0) 画 ⇒ 会盖住 NPC 对话窗。
+/// 这条一直没被抓到，是因为 `tools/acceptance/csharp_golden/window_rect_table.py` 读的也是
+/// **类里的** `Location`（期望值给成 (0,0,360,420)）——属于该工具的口径缺口，别按它判。
+pub const PANEL_ORIGIN: (f32, f32) = (0.0, 224.0);
 /// 主物品格尺寸 = C# `MirItemCell` 構造子里的默认 `Size = new Size(36, 32)`
 /// （`Client/MirControls/MirItemCell.cs:184-186`）。本端此前画 36x28：不仅命中区比原版矮 4px，
 /// `npc_awake_render_system` 还会把物品图**拉伸**到节点尺寸 ⇒ 图标纵向被压扁。
@@ -404,11 +416,20 @@ fn spawn_npc_awake(
     let font = ui_font.0.clone();
     let cjk = shared_cjk_font(&mut fonts, &mut cjk_font);
 
-    // 面板 Title[710]（360x420）C# Location (0,0)
+    // 面板 Title[710]（360x420）@ (0,224)：C# 的真实位置由 `GameScene.cs:307` 逐实例覆盖成
+    // `(0, NPCDialog.Size.Height)` = (0,224)，不是类里的 (0,0)（见 `PANEL_ORIGIN` 的说明）。
     let Some(bg) = load_lib_image(&mut libs, &mut images, LibraryName::Title, 710) else {
         return;
     };
-    let panel = spawn_panel(&mut commands, bg, 0.0, 0.0, PANEL_SIZE.0, PANEL_SIZE.1, 30);
+    let panel = spawn_panel(
+        &mut commands,
+        bg,
+        PANEL_ORIGIN.0,
+        PANEL_ORIGIN.1,
+        PANEL_SIZE.0,
+        PANEL_SIZE.1,
+        30,
+    );
     commands
         .entity(panel)
         .insert((DialogRoot(DialogKind::NpcAwake), NpcAwakeWidget));
@@ -603,6 +624,14 @@ mod tests {
             "C# NPCAwakeDialog.Index = 710"
         );
         assert_eq!(PANEL_SIZE, (360.0, 420.0), "Title[710] 图头 360x420");
+        // 位置取 `GameScene.cs:307` 的逐实例覆盖，不是类里的 (0,0)。
+        // 阳性对照（已实做）：把 `PANEL_ORIGIN` 改回 `(0.0, 0.0)` ⇒ 本断言立即红；
+        // 实机侧同样红——原版全屏模板匹配命中的是 (0,224)（README §3.2ar）。
+        assert_eq!(
+            PANEL_ORIGIN,
+            (0.0, 224.0),
+            "C# GameScene.cs:307：Location = (0, NPCDialog.Size.Height=224)"
+        );
         assert_eq!(
             MAIN_CELL_SIZE,
             (36.0, 32.0),
