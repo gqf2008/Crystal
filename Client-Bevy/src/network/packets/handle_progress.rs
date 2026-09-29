@@ -480,24 +480,35 @@ pub(crate) fn handle_progress(
             }
         }
         x if x == ServerPacketIds::NPCDisassemble as i16 => {
-            // #1356：C# S.NPCDisassemble → 打开分解面板
+            // C# `GameScene.NPCDisassemble()`（`GameScene.cs:6352-6356`）：
+            //   `NPCDropDialog.PType = PanelType.Disassemble; NPCDropDialog.Show();`
+            // ⇒ 打开的是 **投放/出售面板**（`NPCDropDialog`，`Prguse2[351]` @(264,224)），
+            //   不是觉醒面板。2026-09-29 实机取证（README §3.2at）：原版点 `Disassemble` 后
+            //   (264,224) 出现该面板，文案 `ItemWillBeDestroyed`（`NPCDialogs.cs:1770-1771`）。
+            //   本端此前把它接成 `NpcAwakePanel{service:1}`（画觉醒面板）——已纠正。
             if awakening_system::NPCDisassemble::read_body(&mut cur).is_ok() {
-                server_events.write(ServerEvent::NpcAwakePanel { service: 1 });
-                tracing::debug!("🔧 NPC 拆卸面板");
+                server_events.write(ServerEvent::NpcSellPanel {
+                    panel_type: mir2_shared::enums::PanelType::Disassemble,
+                });
+                tracing::debug!("🔧 NPC 分解面板（NPCDropDialog）");
             }
         }
         x if x == ServerPacketIds::NPCDowngrade as i16 => {
-            // #1356：C# S.NPCDowngrade → 打开降级面板
+            // 同上：C# `NPCDowngrade()`（`GameScene.cs:6358-6362`）→ `NPCDropDialog.PType = Downgrade`
             if awakening_system::NPCDowngrade::read_body(&mut cur).is_ok() {
-                server_events.write(ServerEvent::NpcAwakePanel { service: 2 });
-                tracing::debug!("⬇️ NPC 降级面板");
+                server_events.write(ServerEvent::NpcSellPanel {
+                    panel_type: mir2_shared::enums::PanelType::Downgrade,
+                });
+                tracing::debug!("⬇️ NPC 降级面板（NPCDropDialog）");
             }
         }
         x if x == ServerPacketIds::NPCReset as i16 => {
-            // #1356：C# S.NPCReset → 打开重置面板
+            // 同上：C# `NPCReset()`（`GameScene.cs:6364-6368`）→ `NPCDropDialog.PType = Reset`
             if awakening_system::NPCReset::read_body(&mut cur).is_ok() {
-                server_events.write(ServerEvent::NpcAwakePanel { service: 3 });
-                tracing::debug!("🔄 NPC 重置面板");
+                server_events.write(ServerEvent::NpcSellPanel {
+                    panel_type: mir2_shared::enums::PanelType::Reset,
+                });
+                tracing::debug!("🔄 NPC 重置面板（NPCDropDialog）");
             }
         }
         x if x == ServerPacketIds::GuildBuffList as i16 => {
