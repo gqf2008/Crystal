@@ -237,6 +237,8 @@ impl Plugin for EffectsPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<EffectsState>();
         app.add_message::<PendingEffect>();
+        // #3393：spawn_pending_effects 现在还会投施法音效请求 → 需该消息
+        app.add_message::<crate::game::sound::PlaySoundRequest>();
         // 对象特效的加法混合材质（原版 `Blend = true` 的 31 条走它、`blend = false` 的 8 条走普通 Sprite）
         crate::game::object_fx_material::register_object_fx_material(app);
         app.add_systems(
@@ -257,6 +259,13 @@ impl Plugin for EffectsPlugin {
 }
 
 /// 消费 pending：按目标实体定位生成弹道/爆炸
+#[derive(bevy::ecs::system::SystemParam)]
+struct BlendFxRes<'w> {
+    mats: ResMut<'w, Assets<crate::game::object_fx_material::ObjectFxBlendMaterial>>,
+    quad: ResMut<'w, crate::game::object_fx_material::ObjectFxQuad>,
+    meshes: ResMut<'w, Assets<Mesh>>,
+}
+
 fn spawn_pending_effects(
     mut commands: Commands,
     mut state: ResMut<EffectsState>,
@@ -267,9 +276,8 @@ fn spawn_pending_effects(
     mut cache: ResMut<UiImageCache>,
     time: Res<Time>,
     // 加法混合材质（原版 `Blend = true` 的条目）：材质资源 + 单位四边形缓存 + 网格资源
-    mut fx_mats: ResMut<Assets<crate::game::object_fx_material::ObjectFxBlendMaterial>>,
-    mut fx_quad: ResMut<crate::game::object_fx_material::ObjectFxQuad>,
-    mut meshes: ResMut<Assets<Mesh>>,
+    // —— 折成一个 `SystemParam`：Bevy 单函数上限 16 个，本函数已顶格，本轮还要再挂音效队列与性别查询。
+    mut blend: BlendFxRes,
     // 朝向从 `ActorAnim.direction` 取（原版 `ob.Direction`）——`DeathCrawlerBreath` 的
     // `272 + Direction * 4` 用它取帧段；`Option` 兼容测试/演示里没有动画组件的对象。
     actors: Query<(&NetObjectId, &Transform, Option<&ActorAnim>)>,
@@ -285,6 +293,11 @@ fn spawn_pending_effects(
     players: Query<&Transform, (With<LocalPlayer>, With<NetObjectId>)>,
     // 已存活的对象特效实体：光环 Up/Down 要清同组、DelayedExplosion 换 stage 要先移除旧实体
     object_fx_q: Query<(Entity, &ObjectFxAnim)>,
+    // #3393：施法音效（`PlayerObject.cs` 的施法块与 `new Effect(...)` 同 case）——
+    // 音效走消息队列（本函数顶格 16 个 SystemParam，挂不下 `Assets<AudioSource>`/`SoundBank`）。
+    mut sound_reqs: MessageWriter<crate::game::sound::PlaySoundRequest>,
+    // 施法音效里 C# 有 `+ (Gender == MirGender.Male ? 0 : 1)`（女号 +1）⇒ 要读施法者性别
+    genders: Query<(&NetObjectId, &crate::actor::ActorAppearance)>,
 ) {
     let pending: Vec<PendingEffect> = effects.read().copied().collect();
     if pending.is_empty() {
@@ -323,9 +336,9 @@ fn spawn_pending_effects(
                         &mut libs,
                         &mut images,
                         &mut cache,
-                        &mut meshes,
-                        &mut fx_quad,
-                        &mut fx_mats,
+                        &mut blend.meshes,
+                        &mut blend.quad,
+                        &mut blend.mats,
                         m,
                         player_pos,
                         to,
@@ -416,9 +429,9 @@ fn spawn_pending_effects(
                                 &mut libs,
                                 &mut images,
                                 &mut cache,
-                                &mut meshes,
-                                &mut fx_quad,
-                                &mut fx_mats,
+                                &mut blend.meshes,
+                                &mut blend.quad,
+                                &mut blend.mats,
                                 source,
                                 spec.base,
                                 spec.frames,
@@ -441,9 +454,9 @@ fn spawn_pending_effects(
                             &mut libs,
                             &mut images,
                             &mut cache,
-                            &mut meshes,
-                            &mut fx_quad,
-                            &mut fx_mats,
+                            &mut blend.meshes,
+                            &mut blend.quad,
+                            &mut blend.mats,
                             m,
                             from,
                             to,
@@ -535,9 +548,9 @@ fn spawn_pending_effects(
                             &mut libs,
                             &mut images,
                             &mut cache,
-                            &mut meshes,
-                            &mut fx_quad,
-                            &mut fx_mats,
+                            &mut blend.meshes,
+                            &mut blend.quad,
+                            &mut blend.mats,
                             m,
                             from,
                             to,
@@ -579,6 +592,26 @@ fn spawn_pending_effects(
                     continue;
                 };
                 let pos = Vec2::new(tf.translation.x, tf.translation.y);
+                // #3393：施法音效（C# `PlayerObject.cs` 的 `case MirAction.AttackRange2:` +
+                // `case MirAction.Spell:` 块里，`SoundManager.PlaySound(...)` 与 `new Effect(...)` 同 case）。
+                // 表由 `spell_effects_from_csharp.py` 从 C# 生成（id 用 **C# Spell 值**算——本端枚举是 C# +3）。
+                if let Ok(sp) = mir2_shared::enums::Spell::try_from(spell) {
+                    let female = genders
+                        .iter()
+                        .find(|(id, _)| id.0 == object_id)
+                        .map(|(_, a)| a.gender != mir2_shared::enums::MirGender::Male)
+                        .unwrap_or(false);
+                    // ⚠️ 只有**玩家/英雄**施法才放这张表里的音效：C# 该表在 `PlayerObject.SetAction` 里，
+                    // 怪物走 `MonsterObject` 的 `BaseSound + n` 那一套（本端 combat.rs 已有怪物音）。
+                    // 不判种族会把玩家的法术音效套到怪物身上（实测 mock 里 `ObjectSpell` 的施法者是怪物 103）。
+                    let is_player = player_ids.iter().any(|id| id.0 == object_id);
+                    if is_player {
+                        if let Some(id) = crate::game::spell_effects::cast_sound_id(sp, female) {
+                            tracing::info!("🔊 施法音效: {sp:?} female={female} id={id}");
+                            sound_reqs.write(crate::game::sound::PlaySoundRequest(id));
+                        }
+                    }
+                }
                 match mir2_shared::enums::Spell::try_from(spell)
                     .ok()
                     .and_then(|sp| crate::game::spell_effects::spell_fx(sp, dir))
@@ -600,9 +633,9 @@ fn spawn_pending_effects(
                         // ⇒ `Library.DrawBlend` ⇒ `DXManager.SetBlend(true, rate)` = **加法混合**。
                         // 详见下方 `spawn_blend_quad_render` 的说明。
                         let (mesh, mat, scale) = spawn_blend_quad_render(
-                            &mut meshes,
-                            &mut fx_quad,
-                            &mut fx_mats,
+                            &mut blend.meshes,
+                            &mut blend.quad,
+                            &mut blend.mats,
                             &handle,
                             &images,
                         );
@@ -766,18 +799,19 @@ fn spawn_pending_effects(
                         // 原版 `Blend = true` → `Library.DrawBlend` → `DXManager.SetBlend(true)` = 加法混合。
                         // 用 Mesh2d + 加法材质表达（Bevy 的 Sprite 只有普通 alpha，做不到 ADD）。
                         let quad = crate::game::object_fx_material::object_fx_quad(
-                            &mut meshes,
-                            &mut fx_quad,
+                            &mut blend.meshes,
+                            &mut blend.quad,
                         );
                         let size = images
                             .get(&handle)
                             .map(|i| i.size_f32())
                             .unwrap_or(Vec2::splat(1.0));
-                        let mat =
-                            fx_mats.add(crate::game::object_fx_material::ObjectFxBlendMaterial {
+                        let mat = blend.mats.add(
+                            crate::game::object_fx_material::ObjectFxBlendMaterial {
                                 color: LinearRgba::WHITE,
                                 texture: handle,
-                            });
+                            },
+                        );
                         commands.spawn((
                             anim,
                             Mesh2d(quad),
@@ -1330,6 +1364,10 @@ mod tests {
             .0
             .ensure_initialized();
         world.insert_resource(bevy::prelude::Messages::<PendingEffect>::default());
+        // #3393：spawn_pending_effects 还会投施法音效请求（同 world 装配里也要备消息）
+        world.insert_resource(bevy::prelude::Messages::<
+            crate::game::sound::PlaySoundRequest,
+        >::default());
         // 一个「施法者」对象，位置随便
         world.spawn((
             NetObjectId(4242),
@@ -1422,6 +1460,10 @@ mod tests {
             .0
             .ensure_initialized();
         world.insert_resource(bevy::prelude::Messages::<PendingEffect>::default());
+        // #3393：spawn_pending_effects 还会投施法音效请求（同 world 装配里也要备消息）
+        world.insert_resource(bevy::prelude::Messages::<
+            crate::game::sound::PlaySoundRequest,
+        >::default());
         world.spawn((
             NetObjectId(4242),
             bevy::prelude::Transform::from_xyz(100.0, 200.0, 0.0),
@@ -1519,6 +1561,10 @@ mod tests {
             .0
             .ensure_initialized();
         world.insert_resource(bevy::prelude::Messages::<PendingEffect>::default());
+        // #3393：spawn_pending_effects 还会投施法音效请求（同 world 装配里也要备消息）
+        world.insert_resource(bevy::prelude::Messages::<
+            crate::game::sound::PlaySoundRequest,
+        >::default());
         world.spawn((
             NetObjectId(4242),
             bevy::prelude::Transform::from_xyz(100.0, 200.0, 0.0),
@@ -1609,6 +1655,10 @@ mod tests {
             .0
             .ensure_initialized();
         world.insert_resource(bevy::prelude::Messages::<PendingEffect>::default());
+        // #3393：spawn_pending_effects 还会投施法音效请求（同 world 装配里也要备消息）
+        world.insert_resource(bevy::prelude::Messages::<
+            crate::game::sound::PlaySoundRequest,
+        >::default());
         // 5001 = 玩家（释放方）；5002 = 怪物（同一法术，但原版走另一张表）；5003 = 目标
         world.spawn((
             NetObjectId(5001),
@@ -1695,6 +1745,10 @@ mod tests {
             .0
             .ensure_initialized();
         world.insert_resource(bevy::prelude::Messages::<PendingEffect>::default());
+        // #3393：spawn_pending_effects 还会投施法音效请求（同 world 装配里也要备消息）
+        world.insert_resource(bevy::prelude::Messages::<
+            crate::game::sound::PlaySoundRequest,
+        >::default());
         // 6001 = AxeSkeleton（C# 值 24，表里有 Range1 弹道）；6002 = 不在表里的怪物；6003 = 目标
         world.spawn((
             NetObjectId(6001),
@@ -1781,6 +1835,8 @@ mod tests {
         app.insert_state(crate::scenes::AppState::Game);
         app.init_resource::<EffectsState>();
         app.add_message::<PendingEffect>();
+        // #3393：spawn_pending_effects 现在还会投施法音效请求 → 需该消息
+        app.add_message::<crate::game::sound::PlaySoundRequest>();
         app.init_resource::<crate::game::dialogs::option::OptionState>();
         app.insert_resource(bevy::prelude::Assets::<bevy::prelude::Image>::default());
         app.insert_resource(crate::map_renderer::GameLibraries(
@@ -1850,6 +1906,10 @@ mod tests {
             .0
             .ensure_initialized();
         world.insert_resource(bevy::prelude::Messages::<PendingEffect>::default());
+        // #3393：spawn_pending_effects 还会投施法音效请求（同 world 装配里也要备消息）
+        world.insert_resource(bevy::prelude::Messages::<
+            crate::game::sound::PlaySoundRequest,
+        >::default());
         world.spawn((
             NetObjectId(4242),
             // 种族：原版 `ob.Race`。4242 当**玩家**——MagicShieldUp/Down 与 ElementalBarrierUp/Down

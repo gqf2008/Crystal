@@ -519,6 +519,25 @@ pub struct SoundCache {
     pub map: HashMap<u32, Handle<AudioSource>>,
 }
 
+/// #3393：**音效播放请求**（消息）。给那些拿不到 `Assets<AudioSource>`/`SoundBank` 的系统用
+/// （Bevy 单函数 SystemParam 上限 16，`effects::spawn_pending_effects` 已经顶格）。
+/// 由 [`play_sound_requests`] 统一消费并走 [`play_sound_cached`]。
+#[derive(Message, Debug, Clone, Copy)]
+pub struct PlaySoundRequest(pub u32);
+
+/// 消费 [`PlaySoundRequest`]（带缓存播放）
+fn play_sound_requests(
+    mut requests: MessageReader<PlaySoundRequest>,
+    mut commands: Commands,
+    mut assets: ResMut<Assets<AudioSource>>,
+    bank: Res<SoundBank>,
+    mut cache: ResMut<SoundCache>,
+) {
+    for req in requests.read() {
+        play_sound_cached(&mut commands, &mut assets, &bank, &mut cache, req.0);
+    }
+}
+
 /// 播放音效（带缓存；未命中时读盘一次并缓存）
 pub fn play_sound_cached(
     commands: &mut Commands,
@@ -628,9 +647,15 @@ impl Plugin for SoundPlugin {
         app.init_resource::<SoundBank>();
         app.init_resource::<SoundCache>();
         app.init_resource::<BgmState>();
+        // #3393：任意系统 → 音效队列（施法音效等不需要 `Assets<AudioSource>` 参数的调用方用）
+        app.add_message::<PlaySoundRequest>();
         app.add_systems(Startup, load_sound_bank);
         app.add_systems(Update, bgm_system);
         app.add_systems(Update, gold_sound_system);
+        app.add_systems(
+            Update,
+            play_sound_requests.run_if(in_state(crate::scenes::AppState::Game)),
+        );
         // #230：S.PlaySound → 播放服务端指定音效
         app.add_systems(
             Update,

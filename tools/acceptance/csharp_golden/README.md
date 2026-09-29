@@ -3398,6 +3398,51 @@ inv_slot_at(...).filter(|i| !inv_clickable_slot(*i, locked))   // ✗ 只保留�
 （+1：帧推进/音效 id/格坐标）；`cargo test --test b0001_smoke --test ui_alignment` **2 + 53 passed**；
 本轮改动文件 `cargo fmt -- --check` 无差异。
 
+### 3.2bt 施法音效：`20000 + (ushort)Spell * 10` 全表补齐（原版**施法一直没声音**）（2026-09-30）
+
+§3.2bs 补物品升级音效时发现本端**根本没有施法音效**：`sound.rs` 里只有怪物段与 `SoundList` 常量段，
+`combat.rs` 有挥砍/受击/死亡音，但 C# `PlayerObject.cs` 那套 `SoundManager.PlaySound(20000 + (ushort)Spell * 10 [+ k])`
+**一条都没接**（施法全程静音）。
+
+**① C# 真值**：施法音效在 `case MirAction.AttackRange2:` + `case MirAction.Spell:` 共用的那个
+`switch (Spell)` 里（`PlayerObject.cs:1753-1765` 起），**与 `new Effect(...)` 同一个 case** ⇒
+落点就是"施法动作开始的那一刻"。共 **61** 条：多数是 `20000 + (ushort)Spell * 10`，
+另有四种变体——`+ 1`、`+ 5`（CounterAttack）、`+ (Gender == MirGender.Male ? 0 : 1)`（**女号 +1**：
+BattleCry / CrescentSlash / FlashDash）、固定 `20000 + 139 * 10`（OneWithNature）与
+`Spell.GreatFireBall * 10`（FireBounce / MeteorShower 复用大火球的音效）。
+
+**② 补法（走既有生成器，不手抄）**：`Client-Bevy/tools/spell_effects_from_csharp.py` 本来就解析这个文件
+（`_object_fx_sound` 已会算 `20000 + (ushort)Spell.X * 10`），本轮加 `parse_spell_cast_sounds()` +
+`_spell_cast_sound()`（**不认识的形式直接报错，禁止猜**）+ `render_spell_cast_sounds()`，
+生成 `spell_effects.rs` 的 `SPELL_CAST_SOUND`（61 条，`--write` 幂等）。
+`sound.rs` 加消息 `PlaySoundRequest` + 消费系统 `play_sound_requests`（给拿不到 `Assets<AudioSource>`
+的系统用）；`effects.rs` 的 `SpellCast` 分支按 `cast_sound_id(spell, female)` 投请求。
+
+> ⚠️ **还是那条 `Spell` +3**：音效 id 必须用 **C# 枚举值**算（C# `FireBall = 31` ⇒ 20310 → `M31-0.wav`；
+> 本端 `Spell::FireBall as u8 = 34`，照抄会算成 20340 → **`M34-0.wav`（也存在，错得安静）**）。
+> 生成器读 `Shared/Enums.cs` 的 C# 值；单测用 `assert_ne!` 钉住。
+
+**③ 只有玩家/英雄施法才放这张表**：C# 该表在 `PlayerObject`，怪物走 `MonsterObject` 的
+`BaseSound + n` 那套（本端 `combat.rs` 已有怪物音）⇒ 本端按 `With<Player>` 过滤
+（**阳性对照就在同一帧**：mock 同一轮里对象 100=玩家、103=怪物都放 FireBall，
+只有玩家那条出音效日志）。
+
+**④ 实机（本端 mock，`--upgrade-test` 施放 FireBall）**
+
+| 事件 | 实测日志 |
+|---|---|
+| 玩家（object 100）施法 | `🔊 施法音效: FireBall female=false id=20310`（= 20000+31*10 ⇒ `M31-0.wav`） |
+| 同一轮怪物（object 103）施法 | **无**该日志（走怪物自己的音效路径，未被玩家表污染） |
+| 音效文件 | `Sound/M31-0.wav` 存在（错值 `M34-0.wav` 也存在——所以错了不会报错） |
+
+> 夹具补齐：mock 的 `Magic` 分支以前**只**回怪物那条 `S.ObjectSpell`，本轮让它也回一条
+> 施法者自己（object 100）的 `S.ObjectSpell`（真实服务端就是把同图玩家的施法广播回来），
+> 否则"玩家施法音效"这条链在 mock 下根本走不到。
+
+**⑤ 门禁**（`Client-Bevy`）：`cargo check --tests` 0 error；`cargo test --lib` **894 passed / 0 failed**
+（+1：音效表键/抽样 id/性别位/`assert_ne!` 反例）；`cargo test --test b0001_smoke --test ui_alignment`
+**2 + 53 passed**；本轮改动文件 `cargo fmt -- --check` 无差异。
+
 ### 3.2bm §3.2bl 的最后留白收口：`MirMessageBox` 的**原版现帧**拿到了（换入口，锁屏也能取）；并钉死 `game_shop` 买钮那条路**取不到帧的两条硬前置**（2026-09-29）
 
 §3.2bl 留的唯一留白是「原版侧**同状态帧**」（沙箱里点商品格买钮后的 `MirMessageBox`）。本轮把它定性收口：

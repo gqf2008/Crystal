@@ -1791,6 +1791,18 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                     }
                                     if let Ok(p) = client::combat::Magic::read_body(&mut cur) {
                                         tracing::info!("[MOCK] 魔法 spell={:?}", p.spell);
+                                        // #3393：施法者自己的 `S.ObjectSpell`——真实服务端会把同图玩家的施法广播回来
+                                        // （客户端据此播施法特效 + **施法音效**，见 `effects.rs` 的 SpellCast 分支）。
+                                        // 本地玩家在本 mock 里的 object_id 恒为 100。
+                                        send(
+                                            &to_client,
+                                            &server::magic_combat::ObjectSpell {
+                                                object_id: 100,
+                                                location_x: 353,
+                                                location_y: 353,
+                                                spell: p.spell,
+                                            },
+                                        );
                                         // #619：Mirroring → AddBuff（--buff-test）
                                         // #2791 单元④：回发 3 条（不同图标/数值），供 Buff 窗口
                                         // 图标行 + Hint 实机核对（攻击加成 12 / 生命增益 5 / 魔法盾 15%）
