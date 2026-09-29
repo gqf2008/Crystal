@@ -541,6 +541,17 @@ enum ControlCommand {
         clear: bool,
         reply: Sender<String>,
     },
+    /// 实机夹具（§3.2bv，2026-09-30）：把任意公告文本灌进 `NoticeState` 并开窗。
+    ///
+    /// 存在理由：公告窗（`NoticeDialog`）在台账里长期"零对拍"——原版侧的入口是**服务端下发**
+    /// （`S.UpdateNotice`，由 `<Server>\Envir\Notice.txt` 驱动），本端 mock 只在施法后回发一条
+    /// 两行公告。没有这条 RPC 就没法把**同一份文本**喂给两端（原版 26 行 → 位置条该出现、
+    /// 本端必须同状态），A/B 就永远只能比两行短文本。
+    NoticeSet {
+        title: String,
+        message: String,
+        reply: Sender<String>,
+    },
     /// 翻转 HUD 开关（2026-09-28，#3327）：`which` = `"belt"` / `"skillbar"`，
     /// `on = None` = 翻转（与 C# 热键同语义）。逐窗 A/B 的两行 HUD（Belt/Skillbar）
     /// 此前只能整帧比、等于噪声；有了它我方侧也能把这两行摆到屏上做窗内比对。
@@ -831,6 +842,9 @@ struct ControlQueries<'w, 's> {
     /// `combat_probe` 用：对象头顶血条百分比（由 `S.ObjectHealth` 写入 `ActorHp`）。
     /// 这是"攻击是否真的落到目标身上"的直接证据，不依赖视野成员变化。
     hp: Query<'w, 's, (&'static NetObjectId, &'static crate::game::combat::ActorHp)>,
+    /// §3.2bv 实机夹具 `notice_set` 用：写公告状态（`apply_control_commands` 已是 Bevy 的
+    /// 16 参数上限，新资源必须并进本 `SystemParam`，不能再加一个系统参数）。
+    notice: ResMut<'w, crate::game::dialogs::notice::NoticeState>,
     /// `state` 用：会话里的服务器权威位置留痕（`UserLocation`）——移动同步判据见
     /// `SessionState::last_server_position` 的注释。
     session: Res<'w, crate::network::SessionState>,
@@ -1416,6 +1430,39 @@ fn handle_conn(mut stream: std::net::TcpStream, tx: Sender<ControlCommand>) {
                     serde_json::from_str::<Value>(&s).unwrap_or_else(|_| json!({}))
                 } else {
                     json!({"error": "control channel closed"})
+                }
+            }
+            // 实机夹具（§3.2bv）：任意公告文本 → 开窗。{title, message}
+            "notice_set" => {
+                let title = params
+                    .get("title")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let message = params
+                    .get("message")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                if message.trim().is_empty() {
+                    json!({"error": "missing message"})
+                } else {
+                    let (reply_tx, reply_rx) = bounded::<String>(1);
+                    if tx
+                        .send(ControlCommand::NoticeSet {
+                            title,
+                            message,
+                            reply: reply_tx,
+                        })
+                        .is_ok()
+                    {
+                        let s = reply_rx
+                            .recv_timeout(std::time::Duration::from_secs(2))
+                            .unwrap_or_else(|_| "{}".to_string());
+                        serde_json::from_str::<Value>(&s).unwrap_or_else(|_| json!({}))
+                    } else {
+                        json!({"error": "control channel closed"})
+                    }
                 }
             }
             // 只读小地图探针（见 `ControlCommand::MiniMapProbe` 注释）
@@ -3559,6 +3606,17 @@ fn apply_control_commands(
                     q.guard.notice.text = None;
                 }
                 let _ = reply.try_send(json!({"ok": true, "text": q.guard.notice.text}).to_string());
+            }
+            // 实机夹具（§3.2bv）：任意公告文本 → 同一支 `set_notice`（与 `S.UpdateNotice` 一致）
+            ControlCommand::NoticeSet {
+                title,
+                message,
+                reply,
+            } => {
+                crate::game::dialogs::notice::set_notice(&mut q.notice, title, message);
+                mgr.open.push(crate::game::dialogs::DialogKind::Notice);
+                let _ =
+                    reply.try_send(json!({"ok": true, "lines": q.notice.lines.len()}).to_string());
             }
             ControlCommand::MiniMapProbe { reply } => {
                 // 绘制侧真值（只读）：判定"裁错"还是"画错"只需要这几项

@@ -3846,6 +3846,89 @@ C# 的语义本来就不是"叠一张图"，而是**换按钮的基础索引**�
 **门禁**：`cargo check`（lib+bin）0 error；`cargo test --lib` **885 passed / 0 failed**；
 `cargo test --test b0001_smoke --test ui_alignment` **2 + 53 passed**。
 
+### 3.2bv 「零对拍」批次①：公告窗 `NoticeDialog` 拿到**同状态原版帧**（键盘路径，锁屏也能取）——捞出三处真缺口并修（2026-09-30）
+
+**为什么能取到**（其他「只能靠鼠标到达」的窗做不到）：公告窗的入口是**服务端下发**
+`S.UpdateNotice`，`<Server>\Envir\Notice.txt` 一改、重登就推，全程不用鼠标（§2.1 键盘路径）。
+
+**配方（两端同文本，可复跑）**
+
+```powershell
+# ① 原版侧：写沙箱公告（注意路径是 Envir\ 下，不是 Server\ 根！）+ 重启沙箱服务端 + 键盘登录
+$sb="$env:TEMP\golden_sandbox"
+$lines=@('TITLE=服务器公告') + (1..25 | % { "第 $_ 行公告内容" })
+[IO.File]::WriteAllText("$sb\Server\Envir\Notice.txt", (($lines -join "`r`n")+"`r`n"), (New-Object Text.UTF8Encoding($false)))
+Start-Process "$sb\Server\Server.exe" -WorkingDirectory "$sb\Server"
+pwsh tools\acceptance\csharp_golden\csharp_kbd_login.ps1 -SandboxRoot $sb -Account 333 -Password 333333
+#   → shots\orig_kbd_02_ingame.png 就带公告窗（进图后 10s 截的那帧）
+# ② 本端侧：同一条文本走新夹具 `notice_set`（与 `S.UpdateNotice` 同一支 `set_notice`）
+pwsh tools\acceptance\rpc.ps1 -Method notice_set -Params '{"title":"服务器公告","message":"第 1 行公告内容\r\n…\r\n"}'
+pwsh tools\acceptance\rpc.ps1 -Method screenshot -Params '{"path":"<worktree>\ours_notice_long.png"}'
+```
+
+**判据与读数**（面板 `Prguse[961]` 316x466；原版实测落在 **(355,100)**、本端 **(354,100)**——
+差的这 1px 就是 §3.2c–§3.2f 记的**居中窗恒定取帧偏移**，比对时按 `dx=+1` 对齐，别当缺陷）
+
+| 控件 | C# 出处 | 原版实机落点（26 行公告） | 修复前（本端） | 修复后 |
+|---|---|---|---|---|
+| Panel `Prguse[961]` | `NoticeDialog.cs:34-38` | (355,100) 316x466 | (354,100) 316x466 ✓ | 同 |
+| Ok/CLOSE `Title[193]` | `:63-75`（**未设 Size** → art 68x25） | 面板内 (120,436) | **20x20 压缩**：1700 px 里 1694 不符（0.9965） | **0.0000** |
+| Up `Prguse2[470]` | `:70-88`（`Size=(16,14)` 只作命中框） | 面板内 (293,33) art 12x12 | **20x20 拉伸**：0.8194 | **0.0000** |
+| Down `Prguse2[473]` | `:89-98` | 面板内 (293,418) art 12x12 | 0.8750 | **0.0000** |
+| PositionBar `Prguse2[205]` | `:100-118`（`Movable`，y∈[46,399]） | 面板内 (293,46) art 12x18 | **根本没画**（`NoticeBar` 只声明没生成）；`>19 行`时原版有、本端无 | **0.0000** |
+
+> 上表「不符」口径 = 同尺寸区域逐像素 RGB 差之和 > 12 的像素数 / 区域像素数，**已按 `dx=+1`
+> 对齐**（原版帧比本端右 1px）。模板匹配另测：修复后 `Prguse2[205]/[470]/[473]` 在两端
+> `win_locate.py` 最优落点都不符率 **0.0000**。
+
+**整窗对表**（`shot_diff.py ours orig 354,100,670,566`）：**未对齐 120029/147256 = 81.5%**；
+**按 `dx=+1` 对齐后 23434/147256 = 15.9%**（其中正文区 18.6%、标题行 6.8%、Ok 钮 0.64%）。
+⇒ 剩下的差异是**文字**（C# `10F` + `TextRenderer` 渲染 vs 本端 CJK 字体/10px），不是几何：
+控件与面板边框都已是 0~7%。
+
+**本轮改了什么**（`Client-Bevy`）
+
+1. `game/dialogs/notice.rs`：Ok/Up/Down 三钮改**art 原生尺寸**（68x25 / 12x12 / 12x12）——
+   原先是统一 20x20，把 art 压/拉变形；新增 `ARROW_W/ARROW_H/OK_W/OK_H` 常量 + 单测钉住。
+2. 同文件：**补上 PositionBar**（`Prguse2[205/206]` @(293,46)，12x18）+ `>19 行`才显示
+   （C# `NewText` :218-243）+ 拖动跟手（`PositionBar_OnMoving` :134-152 的
+   `index_from_bar_y`，本就写好且有单测，此前是**死代码**——条根本没生成）。
+3. `control.rs`：新增实机夹具 **`notice_set {title, message}`**（→ `notice::set_notice`，
+   与 `S.UpdateNotice` 共用一条折行/置态路径）。**没有它就没法把同一份 26 行文本喂给两端**，
+   这扇窗只能停在"零对拍"。注：`apply_control_commands` 已是 Bevy 的 16 参数上限，新资源并进
+   `ControlQueries` 而不是加系统参数（加了会 `cannot become an ObserverSystem`）。
+4. `set_notice()` 抽出来：服务端事件与夹具共用（两处各写一遍折行必然漂移）。
+
+**口径坑（本轮踩到，写给下一轮）**
+
+- **公告文件在 `<Server>\Envir\Notice.txt`**，不是 `<Server>\Notice.txt`（`Server/Settings.cs:32`
+  `NoticePath = Path.Combine(EnvirPath, "Notice.txt")`）。写到根目录 → 服务端静默不推公告，
+  客户端一切正常、只是没窗——很容易误判成"本端没实现"。
+- 推送条件：`Settings.Notice.LastUpdate > Info.LastLogoutDate`（`Server/MirObjects/PlayerObject.cs:1172`）
+  ⇒ 改完文件必须**重启沙箱服务端**（`LoadNotice` 只在启动时读）；文件 mtime 新于上次登出即成立。
+- **原版 `NoticeDialog.cs` 源码与实机行为不一致**：源码 `NewText` :218-243 写明
+  `lines.Count <= 19` 时 `UpButton/DownButton.Visible = false`，但**实机帧里两个箭头一直在**
+  （3 行短公告也画，模板匹配 0.0000；`q_closed/t1_closed/select` 那些没有公告的帧则 0.55
+  找不到 ⇒ 确实是公告窗画的）。本端**按实机行为对齐**（箭头常显、位置条按行数显隐）——
+  这条差异如实记录，别照源码把箭头改没了。
+- 公告正则 `{t/colour}`、`(t/http-link)` 的解析在 §3.2ba/§3.2bc 已定案，本轮未动。
+
+**本批另外两行的状态（如实）**
+
+- **Roll（`RollDialog`）**：本端布局/帧表已按 C# `Setup` 对齐（`roll.rs` 有常量单测，骰子
+  65x65 @(474,344)、尤茨 180x130 @(422,319)）。**原版侧同状态帧未采集**：入口是 NPC 脚本
+  `ROLLDIE/ROLLYUT` 发 `S.Roll`，要先把人物走到指定 NPC 再点行——属 §3.2l 那批（需解锁 + 真鼠标）。
+  `window_rect_table.py` 也**收不了它**：`RollDialog` 是纯 `MirControl`（无 `Index/Library`，
+  尺寸/位置在 `Setup` 里按 type 现设），几何期望值只能落在 `roll.rs` 常量里（即上面那两行）。
+- **Trade / GuestTrade**：本端几何已按 C# 对齐（`trade.rs` 常量：我方 `Prguse[389]` 204x152
+  @(298,418)、对方 `[390]` @(522,418)）。**原版侧未采集**：`TradeDialog` 单开不可达
+  （§3.3 已把 Trade 列为 excluded）——要取帧得有**第二个客户端**或服务端造出交易态；
+  本端 `GuestTrade` 也刻意没有独立 RPC（批M 审查：由交易会话驱动）。判据设计留给下一轮：
+  要么给 `--mock` 补一条"造交易态"的入口（本端先能同时开两扇窗），要么原版侧起两个沙箱客户端。
+
+**门禁**：`cargo check --tests` 0 error；新增单测 `notice_buttons_use_native_art_size`
+（红检：把三钮改回 20x20 → FAILED）；lib/集成测试结论见 PR。
+
 ### 3.2bu 原版 C# 客户端连的是**原版 C# 服务端**，不是 `ServerRust`（2026-09-30 实测）
 
 **问题**：原版 `Client.exe` 到底连哪个服务端？——**本目录沙箱里连的是原版 `Server\Server.exe`**
