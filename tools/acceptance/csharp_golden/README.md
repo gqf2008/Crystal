@@ -2858,3 +2858,65 @@ clippy::chunks_exact_to_as_chunks`，是本地 rustc/clippy **1.98.1** 的新 li
 另：NPC 窗 Quest 钮的**显隐**目前仍是文本启发式（脚本行含「可接受任务」），C# 是
 `npc.GetAvailableQuests().Any()`（`NPCDialogs.cs:1006-1020`）——留到单元②一并按目录口径改
 （改它要动 `npc_ui_system` 的参数预算，见该函数 16 参注释）。
+
+### 3.2ax NPC 侧任务列表窗**内容齐了**（单元②）：消息区 + 奖励区 + 接受/完成钮；任务钮显隐改按 C# 目录口径（2026-09-29）
+
+§3.2aw 收口了窗的身份/位置/行列表；本轮把 C# 同一扇窗的**下半截内容**补齐，并把 NPC 窗任务钮的
+显隐判据从文本启发式换成 C# 的口径。
+
+**① 消息区**（C# `QuestMessage`，`QuestDialogs.cs:180-193` 构造 / `:1030-1290` 行为）：
+
+| 项 | C# | 本端 |
+|---|---|---|
+| 控件落点/尺寸 | `Location = (10, 135)`、`Size = (280, 160)` | `LIST_MSG_ORIGIN` / `LIST_MSG_W` |
+| 行数 | `new QuestMessage(..., 10)` | `LIST_MSG_LINE_COUNT = 10` |
+| 上下滚 | `Prguse2[197..199] @(292,136)` / `[207..209] @(292,282)` | 同（复用详情窗口径：显式 `Size` 被 `AutoSize` 顶掉 → 12x12 图头） |
+| 位置条 | `Prguse2[205/206] @(292,149)`，`PosMinY=149 / PosMaxY=263` | 同 |
+| 行模型 | `UpdateQuest` + `AdjustDescription`（`:1142-1213`） | 复用 `quest_message_lines`（与详情窗同一支纯函数） |
+| 标题行 | 首行黄、`{Tasks}/{Progress}/{QuestReturn}/{TimeLimit}` 行加粗缩进 15、行前圆点 `Prguse[919] @(x+5, y+5)`、每标题行 `adjust += 5` | 同口径（缩进/`adjust`/圆点照抄；**不加粗**——本端没有同字体的粗体档，留作已知差异） |
+| 滚轮 | `QuestMessage_MouseWheel`（`:1082-1098`，含「末行钳位用 `Count-1`」的原版怪癖） | 复用 `quest_msg_wheel_top_line`，光标须在消息区矩形内 |
+
+⚠️ **位置条的 y 算法不能直接复用** `quest_log::quest_msg_bar_y`：那支内部吃的是**详情窗**的
+`PosMinY/MaxY`（46/263 系）。本窗是 149/263，故在 `quest_list.rs` 另写 `quest_list_msg_bar_y`
+（同一条 C# 公式、不同常量），并单独写了单测。
+
+**② 奖励区**（C# `QuestRewards`，`:1396-1530`）：原点 `(5,307)` 与详情窗**完全相同**，
+故直接复用 `QUEST_REWARD_ORIGIN`/`reward_cell_offset`（`(i*45+15, 24|89)`）与
+`quest_reward_offsets`（经验/金币/信用三列左移链）、`quest_reward_visible_for_gender`：
+
+- 顶行：经验 `Prguse[966]@(10,2)` / 金币 `[965]@(100+Δ,2)` / 信用 `[2447]@(190+Δ′,2)` + 数值标签；
+  区标题 `Title[17]@(20,66)`。
+- 固定排**不做**性别过滤、可选排过滤（C# `:1533-1553`，固定排那行的 `FilterRewards` 被注释掉）；
+  可选排点击=多选一，存的是**未过滤下标**（`SelectedItemIndex`），与 `C.FinishQuest` 的
+  `selected_item_index` 语义一致。
+- 格子底：固定格恒 `Prguse[989]@(x,y-1)`；可选格仅选中时 `Prguse[979]@(x,y-5)`；
+  物品图居中偏移 `((40-w)/2,(32-h)/2)`（`QuestCell.DrawControl`，`:1690-1696`）。
+
+**③ 接受/完成钮**（C# `:72-143` 构造、`:402-425` `ReDisplayButtons`）：
+`Title[270..272]`（接受）与 `Title[273..275]`（完成）**同落点 (40,436)**，靠显隐二选一；
+接受 = `!Taken && CurrentQuests.Count < MaxConcurrentQuests`，完成 = `Completed`。
+点击守卫照抄：未接不发，未完成不发；有可选奖励未选时**不发送** `FinishQuest`
+（C# 此处弹 `MirMessageBox(YouMustSelectRewardItem)`——本端只拦包 + 记日志，
+**提示框未做**，见文末）。
+
+**④ NPC 窗任务钮显隐改按 C# 目录口径**（`NPCDialog.CheckQuestButtonDisplay`，`NPCDialogs.cs:1006-1020`）：
+由「脚本行含『可接受任务/可完成任务』」改为 `npc_available_quests(...).Any()` 的等价实现——
+即上一节 §3.2aw 那支纯函数。顺带补了 `npc_object_id == 0` 的守卫（C# `MapControl.GetObject(0) == null`
+→ 钮不显示；不挡会把「无 NPC 关联、服务端下发 `npc_index=0`」的任务算成本 NPC 的）。
+`npc_ui_system` 已到 Bevy 的 16 参上限，故任务目录/日志/玩家/关闭钮查询打包成 `NpcQuestAccess`。
+
+**验证**：`cargo check`（lib+bin）0 error；`cargo test --lib` **879 passed / 0 failed**（本轮 +5 条：
+消息行模型 4 态、`ReDisplayButtons` 5 态、奖励格落点、位置条钳位、`npc_object_id=0` 守卫）；
+`cargo test --test b0001_smoke --test ui_alignment` **2 + 53 passed**，其中
+`inventory_bigmap_constants` 新增本窗**全套纯几何断言**（面板/行/消息区/钮/奖励格，无 `Data/` 也跑，
+避免 `require_assets!` 在 CI 上整段跳过）。
+
+**实机 A/B：未采集**（同 §3.2aw）。`dialog open quest_list` + `win_locate.py` 的面板落点、消息区/奖励区
+逐块差异占比，留到下一次解锁窗口时补——本批不推数。
+
+**仍未做（已登记，不留在暗处）**：
+
+1. 消息区**彩色叠加段/怪物/NPC/物品链接**（详情窗在 #2810 单元②已实现）——列表窗暂按纯文本；
+2. 「必须先选奖励物品」的 `MirMessageBox` 提示框（本端只拦发包）；
+3. 位置条**拖动**（`PositionBar_OnMoving`）——本端只跟随 `TopLine` 移动，未做拖拽反向写回；
+4. 标题行**加粗**（无同字体粗体档）。
