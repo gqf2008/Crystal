@@ -443,6 +443,25 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                                     quest: mock_npc_quest_info(),
                                                 },
                                             );
+                                            // #3368 单元④：把这条任务标记成「已接 + 已完成」，
+                                            // 列表窗的**完成钮**才会出现（C# `ReDisplayButtons`：
+                                            // `SelectedQuest.Completed`），「必须先选奖励物品」的
+                                            // `MirMessageBox` 才有实机判据。
+                                            send(
+                                                &to_client,
+                                                &server::quest::ChangeQuest {
+                                                    quest:
+                                                        mir2_shared::data::client_data::ClientQuestProgress {
+                                                            id: mock_npc_quest_info().index,
+                                                            task_list: vec![
+                                                                "与 比奇老兵 对话 1/1".to_string(),
+                                                            ],
+                                                            taken: true,
+                                                            completed: true,
+                                                            new: false,
+                                                        },
+                                                },
+                                            );
                                         }
                                         let page: Vec<String> = match key.as_str() {
                                             "[@SHOP]" => vec![

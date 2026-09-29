@@ -232,9 +232,29 @@ pub(crate) fn mock_npc_quest_info() -> mir2_shared::data::client_data::ClientQue
         reward_exp: 500,
         reward_credit: 0,
         rewards_fixed_item: vec![quest_reward(1, "金创药(小)", 5, 1)],
-        rewards_select_item: vec![quest_reward(5, "木剑", 5, 1), quest_reward(221, "青铜剑", 221, 1)],
+        // #3368 单元④实机判据：可选奖励要**过性别过滤**才会画出格子
+        // （`quest_reward()` 给的是 `RequiredGender::NONE` = 无位 ⇒ 任何性别都过滤掉），
+        // 故这两件显式置成 Male|Female（C# `FilterRewards` 用 `HasFlag`，位掩码 0 必不通过）。
+        rewards_select_item: vec![
+            quest_reward_both_genders(5, "木剑", 5, 1),
+            quest_reward_both_genders(221, "青铜剑", 221, 1),
+        ],
         finish_npc_index: super::MOCK_QUEST_NPC_ID,
     }
+}
+
+/// 与 `quest_reward` 同形，但把 `required_gender` 置成 **Male|Female**（两种性别都可见）——
+/// 供"可选奖励格"类实机取证用（`RequiredGender::NONE` 会被 `FilterRewards` 滤掉）。
+pub(crate) fn quest_reward_both_genders(
+    item_index: i32,
+    name: &str,
+    image: u16,
+    count: u16,
+) -> mir2_shared::data::shared_data::QuestItemReward {
+    let mut r = quest_reward(item_index, name, image, count);
+    r.item.required_gender = mir2_shared::enums::RequiredGender::MALE
+        | mir2_shared::enums::RequiredGender::FEMALE;
+    r
 }
 
 pub(crate) fn potion_item(index: i32) -> mir2_shared::data::item::UserItem {
