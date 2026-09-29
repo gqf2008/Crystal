@@ -743,6 +743,14 @@ impl CursorSource<'_, '_> {
         let real = self.windows.single().ok().and_then(|w| w.cursor_position());
         resolve_cursor(self.probe.as_ref().and_then(|p| p.pos), real)
     }
+
+    /// **只看真实窗口光标**（忽略探针）。给"跟手"类拖动用：C# 里 `PositionBar_OnMoving`
+    /// 读的是真实鼠标位置，而探针在自动化下会被 `click` 驱动**钉在按下点**
+    /// （`drive_pending_click` 的 phase 0 写探针、结尾清探针，见 `control.rs:2712`），
+    /// 拖动期间读探针会一直读到起点 ⇒ 条不动（#3368 单元③b 实测踩到）。
+    pub fn real(&self) -> Option<Vec2> {
+        self.windows.single().ok().and_then(|w| w.cursor_position())
+    }
 }
 
 /// #2767：控制接口用到的实体查询打包（原先 16 个系统参数已是 Bevy 上限，
