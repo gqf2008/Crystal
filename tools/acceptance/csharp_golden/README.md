@@ -3167,6 +3167,55 @@ py -3.12 tools\acceptance\csharp_golden\win_locate.py --shot <png> --lib Data\Pr
 （新增 3 条：公式、报价文案、租用 ×2）；`cargo test --test b0001_smoke --test ui_alignment` **2 + 53 passed**；
 本轮改动的 6 个文件 `cargo fmt -- --check` **无差异**（master 其余文件的既有 fmt 漂移 70 处不属本轮，未动）。
 
+### 3.2bp `NPCDropDialog.Confirm` 的**客户端预检**：C# 本地拒绝，本端是**服务端权威**——结论「不照抄」（2026-09-30）
+
+§3.2bo 只补了 `BeforeDraw` 的报价；同一扇窗还有第二处「看起来是缺口」的地方：C# 的
+`NPCDropDialog.Confirm()`（`NPCDialogs.cs:1520-1656`）在发包**之前**会本地拦一批条件并直接发系统聊天。
+本轮把它逐条对到本端，**结论是：不需要照抄**——本端这些条件都在**服务端**判、而且**都有系统提示**。
+
+**① C# 客户端的本地预检（原文）**
+
+| 档 | C# 本地条件 | 拒绝文案 | 物品去留 |
+|---|---|---|---|
+| Sell | `Bind.HasFlag(DontSell)` | `CannotSellItem` | **留**（`return`） |
+| Sell | `Gold + Price()/2 > uint.MaxValue` | `CannotCarryMoreGold` | 清（`break` → 末尾 `TargetItem = null`） |
+| Repair | `DontRepair` | `CannotRepairItem` | 留 |
+| Repair | `Gold < RepairPrice()*NPCRate` | `LowGold` | 清 |
+| SpecialRepair | `DontRepair \|\| NoSRepair` | `CannotRepairItem` | 留 |
+| SpecialRepair | `Gold < RepairPrice()*3*NPCRate` | `LowGold` | 清 |
+| Consign | `DontStore \|\| DontSell` | `CannotConsignItem` | 留 |
+| Reset | `Info.NeedIdentify == false` 才发（否则静默 return） | — | 留 |
+| Refine | 精炼窗有存料 **且** `Gold >= RequiredAmount*10*NPCRate` | `YouDontHaveEnoughGoldToRefine` / `YouHaventDepositedItemsToRefine` | 留 |
+| CheckRefine | `RefineAdded != 0` | `ItemHasntBeenRefinedNoChecking` | 留 |
+| ReplaceWedRing | `Info.Type == ItemType.Ring` | `ItemIsNotRing` | 留 |
+
+**② 本端对应实现（都在服务端，且都发系统聊天）**
+
+| 条件 | 本端位置 | 实测文案（源码字面量） |
+|---|---|---|
+| Sell `DontSell` | `ServerRust/src/actors/world/item.rs:4044-4053` | 「该物品无法出售」 |
+| Repair `DontRepair` / SRepair `NoSRepair` | `item.rs:4281-4293` | 「该物品无法修理」/「该物品无法特殊修理」 |
+| Repair 耐久已满 / 费用 0 | `item.rs:4297-4309` | 「该物品不需要修理」/「该物品无法修理」 |
+| Repair 金币不足 | `item.rs:4312-4318` | 「金币不足（需要 N 金币）」 |
+| Consign `DontStore/DontSell`（+ 死亡/距离） | `market.rs:1817/1845/1873` | 「绑定的物品无法寄售」等 |
+| REPAIRALL 金币不足 | `world/mod.rs:6514-6520` | 「金币不足，修理需要 N 金币」 |
+
+⇒ **差别只有一处：C# 是本地立刻拒（零往返），本端是发出去由服务端拒（一次往返）**——而 C# 自己的服务端
+（`Server/MirObjects/PlayerObject.cs` 那侧）同样会校验，所以本端把权威放服务端、客户端不重复实现，
+不算口径差；绑定类"物品留在面板里"的行为差异也随之不存在（本端面板在收到服务端拒后仍是原样，因为
+客户端已在确认时清了 `target` —— 详见 ③ 的如实留痕）。
+
+**③ 如实留痕（本轮**没有**做、也没推数的部分）**
+
+- `CheckRefine`（`RefineAdded == 0`）与 `ReplaceWedRing`（`Type != Ring`）这两条**客户端预检**在服务端
+  的对应提示**没有逐条核到**（refine 那条走 `actors/refine.rs` 的结算路径，本轮只到"定性"）——
+  记为**未采集**，留给下一轮（要核就得跑 refine/marriage 的 e2e）。
+- **原版侧这些拒绝路径的实机帧未采集**：要在沙箱里点 NPC + 放绑定物，属 §3.2l 那批（需解锁 + 真鼠标）。
+- 本端「确认被服务端拒后，面板里的物品是留还是清」这一条**没有单独实机取证**（需要一件绑定物品的 mock
+  夹具）；本轮只在源码层确认了 C# 的留/清分支，**不推数**。
+
+**门禁**：本轮只动文档，无产品代码变化。
+
 ### 3.2bm §3.2bl 的最后留白收口：`MirMessageBox` 的**原版现帧**拿到了（换入口，锁屏也能取）；并钉死 `game_shop` 买钮那条路**取不到帧的两条硬前置**（2026-09-29）
 
 §3.2bl 留的唯一留白是「原版侧**同状态帧**」（沙箱里点商品格买钮后的 `MirMessageBox`）。本轮把它定性收口：
