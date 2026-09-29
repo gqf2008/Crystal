@@ -3370,6 +3370,31 @@ pwsh tools/acceptance/rpc.ps1 -Method click         -Params '{"x":831,"y":115,"d
 
 **门禁**：本轮只动文档，无产品代码变化。
 
+### 3.2bl 「只能靠鼠标到达」批收尾：`game_shop` **买卖路径**（商品格买钮 → `MirMessageBox` 确认 → 发包）（2026-09-29）
+
+清单最后一项。C# 的买路（`Client/MirControls/MirGameShopCell.cs:193-228`）是**三段**：
+点格内买钮 → `MirMessageBox(ConfirmPurchaseItemGold / ConfirmBuyItemCredits, YesNo)` →
+**Yes** 才 `Network.Enqueue(new C.GameshopBuy{ GIndex, Quantity, PType })`。
+
+**本端已有同构实现**：格内买钮 `Title[778..780] @ 格内(42,122)`（`game_shop.rs:285-287`）、
+确认框 `GameShopConfirm`（`Prguse[360]` 456x190 @**(284,289)**、文本 @(35,35)、Yes `Title[206..208]` @(260,157) /
+No `Title[210..212]` @(360,157)，文案取同两个 `ClientTextKeys`）——即 `MirMessageBox` 的同一套几何。
+
+**本端实机全链路**（mock，`dialog open game_shop`）：
+
+| 步骤 | 实测 |
+|---|---|
+| 点格 0 买钮 (392,395) | `hits` 命中 `11428v0 [root=GameShop]`；确认框 `win_locate Prguse[360]` 命中 **(284,289)**、不符率 **0.0442**；日志「🛒 确认购买 #221 木剑 x1 付款方式=金币」 |
+| 点 **Yes** (582,458) | `hits` 命中 `11685v0 76x25 [root=GameShop]`（Yes 钮）；日志「🛒 购买商城商品 #221（付款 1）」→ mock 回「🛒 [MOCK] 商城购买 #221 x1（付款 1）**邮件送达**」 |
+| 框是否关掉 | 复查 `Prguse[360]` 全屏最优落点已不在 (284,289)（0.2093）⇒ **框已关** |
+
+⇒ 这条清单项**本端实机收口**。**仍未采集的只剩"原版侧同状态帧"**（要在沙箱里点商品格）；
+但确认框这个控件（`MirMessageBox`）的**两端几何对照在上游已经做过**——§3.2az 用同一模板在两帧上量过
+它落在 (284,289)（本端 0.0252；C# 由 `MirMessageBox.cs:23-26` 的 `((1024-456)/2,(768-190)/2)` 给出同值），
+本轮又给同式框量到 0.0442，故只在"原版现帧"这一层留白。
+
+**门禁**：本轮只动文档，无产品代码变化。
+
 ### 3.2bj 探针补「详情窗状态」＋ §3.2bc ③（详情窗位置条拖动）复验：**仍未采集，但原因具体化**（2026-09-29）
 
 **① 探针扩展（本轮落地）**：`quest_list_probe` 原来只回 NPC 侧列表窗的状态，详情窗（`QuestDetailDialog`）
