@@ -67,6 +67,11 @@ py -3.12 .\shot_diff.py a.png b.png [x0,y0,x1,y1]
 pwsh -NoProfile -File .\csharp_kbd_login.ps1 -SandboxRoot <沙箱目录> -Account 333 -Password <pw>
 ```
 
+> **账号 `333` 的口令 = 原版 DB 里的 `333333`**（owner 2026-09-30 确认；`make_sandbox -Force`
+> 从原版 `Server.MirADB` 重拷后就是这个值）。下文 §3.2b / §3.2bl 那段
+> `setpw 333 abbtest123` **只在显式改过密码之后**成立——照抄 `abbtest123` 会一直停在登录界面
+> （§3.2bk ③ 踩过一次）。
+
 依据（原版 C# 源码）：
 
 - `Client/MirScenes/LoginScene.cs:481` `LoginDialog.TextBox_KeyPress`：账户/密码框回车 → `OKButton.InvokeMouseClick(null)`；
@@ -139,6 +144,7 @@ pwsh -NoProfile -File .\csharp_kbd_login.ps1 -SandboxRoot <沙箱目录> -Accoun
 ```powershell
 # 0) 沙箱（按段改端口 + 回读校验）+ 原版服务端 + 键盘登录
 #    （账号密码写进**沙箱副本**：dbtool <沙箱>\Server setpw 333 abbtest123；重跑 make_sandbox -Force 会把原版 DB 拷回来，密码要重设）
+#     注意：**不改密码时沙箱就是原版口令 `333` / `333333`**（见 §2.1 的提示框）
 pwsh tools/acceptance/csharp_golden/make_sandbox.ps1 -Port 7100 -Force
 Start-Process "$env:TEMP\golden_sandbox\Server\Server.exe" -WorkingDirectory "$env:TEMP\golden_sandbox\Server"
 pwsh tools/acceptance/csharp_golden/csharp_kbd_login.ps1 -SandboxRoot $env:TEMP\golden_sandbox -Account 333 -Password abbtest123
@@ -3839,6 +3845,45 @@ C# 的语义本来就不是"叠一张图"，而是**换按钮的基础索引**�
 
 **门禁**：`cargo check`（lib+bin）0 error；`cargo test --lib` **885 passed / 0 failed**；
 `cargo test --test b0001_smoke --test ui_alignment` **2 + 53 passed**。
+
+### 3.2bu 原版 C# 客户端连的是**原版 C# 服务端**，不是 `ServerRust`（2026-09-30 实测）
+
+**问题**：原版 `Client.exe` 到底连哪个服务端？——**本目录沙箱里连的是原版 `Server\Server.exe`**
+（§1 的 7100）。本项目的产品配对是 **`Client-Bevy` ↔ `ServerRust`**，两条线不是一回事。
+
+| 侧 | 监听 | 帧格式 | 谁能连 |
+|---|---|---|---|
+| 原版 `Server\Server.exe`（沙箱 7100） | 明文游戏端口 | `[u16 LE 长度][i16 opcode][body]`，**无加密** | 原版 `Client.exe`（`Client/MirNetwork/Packet.cs` 读写的就是这个） |
+| `ServerRust/.../mir2_server.exe`（gate 7000） | `cfg.network.listen_addr`（`ServerRust/config/server.toml`） | **`[u16 LE 长度] + XOR 0xAA(payload)`**（`ServerRust/src/gate/codec.rs:1-8`，对应原版 **LoginGate** 的约定；`Client-Bevy/src/network/codec.rs:4` 同 key） | `Client-Bevy`（`--real-net`） |
+
+**实测**（把沙箱客户端 `Mir2Config.ini [Network] Port` 临时从 7100 → 7000，指向本机正在跑的
+`mir2_server` debug 实例；测完已还原 7100、客户端进程已停）：
+
+1. **TCP 能连上**：`netstat` 见 `127.0.0.1:57947 → 127.0.0.1:7000 ESTABLISHED`，owner pid 的
+   `ExecutablePath` 已核为沙箱 `Client.exe`。
+2. **服务端 accept 后立刻回 `Connected`**：裸 TCP 探针收到 6 字节 `04 00 ae aa aa aa`
+   = `[u16 len=4] + XOR0xAA(00 00 00 00)` ⇒ 解出 `[u16 len=0][i16 opcode=0]`，
+   opcode 0 = `ServerPacketIds::Connected`（`SharedRust/src/enums.rs:2333`，与 C# 同值）。
+3. **原版客户端不认这帧**：登录框的 WinForms 文本框始终没出现（`Get-CsEdits` 返回 0 条
+   `WindowsForms10.Edit`；同一沙箱走 7100 时是 2 条），画面停在 `LoginScene.cs:84` 的
+   `_connectBox = new MirMessageBox(AttemptingConnectServer, Cancel)`；25s 与 90s 两帧
+   `shot_diff.py` 只差 **3430 px / 106066**，差异 bbox `(322,5,615,367)` 就是那块消息框
+   （差别来自 `LoginScene.Process()` 刷新的重试计数）。
+4. **客户端在反复重连**：90s 快照里 `127.0.0.1:* → :7000` 有 **≥20 条 `TIME_WAIT`、0 条 `ESTABLISHED`**
+   （`Network.MaxAttempts = 20`、`RetryTime = CMain.Time + 5000`）。
+
+**根因（确定性）**：原版客户端直连游戏端口时**不做 XOR**（`Client/MirNetwork/Network.cs:24-63` 只有
+`TcpClient` + `Packet` 的小端 `Length/Index` 头），而 `ServerRust` 的 gate 把 payload 整体 XOR 0xAA
+——两边「同一份 opcode 表、不同的封装」，所以**原版客户端目前连不上 `ServerRust`**，
+也不是「连上了但版本校验不过」。
+
+**据此的使用口径**：需要「原版侧」的帧/行为，一律走 §1 沙箱（原版 `Server.exe` + `Client.exe`，
+7100，口令 `333/333333`）；`ServerRust` 只服务 `Client-Bevy`。要验 Rust 服务端，用
+`scripts/run_real_e2e.ps1` / `client_bevy.exe --real-net`，别拿原版客户端当探针。
+
+**未采集**：① 中间插一层原版 `LoginGate` 后原版客户端能否连 `ServerRust`（本轮没试）；
+② `ServerRust` 那一侧的握手日志（跑着的是 9/28 的 debug 实例，stdout 没留痕，本轮只从
+客户端/网络侧取证）。
 
 ### 3.2bk §3.2bj 的「详情窗拖动未采集」**收口：能跑，之前是夹具用法问题**（2026-09-29）
 
