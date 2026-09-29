@@ -1616,7 +1616,16 @@ fn spawn_guild(
     // 邀请提示（MirMessageBox，独立覆盖层 `Prguse[360]` 456x190 @ (284,289)）
     let (bx, by) = (284.0, 289.0);
     if let Some(h) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 360) {
-        let popup = spawn_panel(&mut commands, h, bx, by, 456.0, 190.0, 45);
+        // 模态面板统一 z（C# 邀请提示也是 `MirMessageBox`，`Modal = true`）
+        let popup = spawn_panel(
+            &mut commands,
+            h,
+            bx,
+            by,
+            456.0,
+            190.0,
+            crate::game::dialogs::modal_layer::MODAL_PANEL_Z,
+        );
         commands.entity(popup).insert((
             DialogRoot(DialogKind::Guild),
             // 独立弹窗不随 Guild 开关门控；挂 DialogRoot 仅为 OnExit 时随行会窗口一起清理

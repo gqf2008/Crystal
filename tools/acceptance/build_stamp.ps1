@@ -68,30 +68,54 @@ function Assert-ClientBuildStamp {
         这样接入只需要一行、不必每个夹具都自己算构建根。
       .PARAMETER ScriptName
         夹具名，仅用于输出。
+      .PARAMETER ExpectCommit
+        **显式期望提交**（2026-09-30 补，walgit `crystal-modal-layer-batch` ③b）。
+        给了它就**不再从 exe 路径反推构建根**，直接比 `stamp.commit -eq $ExpectCommit`：
+        不等 = 陈旧/串了产物 ⇒ **exit 2**（不做「Client-Bevy 有没有改动」的软化）。
+        为什么需要：跨 target 目录跑（worktree + `CARGO_TARGET_DIR` 指主检出、或显式
+        `-ClientExe`）时反推必然失败，旧实现只打一行 WARN 就**静默跳过**——正是「拿昨天的
+        二进制跑出绿」那道护栏失效的场景。现在调用方（如 `ui_interact_sweep.ps1`）默认传
+        自己的 `RepoRoot` HEAD，护栏不再降级。
       .PARAMETER AllowDirty
         显式允许 dirty 产物（默认也只是告警，不拦）。
     #>
     param(
         [Parameter(Mandatory = $true)][string]$Exe,
         [string]$Worktree = '',
+        [string]$ExpectCommit = '',
         [string]$ScriptName = '(unknown)',
         [switch]$AllowDirty
     )
+    $stamp = Get-ClientBuildStamp -Exe $Exe
+    if ($null -eq $stamp) {
+        Write-Host ("FAIL(2)[{0}]: 被测 exe 里没有构建戳 —— 多半是**旧产物**，请重建客户端：{1}" -f $ScriptName, $Exe) -ForegroundColor Red
+        if ($Worktree) {
+            Write-Host ("          （重建：cd {0}\Client-Bevy; cargo build --bin client_bevy）" -f $Worktree) -ForegroundColor Red
+        }
+        exit 2
+    }
+    if ($ExpectCommit) {
+        $want = $ExpectCommit.Trim()
+        $ok = ($stamp.commit -eq $want) -or $stamp.commit.StartsWith($want) -or $want.StartsWith($stamp.commit)
+        if (-not $ok) {
+            Write-Host ("FAIL(2)[{0}]: 被测 exe 出自 {1}，而显式期望提交是 {2} —— **产物与预期提交不符**（-ExpectCommit），先重建再跑" -f `
+                $ScriptName, $stamp.short, $want.Substring(0, [Math]::Min(12, $want.Length))) -ForegroundColor Red
+            exit 2
+        }
+        $dirtyTag0 = if ($stamp.dirty -eq '1') { 'dirty=1（产物≠HEAD 树，仅告警）' } else { 'dirty=0' }
+        Write-Host ("  [OK][{0}] 构建戳 = 显式期望提交 {1} {2}" -f $ScriptName, $want.Substring(0, [Math]::Min(12, $want.Length)), $dirtyTag0) -ForegroundColor DarkGray
+        return
+    }
     if (-not $Worktree) {
         # 由 exe 反推构建根：取包含 `\Client-Bevy\` 的那一层，其父目录即 worktree
         $m = [regex]::Match($Exe, '^(.*)\\Client-Bevy\\', 'IgnoreCase')
         if ($m.Success) {
             $Worktree = $m.Groups[1].Value
         } else {
-            Write-Host ("  [WARN][{0}] 无法从 exe 路径反推构建根（{1}）——跳过构建戳比对" -f $ScriptName, $Exe) -ForegroundColor Yellow
-            return
+            # 不再静默跳过（③b）：没 -Worktree 又反推不出 ⇒ 直接前置失败，逼调用方显式给口径
+            Write-Host ("FAIL(2)[{0}]: 无法从 exe 路径反推构建根（{1}），且未给 -Worktree/-ExpectCommit —— 无法证明产物出处" -f $ScriptName, $Exe) -ForegroundColor Red
+            exit 2
         }
-    }
-    $stamp = Get-ClientBuildStamp -Exe $Exe
-    if ($null -eq $stamp) {
-        Write-Host ("FAIL(2)[{0}]: 被测 exe 里没有构建戳 —— 多半是**旧产物**，请重建客户端：{1}" -f $ScriptName, $Exe) -ForegroundColor Red
-        Write-Host ("          （重建：cd {0}\Client-Bevy; cargo build --bin client_bevy）" -f $Worktree) -ForegroundColor Red
-        exit 2
     }
     $head = ''
     try {

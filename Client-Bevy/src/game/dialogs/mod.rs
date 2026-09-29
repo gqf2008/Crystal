@@ -42,6 +42,8 @@ pub mod market_filter;
 pub mod mentor;
 pub mod menu;
 pub mod minimap;
+/// C# `MirControl.Modal = true` 的 **UI 层遮挡**（全客户区遮挡节点，见本文件头注）
+pub mod modal_layer;
 pub mod mount;
 pub mod notice;
 pub mod notice_box;
@@ -1568,6 +1570,8 @@ impl Plugin for DialogsPlugin {
         app.add_plugins(hero_skills::HeroSkillPlugin);
         // 统一信息提示框（C# MirMessageBox OK）+ 各窗 `Show()` 前置守卫（宠物/行会/坐骑/钓鱼）
         app.add_plugins(notice_box::NoticeBoxPlugin);
+        // 统一模态层（①）：弹框期间吞掉**整个客户区**的 UI 输入（C# `MirControl.Modal`）
+        app.add_plugins(modal_layer::ModalLayerPlugin);
         // 先置顶再开始拖动：点击重叠窗口时，先让被点窗口到最前，再由 drag 选中它。
         // 通用对话框可见性兜底：PostUpdate（所有 Update 对话框 ui_system 之后）强制隐藏
         // 未 open 的挂 DialogRoot 实体，消除控件泄漏叠加（清理"一堆 UI 堆屏幕"）。

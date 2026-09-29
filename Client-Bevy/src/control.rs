@@ -552,6 +552,15 @@ enum ControlCommand {
         message: String,
         reply: Sender<String>,
     },
+    /// 实机夹具（§3.2bw，walgit `crystal-modal-layer-batch` ①）：**显示**通用 `MirMessageBox`
+    /// （`notice_box.rs`，C# `MirMessageBox.Modal = true`）。
+    ///
+    /// 存在理由：模态遮挡（弹框期间点下层对话框应当没反应）只有实机能证——而实机要走这条路
+    /// 得先有个「按需弹框」的入口（走守卫那四扇窗是副作用，摆不出「框 + 下面那扇窗」的同帧）。
+    NoticeBoxShow {
+        text: String,
+        reply: Sender<String>,
+    },
     /// 翻转 HUD 开关（2026-09-28，#3327）：`which` = `"belt"` / `"skillbar"`，
     /// `on = None` = 翻转（与 C# 热键同语义）。逐窗 A/B 的两行 HUD（Belt/Skillbar）
     /// 此前只能整帧比、等于噪声；有了它我方侧也能把这两行摆到屏上做窗内比对。
@@ -1452,6 +1461,33 @@ fn handle_conn(mut stream: std::net::TcpStream, tx: Sender<ControlCommand>) {
                         .send(ControlCommand::NoticeSet {
                             title,
                             message,
+                            reply: reply_tx,
+                        })
+                        .is_ok()
+                    {
+                        let s = reply_rx
+                            .recv_timeout(std::time::Duration::from_secs(2))
+                            .unwrap_or_else(|_| "{}".to_string());
+                        serde_json::from_str::<Value>(&s).unwrap_or_else(|_| json!({}))
+                    } else {
+                        json!({"error": "control channel closed"})
+                    }
+                }
+            }
+            // 实机夹具（§3.2bw）：显示通用 MirMessageBox。{text}
+            "notice_box_show" => {
+                let text = params
+                    .get("text")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                if text.trim().is_empty() {
+                    json!({"error": "missing text"})
+                } else {
+                    let (reply_tx, reply_rx) = bounded::<String>(1);
+                    if tx
+                        .send(ControlCommand::NoticeBoxShow {
+                            text,
                             reply: reply_tx,
                         })
                         .is_ok()
@@ -3617,6 +3653,13 @@ fn apply_control_commands(
                 mgr.open.push(crate::game::dialogs::DialogKind::Notice);
                 let _ =
                     reply.try_send(json!({"ok": true, "lines": q.notice.lines.len()}).to_string());
+            }
+            // 实机夹具（§3.2bw）：弹出通用 MirMessageBox（模态）；判据=实机巡回的「模态遮挡」段
+            ControlCommand::NoticeBoxShow { text, reply } => {
+                q.guard.notice.show(text);
+                let _ = reply.try_send(
+                    json!({"ok": true, "visible": q.guard.notice.is_visible()}).to_string(),
+                );
             }
             ControlCommand::MiniMapProbe { reply } => {
                 // 绘制侧真值（只读）：判定"裁错"还是"画错"只需要这几项
