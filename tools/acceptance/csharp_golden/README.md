@@ -3330,3 +3330,33 @@ C# 的语义本来就不是"叠一张图"，而是**换按钮的基础索引**�
 
 **门禁**：`cargo check`（lib+bin）0 error；`cargo test --lib` **885 passed / 0 failed**；
 `cargo test --test b0001_smoke --test ui_alignment` **2 + 53 passed**。
+
+### 3.2bj 探针补「详情窗状态」＋ §3.2bc ③（详情窗位置条拖动）复验：**仍未采集，但原因具体化**（2026-09-29）
+
+**① 探针扩展（本轮落地）**：`quest_list_probe` 原来只回 NPC 侧列表窗的状态，详情窗（`QuestDetailDialog`）
+没有判据——§3.2bc ③ 那条"改读真实光标"的改动就是想验也没法断言。本轮给它补四项：
+`detail_quest_id` / `detail_top_line` / `detail_selected_reward` / `detail_confirm_cancel`
+（读的就是 `QuestDetailState`，与 `quest_detail{quest_id[,top_line][,confirm]}` 这个**既有夹具 RPC** 写的是同一份）。
+
+**② 顺带把"条该不该在"这一步确认了**：详情窗消息区要 **>16 行**位置条才出现。
+夹具里 quest 1（8 行描述）不够；**quest 2**（14 行描述，走 `npc_call 4242 [@QUEST]`）够 ⇒
+`win_locate Prguse2[205]` 命中 **(813,88) 不符率 0.0000**（该坐标 = 当前窗原点 + 面板内 (293,48)；
+**注意详情窗 `Movable = true`，面板原点会被拖走**，量条之前先取 `dialog_rect quest_detail`）。
+
+**③ 拖动本身：仍未采集，原因具体化**。夹具用 `click {x,y,drag_to}` 压在条上：
+
+| 尝试 | 结果 |
+|---|---|
+| 第一次（条在 (825,108) 的**推定**位置，实际窗原点已偏） | 按下点落在窗内 ⇒ **整扇窗被拖走**（随后量到条在 (813,88)，正好是面板原点位移 (-12,-20) 的结果）；`detail_top_line` 仍 0 |
+| 第二次（条的真实位置 (819,97) 中心） | `hits` 回 `66v0 ?`、拖后帧里**找不到** `Prguse2[205]`（最优 0.30）；`detail_top_line` 仍 0 |
+
+⇒ 与本端**列表窗**同一驱动方式能改 `top_line`（§3.2bb 实测 0→5）形成对照。差别在哪需要单独查
+（候选：两窗根/子按钮在 `dialog_drag_system` 下的命中差异、或详情窗那个 `?` 尺寸的命中实体是谁）。
+**本轮不硬猜、也不推数**，按"未采集"记。
+
+**下一次的两条路**（写给下一轮，任选其一即可给结论）：
+1. 给详情窗拖动复验加一个"只压条不拖窗"的驱动（例如测试期临时挂 `NotDraggable`，或用键盘/滚轮改 `top_line` 只验条的**显示**跟随）；
+2. 先查清两窗差异：`ui_nodes_at` 打在条心，看命中的实体与祖先链，与列表窗同点对照。
+
+**门禁**：`cargo check`（lib+bin）0 error；`cargo test --lib` **885 passed / 0 failed**；
+`cargo test --test b0001_smoke --test ui_alignment` **2 + 53 passed**。

@@ -4298,6 +4298,12 @@ fn apply_control_commands(
                     "selected_reward": q.quest_list.selected_reward,
                     // #3368 单元④：`MirMessageBox(YouMustSelectRewardItem)` 是否在弹
                     "notice": q.quest_list.notice,
+                    // #2801/#3368：任务**详情窗**状态（`QuestDetailDialog`）——`§3.2bc` 的
+                    // 位置条拖动改读真实光标要能在实机断言 `top_line` 变化，此前只有列表窗有探针。
+                    "detail_quest_id": q.quest_detail.quest_id,
+                    "detail_top_line": q.quest_detail.top_line,
+                    "detail_selected_reward": q.quest_detail.selected_reward,
+                    "detail_confirm_cancel": q.quest_detail.confirm_cancel,
                 });
                 tracing::info!("🎮 control quest_list_probe: bound={} catalog={}", payload["bound_npc"], payload["catalog_infos"]);
                 let _ = reply.send(payload.to_string());
