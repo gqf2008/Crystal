@@ -697,10 +697,22 @@ impl Plugin for QuestLogPlugin {
         app.init_resource::<QuestLogState>();
         app.init_resource::<QuestCatalog>();
         app.init_resource::<QuestDetailState>();
-        app.add_systems(
-            Update,
-            quest_log_server_events.run_if(in_state(AppState::Game)),
-        );
+        // 摄入**不设状态门**（与 `network_system` 对齐，后者也跑在所有状态）。
+        //
+        // 起因（#3368 实机挖出）：服务端把任务定义放在 **StartGame 那一串**里下发
+        // （`ServerRust/src/actors/world/session.rs:1344` `send_quest_infos`——"任务定义必须在
+        // NPC 生成之后下发"，npc_index 才是本会话的 object_id），而这一串常在客户端**还处于
+        // Select 的那一两帧**就被解码。此前这里是 `run_if(in_state(AppState::Game))`：
+        // `ServerEvent::QuestInfo` 写在非 Game 帧 → Game 门内的读者读不到 → Bevy 消息 2 帧后过期
+        // ⇒ **登录下发的任务定义整体丢失**。
+        //
+        // 实测（mock 登录串：2 条 NewQuestInfo）：`QuestCatalog.infos == 0`；只有用
+        // `--quest-data-test` 在 Game 内补发才变成 2 条。影响面不小——任务日记的「可接任务」段
+        // 与 NPC 侧任务列表窗（`QuestListDialog`）都以这份目录为数据源，实机上这两处会**空**。
+        //
+        // 本系统的参数只有 `MessageReader<ServerEvent>` + 两个插件期就 init 的资源，
+        // 在任何状态跑都安全；渲染/交互那几支系统仍留在 `in_state(Game)` 门内。
+        app.add_systems(Update, quest_log_server_events);
         app.add_systems(OnEnter(AppState::Game), spawn_quest_log);
         app.add_systems(OnEnter(AppState::Game), spawn_quest_detail);
         app.add_systems(OnExit(AppState::Game), cleanup_quest_log);
@@ -3994,6 +4006,33 @@ mod tests {
             rewards_select_item: vec![],
             finish_npc_index: 10,
         }
+    }
+
+    /// #3368 实机挖出的回归门禁：**登录串里的任务定义必须进目录**，且**不依赖
+    /// `AppState::Game`**。服务端把 `NewQuestInfo` 放在 StartGame 那一串里
+    /// （`ServerRust/src/actors/world/session.rs:1344`），那一串常在客户端还处于 Select 的帧里
+    /// 被解码；本系统此前挂着 `run_if(in_state(AppState::Game))` ⇒ 事件写在非 Game 帧、
+    /// 门内读者读不到、Bevy 消息 2 帧后过期 ⇒ 目录恒空（NPC 侧任务列表窗与日记「可接任务」段
+    /// 都会空）。把注册改回带状态门，本测试立即红。
+    #[test]
+    fn quest_info_is_ingested_outside_game_state() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        // `ServerEvent` 消息由网络插件注册；最小 App 里要自己加，否则读者参数校验失败
+        app.add_message::<crate::network::server_event::ServerEvent>();
+        // 只装任务日志插件；**刻意不进入 `AppState::Game`**（默认不是 Game）
+        app.add_plugins(QuestLogPlugin);
+        app.update();
+        app.world_mut()
+            .write_message(crate::network::server_event::ServerEvent::QuestInfo {
+                info: info(7, 1, RequiredClass::from_bits_truncate(0)),
+            });
+        app.update();
+        let cat = app.world().resource::<QuestCatalog>();
+        assert!(
+            cat.infos.iter().any(|i| i.index == 7),
+            "登录下发的任务定义必须进目录（不依赖 AppState::Game）"
+        );
     }
 
     /// #2535 子批2：带组名的任务定义（info() 的 group 变体）

@@ -31,6 +31,11 @@ use state::*;
 const MOCK_DIR_DX: [i32; 8] = [0, 1, 1, 1, 0, -1, -1, -1];
 const MOCK_DIR_DY: [i32; 8] = [-1, -1, 0, 1, 1, 1, 0, -1];
 
+/// #3368 单元②取证：mock 的「任务 NPC」object_id——`npc_call {object_id: <本值>}` 之后，
+/// `npc_index == 本值` 的那条任务定义才会出现在 NPC 侧任务列表窗里（见下面第二条
+/// `NewQuestInfo` 的注释）。取一个远离 mock 世界里其它 object_id 的值，避免撞车。
+const MOCK_QUEST_NPC_ID: u32 = 4242;
+
 /// 市场列表行（mock 侧与服务端 `MarketListing` 同形）
 type MockMarketListing = (u64, mir2_shared::data::item::UserItem, String, u32, u8, u32);
 
@@ -428,6 +433,16 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                                 },
                                             );
                                             tracing::info!("🎲 [MOCK] 掷骰结果回发 type=0 result=4");
+                                        }
+                                        // #3368：`[@QUEST]` 页顺带下发该 NPC 的任务定义——
+                                        // 实机取证不必先施法（`Magic` 分支也发一次，两条路径同源）。
+                                        if key == "[@QUEST]" {
+                                            send(
+                                                &to_client,
+                                                &server::quest::NewQuestInfo {
+                                                    quest: mock_npc_quest_info(),
+                                                },
+                                            );
                                         }
                                         let page: Vec<String> = match key.as_str() {
                                             "[@SHOP]" => vec![
@@ -2169,6 +2184,18 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                                     ],
                                                     finish_npc_index: 0,
                                                 },
+                                            },
+                                        );
+                                        // #3368 单元②取证：绑定到 mock 任务 NPC 的那条任务定义
+                                        // （`mock_npc_quest_info()`，`npc_index = MOCK_QUEST_NPC_ID`）。
+                                        // 上面那条 `npc_index = 0` 按 C# 语义（`MapControl.GetObject(0) == null`）
+                                        // 不属于任何 NPC，而 NPC 侧任务列表窗按 `npc_index == object_id` 过滤
+                                        // （C# `NPCObject.GetAvailableQuests`）——只有这条能让
+                                        // `dialog open quest_list` 出现行 + 消息区 + 奖励区。
+                                        send(
+                                            &to_client,
+                                            &server::quest::NewQuestInfo {
+                                                quest: mock_npc_quest_info(),
                                             },
                                         );
                                         send(

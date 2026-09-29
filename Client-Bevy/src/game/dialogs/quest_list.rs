@@ -693,7 +693,7 @@ fn quest_list_ui_system(
     >,
     mut widgets: Query<&mut Visibility, With<QuestListWidget>>,
     mut rows: Query<
-        (&mut Text, &QuestListRow),
+        (&mut Text, &mut Visibility, &QuestListRow),
         (Without<QuestListWidget>, Without<QuestListAvailableLabel>),
     >,
     mut marks: Query<
@@ -752,12 +752,20 @@ fn quest_list_ui_system(
     }
 
     // 行渲染（C# `RefreshInterface`：`Rows[i].Quest = Quests[i + StartIndex]`）
-    for (mut text, row) in &mut rows {
+    for (mut text, mut vis, row) in &mut rows {
         let entry = list.get(state.start + row.0).copied();
         text.0 = entry
             .and_then(|e| catalog.infos.iter().find(|c| c.index == e.quest))
             .map(|c| c.name.clone())
             .unwrap_or_default();
+        // 越界行清空并隐藏；C# `RefreshInterface` 里 `Rows[i]` 是**新建控件**（按 `Quests.Count`
+        // 逐个 new），本端是固定 5 个槽位，故显隐要显式写——**漏写就是「窗开着但一行字都看不见」**
+        // （#3368 实机取证抓到：`catalog_infos=1 / selected=2` 却 row 区亮像素 0）
+        *vis = if open && entry.is_some() {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
     }
     for (mut vis, mark) in &mut marks {
         let entry = list.get(state.start + mark.0).copied();

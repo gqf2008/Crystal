@@ -458,6 +458,13 @@ enum ControlCommand {
     QuestProbe {
         reply: Sender<String>,
     },
+    /// #3368：NPC 侧任务列表窗的**状态判据**（不是 UI 代理量）——绑定到哪只 NPC、
+    /// 目录里有多少条定义、算出来的可接/可交列表、选中/翻页/选定奖励下标。
+    /// 存在的理由：这扇窗的内容（行/消息区/奖励区）在"没有 NPC 会话"或"任务未绑到该 NPC"
+    /// 时**按 C# 语义本就该是空的**，只截图分不清"空得对"与"数据没到"。
+    QuestListProbe {
+        reply: Sender<String>,
+    },
     CombatProbe {
         reply: Sender<String>,
     },
@@ -750,6 +757,10 @@ struct ControlQueries<'w, 's> {
     session: Res<'w, crate::network::SessionState>,
     /// `quest_probe` 用：客户端侧任务日记状态（已接/已完成标记）
     quest_log: Res<'w, crate::game::dialogs::quest_log::QuestLogState>,
+    /// `quest_list_probe` 用（#3368）：NPC 侧任务列表窗状态（绑定的 NPC / 选中 / 翻页 / 选定奖励）
+    quest_list: Res<'w, crate::game::dialogs::quest_list::QuestListState>,
+    /// `quest_list_probe` 用（#3368）：任务定义目录——列表窗的行来源（`npc_index == object_id` 过滤）
+    quest_catalog: Res<'w, crate::game::dialogs::quest_log::QuestCatalog>,
     /// `chat_probe` 用：聊天过滤设置——`transparent`（C# Settings.TransparentChat）决定面板底色
     /// 是否半透明；owner 缺陷②的实机判据要读它，而 `apply_control_commands` 的参数表已到
     /// 16 个 SystemParam 上限（再多会因 `ObserverSystem` 实现上限编译失败），故挂在 `ControlQueries`。
@@ -1712,6 +1723,21 @@ fn handle_conn(mut stream: std::net::TcpStream, tx: Sender<ControlCommand>) {
                 let (reply_tx, reply_rx) = bounded::<String>(1);
                 if tx
                     .send(ControlCommand::QuestProbe { reply: reply_tx })
+                    .is_ok()
+                {
+                    let s = reply_rx
+                        .recv_timeout(std::time::Duration::from_secs(2))
+                        .unwrap_or_else(|_| "{}".to_string());
+                    serde_json::from_str::<Value>(&s).unwrap_or_else(|_| json!({}))
+                } else {
+                    json!({"error": "control channel closed"})
+                }
+            }
+            "quest_list_probe" => {
+                // #3368 只读：NPC 侧任务列表窗的状态判据（绑定 NPC / 目录 / 列表 / 选中）
+                let (reply_tx, reply_rx) = bounded::<String>(1);
+                if tx
+                    .send(ControlCommand::QuestListProbe { reply: reply_tx })
                     .is_ok()
                 {
                     let s = reply_rx
@@ -4246,6 +4272,24 @@ fn apply_control_commands(
                         "selected": q.mail.selected,
                     });
                 tracing::info!("🎮 control mail_probe: {} mails", mails.len());
+                let _ = reply.send(payload.to_string());
+            }
+            ControlCommand::QuestListProbe { reply } => {
+                // #3368：NPC 侧任务列表窗状态判据。列表算法直接复用窗口用的那支纯函数，
+                // 保证「探针说列表里有 N 条」与「窗口画 N 行」是同一个来源。
+                let payload = json!({
+                    "ok": true,
+                    "bound_npc": q.quest_list.bound_npc,
+                    "npc_object_id": q.npc_state.npc_object_id,
+                    "npc_visible": q.npc_state.visible,
+                    "catalog_infos": q.quest_catalog.infos.len(),
+                    "catalog_npc_indexes": q.quest_catalog.infos.iter().map(|i| i.npc_index).collect::<Vec<_>>(),
+                    "selected": q.quest_list.selected,
+                    "start": q.quest_list.start,
+                    "top_line": q.quest_list.top_line,
+                    "selected_reward": q.quest_list.selected_reward,
+                });
+                tracing::info!("🎮 control quest_list_probe: bound={} catalog={}", payload["bound_npc"], payload["catalog_infos"]);
                 let _ = reply.send(payload.to_string());
             }
             ControlCommand::QuestProbe { reply } => {

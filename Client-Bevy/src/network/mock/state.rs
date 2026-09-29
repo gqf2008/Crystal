@@ -196,6 +196,44 @@ pub(crate) fn quest_reward(
     }
 }
 
+/// #3368 单元②取证：**绑定到 mock 任务 NPC**（`MOCK_QUEST_NPC_ID`）的任务定义。
+///
+/// NPC 侧任务列表窗（C# `QuestListDialog`）的数据源是 `QuestCatalog.infos` 按
+/// `npc_index == 该 NPC 的 object_id` 过滤（C# `NPCObject.GetAvailableQuests`，`NPCObject.cs:390-424`）
+/// ——只有绑到本 NPC 的定义会出现在那扇窗里。既有的 demo 定义（index 1）`npc_index = 0`，
+/// 按 C# 语义（`MapControl.GetObject(0) == null`）不属于任何 NPC，故另给一条：
+/// 行/消息区/奖励区才有内容可比。
+pub(crate) fn mock_npc_quest_info() -> mir2_shared::data::client_data::ClientQuestInfo {
+    mir2_shared::data::client_data::ClientQuestInfo {
+        index: 2,
+        npc_index: super::MOCK_QUEST_NPC_ID,
+        name: "给比奇老兵送信".to_string(),
+        group: "主线".to_string(),
+        description: (1..=9)
+            .map(|i| match i {
+                2 => "把信交给{比奇老兵/LimeGreen}".to_string(),
+                4 => "顺路采集[ITEM:1001|力量戒指]".to_string(),
+                _ => format!("任务描述第 {i} 行"),
+            })
+            .collect(),
+        task_description: vec!["与 比奇老兵 对话 0/1".to_string()],
+        return_description: vec!["回到比奇城找 比奇老兵".to_string()],
+        completion_description: vec!["干得漂亮，这是你的报酬".to_string()],
+        min_level_needed: 1,
+        max_level_needed: 99,
+        quest_needed: 0,
+        class_needed: mir2_shared::enums::RequiredClass::WAR_WIZ_TAO,
+        quest_type: mir2_shared::enums::QuestType::General,
+        time_limit_in_seconds: 0,
+        reward_gold: 250,
+        reward_exp: 500,
+        reward_credit: 0,
+        rewards_fixed_item: vec![quest_reward(1, "金创药(小)", 5, 1)],
+        rewards_select_item: vec![quest_reward(5, "木剑", 5, 1), quest_reward(221, "青铜剑", 221, 1)],
+        finish_npc_index: super::MOCK_QUEST_NPC_ID,
+    }
+}
+
 pub(crate) fn potion_item(index: i32) -> mir2_shared::data::item::UserItem {
     mir2_shared::data::item::UserItem {
         unique_id: 9000 + index as u64,
