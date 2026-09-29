@@ -24,6 +24,11 @@ pub const PANEL: (LibraryName, usize) = (LibraryName::Prguse3, 20);
 const INV_W_FALLBACK: f32 = 316.0;
 const INV_H_FALLBACK: f32 = 236.0;
 
+/// 人窗（C# `CharacterDialog.Index = 504`）的面板图号与兜底尺寸
+/// （`CharacterDialog.cs:32-34`：`Title[504]` @ `(ScreenWidth-264, 0)`；实测 264x380）
+pub const CHAR_PANEL_INDEX: usize = 504;
+pub const CHAR_SIZE_FALLBACK: (f32, f32) = (264.0, 380.0);
+
 /// C# SocketDialog.Show(Inventory) 定位公式（SocketDialog.cs:108-110）：
 /// x = inv.X + (inv.W - sock.W)/2，y = inv.Y + inv.H + 5 —— 全部用背包**真实**尺寸；
 /// C# Point 是 int，除法整除截断（floor 复刻）。
@@ -36,6 +41,40 @@ fn socket_origin(inv: (f32, f32), inv_w: f32, inv_h: f32, sock_w: f32) -> (f32, 
     )
 }
 
+/// 镶嵌面板的**来源格**（C# `SocketDialog.Show(MirGridType grid, UserItem item)`，
+/// `SocketDialog.cs:88-124`）——两种来源**落点不同**：
+///
+/// | 来源 | C# 分支 | 公式（`:108-118`） |
+/// |---|---|---|
+/// | 背包 | `case MirGridType.Inventory` | `x = inv.X + (inv.W - w)/2`，`y = inv.Y + inv.H + 5` |
+/// | 装备 | `case MirGridType.Equipment` | `x = char.X + (char.W - w)/2`，`y = char.Y + char.H + 5` |
+///
+/// 两扇宿主窗 C# 都是 `Movable = true`（`InventoryDialog` / `CharacterDialog.cs:35`），
+/// 所以公式读的是**当前**位置——本端两处都从运行期 `Node.left/top` 取（见 `socket_ui_system`）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SocketSource {
+    #[default]
+    Inventory,
+    Equipment,
+}
+
+/// 纯函数：按来源算面板落点（C# 两条公式的逐值复刻；`Point` 是 int ⇒ 整除截断用 `floor`）。
+/// `host` = 宿主窗当前原点，`host_size` = 宿主窗真实尺寸，`sock_w` = 面板当前宽度。
+pub fn socket_origin_for(
+    source: SocketSource,
+    inv_origin: (f32, f32),
+    inv_size: (f32, f32),
+    char_origin: (f32, f32),
+    char_size: (f32, f32),
+    sock_w: f32,
+) -> (f32, f32) {
+    let (origin, size) = match source {
+        SocketSource::Inventory => (inv_origin, inv_size),
+        SocketSource::Equipment => (char_origin, char_size),
+    };
+    socket_origin(origin, size.0, size.1, sock_w)
+}
+
 /// 背包背景 Title[196] 真实尺寸（缺失回退 316x236 实测值）
 fn inventory_real_size(libs: &mut GameLibraries) -> (f32, f32) {
     match libs.0.get_image(LibraryName::Title, 196) {
@@ -44,10 +83,12 @@ fn inventory_real_size(libs: &mut GameLibraries) -> (f32, f32) {
     }
 }
 
-/// 镶嵌状态（当前展示的物品）
+/// 镶嵌状态（当前展示的物品 + 来源格）
 #[derive(Resource, Default)]
 pub struct SocketState {
     pub item: Option<InvItem>,
+    /// C# `SocketDialog.Show(grid, …)` 的 `grid`：决定面板贴在**背包**下还是**人窗**下
+    pub source: SocketSource,
 }
 
 #[derive(Component)]
@@ -150,6 +191,14 @@ fn socket_ui_system(
     mut mgr: ResMut<DialogManager>,
     state: Res<SocketState>,
     inv_origin: Res<InventoryOrigin>,
+    // C# `case MirGridType.Equipment`：面板贴 `CharacterDialog.Location`（该窗 `Movable = true`，
+    // 所以取运行期 `Node.left/top` 而不是常量）
+    // `Without<SocketClose>/Without<SocketPanel>`：本系统另有两处 `&mut Node`（关闭钮/面板），
+    // 不加这两个过滤 Bevy 报 B0001（同一系统内 Node 的读/写访问无法证不相交）
+    roots: Query<
+        (&Node, &crate::game::dialogs::DialogRoot),
+        (Without<SocketClose>, Without<SocketPanel>),
+    >,
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
     mut close: Query<
@@ -198,13 +247,44 @@ fn socket_ui_system(
     // 面板按孔数换图 + 按背包真实尺寸重定位（C# SocketDialog.Show：
     // x = inv.X+(inv.W-w)/2、y = inv.Y+inv.H+5、CloseButton = w-23 —— 关闭钮随实际宽度）
     let (inv_w, inv_h) = inventory_real_size(&mut libs);
+    // 人窗（C# `CharacterDialog`）：原点取运行期，尺寸取 `Title[504]` 真实值（兜底 264x380）
+    let char_origin = roots
+        .iter()
+        .find(|(_, r)| r.0 == DialogKind::Character)
+        .map(|(n, _)| {
+            (
+                match n.left {
+                    Val::Px(v) => v,
+                    _ => crate::game::dialogs::character::DIALOG_X,
+                },
+                match n.top {
+                    Val::Px(v) => v,
+                    _ => crate::game::dialogs::character::DIALOG_Y,
+                },
+            )
+        })
+        .unwrap_or((
+            crate::game::dialogs::character::DIALOG_X,
+            crate::game::dialogs::character::DIALOG_Y,
+        ));
+    let char_size = match libs.0.get_image(LibraryName::Title, CHAR_PANEL_INDEX) {
+        Some(i) => (i.width.max(0) as f32, i.height.max(0) as f32),
+        None => CHAR_SIZE_FALLBACK,
+    };
     let idx = 20 + slot_count - 1;
     let w = libs
         .0
         .get_image(LibraryName::Prguse3, idx)
         .map(|i| i.width.max(0) as f32)
         .unwrap_or(81.0); // Prguse3 缺失兜底：1 孔面板宽（最小情形）
-    let (px, py) = socket_origin((inv_origin.0, inv_origin.1), inv_w, inv_h, w);
+    let (px, py) = socket_origin_for(
+        state.source,
+        (inv_origin.0, inv_origin.1),
+        (inv_w, inv_h),
+        char_origin,
+        char_size,
+        w,
+    );
     if let Ok((mut node, mut img)) = panel.single_mut() {
         if let Some(h) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse3, idx) {
             if img.image != h {
@@ -306,6 +386,42 @@ mod tests {
         assert_eq!(socket_origin((708.0, 0.0), 316.0, 236.0, 268.0).0, 732.0);
         // 拖动背包 (100,50) 后 y=50+236+5=291
         assert_eq!(socket_origin((100.0, 50.0), 316.0, 236.0, 81.0).1, 291.0);
+    }
+
+    /// 来源格决定宿主窗（C# `SocketDialog.Show(grid, …)`，`SocketDialog.cs:108-118`）：
+    /// 背包贴 `InventoryDialog`、**装备贴 `CharacterDialog`**（`Location=(ScreenWidth-264,0)=(760,0)`、
+    /// `Title[504]` 实测 264x380 ⇒ y=380+5=385）。C# `Point` 是 int ⇒ 整除截断。
+    #[test]
+    fn socket_origin_follows_source_grid_like_csharp_show() {
+        let inv = ((0.0, 0.0), (316.0, 236.0));
+        let ch = ((760.0, 0.0), (264.0, 380.0));
+        // 背包来源：与旧口径逐值一致（y = 0+236+5 = 241）
+        assert_eq!(
+            socket_origin_for(SocketSource::Inventory, inv.0, inv.1, ch.0, ch.1, 81.0),
+            (117.0, 241.0)
+        );
+        // 装备来源：x = 760 + (264-81)/2 = 760+91 = 851；y = 0+380+5 = 385
+        assert_eq!(
+            socket_origin_for(SocketSource::Equipment, inv.0, inv.1, ch.0, ch.1, 81.0),
+            (851.0, 385.0)
+        );
+        // 12 孔面板 268 比人窗宽：x = 760 + floor((264-268)/2) = 760-2 = 758
+        assert_eq!(
+            socket_origin_for(SocketSource::Equipment, inv.0, inv.1, ch.0, ch.1, 268.0).0,
+            758.0
+        );
+        // 宿主窗被拖动/推位后公式跟随（装备：人窗被拖到 (700,40)）
+        assert_eq!(
+            socket_origin_for(
+                SocketSource::Equipment,
+                inv.0,
+                inv.1,
+                (700.0, 40.0),
+                ch.1,
+                81.0
+            ),
+            (791.0, 425.0)
+        );
     }
 
     /// B0001 冒烟（PR #2553 审查实证：close_tf 与 panel 双写 Transform 若 filter 不互斥，

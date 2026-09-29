@@ -711,11 +711,14 @@ fn char_equip_system(
         (Without<CharDialogWidget>, Without<CharEquipSlot>),
     >,
     mouse: Res<ButtonInput<MouseButton>>,
+    keys: Res<ButtonInput<KeyCode>>,
     windows: Query<&Window>,
     net: Res<NetConnection>,
-    mgr: Res<DialogManager>,
+    mut mgr: ResMut<DialogManager>,
     page: Res<CharPage>,
     panel_origin: Query<&Node, With<CharDialogWidget>>,
+    probe: Res<crate::control::CursorProbe>,
+    mut socket: ResMut<crate::game::dialogs::socket::SocketState>,
 ) {
     // 右键卸下装备（原版 C# MirItemCell 右键 → UseItem → Equipment → RemoveItem）
     // #2633 批次4 步6：读 Loadout 组件（实体缺失默认空，同旧 HudState.equipment 默认 [None;14]）
@@ -724,49 +727,70 @@ fn char_equip_system(
         .map(|l| l.slots.as_slice())
         .unwrap_or(&[]);
     if mouse.just_pressed(MouseButton::Right) && mgr.is_open(DialogKind::Character) && page.0 == 0 {
-        if let Ok(window) = windows.single() {
-            if let Some(cursor) = window.cursor_position() {
-                let (ox, oy) = panel_origin
-                    .single()
-                    .map(|n| {
-                        (
-                            match n.left {
-                                Val::Px(v) => v,
-                                _ => DIALOG_X,
-                            },
-                            match n.top {
-                                Val::Px(v) => v,
-                                _ => DIALOG_Y,
-                            },
-                        )
-                    })
-                    .unwrap_or((DIALOG_X, DIALOG_Y));
-                for pos in 0..EQUIP_SLOTS.len() {
-                    let Some((sx, sy)) = slot_screen_origin(pos, ox, oy) else {
-                        continue;
-                    };
-                    if cursor.x >= sx
-                        && cursor.x <= sx + SLOT_W
-                        && cursor.y >= sy
-                        && cursor.y <= sy + SLOT_H
-                    {
-                        if let Some(server_idx) = SERVER_SLOT_TO_POS.iter().position(|p| *p == pos)
-                        {
-                            if let Some(item) = equipment.get(server_idx).and_then(|s| s.as_ref()) {
-                                net.send_packet(&mir2_shared::packets::client::item::RemoveItem {
-                                    grid: mir2_shared::enums::MirGridType::Inventory,
-                                    unique_id: item.unique_id,
-                                    to: 0,
-                                });
-                                tracing::info!(
-                                    "🛡️ 右键卸下装备 {} (uid={})",
-                                    item.name,
-                                    item.unique_id
-                                );
+        // 光标：探针优先、真光标兜底（同 `inv_socket_open_system`；正常游玩行为不变）
+        if let Some(cursor) = crate::control::resolve_cursor(
+            probe.pos,
+            windows.single().ok().and_then(|w| w.cursor_position()),
+        ) {
+            let (ox, oy) = panel_origin
+                .single()
+                .map(|n| {
+                    (
+                        match n.left {
+                            Val::Px(v) => v,
+                            _ => DIALOG_X,
+                        },
+                        match n.top {
+                            Val::Px(v) => v,
+                            _ => DIALOG_Y,
+                        },
+                    )
+                })
+                .unwrap_or((DIALOG_X, DIALOG_Y));
+            for pos in 0..EQUIP_SLOTS.len() {
+                let Some((sx, sy)) = slot_screen_origin(pos, ox, oy) else {
+                    continue;
+                };
+                if cursor.x >= sx
+                    && cursor.x <= sx + SLOT_W
+                    && cursor.y >= sy
+                    && cursor.y <= sy + SLOT_H
+                {
+                    if let Some(server_idx) = SERVER_SLOT_TO_POS.iter().position(|p| *p == pos) {
+                        if let Some(item) = equipment.get(server_idx).and_then(|s| s.as_ref()) {
+                            // C# `MirItemCell.OnMouseClick`（`MirItemCell.cs:239-247`）：
+                            // **Ctrl+右键 → `OpenItem()`**（镶嵌面板，来源 = 装备格；面板随后贴在
+                            // `CharacterDialog` 下，`SocketDialog.cs:112-118`）；
+                            // 不带 Ctrl 的右键才是 `UseItem()` → 装备格 → `RemoveItem()`（卸下）。
+                            if keys.pressed(KeyCode::ControlLeft)
+                                || keys.pressed(KeyCode::ControlRight)
+                            {
+                                if !item.slots.is_empty() {
+                                    socket.item = Some(item.clone());
+                                    socket.source =
+                                        crate::game::dialogs::socket::SocketSource::Equipment;
+                                    mgr.open(DialogKind::Socket);
+                                    tracing::info!(
+                                        "💎 打开镶嵌面板（装备）: {} ({} 孔)",
+                                        item.name,
+                                        item.slots.len()
+                                    );
+                                }
+                                break;
                             }
+                            net.send_packet(&mir2_shared::packets::client::item::RemoveItem {
+                                grid: mir2_shared::enums::MirGridType::Inventory,
+                                unique_id: item.unique_id,
+                                to: 0,
+                            });
+                            tracing::info!(
+                                "🛡️ 右键卸下装备 {} (uid={})",
+                                item.name,
+                                item.unique_id
+                            );
                         }
-                        break;
                     }
+                    break;
                 }
             }
         }
