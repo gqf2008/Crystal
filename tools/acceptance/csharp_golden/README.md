@@ -2557,6 +2557,45 @@ py -3.12 tools\acceptance\csharp_golden\golden_ab_diff.py `
 （`Quests` 的 ±0.6pp 与 Belt/Skillbar 的整帧波动都不指向代码改动。）
 
 **门禁**：本轮只动文档，无代码变化。
+### 3.2at 觉醒 NPC 的「分解/降级/重置」在 C# 里开的是**投放面板**，不是觉醒面板（2026-09-29）
+
+沿 §3.2ar/§3.2as 继续点 NPC 时顺手查了觉醒 NPC（`BichonProvince/BichonWall/Awakening`，map 1 @(338,338)）
+的三个链接 `<Disassemble/@Disassemble>` / `<Downgrade/@Downgrade>` / `<Reset/@Reset>`。
+
+**① C# 真值（源码）**：`GameScene` 里四条路的落点**不一样**
+
+| 包 | C# 处理（`GameScene.cs`） | 开哪扇窗 |
+|---|---|---|
+| `S.NPCAwakening` | `:6347-6350` `NPCAwakeDialog.Show()` | **觉醒面板** `Title[710]` @**(0,224)** |
+| `S.NPCDisassemble` | `:6352-6356` `NPCDropDialog.PType = Disassemble; Show()` | **投放面板** `Prguse2[351]` @**(264,224)** |
+| `S.NPCDowngrade` | `:6358-6362` 同上，`PType = Downgrade` | 同上 |
+| `S.NPCReset` | `:6364-6368` 同上，`PType = Reset` | 同上 |
+
+**② 实机取证（原版侧）**：点 `Disassemble` 后，(264,224) 出现投放面板，文案
+`Item will be Destroyed`（= `ClientTextKeys.ItemWillBeDestroyed`，只出现在 `NPCDropDialog` 的
+`BeforeDraw` 里，`NPCDialogs.cs:1770-1771`）；NPC 窗仍在（`Prguse[995]` 不符率 0.0182）。
+（同页的另两档 `Downgrade`/`Reset` 走的是同一分支、同一位置，只换 `InfoLabel` 文案，
+**本轮没有逐档再点**，如实记为未采集。）
+
+**③ 本端缺口（已修）**：这三条包原先被接成 `NpcAwakePanel{service:1|2|3}` →
+**画觉醒面板**（`Title[710]` @(0,224)），而且那扇面板上还多了 **4 颗自造的"服务模式"页签**
+（觉醒/分解/降级/重置 @(30+72i,26)）——C# 的 `NPCAwakeDialog` 里**没有**这种页签
+（它只有 `UpgradeButton` `Title[712..714]` @(115,391)）。修法：
+
+- `network/packets/handle_progress.rs`：三条包改发 `ServerEvent::NpcSellPanel{ panel_type: Disassemble/Downgrade/Reset }`
+  （与 C# 的 `NPCDropDialog.PType = …` 一一对应）；
+- `game/dialogs/sell_panel.rs`：补这三档的 `InfoLabel` 文案与**确认发包**
+  （`C.DisassembleItem` / `C.DowngradeAwakening` / `C.ResetAddedItem`，对齐 `NPCDialogs.cs:1586-1597`）；
+- `game/dialogs/npc_awake.rs`：删掉那 4 颗自造页签；事件入口加纯函数
+  `NpcAwakeService::opens_awake_panel(service)` —— **只有 0 才开觉醒面板**，收到 1/2/3 会 `warn!` 并忽略
+  （接线回退时不静默）。
+
+**④ 门禁**：`cargo test --lib` **867 passed**（新增
+`only_awakening_service_opens_awake_panel`；阳性对照实做：把 `opens_awake_panel` 改回 `service <= 3`
+⇒ 立即红），`sell_panel` 的文案测试补了三档断言。
+
+**⑤ 顺带一条口径**：`NpcAwakePanel` 这个 `ServerEvent` 的 `service` 字段从此**只有 0 会真正生效**
+——服务端那边仍然照 C# 发四种包（`ServerRust/.../npc.rs:1884-1916`），客户端按上面分流。
 ### 3.2ar 「鼠标驱动」那批窗的两端同状态 A/B：`storage / craft / market / npc_awake` —— 捞出 1 处真缺口（npc_awake 的位置）（2026-09-29）
 
 §3.2ao⑤ 留下的「需要原版侧真鼠标点 NPC」那批，owner 解锁后本轮跑完。**解锁判据两条都过**：

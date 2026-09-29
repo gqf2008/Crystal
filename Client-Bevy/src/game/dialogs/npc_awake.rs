@@ -170,6 +170,17 @@ pub enum NpcAwakeService {
 }
 
 impl NpcAwakeService {
+    /// 哪些 `NpcAwakePanel{service}` 才该开**觉醒面板**——纯函数，纯为门禁。
+    ///
+    /// C# `GameScene`：只有 `NPCAwakening()` 开 `NPCAwakeDialog`（`GameScene.cs:6347-6350`）；
+    /// `NPCDisassemble/NPCDowngrade/NPCReset` 开的是**投放面板** `NPCDropDialog`
+    /// （`GameScene.cs:6352-6368`）。所以这里只放行 0。
+    ///
+    /// 阳性对照（实做）：把它改回 `service <= 3` ⇒ 单测立即红（也就等于回到"分解/降级/重置画觉醒面板"的老 bug）。
+    pub fn opens_awake_panel(service: u8) -> bool {
+        service == 0
+    }
+
     pub fn label(&self) -> &'static str {
         match self {
             Self::Awaken => "觉醒",
@@ -230,11 +241,7 @@ pub struct NpcAwakeClose;
 #[derive(Component)]
 pub struct NpcAwakeUpgrade;
 
-/// #1356：服务模式按钮（C# PanelType）
-#[derive(Component)]
-pub struct NpcAwakeServiceBtn(u8);
-
-/// #1356：操作按钮文字（觉醒/分解/降级/重置）
+/// 操作按钮文字（C# `UpgradeButton` 下方那行文案）
 #[derive(Component)]
 pub struct NpcAwakeActionLabel;
 
@@ -471,33 +478,12 @@ fn spawn_npc_awake(
             9,
         )
         .insert(NpcAwakeTypeDrop);
-        // #1356：服务模式按钮（C# PanelType：觉醒/分解/降级/重置）@(30+72i,26)
-        for (i, label) in ["觉醒", "分解", "降级", "重置"].iter().enumerate() {
-            spawn_container(p, 30.0 + i as f32 * 72.0, 26.0, 64.0, 20.0, 9)
-                .insert((
-                    Button,
-                    NpcAwakeServiceBtn(i as u8),
-                    BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.0)),
-                ))
-                .with_children(|b| {
-                    b.spawn((
-                        Node {
-                            position_type: PositionType::Absolute,
-                            left: Val::Px(2.0),
-                            top: Val::Px(4.0),
-                            ..default()
-                        },
-                        Text::new(*label),
-                        TextFont {
-                            font: FontSource::Handle(cjk.clone()),
-                            font_size: FontSize::Px(12.0),
-                            ..default()
-                        },
-                        TextColor(Color::WHITE),
-                        ZIndex(1),
-                    ));
-                });
-        }
+        // **2026-09-29 去掉四颗"服务模式"页签**（觉醒/分解/降级/重置 @(30+72i,26)）：
+        // C# `NPCAwakeDialog` 里**没有**这种页签——它的按钮只有 `UpgradeButton`（`Title[712..714]`
+        // @(115,391)，见 `NPCDialogs.cs:1925-1936`），模式由服务端**分别下发不同包**
+        // （`S.NPCAwakening` / `S.NPCDisassemble` / `S.NPCDowngrade` / `S.NPCReset`）决定：
+        // 只有前者开觉醒面板，后三者开的是**投放面板** `NPCDropDialog`（`GameScene.cs:6352-6368`）。
+        // 实机对表见 README §3.2ar（原版觉醒面板帧里 (30,250) 一带没有任何页签）。
         // #1356：操作按钮文字（升级按钮下方）
         spawn_label(p, &cjk, "觉醒", 118.0, 396.0, 12.0, Color::WHITE, 10)
             .insert(NpcAwakeActionLabel);
@@ -639,6 +625,28 @@ mod tests {
         );
     }
 
+    /// 门禁（2026-09-29 §3.2at）：只有觉醒那一路（service 0）能开这扇窗。
+    ///
+    /// 分解/降级/重置在 C# 里开的是**投放面板** `NPCDropDialog`（`GameScene.cs:6352-6368`），
+    /// 本端曾经把它们也画成觉醒面板（还多出四颗自造的模式页签）。
+    /// 阳性对照：把 `opens_awake_panel` 改回 `service <= 3` ⇒ 本测试立即红。
+    #[test]
+    fn only_awakening_service_opens_awake_panel() {
+        assert!(NpcAwakeService::opens_awake_panel(0), "S.NPCAwakening → 觉醒面板");
+        assert!(
+            !NpcAwakeService::opens_awake_panel(1),
+            "S.NPCDisassemble 应走 NPCDropDialog（投放面板）"
+        );
+        assert!(
+            !NpcAwakeService::opens_awake_panel(2),
+            "S.NPCDowngrade 应走 NPCDropDialog（投放面板）"
+        );
+        assert!(
+            !NpcAwakeService::opens_awake_panel(3),
+            "S.NPCReset 应走 NPCDropDialog（投放面板）"
+        );
+    }
+
     /// 门禁（#3264）：两个**只读材料格**必须落在 C# `ItemCells[1]/[2]` 的坐标上，
     /// 且文案规则与 C# `setNeedItems`（`NPCDialogs.cs:2165-2193`）一致：`count == 0` 不写文案。
     /// 阳性对照：把 `NEED_CELL_POS` 改回「只有主格」的旧值（例如 (0,0)）⇒ 坐标断言即红。
@@ -749,7 +757,6 @@ fn npc_awake_ui_system(
             Without<NpcAwakeMaterialText>,
         ),
     >,
-    service_btns: Query<(Entity, &Interaction, &NpcAwakeServiceBtn)>,
     mut action: Query<(&mut Text, &mut Visibility), With<NpcAwakeActionLabel>>,
     mut type_vis: Query<&mut Visibility, (With<NpcAwakeTypeDrop>, Without<NpcAwakeActionLabel>)>,
     mut mat_vis: Query<
@@ -816,20 +823,7 @@ fn npc_awake_ui_system(
             Visibility::Hidden
         };
     }
-    // #1356：服务模式切换（C# PanelType）
-    for (e, inter, svc) in &service_btns {
-        if edge(e, inter, &mut prev_inter) {
-            let new_svc = NpcAwakeService::from_u8(svc.0);
-            if new_svc != state.service {
-                state.service = new_svc;
-                state.selected_uid = None;
-                state.selected_item = None;
-                state.awake_type = None;
-                state.materials.clear();
-                state.result_text = String::new();
-            }
-        }
-    }
+    // 模式页签已删（见 `spawn_npc_awake` 里的说明）：C# 的模式由服务端包决定，页签是自造 UI。
 
     for (e, inter) in &close {
         if edge(e, inter, &mut prev_inter) {
@@ -1112,7 +1106,18 @@ fn awake_server_events(
                 awake.result_text = result_text.clone();
             }
             ServerEvent::NpcAwakePanel { service } => {
-                // #1356：C# S.NPCAwakening/S.NPCDisassemble/S.NPCDowngrade/S.NPCReset → 打开面板
+                // C# 只有 `S.NPCAwakening` 开这扇窗（`GameScene.cs:6347-6350`）；
+                // `S.NPCDisassemble/S.NPCDowngrade/S.NPCReset` 开的是**投放面板**
+                // （`GameScene.cs:6352-6368` → `NPCDropDialog`），本端已改走 `NpcSellPanel`
+                // （见 `network/packets/handle_progress.rs`）。这里只接受觉醒那一路；
+                // 真收到 1..3 说明接线回退了，**别静默**当觉醒开。
+                if !NpcAwakeService::opens_awake_panel(*service) {
+                    tracing::warn!(
+                        "⚠️ NpcAwakePanel service={} 应走 NPCDropDialog（见 handle_progress.rs），已忽略",
+                        service
+                    );
+                    continue;
+                }
                 awake.service = NpcAwakeService::from_u8(*service);
                 awake.selected_uid = None;
                 awake.selected_item = None;

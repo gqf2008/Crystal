@@ -95,6 +95,13 @@ pub fn sell_panel_prompt(mode: Option<PanelType>) -> &'static str {
         Some(PanelType::Repair) | Some(PanelType::SpecialRepair) => "放入物品后点确认修理",
         Some(PanelType::Refine) => "放入武器后点确认精炼",
         Some(PanelType::CheckRefine) => "放入物品后点确认查看精炼",
+        // C# 这三档的 `InfoLabel` 文案（`NPCDialogs.cs:1770-1789`）：
+        // Disassemble = `ClientTextKeys.ItemWillBeDestroyed`（"Item will be Destroyed"）、
+        // Downgrade = `ClientTextKeys.Downgrade`、Reset = `ClientTextKeys.Reset`。
+        // 本端这几档用与其它档一致的中文口径（本仓 sell 面板文案一向是本端中文，见 §3.2af 的"语言"类残差）。
+        Some(PanelType::Disassemble) => "放入物品后点确认分解（物品会被销毁）",
+        Some(PanelType::Downgrade) => "放入物品后点确认降级",
+        Some(PanelType::Reset) => "放入物品后点确认重置",
         _ => "放入物品后点确认出售",
     }
 }
@@ -466,6 +473,28 @@ fn sell_panel_action_system(
                     });
                     tracing::info!("🔨 面板查看精炼 {} (uid={})", item.name, item.unique_id);
                 }
+                // C# `NPCDropDialog.Confirm`（`NPCDialogs.cs:1586-1597`）三档：
+                //   Disassemble → `C.DisassembleItem{UniqueID}`、
+                //   Downgrade   → `C.DowngradeAwakening{UniqueID}`、
+                //   Reset       → `C.ResetAddedItem{UniqueID}`
+                Some(PanelType::Disassemble) => {
+                    net.send_packet(&mir2_shared::packets::client::misc::DisassembleItem {
+                        unique_id: item.unique_id,
+                    });
+                    tracing::info!("🔧 面板分解 {} (uid={})", item.name, item.unique_id);
+                }
+                Some(PanelType::Downgrade) => {
+                    net.send_packet(&mir2_shared::packets::client::misc::DowngradeAwakening {
+                        unique_id: item.unique_id,
+                    });
+                    tracing::info!("⬇️ 面板降级 {} (uid={})", item.name, item.unique_id);
+                }
+                Some(PanelType::Reset) => {
+                    net.send_packet(&mir2_shared::packets::client::misc::ResetAddedItem {
+                        unique_id: item.unique_id,
+                    });
+                    tracing::info!("🔄 面板重置 {} (uid={})", item.name, item.unique_id);
+                }
                 _ => {}
             }
         }
@@ -547,6 +576,21 @@ mod tests {
         assert_eq!(
             sell_panel_prompt(Some(PanelType::Sell)),
             "放入物品后点确认出售"
+        );
+        // 2026-09-29（§3.2at）：C# 把 `S.NPCDisassemble/NPCDowngrade/NPCReset` 接到本面板的
+        // Disassemble/Downgrade/Reset 三档（`GameScene.cs:6352-6368` → `NPCDropDialog`），
+        // 所以这三档必须有各自的提示文案，不能落回"出售"。
+        assert_eq!(
+            sell_panel_prompt(Some(PanelType::Disassemble)),
+            "放入物品后点确认分解（物品会被销毁）"
+        );
+        assert_eq!(
+            sell_panel_prompt(Some(PanelType::Downgrade)),
+            "放入物品后点确认降级"
+        );
+        assert_eq!(
+            sell_panel_prompt(Some(PanelType::Reset)),
+            "放入物品后点确认重置"
         );
         assert_eq!(sell_panel_prompt(None), "放入物品后点确认出售");
     }
