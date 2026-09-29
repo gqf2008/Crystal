@@ -1922,14 +1922,28 @@ mod tests {
     }
 
     /// 通用 MirMessageBox 的可见性就是 C# `Modal` 的生效期（`MirMessageBox.cs:19`）。
+    ///
+    /// 两个条件**都要**：有文案 **且** 面板真的建出来了。后者是独立复核（2026-09-29）
+    /// 提出的退化路径——`Prguse[360]` 缺资产时 `spawn_notice_box` 早退，没有面板也没有
+    /// OK 钮，若只看 `text` 就会锁住世界输入而屏上无任何可见 UI。
     #[test]
     fn notice_box_visible_means_modal() {
         use crate::game::dialogs::notice_box::NoticeBox;
         let mut n = NoticeBox::default();
         assert!(!n.is_visible());
+        // 只有文案、面板未就绪 ⇒ 不算模态（否则会把显示层退化升级成输入锁）
         n.show("你没有任何宠物。");
+        assert!(n.text.is_some());
+        assert!(!n.is_visible(), "面板未就绪时不得据此锁世界输入");
+        // 面板建好 + 有文案 ⇒ 模态生效
+        n.panel_ready = true;
         assert!(n.is_visible());
+        // OK / 回车 / ESC 清文案 ⇒ 不再是模态
         n.text = None;
+        assert!(!n.is_visible());
+        // 退出 Game 销毁面板 ⇒ 同样不是模态
+        n.show("x");
+        n.panel_ready = false;
         assert!(!n.is_visible());
     }
 

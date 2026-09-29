@@ -51,6 +51,14 @@ pub const OK_SIZE: (f32, f32) = (76.0, 25.0);
 #[derive(Resource, Default)]
 pub struct NoticeBox {
     pub text: Option<String>,
+    /// 面板是否**真的建出来了**（`spawn_notice_box` 建成功置 `true`，`cleanup_notice_box` 置回 `false`）。
+    ///
+    /// 为什么要它（独立复核 2026-09-29 提出的退化路径）：`spawn_notice_box` 在 `Prguse[360]`
+    /// 取不到时会提前 `return`（本文件 `let Some(bg) = load_lib_image(..) else { return }`）——
+    /// 那时**没有面板、没有 OK 钮**，而四扇窗的守卫照样能往 `text` 里写文案。
+    /// 若可见性只看 `text`，就会把一个**纯显示层退化**升级成「世界输入被锁、屏上却没有任何可见 UI」。
+    /// 故可见性 = **有文案 且 面板真的在**（Enter/ESC 仍能清文案，不是死锁，但不该锁）。
+    pub panel_ready: bool,
 }
 
 impl NoticeBox {
@@ -70,12 +78,17 @@ impl NoticeBox {
     /// 所以可见的 Modal 控件会**吞掉整个客户区的鼠标输入**，不只是自己矩形内的。
     /// `MirMessageBox.cs:19` 构造即 `Modal = true`。
     ///
-    /// 本端已接的两处（`player_control::UiLockState`）：世界点击闸。
+    /// 本端已接的（`player_control::UiLockState`）：世界点击闸。
     /// **未接**：其它 UI 对话框的点击（C# 里同样被吞）——那属于「按 picking 遮挡」，
     /// headless 门禁证不了（见 `dialogs/interact_gate.rs` 模块头「不守遮挡」），
     /// 需实机 `ui_interact_sweep.ps1`，见 walgit 线程 `crystal-modal-input-lock`。
+    ///
+    /// **注意它跟踪的是「模型 + 面板就绪」而不是面板的 `Visibility`**：当前两者同源一致
+    /// （`notice_box_system` 的显隐就是由 `text.is_some()` 推导的），但**将来若把这个资源
+    /// 复用作非模态 toast，就会静默锁住世界输入**（独立复核 2026-09-29 提示）。真要复用请
+    /// 另开一个字段/资源区分「模态」与「仅显示」，别直接拿这个判据。
     pub fn is_visible(&self) -> bool {
-        self.text.is_some()
+        self.panel_ready && self.text.is_some()
     }
 }
 
@@ -99,10 +112,16 @@ impl Plugin for NoticeBoxPlugin {
     }
 }
 
-fn cleanup_notice_box(mut commands: Commands, roots: Query<Entity, With<NoticeBoxPanel>>) {
+fn cleanup_notice_box(
+    mut commands: Commands,
+    roots: Query<Entity, With<NoticeBoxPanel>>,
+    mut notice: ResMut<NoticeBox>,
+) {
     for e in roots.iter() {
         commands.entity(e).despawn();
     }
+    // 面板没了 ⇒ 可见性判据必须跟着假，否则退出/重进 Game 会留下「锁着但画不出」的状态
+    notice.panel_ready = false;
 }
 
 fn spawn_notice_box(
@@ -112,6 +131,7 @@ fn spawn_notice_box(
     mut fonts: ResMut<Assets<Font>>,
     mut ui_font: ResMut<UiFont>,
     mut cjk_font: ResMut<UiCjkFont>,
+    mut notice: ResMut<NoticeBox>,
 ) {
     libs.0.ensure_initialized();
     if !ui_font.0.is_strong() {
@@ -133,6 +153,9 @@ fn spawn_notice_box(
     commands
         .entity(panel)
         .insert((NoticeBoxPanel, Visibility::Hidden));
+    // 建到这里才算「画得出来」——上面那个 let-else 早退路径不会执行到这里，
+    // 于是资产缺失时 panel_ready 保持 false，守卫写的文案不会变成一道看不见的输入锁。
+    notice.panel_ready = true;
     commands.entity(panel).with_children(|p| {
         spawn_label(
             p,
