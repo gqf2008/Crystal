@@ -57,6 +57,26 @@ impl NoticeBox {
     pub fn show(&mut self, text: impl Into<String>) {
         self.text = Some(text.into());
     }
+
+    /// 提示框是否可见 —— 也就是 C# `MirMessageBox.Modal == true` 生效的那段期间。
+    ///
+    /// 原版依据（`Client/MirControls/MirControl.cs`）：
+    /// ```csharp
+    /// public virtual bool IsMouseOver(Point p)          // :825-828
+    /// { return Visible && (DisplayRectangle.Contains(p) || Moving || Modal) && !NotControl; }
+    /// ```
+    /// `Modal` 为真时**任意点**都返回 `true`；子控件派发是自顶向下取第一个命中并 `return`
+    /// （`:921-927` `for (int i = Controls.Count - 1; i >= 0; i--)`）——
+    /// 所以可见的 Modal 控件会**吞掉整个客户区的鼠标输入**，不只是自己矩形内的。
+    /// `MirMessageBox.cs:19` 构造即 `Modal = true`。
+    ///
+    /// 本端已接的两处（`player_control::UiLockState`）：世界点击闸。
+    /// **未接**：其它 UI 对话框的点击（C# 里同样被吞）——那属于「按 picking 遮挡」，
+    /// headless 门禁证不了（见 `dialogs/interact_gate.rs` 模块头「不守遮挡」），
+    /// 需实机 `ui_interact_sweep.ps1`，见 walgit 线程 `crystal-modal-input-lock`。
+    pub fn is_visible(&self) -> bool {
+        self.text.is_some()
+    }
 }
 
 #[derive(Component)]
