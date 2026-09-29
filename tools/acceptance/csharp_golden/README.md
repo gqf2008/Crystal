@@ -3090,3 +3090,28 @@ C# 读的是真实鼠标位置，故给 `CursorSource` 加 `real()`（只看真�
 **同类残留（已登记）**：任务**详情窗**（`quest_detail_ui_system`）的位置条拖动仍读"探针优先"的 `cursor`，
 在自动化夹具下会有同样的"读到按下点"现象——它那支的改法与本节同（一行换成 `real()`），留给下一批；
 `#3368` 这扇窗已改。
+
+### 3.2bc 两处口径更正 + 详情窗同源修复：链接**没有**点击行为；粗体受资产限制；详情窗拖动改读真实光标（2026-09-29）
+
+**① 更正：任务消息里的链接，C# 原版「点了什么都不做」。** §3.2ba 把"链接点击"记成"仍未做①"是**错的**。
+逐行核 `QuestMessage` 全类（`QuestDialogs.cs:1003-1400`）：`Click +=` 只出现 **2 次**，都在滚动钮上
+（`:1042` 上滚 / `:1052` 下滚）；`NewLink`（`:1355-1382`）只挂了 `MouseEnter`（转橙 + `ShowTooltipForLink`）、
+`MouseLeave`（回青 + 隐提示）与 `MouseWheel`。⇒ 本端"青色 + 悬停橙 + tooltip、不响应点击"**就是**同口径，
+这一项**没有缺口**（记录更正，免得后续再按"缺点击"去实现一个原版没有的行为）。
+
+**② 更正：标题行加粗当前**做不了**，原因是资产。** C# 标题行用
+`new Font(Settings.FontName, 10F, FontStyle.Bold)`（`QuestDialogs.cs:1244`），而本端整个客户端只带
+**一个字体资产** `Client-Bevy/Assets/AlibabaPuHuiTi-3-55-Regular.ttf`（3-55 = Regular 字重，无粗体档）。
+⇒ 除非引入粗体字体资产（或对标题做描边/双层偏移模拟），否则这条只能挂着；已按"资产限制"归档，不再是"待实现代码"。
+
+**③ 详情窗同源修复**：§3.2bb 挖出的"拖动期读到按下点"在**任务详情窗**（`quest_detail_ui_system`）同样存在
+（它那支的位置条也用探针优先的 `cursor`）。本轮把它改成 `real_cursor`（只看真实窗口光标），与列表窗
+`CursorSource::real()` 同一口径；悬停/命中仍走探针优先（#2767 语义不变）。
+
+**验证**：`cargo check`（lib+bin）0 error；`cargo test --lib` **881 passed / 0 failed**；
+`cargo test --test b0001_smoke --test ui_alignment` **2 + 53 passed**。
+
+**未采集（如实留痕）**：③ 的**实机**拖动复验。路线上要先让详情窗拿到 `quest_id`（C# 是点任务日记行 →
+`QuestDetailDialog.DisplayQuestDetails`），而本端这条链要先开日记再点行、且行高/组头会让落点依赖数据——
+本轮只做了代码同源改造（与列表窗那条已被实机验证的改法逐字相同），**没有**跑通"详情窗拖动"的实机取证，
+留到能稳定驱动该链路时补。

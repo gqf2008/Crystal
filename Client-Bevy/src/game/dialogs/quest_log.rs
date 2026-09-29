@@ -1577,6 +1577,10 @@ fn quest_detail_ui_system(
         extras.probe.pos,
         windows.single().ok().and_then(|w| w.cursor_position()),
     );
+    // #3368 单元③b 同源修复：位置条"跟手"读的必须是**真实光标**——`click` 驱动会把探针
+    // 钉在按下点（`control.rs:2358-2712`），探针优先的 `cursor` 在拖动期间会一直读到起点
+    // （列表窗实测踩到，见 README §3.2bb）。C# `PositionBar_OnMoving` 读的就是真实鼠标位置。
+    let real_cursor = windows.single().ok().and_then(|w| w.cursor_position());
 
     // ---- 滚轮（C# `QuestMessage_MouseWheel`，`:1082-1098`；仅光标在消息区内生效）----
     let mut wheel_count = 0i32;
@@ -1784,7 +1788,8 @@ fn quest_detail_ui_system(
         *vis = Visibility::Visible;
         if *inter == Interaction::Pressed {
             // 拖动中：条跟手（C# `PositionBar.Location = new Point(x, y)`，不做吸附）
-            if let Some(cur) = cursor {
+            // 位置取**真实光标**（`real_cursor`），不取探针优先的 `cursor`——理由见上面声明处注释
+            if let Some(cur) = real_cursor {
                 let raw = (cur.y - panel_origin.1).round() as i32;
                 let clamped = raw.clamp(QUEST_MSG_POS_MIN_Y, QUEST_MSG_POS_MAX_Y);
                 dialogs.detail.top_line = quest_msg_top_line_at_bar(clamped, all.len(), line_count);
