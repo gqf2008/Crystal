@@ -3116,6 +3116,48 @@ C# 读的是真实鼠标位置，故给 `CursorSource` 加 `real()`（只看真�
 本轮只做了代码同源改造（与列表窗那条已被实机验证的改法逐字相同），**没有**跑通"详情窗拖动"的实机取证，
 留到能稳定驱动该链路时补。
 
+### 3.2be 几何表工具的**假绿**修掉：`window_rect_table.py` 补「运行时改写 Location」覆盖；并纠正 §3.2ap ⑤ 的 buff/timer 归因（2026-09-29）
+
+本批不开新窗，修的是"**判据本身**"——两处已登记的工具缺陷。
+
+**① `window_rect_table.py` 对 `NPCAwakeDialog` 的期望值错 → 假绿（§3.2ar ④ 记的）**
+
+工具从 C# **类构造器**里抠 `Location`，而觉醒窗的真值是在 `GameScene` 里**逐实例改写**的：
+`Client/MirScenes/GameScene.cs:307` `NPCAwakeDialog.Location = new Point(0, NPCDialog.Size.Height)` ⇒ **(0,224)**。
+2026-09-29 全仓 grep `GameScene.Scene.*Dialog.Location = ` 确认：**逐实例改 Location 的只有这一处**。
+
+修法：把原本**内联在 `main()` 里的** `RUNTIME_LOC = {"SkillBarDialog": (0,0)}`（§3.2k 技能栏那条）
+提升为模块级 `RUNTIME_LOCATION`，并加进 `NPCAwakeDialog: (0,224)`（两条都写了出处与行号）。
+
+**三向对照（同一份工具、只换输入）**：
+
+| 工具版本 | 喂进去的帧 | 判定 |
+|---|---|---|
+| 修改前 | `npc_awake=(0,0,360,420)`（本端若又错位到左上角） | **OK（假绿）** ← 这就是 §3.2ar ④ 记的风险 |
+| 修改后 | 同上 | **DIFF** ✓ |
+| 修改后 | `npc_awake=(0,224,360,420)`（真值） | **OK** ✓ |
+
+**真机端到端**：本轮跑着的客户端 `dialog_rect {kind:'npc_awake',fallback:'root'}` = **(0,224,360,420)**，
+喂进修后工具 ⇒ `npc_awake OK`（不一致 0）。旧工具对这一**正确**位置反而会报 DIFF——同一处假绿的另一面。
+
+**② 纠正 §3.2ap ⑤ 的归因：buff/timer 取不到矩形**不是"根节点没登记 kind 标记"
+
+那两扇窗的根**都挂了** `DialogRoot(kind)`：`buff.rs:662` `DialogRoot(DialogKind::Buff)`、
+`timer.rs:217` `DialogRoot(DialogKind::Timer)`。真正原因是**取矩形的两条路都要求"根可见"**：
+
+- 关闭钮那条路要从可见的 `DialogRoot` 上的 `CloseButton` 上溯；
+- `fallback:"root"` 那条走 `pick_root_rect`，同样只认 `Visibility::Visible` 的根。
+
+而 buff 面板的显隐是 `count > 0 && hovered`（把 C# `Process` 的 Opacity 渐隐实现成显隐）、timer 要
+`S.SetTimer` 起始的**服务端计时器**——§3.2ap 那轮的测试角色既没悬停也没有计时器 ⇒ 两扇都 Hidden。
+
+**可复现的取证（buff）**：先把 `cursor` 探针放进面板矩形再取，即可拿到
+`dialog_rect {kind:'buff',fallback:'root'}` = **(830, 0, 68, 34)** ⇒ 右缘 **898** = C# `PANEL_RIGHT`，
+与 §3.2af 的 Buff 行（右缘恒 898）一致。timer 仍**未采集**（mock 场景没有计时器状态，需 `S.SetTimer`）。
+
+**门禁**：本轮只动测试工具与文档，无产品代码变化；离线跑过 `--src` 与 `--compare`（上表三向 + 真机一次），
+`cargo test --lib` / 集成未受影响（与上一批同一份代码）。
+
 ### 3.2bd NPC 侧任务列表窗单元④：`MirMessageBox(你必须选择一个奖励物品)`（本窗最后一个用户可见缺口）（2026-09-29）
 
 §3.2ax/§3.2ba 一直挂着这条：C# `_finishButton.Click`（`QuestDialogs.cs:121-141`）在**有可选奖励但没选**时

@@ -105,6 +105,23 @@ STATE_DEPENDENT = {
     "MountDialog": [(324, 377), (272, 378)],  # Prguse[167] 五孔 / Prguse[160] 四孔（C# SwitchType）
 }
 
+# 运行时被**逐实例改写** `Location` 的窗口：类里那个值是默认/占位，真值在别处赋值。
+# 这类窗**必须**在这里覆盖，否则几何表会拿"类里的默认 Location"去比——只要本端也照抄成默认值，
+# 就会把**错位**判成 OK（假绿）。
+#
+RUNTIME_LOCATION = {
+    # `SkillBarDialog`：`GameScene.DialogProcess:1327-1333` 每帧把
+    # `Bar.Location = Settings.SkillbarLocation[i]`（`Settings.cs:163` 默认 `{0,0}`/`{216,0}`）
+    # ⇒ 取 **bar0 = (0,0)**；构造期的 `(0, BarIndex*20)` 会被覆盖。
+    "SkillBarDialog": (0, 0),
+    # `NPCAwakeDialog`：`Client/MirScenes/GameScene.cs:307`
+    # `GameScene.Scene.NPCAwakeDialog.Location = new Point(0, GameScene.Scene.NPCDialog.Size.Height);`
+    # ⇒ **(0,224)**（`NPCDialog` 高 224）。原版实机模板匹配实测 `Title[710]` 就落在 (0,224)
+    # （README §3.2ar ③：本端修前 (0,0) 不符率 0.1125、修后 (0,224) 0.050）。
+    # ⚠️ 2026-09-29 全仓 grep `GameScene.Scene.*Dialog.Location = ` 确认过：逐实例改 Location 的只有这一处。
+    "NPCAwakeDialog": (0, 224),
+}
+
 
 def lib_header_size(path, index):
     """只读图头拿 (w,h)：`i16 w, i16 h, …` @ offset（与 libextract.py 同格式）。"""
@@ -247,6 +264,9 @@ def scan(src):
 
             lx = eval_expr(mloc_parts[0]) if mloc_parts else 0
             ly = eval_expr(mloc_parts[1]) if mloc_parts else 0
+            # 运行时覆盖（见模块级 RUNTIME_LOCATION）：真值在别处赋值，扫描阶段先打个标记，
+            # 位置在 `main()` 里按最终尺寸统一改写。
+            loc_override = name in RUNTIME_LOCATION
             rows.append({
                 "file": fn,
                 "class": name,
@@ -255,6 +275,7 @@ def scan(src):
                 "index": int(mi.group(1)),
                 "x": lx,
                 "y": ly,
+                "loc_override": loc_override,
                 "loc_expr": [mloc_parts[0].strip(), mloc_parts[1].strip()] if mloc_parts else None,
                 "loc_symbol": mcenter.group(1) if mcenter else None,
                 "declared_size": [int(msize.group(1)), int(msize.group(2))] if msize else None,
@@ -315,9 +336,8 @@ def main():
         #    `Bar.Location = Settings.SkillbarLocation[i]`（`Settings.cs:163` 默认 `{0,0}`、`{216,0}`）
         #    ⇒ 取 **bar0 = (0,0)**；构造期的 `(0, BarIndex*20)` 会被覆盖（所以 `BarIndex` 解不出也照样可比）。
         #    原版沙箱若在设置里挪过技能栏，本行会显示位移——这是口径的已知边界。
-        RUNTIME_LOC = {"SkillBarDialog": (0, 0)}
-        if r["class"] in RUNTIME_LOC:
-            r["x"], r["y"] = RUNTIME_LOC[r["class"]]
+        if r["class"] in RUNTIME_LOCATION:
+            r["x"], r["y"] = RUNTIME_LOCATION[r["class"]]
         # 扫描阶段的表达式求值不认识 `Size.Width`（那时还没解析出尺寸）——这里用最终尺寸再补一次
         if r.get("loc_expr") and (r["x"] is None or r["y"] is None):
             r["x"] = eval_expr(r["loc_expr"][0], r["expect"])
