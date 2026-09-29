@@ -3158,6 +3158,35 @@ C# 读的是真实鼠标位置，故给 `CursorSource` 加 `real()`（只看真�
 **门禁**：本轮只动测试工具与文档，无产品代码变化；离线跑过 `--src` 与 `--compare`（上表三向 + 真机一次），
 `cargo test --lib` / 集成未受影响（与上一批同一份代码）。
 
+### 3.2bf §3.2be 剩的那条「timer 矩形未采集」收口：**(904,538,120,100)**；外加一条**取窗口矩形的时序坑**（2026-09-29）
+
+**① timer 矩形采到了**（§3.2be 里如实记为"未采集"的那条）
+
+配方：计时器窗是**服务端驱动**的（`S.SetTimer` → `TimerState.active`，`TimerDialog.cs:112-127` 倒计时归零即隐），
+而 mock 的 `SetTimer` 挂在**施法分支**里 ⇒ 用 `--quest-data-test`（自动施法）触发，再轮询取矩形：
+
+```powershell
+.\target\debug\client_bevy.exe --mock --auto-enter --quest-data-test --ui-scale 1
+#  然后 200~700ms 一次轮询（窗口只活 5 秒）
+pwsh tools/acceptance/rpc.ps1 -Method dialog_rect -Params '{"kind":"timer","fallback":"root"}'
+```
+
+实测（5 次采样全同）：`{rx:904, ry:538, rw:120, rh:100, source:"root"}` ——与 C#
+`TimerDialog.cs:27-31` 的 `Location = (ScreenWidth-120, ScreenHeight-230)` = **(904,538)**、`Size = (120,100)`
+**逐值一致**（本端 `timer.rs:203-215` 的常量与那支测试同值）。日志侧对上：
+`⏱️ 设置计时器 id=1 秒=5 类型=1` → `⏱️ [TIMER] 启动计时器 key=1 5 秒 类型=1`。
+
+**② 时序坑：刚显形的那一帧，根矩形会读成 `(0,0,0,0)`（别当成"窗画在左上角"）**
+
+第一轮我只取**第一次** `ok:true` 就收工，拿到的是 `{rx:0, ry:0, rw:0, rh:0, source:"root"}` ——
+根此刻已经 `Visible`（所以 `pick_root_rect` 命中、`ok:true`），但**布局还没跑完**（`ComputedNode` 仍是 0）。
+第二轮改成连续采样，随后每一帧都是正确的 `(904,538,120,100)`。
+
+⇒ 判据写法：**取窗口矩形要连采几帧**（或等 1 帧后再取），首次 `ok:true` 的 `rw/rh == 0` 视为"布局未就绪"丢弃。
+这一条对**所有刚开窗**的 `dialog_rect` 都成立（本批只改文档，不改工具；`pick_root_rect` 的既有单测仍按原语义）。
+
+**门禁**：只动文档；`cargo test --lib` / 集成与上一批同一份代码（未受影响）。
+
 ### 3.2bd NPC 侧任务列表窗单元④：`MirMessageBox(你必须选择一个奖励物品)`（本窗最后一个用户可见缺口）（2026-09-29）
 
 §3.2ax/§3.2ba 一直挂着这条：C# `_finishButton.Click`（`QuestDialogs.cs:121-141`）在**有可选奖励但没选**时
