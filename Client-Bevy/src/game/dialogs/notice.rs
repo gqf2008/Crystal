@@ -57,6 +57,16 @@ pub const BAR_W: f32 = 12.0;
 pub const BAR_H: f32 = 18.0;
 /// C# interval 基数：400 / (count - MaximumLines)（:143/:176）
 pub const BAR_TRAVEL: f32 = 400.0;
+/// Up/Down 按钮 art 原生尺寸（`Prguse2[470]/[473]` 实测 12x12）。
+///
+/// C# 给这两个钮写了 `Size = new Size(16,14)`（`NoticeDialog.cs:70-98`），但**绘制**走的是
+/// `Libraries.Draw(Index, Location, …)` 的 art 原生尺寸，`Size` 只是命中框；本端此前把 art
+/// 压进 20x20（§3.2bv 原版帧模板匹配：原版 12x12 落点不符率 0.0000，本端 20x20 拉伸出 0.52）。
+pub const ARROW_W: f32 = 12.0;
+pub const ARROW_H: f32 = 12.0;
+/// Ok 按钮 art 原生尺寸（`Title[193]` 68x25；C# `NoticeDialog.cs:63-75` 未设 `Size` ⇒ 命中框 = art 尺寸）
+pub const OK_W: f32 = 68.0;
+pub const OK_H: f32 = 25.0;
 
 /// 滑块间隔（调用方保证 count > MAX_LINES）。C# `400 / (count - 19)` 是
 /// **int/int 截断除**（NoticeDialog.cs:143/:176）——f32 除在非整除 count
@@ -214,8 +224,18 @@ fn spawn_notice(
         {
             btn.insert(NoticeBtn(NoticeBtnKind::Close));
         }
-        // Ok / Up / Down（图标按钮）
-        let buttons: [(NoticeBtnKind, LibraryName, usize, usize, usize, f32, f32); 3] = [
+        // Ok / Up / Down（图标按钮；宽高 = art 原生尺寸，见 `ARROW_W`/`OK_W` 注释）
+        let buttons: [(
+            NoticeBtnKind,
+            LibraryName,
+            usize,
+            usize,
+            usize,
+            f32,
+            f32,
+            f32,
+            f32,
+        ); 3] = [
             (
                 NoticeBtnKind::Ok,
                 LibraryName::Title,
@@ -224,6 +244,8 @@ fn spawn_notice(
                 195,
                 OK_REL.0,
                 OK_REL.1,
+                OK_W,
+                OK_H,
             ),
             (
                 NoticeBtnKind::Up,
@@ -233,6 +255,8 @@ fn spawn_notice(
                 472,
                 UP_REL.0,
                 UP_REL.1,
+                ARROW_W,
+                ARROW_H,
             ),
             (
                 NoticeBtnKind::Down,
@@ -242,16 +266,29 @@ fn spawn_notice(
                 475,
                 DOWN_REL.0,
                 DOWN_REL.1,
+                ARROW_W,
+                ARROW_H,
             ),
         ];
-        for (kind, lib, n, h, pr, rx, ry) in buttons {
+        for (kind, lib, n, h, pr, rx, ry, bw, bh) in buttons {
             if let (Some(nh), Some(hh), Some(ph)) = (
                 load_lib_image(&mut libs, &mut images, lib, n),
                 load_lib_image(&mut libs, &mut images, lib, h),
                 load_lib_image(&mut libs, &mut images, lib, pr),
             ) {
-                spawn_icon_button(p, nh, hh, ph, rx, ry, 20.0, 20.0, 10).insert(NoticeBtn(kind));
+                spawn_icon_button(p, nh, hh, ph, rx, ry, bw, bh, 10).insert(NoticeBtn(kind));
             }
+        }
+        // PositionBar `Prguse2[205/206]` @(293,46)（C# `NoticeDialog.cs:100-118`：
+        // Movable、可拖范围 y∈[46,399]）；**只在超 19 行时显示**（`NewText` :218-243）。
+        // 原版实机（26 行公告）实测落点 (648,146) = 面板 (354,100) + 面板内 (293,46)，
+        // 12x18 art 不符率 0.0000（§3.2bv）。
+        if let (Some(n), Some(h)) = (
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 205),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 206),
+        ) {
+            spawn_icon_button(p, n, h.clone(), h, BAR_X, BAR_Y_MIN, BAR_W, BAR_H, 10)
+                .insert((NoticeBar, Visibility::Hidden));
         }
         // 19 行正文
         for i in 0..MAX_LINES {
@@ -287,8 +324,17 @@ fn notice_ui_system(
             With<NoticeWidget>,
             Without<NoticeTitle>,
             Without<NoticeLine>,
+            Without<NoticeBar>,
         ),
     >,
+    // PositionBar（`Prguse2[205/206]`，C# `NoticeDialog.PositionBar`）：显隐 + 拖动跟手
+    mut bar: Query<
+        (&Interaction, &mut Node, &mut Visibility),
+        (With<NoticeBar>, Without<NoticeLine>),
+    >,
+    // 面板节点（取实时原点：本窗 `Movable = true`，拖走以后条仍要按**面板内**坐标走）
+    panel: Query<&Node, (With<NoticeWidget>, Without<NoticeBar>)>,
+    cursor_src: crate::control::CursorSource,
     mut title: Query<&mut Text, (With<NoticeTitle>, Without<NoticeLine>)>,
     mut lines: Query<(&mut Text, &NoticeLine), Without<NoticeTitle>>,
     mut prev_inter: Local<std::collections::HashMap<Entity, Interaction>>,
@@ -350,6 +396,30 @@ fn notice_ui_system(
         *index = ((*index as i32) - notches.round() as i32).clamp(0, max) as usize;
     }
     *index = (*index).min(count.saturating_sub(MAX_LINES));
+    // PositionBar：C# `NewText` :218-243 只在 `lines.Count > MaximumLines` 时显示；
+    // 拖动按 `PositionBar_OnMoving` :134-152（`_index = floor((y-46)/interval)`，y 夹 [46,399]）。
+    // 原版实机（26 行公告）面板内落点 (293,46)、art 12x18 不符率 0.0000（§3.2bv）。
+    if let Ok((inter, mut node, mut vis)) = bar.single_mut() {
+        if scrollable {
+            *vis = Visibility::Visible;
+            let panel_y = panel
+                .single()
+                .map(|n| crate::ui::theme::node_origin(n, ORIGIN).1)
+                .unwrap_or(ORIGIN.1);
+            if *inter == Interaction::Pressed {
+                // 跟手读**真实光标**（注入探针在自动化下会被钉在按下点，见 `CursorSource::real`）
+                if let Some(cur) = cursor_src.real() {
+                    let raw = (cur.y - panel_y).clamp(BAR_Y_MIN, BAR_Y_MAX);
+                    *index = index_from_bar_y(raw, count);
+                    node.top = Val::Px(raw);
+                }
+            } else {
+                node.top = Val::Px(position_bar_y(*index, count));
+            }
+        } else {
+            *vis = Visibility::Hidden;
+        }
+    }
     // 标题
     if let Ok(mut t) = title.single_mut() {
         t.0 = notice.title.clone();
@@ -368,6 +438,21 @@ fn notice_ui_system(
     }
 }
 
+/// 把 `title`/`message` 灌进公告状态（C# `NoticeDialog.Update`：`Split("\r\n")` 后逐行折行、`_index = 0`）。
+///
+/// 服务端事件（`S.UpdateNotice`）与实机夹具（control RPC `notice_set`）共用这一支——
+/// 两处各写一遍折行必然漂移（§3.2bv 的 A/B 要用**同一份文本**喂两端）。
+pub fn set_notice(notice: &mut NoticeState, title: String, message: String) {
+    notice.title = title;
+    notice.message = message.clone();
+    notice.lines = message
+        .split("\r\n")
+        .flat_map(|l| l.split('\n'))
+        .flat_map(|l| wrap_text(l, LINE_FONT_PX, LINE_WRAP_W))
+        .collect();
+    notice.index = 0;
+}
+
 /// 消费服务端公告事件（S.UpdateNotice → 切行/折行 → 开窗）
 fn notice_server_events(
     mut mgr: ResMut<DialogManager>,
@@ -379,14 +464,7 @@ fn notice_server_events(
             if message.trim().is_empty() {
                 continue;
             }
-            notice.title = title.clone();
-            notice.message = message.clone();
-            notice.lines = message
-                .split("\r\n")
-                .flat_map(|l| l.split('\n'))
-                .flat_map(|l| wrap_text(l, LINE_FONT_PX, LINE_WRAP_W))
-                .collect();
-            notice.index = 0;
+            set_notice(&mut notice, title.clone(), message.clone());
             mgr.open.push(DialogKind::Notice);
             tracing::info!("📢 服务器公告: {}（{} 行）", title, notice.lines.len());
         }
@@ -545,5 +623,70 @@ mod tests {
     fn wrap_drives_pages() {
         let lines = wrap_text(&"字".repeat(50), LINE_FONT_PX, LINE_WRAP_W);
         assert_eq!(lines.len(), 2);
+    }
+
+    /// §3.2bv：按钮/位置条的**绘制尺寸 = art 原生尺寸**（C# `Libraries.Draw` 不缩放；
+    /// `NoticeDialog.cs` 只给 Up/Down 写了 `Size=(16,14)` 命中框）。
+    ///
+    /// 红检：把 Ok/Up/Down 改回 20x20（修前的写法）→ 本测试 FAILED。
+    #[test]
+    fn notice_buttons_use_native_art_size() {
+        use crate::resources::libraries::{data_assets_present, resolve_data_path, Libraries};
+        use bevy::ecs::system::RunSystemOnce;
+
+        if !data_assets_present() {
+            eprintln!("skip notice_buttons_use_native_art_size: 无 Data 资产");
+            return;
+        }
+        let mut world = World::new();
+        world.insert_resource(crate::map_renderer::GameLibraries(Libraries::new(
+            resolve_data_path(),
+        )));
+        world.insert_resource(Assets::<Image>::default());
+        world.insert_resource(Assets::<Font>::default());
+        world.insert_resource(UiFont::default());
+        world.insert_resource(UiCjkFont::default());
+        world.insert_resource(NoticeState::default());
+        world
+            .run_system_once(spawn_notice)
+            .expect("spawn_notice 应成功");
+
+        let mut q = world.query::<(Option<&NoticeBtn>, Option<&NoticeBar>, &Node)>();
+        let mut got: Vec<(String, f32, f32, f32, f32)> = Vec::new();
+        for (btn, bar, node) in q.iter(&world) {
+            let (l, t, w, h) = match (node.left, node.top, node.width, node.height) {
+                (Val::Px(l), Val::Px(t), Val::Px(w), Val::Px(h)) => (l, t, w, h),
+                _ => (-1.0, -1.0, -1.0, -1.0),
+            };
+            let name = match (btn.map(|b| b.0), bar.is_some()) {
+                (Some(NoticeBtnKind::Ok), _) => "ok",
+                (Some(NoticeBtnKind::Up), _) => "up",
+                (Some(NoticeBtnKind::Down), _) => "down",
+                (None, true) => "bar",
+                _ => continue,
+            };
+            got.push((name.to_string(), l, t, w, h));
+        }
+        let find = |n: &str| got.iter().find(|g| g.0 == n).cloned();
+        assert_eq!(
+            find("ok"),
+            Some(("ok".to_string(), OK_REL.0, OK_REL.1, OK_W, OK_H)),
+            "Ok 按钮 = Title[193] art 原生 68x25 @(120,436)（C# 未设 Size）"
+        );
+        assert_eq!(
+            find("up"),
+            Some(("up".to_string(), UP_REL.0, UP_REL.1, ARROW_W, ARROW_H)),
+            "Up = Prguse2[470] art 原生 12x12 @(293,33)"
+        );
+        assert_eq!(
+            find("down"),
+            Some(("down".to_string(), DOWN_REL.0, DOWN_REL.1, ARROW_W, ARROW_H)),
+            "Down = Prguse2[473] art 原生 12x12 @(293,418)"
+        );
+        assert_eq!(
+            find("bar"),
+            Some(("bar".to_string(), BAR_X, BAR_Y_MIN, BAR_W, BAR_H)),
+            "PositionBar = Prguse2[205] 12x18 @(293,46)"
+        );
     }
 }
