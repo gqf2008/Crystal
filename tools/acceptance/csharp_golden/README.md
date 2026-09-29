@@ -3057,3 +3057,36 @@ C# 里 `RefreshInterface` 每行是**新建控件**（按 `Quests.Count` 逐个 
 **仍未做（列表窗）**：① 链接**点击**（C# 里怪物/NPC 链接点击会走 `[@…]` 导航、物品链接开提示——本端只做了
 配色/悬停/提示，未接点击）；② 标题行**加粗**（无同字体粗体档）；③ 位置条**拖动**；④ 「必须先选奖励物品」
 的 `MirMessageBox` 提示框（本端只拦发包）；⑤ 原版那一侧的同状态内容帧（需 C# 沙箱 + 解锁窗口）。
+
+### 3.2bb NPC 侧任务列表窗单元③b：位置条**拖动**（并修好 `CursorSource` 拖动态读陈旧探针的问题）（2026-09-29）
+
+§3.2ba 的 ③ 收了。`PositionBar_OnMoving`（`QuestDialogs.cs:1100-1118`）在 C# 里是"跟手"：拖到哪，
+`TopLine` 就按 `(PosMaxY-PosMinY)/(行数-行高)` 反算到哪，条本身不吸附。
+
+**实现**：条（`QuestListPart::Bar`，本身就是 `spawn_icon_button` 出来的 `Button`，带 `Interaction`）
+在按下态读光标 → 钳到本窗的 `PosMinY..PosMaxY`（**149..263**，不是详情窗的 46/261，
+故新写 `quest_list_msg_bar_interval`/`quest_list_msg_top_line_at_bar` 两个纯函数，与
+`quest_list_msg_bar_y` 互为逆，单测覆盖往返）。
+
+**过程中挖到一处夹具/实现共同踩的坑**：`click` 驱动（`control.rs:2358-2712`）在 phase 0 会把
+**光标探针**写到按下点、结尾再清掉；而本端"探针优先"的命中来源（`CursorSource::pos`）于是在拖动期间
+**一直读到起点** ⇒ 条不动（实测日志：`BAR inter=Pressed cursor=Some(785,158)` 三帧，而拖动目标是 y=200）。
+C# 读的是真实鼠标位置，故给 `CursorSource` 加 `real()`（只看真实窗口光标）并在拖动分支用它——
+**只影响拖动**，悬停/命中仍走探针优先（`#2767` 语义不变）。
+
+**实机实测**（`--mock --auto-enter --ui-scale 1` + `npc_call 4242 [@QUEST]` + `dialog open quest_list`；
+夹具描述给到 14 行 ⇒ 消息区 21 行 > 一页 10 行，位置条才出现）：
+
+| 判据 | 实测 |
+|---|---|
+| 位置条出现 | `win_locate Prguse2[205]` 命中 **(779,149)**、不符率 **0.0000** |
+| 拖动（`click {x:785,y:158,drag_to:{x:785,y:200}}`） | `quest_list_probe.top_line` **0 → 5**（= (200−149)/10，interval=(263−149)/(21−10)=10） |
+| 条跟手 | 探针列 x=779..791 的非背景像素：拖前只在 **y=149/159**，拖后只在 **y=189/199/209**（条离开原位） |
+| 内容真的滚了 | 消息区黄色像素（首行任务名）**198 → 0**（首行已滚出一页） |
+
+**门禁**：`cargo check`（lib+bin）0 error；`cargo test --lib` **881 passed / 0 failed**（+1 拖动往返单测）；
+`cargo test --test b0001_smoke --test ui_alignment` **2 + 53 passed**。
+
+**同类残留（已登记）**：任务**详情窗**（`quest_detail_ui_system`）的位置条拖动仍读"探针优先"的 `cursor`，
+在自动化夹具下会有同样的"读到按下点"现象——它那支的改法与本节同（一行换成 `real()`），留给下一批；
+`#3368` 这扇窗已改。

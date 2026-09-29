@@ -209,7 +209,10 @@ pub(crate) fn mock_npc_quest_info() -> mir2_shared::data::client_data::ClientQue
         npc_index: super::MOCK_QUEST_NPC_ID,
         name: "给比奇老兵送信".to_string(),
         group: "主线".to_string(),
-        description: (1..=9)
+        // #3368 单元③b：给到 **14 行**——`QuestMessage` 一页 10 行，行数超过一页位置条
+        // 才会显示（C# `UpdatePositionBar`：`Count <= LineCount` 直接隐藏），
+        // 拖动功能才有实机判据。
+        description: (1..=14)
             .map(|i| match i {
                 2 => "把信交给{比奇老兵/LimeGreen}".to_string(),
                 4 => "顺路采集[ITEM:1001|力量戒指]".to_string(),

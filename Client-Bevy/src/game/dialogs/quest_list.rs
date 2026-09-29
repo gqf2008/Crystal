@@ -245,13 +245,34 @@ pub fn quest_list_msg_bar_y(top: usize, len: usize, line_count: usize) -> Option
     if len <= line_count {
         return None;
     }
-    let span = len as i64 - line_count as i64;
-    if span <= 0 {
-        return None;
-    }
-    let interval = (LIST_MSG_POS_MAX_Y - LIST_MSG_POS_MIN_Y) / span as i32;
+    let interval = quest_list_msg_bar_interval(len, line_count);
     let y = LIST_MSG_POS_MIN_Y + top as i32 * interval;
     Some(y.clamp(LIST_MSG_POS_MIN_Y, LIST_MSG_POS_MAX_Y))
+}
+
+/// C# `UpdatePositionBar`/`PositionBar_OnMoving` 用的步进
+/// `(PosMaxY - PosMinY) / (行数 - 行高)`（`QuestDialogs.cs:1126`/`:1108`）。
+/// 同样是**本窗自己的 Pos 常量**（149/263），不能借用详情窗的私有 interval。
+pub fn quest_list_msg_bar_interval(len: usize, line_count: usize) -> i32 {
+    let span = len as i64 - line_count as i64;
+    if span <= 0 {
+        return 0;
+    }
+    (LIST_MSG_POS_MAX_Y - LIST_MSG_POS_MIN_Y) / span as i32
+}
+
+/// C# `PositionBar_OnMoving`（`QuestDialogs.cs:1100-1118`）：条被拖到 y（面板内相对）
+/// → 反算 `TopLine`。`interval <= 0` 时不动（C# 里会除零，本端按"不动"处理）。
+pub fn quest_list_msg_top_line_at_bar(y: i32, len: usize, line_count: usize) -> usize {
+    if len <= line_count {
+        return 0;
+    }
+    let interval = quest_list_msg_bar_interval(len, line_count);
+    if interval <= 0 {
+        return 0;
+    }
+    let location = y.clamp(LIST_MSG_POS_MIN_Y, LIST_MSG_POS_MAX_Y) - LIST_MSG_POS_MIN_Y;
+    (location / interval).max(0) as usize
 }
 
 /// C# `QuestListDialog.StartIndex` / `SelectedIndex` / `CurrentNPCID`（`:26-32`）的打包。
@@ -872,6 +893,8 @@ struct QuestListDetail<'w, 's> {
             Option<&'static mut TextColor>,
             Option<&'static mut TextFont>,
             Option<&'static mut ImageNode>,
+            // 位置条拖动（C# `PositionBar_OnMoving`）要读按下态；其余部件忽略
+            Option<&'static Interaction>,
         ),
         (
             Without<QuestListWidget>,
@@ -1041,7 +1064,7 @@ fn quest_list_detail_system(
     // C# `NewText`（`:1215-1290`）：主体是**去掉标记后**的文本，彩色段/链接由叠加 `MirLabel` 画在上层。
     // 槽位下标 → (行内左偏移, 行顶 y, 字号, 显示文本, 叠加部件)
     let mut spans: Vec<(usize, f32, f32, f32, String, Vec<QuestOverlayPart>)> = Vec::new();
-    for (part, mut node, mut vis, text, color, font, _img) in &mut detail.parts {
+    for (part, mut node, mut vis, text, color, font, _img, _inter) in &mut detail.parts {
         let QuestListPart::MsgLine(slot) = *part else {
             continue;
         };
@@ -1084,7 +1107,7 @@ fn quest_list_detail_system(
     // ---- 第二遍：其余部件 + 消息区叠加（彩色段/链接）----
     // 悬停中的链接（C# `MouseEnter` 转橙 + 提示），循环后统一写 tooltip
     let mut hovered_link: Option<(String, Vec<String>, f32, f32)> = None;
-    for (part, mut node, mut vis, text, color, font, image) in &mut detail.parts {
+    for (part, mut node, mut vis, text, color, font, image, inter) in &mut detail.parts {
         match *part {
             // 第一遍已处理
             QuestListPart::MsgLine(_) => {}
@@ -1181,7 +1204,23 @@ fn quest_list_detail_system(
                 Some(y) => {
                     *vis = show(true);
                     node.left = Val::Px(LIST_MSG_BAR_POS.0);
-                    node.top = Val::Px(y as f32);
+                    // 拖动中：条跟手（C# `PositionBar_OnMoving`，`QuestDialogs.cs:1100-1118`——
+                    // `PositionBar.Location = new Point(x, y)` 不做吸附，本端同）
+                    // 位置取**真实光标**而不是探针：C# 读的就是真实鼠标，而 `click` 驱动
+                    // 会把探针钉在按下点（见 `CursorSource::real` 的注释）。
+                    match (inter, cursor_src.real()) {
+                        (Some(i), Some(cur)) if open && *i == Interaction::Pressed => {
+                            let raw = (cur.y - panel_origin.1).round() as i32;
+                            let clamped = raw.clamp(LIST_MSG_POS_MIN_Y, LIST_MSG_POS_MAX_Y);
+                            state.top_line = quest_list_msg_top_line_at_bar(
+                                clamped,
+                                lines.len(),
+                                LIST_MSG_LINE_COUNT,
+                            );
+                            node.top = Val::Px(clamped as f32);
+                        }
+                        _ => node.top = Val::Px(y as f32),
+                    }
                 }
                 None => *vis = Visibility::Hidden,
             },
@@ -1625,5 +1664,40 @@ mod tests {
             quest_list_msg_bar_y(0, LIST_MSG_LINE_COUNT, LIST_MSG_LINE_COUNT),
             None
         );
+    }
+
+    /// C# `PositionBar_OnMoving`（`:1100-1118`）反转：条 y → `TopLine`，
+    /// 与 `quest_list_msg_bar_y` 互为逆（同 interval、同钳位）。
+    #[test]
+    fn bar_drag_maps_back_to_top_line() {
+        // 21 行（夹具：名字 + 14 行描述 + 任务/交付段）、一页 10 行：
+        // span = 11 → interval = (263-149)/11 = 10
+        let len = 21;
+        assert_eq!(quest_list_msg_bar_interval(len, LIST_MSG_LINE_COUNT), 10);
+        assert_eq!(quest_list_msg_top_line_at_bar(149, len, LIST_MSG_LINE_COUNT), 0);
+        assert_eq!(
+            quest_list_msg_top_line_at_bar(149 + 10, len, LIST_MSG_LINE_COUNT),
+            1
+        );
+        // 拖到底 → 顶行 = 行数 - 一页（末页齐顶）
+        assert_eq!(
+            quest_list_msg_top_line_at_bar(263, len, LIST_MSG_LINE_COUNT),
+            (263 - 149) / 10
+        );
+        // 越界/不足一页：钳位 / 不动
+        assert_eq!(quest_list_msg_top_line_at_bar(9999, len, LIST_MSG_LINE_COUNT), 11);
+        assert_eq!(
+            quest_list_msg_top_line_at_bar(200, LIST_MSG_LINE_COUNT, LIST_MSG_LINE_COUNT),
+            0
+        );
+        // 往返：bar_y(top) 拖回该位置应得同一个 top（`interval` 整除时精确）
+        for top in [0usize, 1, 5, 11] {
+            let y = quest_list_msg_bar_y(top, len, LIST_MSG_LINE_COUNT).unwrap();
+            assert_eq!(
+                quest_list_msg_top_line_at_bar(y, len, LIST_MSG_LINE_COUNT),
+                top,
+                "top={top} 往返应一致"
+            );
+        }
     }
 }
