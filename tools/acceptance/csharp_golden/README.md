@@ -2611,3 +2611,35 @@ GameScene.Scene.NPCDialog.Size.Height) }`（**`GameScene.cs:307`**）。`NPCDial
 
 **门禁**：`cargo test --lib` **866 passed**（含新增断言；阳性对照实做）；
 `b0001_smoke` 2 + `ui_alignment` 53；`ui_interact_sweep.ps1 -ManageServer` 见 PR 正文。
+### 3.2as 继续沿「原版点 NPC」这条路：`NPCDropDialog`（修理/出售面板）位置对表（2026-09-29）
+
+§3.2ar 收工后按 jev 结论继续同一类窗（jev `classify`：next_npc_windows **0.960**、
+tool_locator 0.040、other 0.000，置信度 0.940 —— "继续把同法套到其余原版侧可入口的 NPC 驱动窗"
+显著优先）。本轮选的第一扇是 **`NPCDropDialog`**（我们的 `sell_panel.rs`），它从没进过任何 A/B 表。
+
+**入口**：`BichonProvince/BichonWall/Blacksmith`（`Blacksmith_Bill`，map 1 @(302,221)）页面上的
+`<Special/@SRepair>`。配方同 §3.2ar：`-PosX 302 -PosY 223` + `-NoClickLink` 开窗，再
+`Move-Image` + `Msg-Click` 点链接。
+
+**① 面板美术与落点（C# 实机）**：C# `NPCDropDialog` 构造期写 `Index = 392; Library = Prguse`，
+但 `BeforeDraw`（`NPCDialogs.cs:1743-1745`）改写为 **`Prguse2[351]`（176x147）**，
+`Location = new Point(264, GameScene.Scene.NPCDialog.Size.Height)` ⇒ 期望 **(264,224)**。
+全屏模板匹配实测：`Prguse2[351]` 最佳落点 **@(264,224)**（不符率 0.2482 —— 面板上叠着修理表单的
+卡槽/按钮/文字，所以比纯面板高；**位置**这一维是逐像素对上的）。
+
+| 侧 | 位置依据 |
+|---|---|
+| C# | 实机模板匹配 **@(264,224)** |
+| 本端 | `sell_panel.rs`：`DIALOG_X = 264.0` + `Location = (264, GameScene.Scene.NPCDialog.Size.Height)`（与 C# `BeforeDraw` 同一公式，`NPCDialog`=`Prguse[995]` 440x224 ⇒ 224） ⇒ **(264,224)** |
+
+⇒ 位置一致。**本端实机这一半未采集**：本端服务器在那一格附近没有可点 NPC（`nearby` radius 8/20/60
+连续三次 `count=0`；最近的 `Merchant_Bull` 页面只有 `View/Ask/Close`、没有修理入口），
+要采得先在本端世界里找到带 `@Repair`/`@SRepair` 的 NPC —— 如实记为未采集，不推数。
+
+**② 顺带一个夹具坑：点链接前先看清**哪条是哪条**。同一页的两条黄字带
+（`x13..51,y92..100` / `x13..43,y128..136`）不是"View + Repair"，而是
+**`Special Repair Weapon` + `Close`** —— 本轮先点了第二条，结果是**把 NPC 窗关掉**（后面那帧
+`Prguse2[351]` 自然找不到）。判据：点完要**同时**看目标窗有没有出现**和** NPC 窗还在不在；
+只剩"没出现"时先怀疑点错链接，而不是判"原版没入口"。
+
+**门禁**：本轮只动文档，无代码变化。
