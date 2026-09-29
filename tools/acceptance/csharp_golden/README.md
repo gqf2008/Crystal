@@ -3025,3 +3025,35 @@ C# 里 `RefreshInterface` 每行是**新建控件**（按 `Quests.Count` 逐个 
 
 **仍未采集**：**原版那一侧的同状态内容帧**（需 C# 沙箱 + 解锁窗口；§3.2au 那张是 Jane 的列表，
 数据与本夹具不同，只能做区域级对照，不能做逐像素 A/B）。
+
+### 3.2ba NPC 侧任务列表窗单元③：消息区的 `{文本/颜色}` 彩色段与链接（C# `NewColour`/`NewLink`）（2026-09-29）
+
+§3.2ax 明说这条留在后面：列表窗的消息区当时**按纯文本画**——于是 `{比奇老兵/LimeGreen}` 这种标记会**连花括号
+一起裸露在屏幕上**（`_` 段名和颜色名都当字面量显示）。本轮按详情窗同一套做好。
+
+**逐条对 C#**（`QuestMessage.NewText`，`QuestDialogs.cs:1215-1290`）：
+
+| 件 | C# | 本端 |
+|---|---|---|
+| 主体文本 | 去掉 `{文本/颜色}` 标记后的显示串 | 复用详情窗的 `quest_line_overlays()`（与 `quest_line_display_text` 同判据） |
+| 彩色段 | 每段一个叠加 `MirLabel`，颜色走 `Color.FromName`（`NewColour`，`:1336-1353`） | 固定池 `QuestListPart::Overlay{slot,seg}`（10 行 × 6 段）+ `known_color()`；未知名隐藏（C# 取到透明色） |
+| 链接 | 初值 `Color.Cyan`、`MouseEnter` 转橙 + `ShowTooltipForLink`（`NewLink`，`:1355-1382`） | 同：青色 / 悬停橙 + `TooltipState.update(13, …)`（走 `quest_link_tooltip_lines`） |
+| 行内落位 | 段在**显示串**里的字符偏移 → 像素（`est_text_width` + 折行） | 复用 `quest_segment_offset(prefix, size, LIST_MSG_W)`（与详情窗同一度量，含折行行高 `字号×1.2`） |
+| 标题行字号 | `NewText` 标题行用 10F 粗体、正文 8F | 复用 `QUEST_MSG_TITLE_FONT_PX/QUEST_MSG_FONT_PX`（加粗仍缺，见文末） |
+
+**实机实测**（`--mock --auto-enter --ui-scale 1` + `npc_call 4242 [@QUEST]` + `dialog open quest_list`，
+夹具里第 3 行含 `{比奇老兵/LimeGreen}`、第 5 行含 `[ITEM:1001|力量戒指]`）：
+
+| 判据 | 实测 | 结论 |
+|---|---|---|
+| 第 3 行绿色段 | `g-max(r,b) > 30` 像素 **207** | LimeGreen 叠加层已画 |
+| 第 5 行链接（未悬停） | 青色像素 **231** | `Color.Cyan` 初值正确 |
+| 第 5 行链接（`cursor` RPC 落点 570,203） | 青色 **0** / 橙色 **31** | `MouseEnter` 转橙生效 |
+| 标记不再裸露 | 该行文本右缘 **x=662 → 591**（缩短 71px ≈ 被剥掉的标记字符） | 花括号/颜色名不再当字面量画 |
+
+**门禁**：`cargo check --lib` 0 error；`cargo test --lib` **880 passed / 0 failed**；
+`cargo test --test b0001_smoke --test ui_alignment` **2 + 53 passed**。
+
+**仍未做（列表窗）**：① 链接**点击**（C# 里怪物/NPC 链接点击会走 `[@…]` 导航、物品链接开提示——本端只做了
+配色/悬停/提示，未接点击）；② 标题行**加粗**（无同字体粗体档）；③ 位置条**拖动**；④ 「必须先选奖励物品」
+的 `MirMessageBox` 提示框（本端只拦发包）；⑤ 原版那一侧的同状态内容帧（需 C# 沙箱 + 解锁窗口）。

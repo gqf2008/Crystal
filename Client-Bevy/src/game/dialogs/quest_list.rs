@@ -29,13 +29,15 @@ use std::collections::HashMap;
 
 use crate::game::dialogs::npc::NpcDialogState;
 use crate::game::dialogs::quest_log::{
-    quest_line_is_title, quest_message_lines, quest_msg_scroll_down,
-    quest_msg_scroll_up, quest_msg_wheel_top_line, quest_reward_offsets,
-    quest_reward_visible_for_gender, reward_item_display_with_catalog, row_action, QuestCatalog,
-    QuestLogState, QuestRewardOffsets, QuestRowAction, CLOSE_POS, QUEST_MSG_LINE_DY,
-    QUEST_MSG_LINE_H, QUEST_MSG_TITLE_DY, QUEST_MSG_TITLE_INDENT, QUEST_REWARD_CELL_DX,
-    QUEST_REWARD_CELL_X0, QUEST_REWARD_FIXED_Y, QUEST_REWARD_ORIGIN, QUEST_REWARD_SELECT_Y,
-    MAX_CONCURRENT_QUESTS,
+    quest_line_is_title, quest_line_overlays, quest_link_display_name,
+    quest_link_tooltip_lines, quest_message_lines, quest_msg_scroll_down, quest_msg_scroll_up,
+    quest_msg_wheel_top_line, quest_reward_offsets, quest_reward_visible_for_gender,
+    quest_segment_offset, reward_item_display_with_catalog, row_action, QuestCatalog,
+    QuestLogState, QuestOverlayPart, QuestRewardOffsets, QuestRowAction, CLOSE_POS,
+    MAX_CONCURRENT_QUESTS, QUEST_MSG_FONT_PX, QUEST_MSG_LINE_DY, QUEST_MSG_LINE_H,
+    QUEST_MSG_MAX_SEGMENTS, QUEST_MSG_TITLE_DY, QUEST_MSG_TITLE_FONT_PX, QUEST_MSG_TITLE_INDENT,
+    QUEST_REWARD_CELL_DX, QUEST_REWARD_CELL_X0, QUEST_REWARD_FIXED_Y, QUEST_REWARD_ORIGIN,
+    QUEST_REWARD_SELECT_Y,
 };
 use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
 use crate::map_renderer::GameLibraries;
@@ -354,6 +356,9 @@ pub enum QuestListPart {
     RewardIcon(u8),
     /// 与图标同槽的数值标签（C# `_expLabel/_goldLabel/_creditLabel`，`:1400-1412`）
     RewardValue(u8),
+    /// 消息区叠加部件（`{文本/颜色}` 彩色段 / 链接）：行槽 `slot` 的第 `seg` 个叠加标签
+    /// （C# `QuestMessage._textButtons`，`:1036` + `NewColour` `:1336-1353` / `NewLink` `:1355-1382`）
+    Overlay { slot: usize, seg: usize },
 }
 
 pub struct QuestListPlugin;
@@ -554,6 +559,15 @@ fn spawn_quest_list(
                     ..default()
                 },
             ));
+            // #3368 单元③：`{文本/颜色}` 彩色段与链接的叠加池
+            // （C# `NewText` 里每段一个叠加 `MirLabel`：`NewColour` `:1336-1353` / `NewLink` `:1355-1382`；
+            //  与详情窗的 `QuestDetailSegment` 同一套"固定池 + 逐帧显隐/落位"做法）
+            for s in 0..QUEST_MSG_MAX_SEGMENTS {
+                spawn_label(p, &cjk, "", ox, y, 12.0, Color::WHITE, 12).insert((
+                    QuestListPart::Overlay { slot: i, seg: s },
+                    Visibility::Hidden,
+                ));
+            }
         }
         // 标题行圆点 `Prguse[919]`（12x10；初始藏在面板外，逐帧按标题行落位）
         if let Some(h) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 919) {
@@ -856,6 +870,7 @@ struct QuestListDetail<'w, 's> {
             &'static mut Visibility,
             Option<&'static mut Text>,
             Option<&'static mut TextColor>,
+            Option<&'static mut TextFont>,
             Option<&'static mut ImageNode>,
         ),
         (
@@ -906,6 +921,11 @@ fn quest_list_detail_system(
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
     mut cache: ResMut<crate::ui::sprite_ui::UiImageCache>,
+    // 单元③：链接换名/提示需要怪物·NPC·物品信息缓存（C# `MonsterInfoList/NPCInfoList`）
+    // （不叫 `info`：本系统下面已有一个同名局部 = 选中任务的定义）
+    info_cache: Res<crate::game::object_state::InfoCache>,
+    // 单元③：链接悬停提示（C# `NPCDialog.ShowTooltipForLink`，`NPCDialogs.cs:957-967`）
+    mut tooltip: ResMut<crate::ui::tooltip::TooltipState>,
     mouse: Res<ButtonInput<MouseButton>>,
     cursor_src: crate::control::CursorSource,
     mut prev_inter: Local<HashMap<Entity, Interaction>>,
@@ -1017,29 +1037,133 @@ fn quest_list_detail_system(
     let top = state.top_line;
 
     // ---- 部件渲染 ----
-    for (part, mut node, mut vis, text, color, image) in &mut detail.parts {
+    // ---- 第一遍：消息行（去 `{文本/颜色}` 标记 + 链接换名），并记下每行的排版结果供叠加池定位 ----
+    // C# `NewText`（`:1215-1290`）：主体是**去掉标记后**的文本，彩色段/链接由叠加 `MirLabel` 画在上层。
+    // 槽位下标 → (行内左偏移, 行顶 y, 字号, 显示文本, 叠加部件)
+    let mut spans: Vec<(usize, f32, f32, f32, String, Vec<QuestOverlayPart>)> = Vec::new();
+    for (part, mut node, mut vis, text, color, font, _img) in &mut detail.parts {
+        let QuestListPart::MsgLine(slot) = *part else {
+            continue;
+        };
+        let idx = top + slot;
+        let raw = lines.get(idx);
+        let is_title = raw.map(|l| quest_line_is_title(idx, l)).unwrap_or(false);
+        let left = ox + if is_title { QUEST_MSG_TITLE_INDENT } else { 0.0 };
+        let top_y = oy + (idx.saturating_sub(top)) as f32 * QUEST_MSG_LINE_DY + adjust_at(idx);
+        let size = if is_title {
+            QUEST_MSG_TITLE_FONT_PX
+        } else {
+            QUEST_MSG_FONT_PX
+        };
+        node.left = Val::Px(left);
+        node.top = Val::Px(top_y);
+        *vis = show(true);
+        let (display, parts) = match raw {
+            Some(l) => quest_line_overlays(l, |link| {
+                quest_link_display_name(link, &catalog, &info_cache)
+            }),
+            None => (String::new(), Vec::new()),
+        };
+        if let Some(mut t) = text {
+            t.0 = display.clone();
+        }
+        if let Some(mut f) = font {
+            f.font_size = FontSize::Px(size);
+        }
+        if let Some(mut c) = color {
+            // C# `NewText`：首行黄、其余白（标题行靠加粗区分，`:1242-1251`）
+            c.0 = if idx == 0 {
+                Color::srgb(1.0, 1.0, 0.0)
+            } else {
+                Color::WHITE
+            };
+        }
+        spans.push((slot, left, top_y, size, display, parts));
+    }
+
+    // ---- 第二遍：其余部件 + 消息区叠加（彩色段/链接）----
+    // 悬停中的链接（C# `MouseEnter` 转橙 + 提示），循环后统一写 tooltip
+    let mut hovered_link: Option<(String, Vec<String>, f32, f32)> = None;
+    for (part, mut node, mut vis, text, color, font, image) in &mut detail.parts {
         match *part {
-            QuestListPart::MsgLine(slot) => {
-                let idx = top + slot;
-                let is_title = lines
-                    .get(idx)
-                    .map(|l| quest_line_is_title(idx, l))
-                    .unwrap_or(false);
-                node.left = Val::Px(ox + if is_title { QUEST_MSG_TITLE_INDENT } else { 0.0 });
-                node.top =
-                    Val::Px(oy + (idx.saturating_sub(top)) as f32 * QUEST_MSG_LINE_DY + adjust_at(idx));
-                *vis = show(true);
+            // 第一遍已处理
+            QuestListPart::MsgLine(_) => {}
+            // #3368 单元③：`{文本/颜色}` 彩色段 + 链接（C# `NewColour`/`NewLink` 的叠加标签）
+            QuestListPart::Overlay { slot, seg } => {
+                let Some((_, left, top_y, size, stripped, parts)) =
+                    spans.iter().find(|(s, ..)| *s == slot)
+                else {
+                    *vis = Visibility::Hidden;
+                    continue;
+                };
+                let Some(part) = parts.get(seg) else {
+                    *vis = Visibility::Hidden;
+                    continue;
+                };
+                let (part_text, part_offset, col) = match part {
+                    QuestOverlayPart::Colour {
+                        text,
+                        color_name,
+                        offset,
+                    } => {
+                        // 未知名：C# 取到透明色（叠加层不可见）→ 直接隐藏（基础白字已含该词）
+                        let Some(c) = crate::ui::text_markup::known_color(color_name) else {
+                            *vis = Visibility::Hidden;
+                            continue;
+                        };
+                        (text.clone(), *offset, c)
+                    }
+                    QuestOverlayPart::Link {
+                        text, kind, index, offset,
+                    } => {
+                        // 命中判定与渲染同一套度量（屏幕坐标 = 面板原点 + 行内位置）
+                        let prefix = stripped.get(..*offset).unwrap_or("");
+                        let (row, x) = quest_segment_offset(prefix, *size, LIST_MSG_W);
+                        let (x0, y0) = (
+                            panel_origin.0 + left + x,
+                            panel_origin.1 + top_y + row as f32 * (*size * 1.2),
+                        );
+                        let (x1, y1) = (
+                            x0 + crate::ui::text_markup::est_text_width(text, *size),
+                            y0 + *size * 1.2,
+                        );
+                        let hovered = cursor
+                            .map(|c| c.x >= x0 && c.x <= x1 && c.y >= y0 && c.y <= y1)
+                            .unwrap_or(false);
+                        if hovered {
+                            // C# `MouseEnter`：转橙 + `ShowTooltipForLink`（`:1368-1376`）
+                            hovered_link = Some((
+                                text.clone(),
+                                quest_link_tooltip_lines(*kind, index, &info_cache),
+                                x0,
+                                y1,
+                            ));
+                            (text.clone(), *offset, Color::srgb(1.0, 0.65, 0.0))
+                        } else {
+                            // C# `NewLink` 初值 `ForeColour = Color.Cyan`（`:1360-1366`）
+                            (text.clone(), *offset, Color::srgb(0.0, 1.0, 1.0))
+                        }
+                    }
+                };
+                let prefix = stripped.get(..part_offset).unwrap_or("");
+                let (row, x) = quest_segment_offset(prefix, *size, LIST_MSG_W);
+                node.left = Val::Px(left + x);
+                // 折行后行高 = 字号 × 1.2（与基础标签同一排版参数）
+                node.top = Val::Px(top_y + row as f32 * (*size * 1.2));
+                if let Some(mut f) = font {
+                    f.font_size = FontSize::Px(*size);
+                }
                 if let Some(mut t) = text {
-                    t.0 = lines.get(idx).cloned().unwrap_or_default();
+                    if t.0 != part_text {
+                        t.0 = part_text;
+                    }
                 }
                 if let Some(mut c) = color {
-                    // C# `NewText`：首行黄、标题行白粗体、正文白（`:1242-1251`）
-                    c.0 = if idx == 0 {
-                        Color::srgb(1.0, 1.0, 0.0)
-                    } else {
-                        Color::WHITE
-                    };
+                    if c.0 != col {
+                        c.0 = col;
+                    }
                 }
+                *vis = show(true);
             }
             QuestListPart::Bullet(slot) => {
                 let idx = top + slot;
@@ -1159,6 +1283,11 @@ fn quest_list_detail_system(
     }
 
     // ---- 钮：上/下滚、接受、完成 ----
+    // C# `HideTooltipForLink`（`NPCDialogs.cs:963-967`）：离开链接即清提示
+    match hovered_link {
+        Some((title, lines, x, y)) => tooltip.update(13, true, title, lines, x, y),
+        None => tooltip.update(13, false, String::new(), Vec::new(), 0.0, 0.0),
+    }
     let list = npc_available_quests(&catalog, &log, state.bound_npc, me_level, me_class);
     let entry = state
         .selected
