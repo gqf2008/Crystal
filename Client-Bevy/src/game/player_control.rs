@@ -1913,17 +1913,16 @@ mod tests {
         assert!(!locked(
             false, false, false, false, false, false, false, false, false
         ));
-        assert!(locked(true, false, false, false, false, false, false, false, false));
-        assert!(locked(false, true, false, false, false, false, false, false, false));
-        assert!(locked(false, false, true, false, false, false, false, false, false));
-        assert!(locked(false, false, false, true, false, false, false, false, false));
-        // C# MirMessageBox.Modal：提示框可见本身就是一道锁（其余四项全假时也要锁）
-        assert!(locked(false, false, false, false, true, false, false, false, false));
-        // 四枚 `MirMessageBox` 系提示（组队/行会邀请、商城确认、英雄询问）同样是 Modal
-        assert!(locked(false, false, false, false, false, true, false, false, false));
-        assert!(locked(false, false, false, false, false, false, true, false, false));
-        assert!(locked(false, false, false, false, false, false, false, true, false));
-        assert!(locked(false, false, false, false, false, false, false, false, true));
+        // 9 个来源逐个置真：**任一**为真都必须锁（前 5 项 = 选中物品/数量框/丢弃确认/快捷键/
+        // C# `MirMessageBox`；后 4 项 = 组队邀请/行会邀请/商城确认/英雄询问，同为 `Modal`）
+        for i in 0..9 {
+            let mut v = [false; 9];
+            v[i] = true;
+            assert!(
+                locked(v[0], v[1], v[2], v[3], v[4], v[5], v[6], v[7], v[8]),
+                "第 {i} 个模态来源为真时必须锁"
+            );
+        }
         assert!(locked(true, true, true, true, true, true, true, true, true));
     }
 

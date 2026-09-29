@@ -136,6 +136,13 @@ fn spawn_modal_blocker(mut commands: Commands) {
         // `Button` + `Interaction` ⇒ 参与 bevy_ui picking：光标落在它上面时命中它，
         // 下层的对话框按钮拿不到 hover/press。
         Button,
+        // 显式写死两件（`Button` 的 `#[require]` 理论上会补 `FocusPolicy::Block`，
+        // 但实测「弹框期间点下层窗照样关」⇒ 不押在 require 上）：
+        //   * `FocusPolicy::Block`：`ui_focus_system` 自顶向下遇到它就 break（下层不进 Pressed）；
+        //   * `Pickable`：bevy_picking 的 UI 后端在 `require_markers` 下只认挂了 `Pickable`
+        //     的节点（没有它会被直接跳过 ⇒ HoverMap 里根本看不见遮挡层）。
+        bevy::ui::FocusPolicy::Block,
+        bevy::picking::Pickable::default(),
         Interaction::default(),
         BackgroundColor(Color::NONE),
         GlobalZIndex(MODAL_BLOCKER_Z),
@@ -208,17 +215,38 @@ mod tests {
     #[test]
     fn blocker_node_is_full_client_area_and_pickable() {
         let mut world = World::new();
-        world.run_system_once(spawn_modal_blocker).expect("spawn 应成功");
-        let mut q = world.query::<(&Node, &GlobalZIndex, &Visibility, Has<Button>, Has<Interaction>)>();
+        world
+            .run_system_once(spawn_modal_blocker)
+            .expect("spawn 应成功");
+        let mut q = world.query::<(
+            &Node,
+            &GlobalZIndex,
+            &Visibility,
+            Has<Button>,
+            Has<Interaction>,
+            Has<bevy::ui::FocusPolicy>,
+            Has<bevy::picking::Pickable>,
+        )>();
         let rows: Vec<_> = q.iter(&world).collect();
         assert_eq!(rows.len(), 1, "应当只有一枚遮挡节点");
-        let (node, z, vis, has_button, has_inter) = rows[0];
+        let (node, z, vis, has_button, has_inter, has_focus, has_pickable) = rows[0];
         assert_eq!(node.left, Val::Px(0.0));
         assert_eq!(node.top, Val::Px(0.0));
         assert_eq!(node.width, Val::Px(CLIENT_W));
         assert_eq!(node.height, Val::Px(CLIENT_H));
         assert_eq!(*z, GlobalZIndex(MODAL_BLOCKER_Z));
-        assert!(has_button && has_inter, "必须能参与 picking（Button+Interaction）");
+        assert!(
+            has_button && has_inter,
+            "必须能参与 picking（Button+Interaction）"
+        );
+        // 红检（本轮实测踩到）：缺 `FocusPolicy::Block` ⇒ `ui_focus_system` 会穿过遮挡层把
+        // Pressed 发给下层按钮（弹框期间点背包 X 照样关窗）；缺 `Pickable` ⇒ UI picking 后端
+        // 在 `require_markers` 下直接跳过它（HoverMap 里看不见遮挡层）。
+        assert!(has_focus, "必须显式挂 FocusPolicy（Block）");
+        assert!(
+            has_pickable,
+            "必须显式挂 Pickable（否则 picking 后端会跳过）"
+        );
         assert_eq!(*vis, Visibility::Hidden, "无模态时默认隐藏");
     }
 }

@@ -426,7 +426,11 @@ mod tests {
             );
         }
         assert_eq!(compact_zs(0), Vec::<i32>::new());
-        assert_eq!(compact_zs(1), vec![DIALOG_Z_MAX], "只有一个 kind 时直接到带顶");
+        assert_eq!(
+            compact_zs(1),
+            vec![DIALOG_Z_MAX],
+            "只有一个 kind 时直接到带顶"
+        );
         assert_eq!(compact_zs(2), vec![DIALOG_Z_MIN, DIALOG_Z_MAX]);
         let zs = compact_zs(26);
         assert_eq!((zs[0], zs[25]), (DIALOG_Z_MIN, DIALOG_Z_MAX), "26 个恰铺满");
@@ -933,7 +937,11 @@ mod tests {
         // 另一个留在带底 30；同 kind 整体平移 ⇒ 内部层级差 10 保留（40/30 → 55/45）。
         let mut sorted = mail_gz.clone();
         sorted.sort_unstable();
-        assert_eq!(sorted, vec![45, 55], "Mail 两面板重排到 45/55，内部层级保留");
+        assert_eq!(
+            sorted,
+            vec![45, 55],
+            "Mail 两面板重排到 45/55，内部层级保留"
+        );
         assert_eq!(char_gz, DIALOG_Z_MIN, "Character 留在带底");
     }
 
