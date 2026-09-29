@@ -3929,6 +3929,69 @@ pwsh tools\acceptance\rpc.ps1 -Method screenshot -Params '{"path":"<worktree>\ou
 **门禁**：`cargo check --tests` 0 error；新增单测 `notice_buttons_use_native_art_size`
 （红检：把三钮改回 20x20 → FAILED）；lib/集成测试结论见 PR。
 
+### 3.2bw 模态层批次（walgit `crystal-modal-layer-batch`）：UI 层遮挡 + 旧提示复活 + 巡回脚本两处工具缺陷（2026-09-30）
+
+**① 统一模态层：把 C# `MirControl.Modal = true` 的「吞掉整个客户区」补全**
+
+原版依据（`MirControl.cs:825-828`）：`IsMouseOver` 在 `Modal` 为真时对**任意点**返回真，
+子控件派发自顶向下取首个命中并 `return` ⇒ 弹框期间**点别的对话框也不该有反应**。
+本端此前只有世界点击那一半（`player_control::UiLockState`），点下层对话框仍穿透。
+
+做法（`Client-Bevy/src/game/dialogs/modal_layer.rs`）：
+
+* 一枚**全客户区**遮挡节点（1024x768 @(0,0)，z = [`MODAL_BLOCKER_Z`] = 59），
+  显隐由**唯一真值** `modal_any_visible(9 个来源)` 驱动（背包选中 / 数量框 / 丢弃确认 /
+  快捷键分配 / 通用 `MirMessageBox` / 组队邀请 / 行会邀请 / 商城确认 / 英雄询问）；
+  世界点击闸与它共用同一支函数（原先 7 处各自挑 z：60/60/60/45/45/46/47）。
+* 模态面板统一挂 `MODAL_PANEL_Z` = 60（高于遮挡层 ⇒ 框自己的按钮照常可点）。
+* **踩到的两个坑**（都写进单测红检）：
+  1. 遮挡节点只写 `Button` 不够 —— `ui_focus_system` 照样把 `Pressed` 发给下层按钮
+     （实测：弹框期间点背包 X 仍然关窗）。必须**显式** `FocusPolicy::Block`。
+  2. 没有 `Pickable` 时，bevy_picking 的 UI 后端在 `require_markers` 下**直接跳过**该节点
+     （`bevy_ui-0.19.1/src/picking_backend.rs:194`）⇒ HoverMap 里根本看不见遮挡层。
+* **更深的根因：动态 z 无界**。`dialog_front_system::bump_dialog_z` 每次 +10 把被点窗抬到最前
+  ——逐窗巡回连点 45 扇窗后，被点窗的 z 涨到 400+，**盖过固定 z 的模态层**（实测 `(modal)block`
+  第一次就是被它打红的）。现改为**带内重排**：所有对话框按当前 z 排名压回 `[30, 55]`
+  （`compact_zs`，带顶 55 > 全部静态非模态 z 的 51、< 遮挡层 59），同 kind 整体平移 ⇒
+  窗内相对层级（如写邮件覆盖层）不变。单测 `dialog_z_band_stays_below_modal_layer` 钉住。
+
+**实机判据**（进 `ui_interact_sweep.ps1`，与逐窗巡回同一次运行）：
+
+```
+--- 模态遮挡 ---
+模态遮挡: 弹框期间点背包 X 无反应 blocked=YES hits=[630v2 1536x1152 []]
+模态解除: 同一处点击生效 closed=YES hits=[6379v0 36x31 [root=Inventory]]
+```
+
+即：开背包 → `notice_box_show`（新夹具，弹通用 `MirMessageBox`）→ 点背包关闭钮 ⇒ **没关**；
+清掉提示框 → 点**同一处** ⇒ **关**（反例同时排除了「这个钮本来就点不动」）。
+`notice_box_show {text}` 是本批新增的实机夹具（`control.rs`）。
+
+**② `cleanup_notice_box` 旧提示复活**：退出 `AppState::Game` 时若提示框还开着，
+原实现只清 `panel_ready` 不清 `text` ⇒ 下次进图面板一建出来，**上一局的旧提示自己弹回来**。
+现一并 `notice.text = None`；单测 `cleanup_clears_text_so_stale_notice_cannot_revive`
+（红检：删掉那一行 → FAILED）。
+
+**③ 巡回脚本两处工具缺陷**（都会让读证据的人误判）
+
+- **(a) `pass` 两套口径**：同一次运行控制台打 `pass=45 total=45`，产物 JSON 却记 `pass=41`
+  （JSON 只数 `closed=YES`，把 4 条 `open=GUARDED` 漏了）。现统一为
+  `closed=YES 或 open=GUARDED`，并在 JSON 里**单列** `guarded`。实测本轮
+  `gate.pass=46 total=47 guarded=4` 与控制台一致。
+- **(b) 构建戳护栏静默降级**：跨 target 目录跑（worktree + `CARGO_TARGET_DIR`、或显式
+  `-ClientExe`）时旧实现「反推不出构建根」只打一行 WARN 就跳过比对——正是「拿昨天的二进制
+  跑出绿」那道护栏失效的场景。现 `Assert-ClientBuildStamp -ExpectCommit <sha>` 支持**显式期望提交**
+  （不等即 exit 2，不做"Client-Bevy 有无改动"的软化），`ui_interact_sweep.ps1` 默认取
+  `-RepoRoot` 的 HEAD 传进去，并把 `build_commit`/`expect_commit` 写进结论 JSON。自证实测：
+  `-ExpectCommit 0000…` ⇒ exit 2；`touch src/lib.rs` 让 exe 比源码旧 ⇒ exit 2。
+  **顺带记一条真坑**：`cargo build` 不一定重跑 `build.rs`，构建戳会**停在旧提交**
+  （本轮实测：提交后 build 仍是上一个 commit 的戳，被新护栏当场拦下）——改完提交要重建时，
+  `touch Client-Bevy/build.rs` 再 build（或 `cargo clean -p client_bevy`）。
+
+**门禁**：`cargo check --tests` 0 error；`cargo test --lib` **900 passed / 0 failed**；
+`b0001_smoke` 2 + `ui_alignment` 53；**`ui_interact_sweep.ps1 -ManageServer` pass=46 total=47
+fail=0 skip=0 exit=0**；改动文件 `cargo fmt -- --check` 与 master 基线逐 hunk 一致。
+
 ### 3.2bu 原版 C# 客户端连的是**原版 C# 服务端**，不是 `ServerRust`（2026-09-30 实测）
 
 **问题**：原版 `Client.exe` 到底连哪个服务端？——**本目录沙箱里连的是原版 `Server\Server.exe`**

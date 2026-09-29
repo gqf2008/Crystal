@@ -79,6 +79,9 @@ param(
     [string]$JsonOut = '',
     [string]$TestUser = 'test',
     [string]$TestPass = '123456',
+    # ③b（2026-09-30）：显式期望提交 —— 跨 target 目录跑时旧的反推路径会静默跳过构建戳比对。
+    # 不传 = 取 `-RepoRoot` 的 HEAD（worktree 里跑就是 worktree 的 HEAD）。
+    [string]$ExpectCommit = '',
     [switch]$AllowStaleBinary,
     [switch]$FailOnSkip
 )
@@ -112,19 +115,29 @@ $srvProc = $null
 $clientProc = $null
 $enteredGame = $false
 $head = ''
+# ③b：产物出处（构建戳）与「期望提交」都写进结论 JSON —— 读证据的人不必再猜这份结果出自哪份二进制
+$buildCommit = ''
+$expectSha = ''
 
 function Write-Results {
     param([int]$Code)
-    $pass = ($results | Where-Object { $_.closed -eq 'YES' }).Count
+    # ③a（2026-09-30）：**与控制台汇总同一套公式** —— `closed='YES'` 或 `open='GUARDED'`
+    # 都算「判过」。此前 JSON 只数 closed='YES'（实测 41），控制台把 4 条 GUARDED 也计入（45），
+    # 只读 JSON 的人会以为少了 4 条；`guarded` 单列一项把口径写在脸上。
+    $pass = ($results | Where-Object { $_.closed -eq 'YES' -or $_.open -eq 'GUARDED' }).Count
+    $guarded = ($results | Where-Object { $_.open -eq 'GUARDED' }).Count
     $gate = [ordered]@{
         exit_code = $Code
         pass      = $pass
         total     = $results.Count
+        guarded   = $guarded
         fail      = $failures.Count
         skip      = $skips.Count
         failures  = $failures.ToArray()
         skips     = $skips.ToArray()
         head      = $head
+        build_commit  = $buildCommit
+        expect_commit = $expectSha
         client    = $ClientExe
         repo      = $RepoRoot
         time      = (Get-Date).ToString('s')
@@ -206,7 +219,20 @@ $ClientExe = (Resolve-Path $ClientExe).Path
 # 所以再叠一层提交级判据（扫 exe 内固化记录，不启动进程）。`-AllowStaleBinary` 时一并跳过。
 if (-not $AllowStaleBinary) {
     . "$PSScriptRoot\build_stamp.ps1"
-    Assert-ClientBuildStamp -Exe $ClientExe -ScriptName 'ui_interact_sweep'
+    # ③b：先定「期望提交」这一份真值，再断言。默认 RepoRoot 的 HEAD（不是 exe 路径反推的
+    # 那一层）——worktree + 共享 `CARGO_TARGET_DIR` / 显式 `-ClientExe` 时反推必失灵。
+    $expect = $ExpectCommit
+    if (-not $expect) {
+        try { $expect = (& git -C $RepoRoot rev-parse HEAD 2>$null | Select-Object -First 1) } catch { $expect = '' }
+        if ($expect) { $expect = $expect.Trim() }
+    }
+    if (-not $expect) {
+        Stop-Gate "取不到期望提交：`-RepoRoot $RepoRoot 不是 git 仓库，且未显式给 -ExpectCommit"
+    }
+    Assert-ClientBuildStamp -Exe $ClientExe -ExpectCommit $expect -ScriptName 'ui_interact_sweep'
+    $expectSha = $expect
+    $stampInfo = Get-ClientBuildStamp -Exe $ClientExe
+    if ($stampInfo) { $buildCommit = $stampInfo.commit }
 }
 
 if (-not $AllowStaleBinary) {
@@ -498,6 +524,55 @@ try {
         }
     } else {
         Add-Skip '(state)hero_manage' 'RPC 开了但窗不可见（该账号无英雄？）——hero_manage 关闭路径本轮未验证'
+    }
+
+    # ---------------- 模态遮挡（①，2026-09-30，walgit `crystal-modal-layer-batch`） ----------------
+    # C# `MirControl.Modal = true`（`MirControl.cs:825-828`）：弹框期间**整个客户区**的鼠标输入
+    # 都被吞——不只是世界点击，**其它对话框**的按钮也点不动。逐窗巡回（上面 45 条）证不了这条，
+    # 这里用一正一反两步把它钉死：
+    #   ① 开背包 → 弹 `MirMessageBox`（`notice_box_show` 夹具）→ 点背包关闭钮 ⇒ 背包**必须还开着**；
+    #   ② 清掉提示框 → 点**同一处** ⇒ 背包必须关（证明刚才那次失败是遮挡，不是"这个钮本来点不动"）。
+    Write-Host '--- 模态遮挡 ---'
+    Rpc 'notice_probe' @{ action = 'close' } | Out-Null
+    Rpc 'dialog' @{ kind = 'inventory'; action = 'open' } | Out-Null
+    Start-Sleep -Milliseconds 500
+    $invRect = Rpc 'dialog_rect' @{ kind = 'inventory' }
+    if (-not $invRect.ok) {
+        Add-Skip '(modal)block' '背包没开出来（拿不到关闭钮矩形）——模态遮挡本轮未验证'
+    } else {
+        $cx = [math]::Round($invRect.cx, 1)
+        $cy = [math]::Round($invRect.cy, 1)
+        $box = Rpc 'notice_box_show' @{ text = '模态遮挡实机判据' }
+        Start-Sleep -Milliseconds 400
+        $probe = Rpc 'notice_probe' @{}
+        if (-not $probe.text) {
+            Add-Skip '(modal)block' '提示框没弹起来（notice_box_show 无文案）——模态遮挡本轮未验证'
+            Rpc 'dialog' @{ kind = 'inventory'; action = 'close' } | Out-Null
+        } else {
+            $click1 = Rpc 'click' @{ x = $cx; y = $cy }
+            Start-Sleep -Milliseconds 500
+            $blocked = ((Rpc 'visible').visible -match 'Inventory')
+            $results.Add([pscustomobject]@{
+                kind='(modal)block'; open=($(if ($blocked) { 'OK' } else { 'LEAK' })); hit=(($click1.hits) -join ' | '); closed='N/A' })
+            if ($blocked) {
+                Write-Host ("模态遮挡: 弹框期间点背包 X 无反应 blocked=YES hits=[{0}]" -f (($click1.hits) -join ' | '))
+            } else {
+                Add-Fail '(modal)block' ("弹框期间点背包关闭钮竟然**关掉了**——UI 输入穿透（hits=[{0}]）" -f (($click1.hits) -join ' | '))
+            }
+            # 反例：清掉提示框后同一处点击必须生效
+            Rpc 'notice_probe' @{ action = 'close' } | Out-Null
+            Start-Sleep -Milliseconds 400
+            $click2 = Rpc 'click' @{ x = $cx; y = $cy }
+            Start-Sleep -Milliseconds 500
+            $nowClosed = ((Rpc 'visible').visible -notmatch 'Inventory')
+            $results.Add([pscustomobject]@{
+                kind='(modal)unblock'; open=($(if ($nowClosed) { 'OK' } else { 'STUCK' })); hit=(($click2.hits) -join ' | '); closed=$(if ($nowClosed) { 'YES' } else { 'NO' }) })
+            if ($nowClosed) {
+                Write-Host ("模态解除: 同一处点击生效 closed=YES hits=[{0}]" -f (($click2.hits) -join ' | '))
+            } else {
+                Add-Fail '(modal)unblock' ("清掉提示框后点同一处背包仍没关——不是遮挡而是关闭钮本身有问题（hits=[{0}]）" -f (($click2.hits) -join ' | '))
+            }
+        }
     }
 } catch {
     Add-Fail 'sweep' "巡回中断: $_"

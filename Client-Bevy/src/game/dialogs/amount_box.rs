@@ -188,7 +188,16 @@ fn spawn_amount_box(
     let Some(bg) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 238) else {
         return;
     };
-    let panel = spawn_panel(&mut commands, bg, x, y, 204.0, 109.0, 60);
+    // 模态面板统一 z（`modal_layer::MODAL_PANEL_Z`）：必须高于遮挡层 59
+    let panel = spawn_panel(
+        &mut commands,
+        bg,
+        x,
+        y,
+        204.0,
+        109.0,
+        crate::game::dialogs::modal_layer::MODAL_PANEL_Z,
+    );
     commands.entity(panel).insert(AmountBoxWidget);
 
     commands.entity(panel).with_children(|p| {

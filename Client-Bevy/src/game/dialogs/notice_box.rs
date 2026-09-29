@@ -122,6 +122,10 @@ fn cleanup_notice_box(
     }
     // 面板没了 ⇒ 可见性判据必须跟着假，否则退出/重进 Game 会留下「锁着但画不出」的状态
     notice.panel_ready = false;
+    // 文案也必须一起清（独立复核 2026-09-29 的「旧提示复活」）：只清 `panel_ready` 时，
+    // 退出 Game 那一刻开着的提示会留在 `text` 里，下次 `spawn_notice_box` 把面板建出来后
+    // **上一局的旧提示会自己弹回来**（可见性判据自洽、锁也没错，纯粹是脏状态）。
+    notice.text = None;
 }
 
 fn spawn_notice_box(
@@ -148,7 +152,8 @@ fn spawn_notice_box(
         PANEL_POS.1,
         PANEL_SIZE.0,
         PANEL_SIZE.1,
-        60,
+        // 模态面板统一 z（`modal_layer::MODAL_PANEL_Z`）：必须高于遮挡层 59
+        crate::game::dialogs::modal_layer::MODAL_PANEL_Z,
     );
     commands
         .entity(panel)
@@ -458,5 +463,31 @@ mod tests {
             show_guard(DialogKind::Fishing, &st),
             ShowGuard::Block("你没有拿着鱼竿。")
         );
+    }
+
+    /// ② 「旧提示复活」：退出 `AppState::Game` 时若提示框还开着，`cleanup_notice_box`
+    /// 必须把 **文案** 也清掉（只清 `panel_ready` 会让旧提示在下次进图时自己弹回来）。
+    ///
+    /// 红检：删掉 `cleanup_notice_box` 里的 `notice.text = None;` → 本用例 FAILED。
+    #[test]
+    fn cleanup_clears_text_so_stale_notice_cannot_revive() {
+        use bevy::ecs::system::RunSystemOnce;
+
+        let mut world = World::new();
+        world.insert_resource(NoticeBox {
+            text: Some("上一局的旧提示".to_string()),
+            panel_ready: true,
+        });
+        assert!(
+            world.resource::<NoticeBox>().is_visible(),
+            "前置：清场前提示框是可见的"
+        );
+        world
+            .run_system_once(cleanup_notice_box)
+            .expect("cleanup_notice_box 应成功");
+        let n = world.resource::<NoticeBox>();
+        assert!(!n.panel_ready, "panel_ready 必须置假");
+        assert!(n.text.is_none(), "text 必须清空（否则旧提示会复活）");
+        assert!(!n.is_visible(), "清场后不得可见");
     }
 }

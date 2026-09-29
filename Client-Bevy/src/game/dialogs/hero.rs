@@ -305,7 +305,16 @@ fn spawn_hero_manage(
     // MakeActiveHero 询问框（C# `MirMessageBox`；同 group.rs 邀请框：`Prguse[360]` 456x190
     // 居中 @(284,289)，Yes `Title[206..208]` @(260,157)、No `Title[210..212]` @(360,157)）
     if let Some(bg) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 360) {
-        let confirm = spawn_panel(&mut commands, bg, 284.0, 289.0, 456.0, 190.0, 47);
+        // 模态面板统一 z（`modal_layer` 的遮挡层 59 之下不许压住自己的按钮）
+        let confirm = spawn_panel(
+            &mut commands,
+            bg,
+            284.0,
+            289.0,
+            456.0,
+            190.0,
+            crate::game::dialogs::modal_layer::MODAL_PANEL_Z,
+        );
         commands.entity(confirm).insert((
             HeroManageConfirm,
             DialogRoot(DialogKind::HeroManage),

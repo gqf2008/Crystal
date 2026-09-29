@@ -289,31 +289,27 @@ struct UiLockState<'w> {
     quest_track: Res<'w, crate::game::dialogs::quest_tracking::QuestTrackingState>,
     quest_log: Res<'w, crate::game::dialogs::quest_log::QuestLogState>,
     notice: Res<'w, crate::game::dialogs::notice_box::NoticeBox>,
-}
-
-/// 选中物品/数量框/丢弃确认/快捷键分配均为模态交互；右击和按住移动也必须让路。
-///
-/// `notice` = 通用 `MirMessageBox`（`notice_box.rs`）可见。原版 `MirMessageBox.Modal = true`
-/// （`MirMessageBox.cs:19`）⇒ `MirControl.IsMouseOver` 对**任意点**返回真（`MirControl.cs:825-828`），
-/// 世界点击同样被吞。此前本端只做了显隐与 OK，弹框期间点世界仍会寻路（§3.2bd 记的缺口）。
-fn modal_ui_locked(
-    selected: bool,
-    amount: bool,
-    confirm: bool,
-    assign_key: bool,
-    notice: bool,
-) -> bool {
-    selected || amount || confirm || assign_key || notice
+    // 「模态」的真值已收敛到 `modal_layer`（①）：世界点击闸与 UI 遮挡层共用同一份来源表，
+    // 所以这里也要把四枚 `MirMessageBox` 系提示（组队/行会邀请、商城确认、英雄询问）算进来。
+    group: Res<'w, crate::game::dialogs::group::GroupState>,
+    guild: Res<'w, crate::game::dialogs::guild::GuildState>,
+    shop: Res<'w, crate::game::dialogs::game_shop::GameShopState>,
+    hero: Res<'w, crate::game::dialogs::hero::HeroState>,
 }
 
 impl UiLockState<'_> {
     fn locked(&self) -> bool {
-        modal_ui_locked(
+        // 单一真值（`modal_layer::modal_any_visible`）：9 个模态来源，UI 遮挡层与这里一字不差。
+        crate::game::dialogs::modal_layer::modal_any_visible(
             self.click.selected.is_some(),
             self.amount.visible,
             self.confirm.visible,
             self.assign_key.visible,
             self.notice.is_visible(),
+            self.group.invite.is_some(),
+            self.guild.invite.is_some(),
+            self.shop.pending.is_some(),
+            self.hero.managing && self.hero.confirm_slot.is_some(),
         )
     }
 
@@ -1911,14 +1907,23 @@ mod tests {
 
     #[test]
     fn modal_ui_lock_truth_table() {
-        assert!(!modal_ui_locked(false, false, false, false, false));
-        assert!(modal_ui_locked(true, false, false, false, false));
-        assert!(modal_ui_locked(false, true, false, false, false));
-        assert!(modal_ui_locked(false, false, true, false, false));
-        assert!(modal_ui_locked(false, false, false, true, false));
-        // C# MirMessageBox.Modal：提示框可见本身就是一道锁（其余四项全假时也要锁）
-        assert!(modal_ui_locked(false, false, false, false, true));
-        assert!(modal_ui_locked(true, true, true, true, true));
+        // ①（2026-09-30）：真值函数收敛到 `modal_layer::modal_any_visible`（9 个来源），
+        // 世界点击闸与 UI 遮挡层共用；这里只钉「任一来源为真即锁」这条语义。
+        use crate::game::dialogs::modal_layer::modal_any_visible as locked;
+        assert!(!locked(
+            false, false, false, false, false, false, false, false, false
+        ));
+        // 9 个来源逐个置真：**任一**为真都必须锁（前 5 项 = 选中物品/数量框/丢弃确认/快捷键/
+        // C# `MirMessageBox`；后 4 项 = 组队邀请/行会邀请/商城确认/英雄询问，同为 `Modal`）
+        for i in 0..9 {
+            let mut v = [false; 9];
+            v[i] = true;
+            assert!(
+                locked(v[0], v[1], v[2], v[3], v[4], v[5], v[6], v[7], v[8]),
+                "第 {i} 个模态来源为真时必须锁"
+            );
+        }
+        assert!(locked(true, true, true, true, true, true, true, true, true));
     }
 
     /// 通用 MirMessageBox 的可见性就是 C# `Modal` 的生效期（`MirMessageBox.cs:19`）。
