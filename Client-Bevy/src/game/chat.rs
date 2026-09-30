@@ -1157,6 +1157,13 @@ pub fn chat_scroll_knob_y(track_h: f32, knob_h: f32, start_index: usize, total: 
     16.0 + h * (start_index as f32 / (total - 1) as f32)
 }
 
+/// `GetTrueSize(Title[466])` = **222x180**（图头 224x180）——C# `ChatOptionDialog` 居中用它。
+pub const CHAT_OPTION_TRUE_SIZE: (f32, f32) = (222.0, 180.0);
+/// C# `ChatOptionDialog.Location = ((SW - Size.Width)/2, (SH - Size.Height)/2)`
+/// （`ChatOptionDialog.cs:24`，逐项整数除法）⇒ `((1024-222)/2, (768-180)/2)` = **(401,294)**。
+/// §3.2cq：本端此前是肉眼定的 (400,300)，x 偏 1、**y 偏 6**。
+pub const CHAT_OPTION_ORIGIN: (f32, f32) = (401.0, 294.0);
+
 /// 聊天设置面板（过滤 + 透明，C# ChatOptionDialog）
 fn spawn_chat_option_panel(
     mut commands: Commands,
@@ -1169,7 +1176,9 @@ fn spawn_chat_option_panel(
     libs.0.ensure_initialized();
     // 同 `spawn_chat`：面板文本含 CJK，用自带字形的主字体
     let font = shared_cjk_font(&mut fonts, &mut cjk_font);
-    let (dx, dy) = (400.0f32, 300.0f32);
+    // **已知画源偏差（本批不改）**：本端画的是自绘 224x180 深色矩形，不是 C# 的 `Title[466]` 美术
+    // —— 换美术要按 466 的子控件坐标整体重排（`FilterTabButton` 等），属独立"画源对齐"批次。
+    let (dx, dy) = CHAT_OPTION_ORIGIN;
 
     // 面板背景（半透明深色 + 边框感）
     let white = images.add(crate::map_renderer::make_image(
@@ -2100,6 +2109,24 @@ fn chat_server_events(
 
 #[cfg(test)]
 mod tests {
+
+    /// §3.2cq：聊天设置面板原点按 C# `Size` = `GetTrueSize(Title[466])` = **222x180** 算
+    /// （不是源码字面 `new Size(224,180)`）⇒ `((1024-222)/2, (768-180)/2)` = **(401,294)**。
+    /// 本端此前是肉眼定的 (400,300)：x 偏 1、**y 偏 6**。
+    #[test]
+    fn chat_option_origin_uses_get_true_size() {
+        assert_eq!(CHAT_OPTION_TRUE_SIZE, (222.0, 180.0));
+        assert_eq!(CHAT_OPTION_ORIGIN, (401.0, 294.0));
+        assert_ne!(CHAT_OPTION_ORIGIN, (400.0, 300.0), "修前的肉眼值");
+        assert_eq!(
+            (
+                (1024.0 - CHAT_OPTION_TRUE_SIZE.0) / 2.0,
+                (768.0 - CHAT_OPTION_TRUE_SIZE.1) / 2.0
+            ),
+            (401.0, 294.0),
+            "两项都整除（441/2 与 588/2）"
+        );
+    }
 
     /// #3261 门禁（金标准 ⑧ 长尾窗）：`ChatType.Announcement` 聊天消息必须**同时**进聊天面板
     /// 并弹顶部横幅（C# `MainDialogs.cs:791-794`）。修复前 `ChatNoticeState` 根本没有写入方
