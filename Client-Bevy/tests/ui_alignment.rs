@@ -2766,7 +2766,8 @@ fn panel_sprites_batch_b1_match_csharp() {
     require_assets!("panel_sprites_batch_b1_match_csharp");
     let mut libs = Libs::new();
 
-    let cases: [(&str, (LibraryName, usize), (f32, f32)); 8] = [
+    // Mail 单独核（见下）：它的实现常量按 C# `Size` = `GetTrueSize`，与图头差 2px。
+    let cases: [(&str, (LibraryName, usize), (f32, f32)); 7] = [
         ("Group", group::PANEL, group::PANEL_SIZE),
         ("Friend", friend::PANEL, friend::PANEL_SIZE),
         ("Mentor", mentor::PANEL, mentor::PANEL_SIZE),
@@ -2777,7 +2778,6 @@ fn panel_sprites_batch_b1_match_csharp() {
         ),
         ("Help", help::PANEL, help::PANEL_SIZE),
         ("Notice", notice::PANEL, (notice::BG_W, notice::BG_H)),
-        ("Mail", mail::PANEL, mail::PANEL_SIZE),
         ("Creature", creature::PANEL, creature::PANEL_SIZE),
     ];
     for (name, (lib, idx), declared) in cases {
@@ -2788,6 +2788,14 @@ fn panel_sprites_batch_b1_match_csharp() {
         );
         assert_in_canvas(name, 0.0, 0.0, real.0, real.1);
     }
+    // Mail 列表窗：C# `MirImageControl.Size` 在 `AutoSize`（默认 true）下返回 `GetTrueSize(670)` = 310x444
+    // —— 源码里的 `Size = new Size(312,444)` 对 getter 无效。2026-09-30 原版帧实测面板内容 @564、
+    // 关闭钮 @850（= 564 + (310-24)）、标题 @582、上一页/下一页 @666/756 ⇒ 按**真实尺寸**核（§3.2ck）。
+    assert_eq!(
+        libs.true_size(mail::PANEL.0, mail::PANEL.1),
+        mail::PANEL_SIZE,
+        "[尺寸] Mail 面板应取 C# `Size` = `GetTrueSize(Title[670])` = 310x444（图头 312x444）"
+    );
 
     // 居中公式（C# `Location = Center` → `((1024-W)/2, (768-H)/2)` 整数除法）
     for (name, (lib, idx), origin) in [
@@ -4712,7 +4720,11 @@ fn mail_window_panels_native_aligned() {
     assert_eq!(m::PANEL, (LibraryName::Title, 670));
 
     // 尺寸：实现常量 == 真资产尺寸（帧选错/尺寸抄错都红）
-    assert_eq!(libs.size(LibraryName::Title, 670), m::PANEL_SIZE);
+    // 列表窗：C# `MailListDialog.Size.Width` = `GetTrueSize(670)` = **310**（图头 312 的右侧 2 列全透明，
+    // `AutoSize` getter 会盖掉源码里写的 312）→ 与 `PANEL_SIZE` 比的是**真实尺寸**（§3.2ck 有原版帧证据）。
+    assert_eq!(libs.true_size(LibraryName::Title, 670), m::PANEL_SIZE);
+    // 另四张（写/读）面板的实现常量目前仍按**图头**写：它们的 C# `Size` 同理会取 `GetTrueSize`
+    // （真宽 233 vs 图头 236），但**未取原版帧**，本轮不动（§3.2ck ⑤ 留作下一轮取证项）。
     assert_eq!(libs.size(LibraryName::Title, 671), m::LETTER_SIZE);
     assert_eq!(libs.size(LibraryName::Title, 672), m::READ_SIZE);
     assert_eq!(libs.size(LibraryName::Title, 674), m::PARCEL_SIZE);
@@ -4792,8 +4804,10 @@ fn close_buttons_native_aligned() {
 
     // 坐标：逐窗绑定实现常量 vs C# 出处值
     let cases: [(&str, (f32, f32), (f32, f32)); 17] = [
-        // C# `MailDialogs.cs:79` Size.Width-24（MAIL_W=312 → 288）
-        ("邮件", d::mail::CLOSE_POS, (288.0, 3.0)),
+        // C# `MailDialogs.cs:79` `Size.Width - 24`；而 `Size.Width` = `GetTrueSize(670)` = **310**
+        // （源码里那句 `Size = new Size(312,444)` 被 `AutoSize` 的 getter 覆盖）→ **286**
+        // 2026-09-30 原版帧实测：关闭钮绝对 (850,8) = 面板 564 + 286（§3.2ck）
+        ("邮件", d::mail::CLOSE_POS, (286.0, 3.0)),
         // C# `RelationshipDialog.cs:42`
         ("姻缘", d::relationship::CLOSE_POS, (260.0, 3.0)),
         // C# `FriendDialog.cs:124`（曾为 206 → 错位 31px）
