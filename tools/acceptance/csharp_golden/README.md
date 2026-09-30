@@ -4239,6 +4239,49 @@ dbtool <沙箱>\Server setpos 333 384 99 100 ; dbtool <沙箱>\Server setpos gqf
 **未采集**：交易中的「双方都放物品/改金币/按确认锁定」这些**内容态**帧（本轮只做到"空窗"同状态对拍）；
 以及**原版鼠标点 YES 点不动**这条本身（是"控制被盖住"还是"点击语义"没查，如实记）。
 
+### 3.2cj `click` 命中栈诊断升级：一眼看出「光标下到底是什么」（+ 本机 mock 点击不稳的实测记录）（2026-09-30）
+
+#### ① 为什么要升
+
+`click` RPC 的 `hits` 原来只打印 `名字 尺寸 [归属窗]`。本轮被两次卡在同一类盲区上：
+
+```
+{"hits":["66v0 ? []"]}        # 既不是「有尺寸的 UI 节点」，也不带任何可辨认信息
+```
+
+——**尺寸是 `?`** 说明它不是 UI 节点（没有 `ComputedNode`），但它是精灵还是别的、可不可交互、在谁上面，全都看不到。
+现在每个命中项补三段（`control.rs` 的 phase 1，`#[cfg(debug_assertions)]` 之外也生效，因为它是回执内容）：
+
+| 段 | 含义 |
+|---|---|
+| `kind` | `ui`（有 `Node`）/ `sprite{custom_size}`（有 `Sprite`）/ `other`（两者都没有） |
+| `vis` | `vis` / `hidden`（`InheritedVisibility`；隐藏的 UI 节点 picking 会跳过） |
+| `z` | `gz=<GlobalZIndex>`（UI）/ `tz=<Transform.z>`（精灵）——跨后端比较靠深度，判断谁压谁得看它 |
+| `pick` | `hover` / `ignore` / `-`（没挂 `Pickable`） |
+
+示例（本端 `--mock`，背包窗关闭钮）：
+
+```
+hits=["6387v0 24x21 [root=Inventory] ui vis - pick=-"]     ← 真的命中窗内关闭钮
+hits=["66v0 ? [] other - - pick=-"]                        ← 命中一个**既非 UI 也非精灵**的实体（见 ②）
+```
+
+#### ② 顺带定性一半：本机 `--mock` 实例的点击**不稳**（根因仍未定性，如实记）
+
+| 场景 | 现象 |
+|---|---|
+| `--mock` 新起客户端，**第一次**点窗内 X | `hits=…[root=Inventory] ui …`，窗口**关掉** ✓ |
+| 之后就同一点/换点连点（5 次试验） | 全部 `hits=["66v0 ? [] other - - pick=-"]`，窗口**不关**（0/5） |
+| 同期 `ui_interact_sweep.ps1 -ManageServer`（`--real-net`） | **47 项里 46 通过、0 失败**（含大量同类 X 点击）✓ |
+| 客户端窗口位置 | 中途实测 `GetWindowRect = (-21333,-21333)`（摆屏外）；`SetWindowPos` 摆回 (100,100) 后**依旧**只命中 `66v0` |
+
+⇒ 这条**不是产品回归**（同一台机器上 real-net 巡回全绿），而是「注入 pointer 在 mock 实例上只能生效一次」的**验证能力**问题；
+根因（`bevy_picking` 的 pointer 实体 / `PointerLocation` 更新 / 窗口焦点三者哪个断的）本轮未定性。
+
+**取证口径（照这个用）**：mock 下要判「某扇窗的按钮点得动吗」这种问题，**优先走 `ui_interact_sweep.ps1`（real-net）**；
+mock 下做逐窗 A/B 时**用 `dialog open` + 状态探针（`dialogs`/`notice_probe`/`scroll`/`xxx_probe`）+ 帧模板匹配**，
+不要靠连续 `click` 下结论（§3.2ci 的英雄守卫取证就是这么做的）。若某一步**必须**用点击，重启一个干净的 mock 客户端后**点一次**。
+
 ### 3.2ci 英雄背包/英雄装备的 **`Hero == null` 静默守卫**补齐（+ `hero_set` 夹具 + 巡回脚本同步）（2026-09-30）
 
 #### ① 缺口：C# 无英雄时**静默不开窗**，本端会照开
