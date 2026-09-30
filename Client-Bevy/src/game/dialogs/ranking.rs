@@ -362,16 +362,37 @@ fn spawn_ranking(
     let mut rank_thumb: Option<Entity> = None;
     if let Ok(mut pcmd) = commands.get_entity(panel) {
         pcmd.with_children(|p| {
-            // 视觉走**本窗自己的 C# 原生滑块**（下面 `Prguse2[205/206]` @(299,113)），
-            // 占位灰条只留交互节点（`ScrollBarVisual::Invisible`）——否则 z=40 的浅灰块
-            // 会盖住 z=10 的美术滑块（2026-09-30 A/B：原版 (649,276) 0.0000，本端在该处只见灰块）。
-            let (_, thumb) = crate::ui::theme::spawn_scroll_bar_ui_styled(
-                p,
-                SCROLL_TRACK,
-                39,
-                crate::ui::theme::ScrollBarVisual::Invisible,
-            );
-            rank_thumb = Some(thumb);
+            // 滑块 = **C# 原生美术** `Prguse2[205]`（`RankingDialog.cs:158-166` 的 `ScrollBar`，
+            // `GetTrueSize` = 12x18 @(299,113)）：既不再画占位灰块（会把美术盖住），
+            // 也不再单独摆一块静态美术（那样拖动/滚动时它不动）。
+            match crate::ui::theme::load_art_thumb(
+                &mut libs,
+                &mut images,
+                LibraryName::Prguse2,
+                205,
+            ) {
+                Some((thumb_art, size)) => {
+                    let (_, thumb) = crate::ui::theme::spawn_scroll_bar_ui_styled(
+                        p,
+                        SCROLL_TRACK,
+                        39,
+                        crate::ui::theme::ScrollBarVisual::Art {
+                            thumb: thumb_art,
+                            size,
+                        },
+                    );
+                    rank_thumb = Some(thumb);
+                }
+                None => {
+                    let (_, thumb) = crate::ui::theme::spawn_scroll_bar_ui_styled(
+                        p,
+                        SCROLL_TRACK,
+                        39,
+                        crate::ui::theme::ScrollBarVisual::Invisible,
+                    );
+                    rank_thumb = Some(thumb);
+                }
+            }
         });
     }
     commands
@@ -481,26 +502,9 @@ fn spawn_ranking(
             )
             .insert(RankingNext);
         }
-        // 滚动条手柄：C# `Prguse2[205/206]` 12x18 @(299,113)。
-        // 拖动（C# `OnMoving` → `RowOffset`）本端暂不接线：服务端固定只回前 20 名
-        // （`ServerRust/.../npc.rs` `take(20)`），故 C# `Move()` 的 `RankCount-20` 恒 0、
-        // `GapPerRow = ScrollHeight / 0` —— 原版在该数据下同样不动（见 #2892 记录）。
-        if let (Some(n), Some(h)) = (
-            crate::ui::theme::load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 205),
-            crate::ui::theme::load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 206),
-        ) {
-            crate::ui::theme::spawn_icon_button(
-                p,
-                n.clone(),
-                h,
-                n,
-                SCROLL_POS.0,
-                SCROLL_POS.1,
-                SCROLL_SIZE.0,
-                SCROLL_SIZE.1,
-                10,
-            );
-        }
+        // 滚动条手柄现在就是上面那块 `ScrollBarVisual::Art`（`Prguse2[205]`）——它随 `offset`
+        // 由 `scroll_list_ui_system` 定位，所以**不要再**单独摆一块静态美术：
+        // 那会变成"拖了不动"的双份（2026-09-30 §3.2ch 之前的 `Invisible` 方案就是这种过渡态）。
         // 仅在线勾选框：C# `Prguse[2086]`(未勾)/`[2087]`(勾) @(190, H-20)，右侧 LabelText
         if let (Some(u), Some(t)) = (
             crate::ui::theme::load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 2086),

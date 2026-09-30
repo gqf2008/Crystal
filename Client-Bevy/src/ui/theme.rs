@@ -1073,6 +1073,35 @@ mod tests {
         assert_eq!(th.alpha(), 0.0, "滑块必须全透明");
     }
 
+    /// 2026-09-30（§3.2ch）：**美术滑块**的几何按美术尺寸走（高 = 美术高、行程 = 轨道高 - 美术高），
+    /// 占位滑块仍按 `visible / total` 比例；两种档都不许把行程算成 0（除零/贴边）。
+    #[test]
+    fn scroll_thumb_metrics_prefer_art_size() {
+        let list = super::UiScrollList {
+            rect_rel: (0.0, 0.0, 0.0, 0.0),
+            row_h: 15.0,
+            visible: 20,
+            total: 100,
+            offset: 0,
+            step: 1,
+            track_rel: (299.0, 113.0, 16.0, 273.0),
+            thumb: None,
+            z: 0,
+        };
+        let (h, travel) = super::thumb_metrics(&list, None);
+        assert!((h - 54.6).abs() < 0.1, "比例档滑块高 {h}");
+        assert!((travel - (273.0 - h)).abs() < 0.1, "比例档行程 {travel}");
+
+        // C# `ScrollBar` = `Prguse2[205]`（`GetTrueSize` 12x18）
+        let art = super::UiScrollThumbArt { size: (12.0, 18.0) };
+        let (h, travel) = super::thumb_metrics(&list, Some(&art));
+        assert_eq!(
+            (h, travel),
+            (18.0, 255.0),
+            "美术档：高 = 美术高、行程 = 轨道高 - 美术高"
+        );
+    }
+
     /// #2892 批D 单元①：下拉框弹出面板的命中矩形必须带上拖动偏移
     /// （C# `MirDropDownBox.Movable = true`：拖走后选项行/滚轮/点击外部关闭都要跟着走）。
     ///
@@ -1672,12 +1701,28 @@ pub fn spawn_scroll_bar_ui(
 /// @(299,113)），再叠一层占位视觉就会把美术**盖住**——2026-09-30 的 A/B 实测正是如此：
 /// 原版帧 `Prguse2[205]` 在 (649,276) 0.0000 命中，本端同一帧该处是不透光的浅灰块
 /// （`Color::srgba(0.85,0.85,0.9,0.9)`，z=40 压住 z=10 的美术）。
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, PartialEq, Debug)]
 pub enum ScrollBarVisual {
     /// 占位视觉：半透明深色轨道 + 浅色滑块（无原生美术滑块的窗用）
     Default,
     /// 只留**交互节点**（滚轮命中/滑块拖动仍可用），不带任何可见像素
     Invisible,
+    /// 用 **C# 原生美术**做滑块（不给轨道）：`thumb` = 该美术的 `Image`，`size` = `GetTrueSize`。
+    /// 滑块尺寸/行程按美术算（见 `UiScrollThumbArt`），随 `offset` 移动 ⇒ 与原版 `PositionBar` 同形。
+    Art {
+        thumb: Handle<Image>,
+        size: (f32, f32),
+    },
+}
+
+/// 挂在滑块实体上：这块滑块是**美术滑块**（非占位色块），尺寸就是美术尺寸。
+///
+/// 为什么要单独一个组件而不是往 [`UiScrollList`] 里加字段：`UiScrollList` 在 18 处构造
+/// （各窗各自填字面量），加必填字段等于全仓改一遍；而"这一块滑块用什么美术"本来就是
+/// **滑块自己的属性**，挂在它身上最省事也最难写错。
+#[derive(Component, Clone, Copy, Debug)]
+pub struct UiScrollThumbArt {
+    pub size: (f32, f32),
 }
 
 /// [`spawn_scroll_bar_ui`] 的带样式版本（返回值同为 `(track, thumb)`，交互节点一个不少）。
@@ -1687,7 +1732,7 @@ pub fn spawn_scroll_bar_ui_styled(
     z: i32,
     visual: ScrollBarVisual,
 ) -> (Entity, Entity) {
-    let (track_colour, thumb_colour) = scroll_bar_colours(visual);
+    let (track_colour, thumb_colour) = scroll_bar_colours(visual.clone());
     // 轨道（半透明深色）
     let track = parent
         .spawn((
@@ -1701,15 +1746,29 @@ pub fn spawn_scroll_bar_ui_styled(
             ZIndex(z),
         ))
         .id();
-    // 滑块（浅色）
-    let thumb = parent
-        .spawn((
-            abs_node(track_rel.0, track_rel.1, Some(track_rel.2), Some(40.0)),
-            BackgroundColor(thumb_colour),
-            UiScrollThumb,
-            ZIndex(z + 1),
-        ))
-        .id();
+    // 滑块：美术档画 `ImageNode`（尺寸 = 美术尺寸），其余档画色块（高度 40，随后由滚动系统按比例改）
+    let thumb = match visual {
+        ScrollBarVisual::Art {
+            thumb: handle,
+            size,
+        } => parent
+            .spawn((
+                abs_node(track_rel.0, track_rel.1, Some(size.0), Some(size.1)),
+                ImageNode::new(handle),
+                UiScrollThumb,
+                UiScrollThumbArt { size },
+                ZIndex(z + 1),
+            ))
+            .id(),
+        _ => parent
+            .spawn((
+                abs_node(track_rel.0, track_rel.1, Some(track_rel.2), Some(40.0)),
+                BackgroundColor(thumb_colour),
+                UiScrollThumb,
+                ZIndex(z + 1),
+            ))
+            .id(),
+    };
     (track, thumb)
 }
 
@@ -1722,8 +1781,39 @@ pub fn scroll_bar_colours(visual: ScrollBarVisual) -> (Color, Color) {
         ),
         // `Color::NONE` = alpha 0：不画任何像素。拖动命中走 `scroll_list_ui_system` 自己按
         // `Node` 矩形判定（不依赖 bevy picking 的可见性），所以透明不影响交互。
-        ScrollBarVisual::Invisible => (Color::NONE, Color::NONE),
+        // 美术档同理：轨道不画（C# 那几扇窗的 `PositionBar` 就只有滑块、没有轨道）。
+        ScrollBarVisual::Invisible | ScrollBarVisual::Art { .. } => (Color::NONE, Color::NONE),
     }
+}
+
+/// 滑块的 `(高度, 行程)`：美术档按美术高，其余档按 `visible / total` 比例。
+fn thumb_metrics(list: &UiScrollList, art: Option<&UiScrollThumbArt>) -> (f32, f32) {
+    let (_, _, _, track_h) = list.track_rel;
+    match art {
+        Some(a) => (a.size.1, (track_h - a.size.1).max(1.0)),
+        None => {
+            let total = list.total.max(list.visible);
+            let h = (track_h * (list.visible as f32 / total as f32)).clamp(14.0, track_h);
+            (h, (track_h - h).max(1.0))
+        }
+    }
+}
+
+/// 取「美术滑块」需要的两样东西：`Image` 句柄 + `GetTrueSize`（C# `MirButton` 不写 `Size` 时用的尺寸）。
+///
+/// 供 [`ScrollBarVisual::Art`] 用：`Prguse2[205/206]` 这类 C# `PositionBar` 就是"原生尺寸的 MirButton"。
+pub fn load_art_thumb(
+    libs: &mut crate::map_renderer::GameLibraries,
+    images: &mut Assets<Image>,
+    lib: LibraryName,
+    index: usize,
+) -> Option<(Handle<Image>, (f32, f32))> {
+    let size = libs.0.get_image(lib, index).map(|i| {
+        let (w, h) = i.get_true_size();
+        (w.max(0) as f32, h.max(0) as f32)
+    })?;
+    let handle = load_lib_image(libs, images, lib, index)?;
+    Some((handle, size))
 }
 
 /// bevy_ui 滚轮滚动 + 滑块定位 + 滑块拖动
@@ -1738,8 +1828,13 @@ pub fn scroll_list_ui_system(
     mouse: Res<ButtonInput<MouseButton>>,
     mut drag: ResMut<crate::ui::scroll_list::ScrollDrag>,
     mut lists: Query<(Entity, &mut UiScrollList), Without<UiScrollThumb>>,
-    thumb_read: Query<(Entity, &ChildOf, &UiScrollThumb)>,
-    mut thumb_write: Query<(&ChildOf, &mut Node, &UiScrollThumb)>,
+    thumb_read: Query<(Entity, &ChildOf, &UiScrollThumb, Option<&UiScrollThumbArt>)>,
+    mut thumb_write: Query<(
+        &ChildOf,
+        &mut Node,
+        &UiScrollThumb,
+        Option<&UiScrollThumbArt>,
+    )>,
     parents: Query<&ChildOf>,
     node_read: Query<&Node, Without<UiScrollThumb>>,
     // 隐藏列表不参与滚轮/滑块拖动命中：列表挂在隐藏页（行会成员页/仓库页）
@@ -1762,22 +1857,23 @@ pub fn scroll_list_ui_system(
         let Some(thumb) = list_thumb(e, &thumb_read) else {
             continue;
         };
-        let Ok((_, mut tn, _)) = thumb_write.get_mut(thumb) else {
+        let Ok((_, mut tn, _, art)) = thumb_write.get_mut(thumb) else {
             continue;
         };
-        let (tx, ty, tw, th) = list.track_rel;
-        let total = list.total.max(list.visible);
-        let thumb_h = (th * (list.visible as f32 / total as f32)).clamp(14.0, th);
+        let (tx, ty, tw, _th) = list.track_rel;
+        let (thumb_h, travel) = thumb_metrics(&list, art);
         let max_off = list.max_offset();
         let ratio = if max_off == 0 {
             0.0
         } else {
             list.offset as f32 / max_off as f32
         };
-        let thumb_y = ty + ratio * (th - thumb_h);
+        let thumb_y = ty + ratio * travel;
+        // 美术档宽度 = 美术宽（C# `PositionBar` 就是左对齐在轨道 x 上）；色块档宽度 = 轨道宽
+        let thumb_w = art.map(|a| a.size.0).unwrap_or(tw);
         tn.left = Val::Px(tx);
         tn.top = Val::Px(thumb_y);
-        tn.width = Val::Px(tw);
+        tn.width = Val::Px(thumb_w);
         tn.height = Val::Px(thumb_h);
     }
 
@@ -1795,11 +1891,14 @@ pub fn scroll_list_ui_system(
     }
 
     // 找某列表的子滑块（UiScrollThumb 且 parent == 列表实体）
-    fn list_thumb(e: Entity, thumbs: &Query<(Entity, &ChildOf, &UiScrollThumb)>) -> Option<Entity> {
+    fn list_thumb(
+        e: Entity,
+        thumbs: &Query<(Entity, &ChildOf, &UiScrollThumb, Option<&UiScrollThumbArt>)>,
+    ) -> Option<Entity> {
         thumbs
             .iter()
-            .find(|(_, co, _)| co.parent() == e)
-            .map(|(t, _, _)| t)
+            .find(|(_, co, _, _)| co.parent() == e)
+            .map(|(t, _, _, _)| t)
     }
 
     // 滑块拖动（C# MirScrollBar movable）
@@ -1812,16 +1911,16 @@ pub fn scroll_list_ui_system(
                 continue;
             };
             let (ox, oy) = scroll_origin(e, &parents, &node_read);
-            let total = list.total.max(list.visible);
-            let (tx, ty, tw, th) = list.track_rel;
-            let thumb_h = (th * (list.visible as f32 / total as f32)).clamp(14.0, th);
+            let (tx, ty, tw, _th) = list.track_rel;
+            let art = thumb_read.get(thumb).ok().and_then(|(_, _, _, a)| a);
+            let (thumb_h, travel) = thumb_metrics(list, art);
             let max_off = list.max_offset();
             let ratio = if max_off == 0 {
                 0.0
             } else {
                 list.offset as f32 / max_off as f32
             };
-            let thumb_y = oy + ty + ratio * (th - thumb_h);
+            let thumb_y = oy + ty + ratio * travel;
             if cursor.x >= ox + tx
                 && cursor.x <= ox + tx + tw
                 && cursor.y >= thumb_y
@@ -1842,18 +1941,17 @@ pub fn scroll_list_ui_system(
                     continue;
                 }
                 let (_, oy) = scroll_origin(e, &parents, &node_read);
-                let total = list.total.max(list.visible);
-                let (_, ty, _, th) = list.track_rel;
-                let thumb_h = (th * (list.visible as f32 / total as f32)).clamp(14.0, th);
+                let (_, ty, _, _th) = list.track_rel;
+                let art = thumb_read.get(thumb_e).ok().and_then(|(_, _, _, a)| a);
+                let (thumb_h, travel) = thumb_metrics(&list, art);
                 let track_top = oy + ty;
                 let max_off = list.max_offset();
                 if max_off == 0 {
                     list.offset = 0;
                     break;
                 }
-                let ty_clamped =
-                    (cursor.y - drag.grab_offset).clamp(track_top, track_top + th - thumb_h);
-                let ratio = ((ty_clamped - track_top) / (th - thumb_h)).clamp(0.0, 1.0);
+                let ty_clamped = (cursor.y - drag.grab_offset).clamp(track_top, track_top + travel);
+                let ratio = ((ty_clamped - track_top) / travel).clamp(0.0, 1.0);
                 list.offset = (ratio * max_off as f32).round() as usize;
                 break;
             }
