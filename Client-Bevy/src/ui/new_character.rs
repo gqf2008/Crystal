@@ -232,10 +232,18 @@ mod name_rule_tests {
 }
 
 /// 对话框常量（相对 1024x768 画布，背景居中）
+/// 贴图用的**图头**（`Library.Draw` 原样 1:1）
 const DLG_W: f32 = 588.0;
 const DLG_H: f32 = 460.0;
-pub const DLG_X: f32 = (1024.0 - DLG_W) / 2.0; // 218
-pub const DLG_Y: f32 = (768.0 - DLG_H) / 2.0; // 154
+/// `GetTrueSize(Prguse[73])` = **583x454**（图头 588x460，四边各裁 1–3px）。
+/// C# `NewCharacterDialog.cs:50` `Location = ((SW - Size.Width)/2, (SH - Size.Height)/2)`，
+/// `Size` = 真尺寸 ⇒ **(220,157)**（§3.2cp 批⑤；按图头会得 218,154）。
+pub const DLG_TRUE_W: f32 = 583.0;
+pub const DLG_TRUE_H: f32 = 454.0;
+/// C# 是**整数除法**：`(1024-583)/2` = 441/2 = **220**（浮点会得 220.5）、`(768-454)/2` = 314/2 = **157**。
+/// 常量不能 `const fn floor`，故直接写字面值（与 `help::ORIGIN` 同一处理，§3.2cl ②）。
+pub const DLG_X: f32 = 220.0;
+pub const DLG_Y: f32 = 157.0;
 const PREVIEW_X: f32 = 120.0;
 const PREVIEW_Y: f32 = 250.0;
 

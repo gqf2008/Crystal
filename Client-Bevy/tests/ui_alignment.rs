@@ -284,14 +284,16 @@ fn change_password_dialog_aligned() {
 fn new_character_dialog_aligned() {
     require_assets!("new_character_dialog_aligned");
     let mut libs = Libs::new();
-    assert_centered(
-        "新建角色框",
-        nc::DLG_X,
-        nc::DLG_Y,
-        LibraryName::Prguse,
-        73,
-        &mut libs,
+    // §3.2cp 批⑤：C# `NewCharacterDialog.cs:50` `((SW - Size.Width)/2, (SH - Size.Height)/2)`，
+    // `Size` = `GetTrueSize(Prguse[73])` = **583x454** ⇒ **(220,157)**（按图头 588x460 会得 218,154）
+    let (ntw, nth) = libs.true_size(LibraryName::Prguse, 73);
+    assert_eq!((ntw, nth), (nc::DLG_TRUE_W, nc::DLG_TRUE_H));
+    assert_eq!(
+        (nc::DLG_X, nc::DLG_Y),
+        (((SW - ntw) / 2.0).floor(), ((SH - nth) / 2.0).floor()),
+        "[居中] 新建角色框按 C# `Size` = GetTrueSize 代入"
     );
+    assert_eq!((nc::DLG_X, nc::DLG_Y), (220.0, 157.0));
     let (dw, dh) = libs.size(LibraryName::Prguse, 73);
     // 标题 Title[20](206,11)
     let (tw, th) = libs.size(LibraryName::Title, 20);
@@ -983,13 +985,20 @@ fn inventory_bigmap_constants() {
     use client_bevy::game::dialogs::inventory as inv;
 
     // ---- #3368 NPC 侧任务列表窗（C# `QuestListDialog`，`QuestDialogs.cs:15-250`）----
-    // 面板/坐标：`Index = 950; Library = Prguse`、`Location = (NPCDialog.Width + 47, 0) = (487,0)`
+    // 面板/坐标：`Index = 950; Library = Prguse`、`Location = (NPCDialog.**Size**.Width + 47, 0)`
+    // §3.2cp 批⑤：`Size.Width` = `GetTrueSize(Prguse[995])` = 438 ⇒ **(485,0)**
+    // （原版帧 `orig_questlist.png` 里 `Prguse[950]` 实测最佳落点就是 (485,0)，不符率 0.089）
     {
         use client_bevy::game::dialogs::npc as npc;
         use client_bevy::game::dialogs::quest_list as ql;
         assert_eq!(ql::LIST_SIZE, (316.0, 466.0), "面板 316x466（与 960/961 同底图）");
-        assert_eq!(ql::LIST_POS, (npc::PANEL_W + 47.0, 0.0), "C# Location 公式");
-        assert_eq!(ql::LIST_POS, (487.0, 0.0), "NPCDialog.Width=440 ⇒ (487,0)");
+        assert_eq!(
+            ql::LIST_POS,
+            (npc::PANEL_TRUE_W + 47.0, 0.0),
+            "C# Location 公式"
+        );
+        assert_eq!(ql::LIST_POS, (485.0, 0.0), "GetTrueSize(995)=438 ⇒ (485,0)");
+        assert_ne!(ql::LIST_POS.0, 487.0, "图头模型 = 487（原版帧证否）");
         // 行：`Rows = new QuestRow[5]`、`Location = (9, 36 + i*19)`、`Size = (200,17)`
         assert_eq!(ql::LIST_ROW_COUNT, 5);
         assert_eq!(ql::LIST_ROW_ORIGIN, (9.0, 36.0));
@@ -3103,10 +3112,10 @@ fn panel_sprites_batch_b3_match_csharp() {
     );
     assert_eq!(
         quest_list::LIST_POS,
-        (npc::PANEL_W + 47.0, 0.0),
-        "[坐标] C# `Location = (NPCDialog.Size.Width + 47, 0)` = (487,0)"
+        (npc::PANEL_TRUE_W + 47.0, 0.0),
+        "[坐标] C# `Location = (NPCDialog.Size.Width + 47, 0)`；`Size` = GetTrueSize(995) = 438 ⇒ (485,0)"
     );
-    assert_eq!(quest_list::LIST_POS, (487.0, 0.0));
+    assert_eq!(quest_list::LIST_POS, (485.0, 0.0));
 
     // Buff：`Prguse2[20..30]` 11 档 art 尺寸逐一核对。
     // §3.2cm：贴图用**图头** `PANEL_SIZES`，布局/锚点用**真尺寸** `PANEL_TRUE_SIZES`（= `GetTrueSize`）。
@@ -5070,5 +5079,59 @@ fn centered_and_anchor_windows_use_true_size_batch4() {
 
     println!(
         "  ✓ 「真尺寸」第二批：Notice/ChatNotice/HeroMenuPanel + 3 条 HUD 条 + 邮件四窗关闭钮（§3.2co 批④，源码判据）"
+    );
+}
+
+/// §3.2cp 批⑤：**NPC 系挂点 + 宠物窗 + 两条宠物条**。
+///
+/// 原版帧：任务列表挂点是**实锤**——`%TEMP%\golden_sandbox\shots\orig_questlist.png` 里
+/// `Prguse[950]`（任务列表面板）最佳落点 **(485,0)**（`win_locate` 不符率 0.089，同帧
+/// `Prguse[995]` @(0,0) 0.046）；按图头 440 会算成 487。
+/// 宠物窗**未采集**：沙箱角色没有宠物 ⇒ 开不出来（同 §3.2cl ③ 的"守卫窗"）。
+#[test]
+fn questlist_and_creature_use_true_size_batch5() {
+    require_assets!("questlist_and_creature_use_true_size_batch5");
+    use client_bevy::game::dialogs::creature;
+    use client_bevy::game::dialogs::npc;
+    use client_bevy::game::dialogs::quest_list as ql;
+    let mut libs = Libs::new();
+
+    // ① NPC 面板 Prguse[995]：图头 440x224 / 真 438x224
+    assert_eq!(libs.size(LibraryName::Prguse, 995), (440.0, 224.0));
+    assert_eq!(
+        libs.true_size(LibraryName::Prguse, 995),
+        (npc::PANEL_TRUE_W, 224.0)
+    );
+
+    // ② 任务列表挂点：`NPCDialog.Size.Width + 47` = 485（原版帧实测值）
+    assert_eq!(ql::LIST_POS, (485.0, 0.0));
+    assert_eq!(
+        ql::LIST_POS.0,
+        libs.true_size(LibraryName::Prguse, 995).0 + 47.0
+    );
+
+    // ③ 宠物窗 Prguse[468]：图头 452x376 / 真 449x375 ⇒ Center (287,196)
+    assert_eq!(libs.size(LibraryName::Title, 468), (452.0, 376.0));
+    assert_eq!(
+        libs.true_size(LibraryName::Title, 468),
+        creature::CREATURE_TRUE_SIZE
+    );
+    assert_eq!(
+        (
+            ((SW - creature::CREATURE_TRUE_SIZE.0) / 2.0).floor(),
+            ((SH - creature::CREATURE_TRUE_SIZE.1) / 2.0).floor()
+        ),
+        (287.0, 196.0),
+        "[居中] 宠物窗 `Location = Center` 用真尺寸"
+    );
+
+    // ④ 两条宠物条：填充宽用 FG 精灵的**真宽**（531→246、420→169），贴图仍按图头
+    assert_eq!(libs.size(LibraryName::Prguse2, 531), (248.0, 12.0));
+    assert_eq!(libs.true_size(LibraryName::Prguse2, 531), (246.0, 12.0));
+    assert_eq!(libs.size(LibraryName::Prguse2, 420), (172.0, 7.0));
+    assert_eq!(libs.true_size(LibraryName::Prguse2, 420), (169.0, 7.0));
+
+    println!(
+        "  ✓ NPC 任务列表挂点 (485,0) + 宠物窗 (287,196) + 两条宠物条真宽 246/169（§3.2cp 批⑤）"
     );
 }

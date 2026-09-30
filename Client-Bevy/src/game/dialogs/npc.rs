@@ -38,6 +38,12 @@ pub const PANEL: (LibraryName, usize) = (LibraryName::Prguse, 384);
 /// 面板尺寸（Prguse[384] 实测 440x224）
 pub const PANEL_W: f32 = 440.0;
 pub const PANEL_H: f32 = 224.0;
+/// 面板**真宽**：`GetTrueSize(Prguse[995])` = **438**（图头 440，最右 2 列全透明）。
+///
+/// C# `NPCDialog` 的 `Size` 就是它 —— 推背包 `Size.Width + 5` = **443**（§3.2cn，原版帧实锤）、
+/// `QuestListDialog.Location = (NPCDialog.Size.Width + 47, 0)` = **485**（§3.2cp 批⑤，原版帧实锤）。
+/// 高不裁（224）⇒ `Size.Height` 与图头同值。
+pub const PANEL_TRUE_W: f32 = 438.0;
 
 /// 面板背景：`Prguse[995]`（C# `NPCDialog` 构造器 `Index = 995; Library = Libraries.Prguse;`，
 /// `NPCDialogs.cs:52`）。**曾用 `Prguse[384]`**——两张图同为 440x224，所以窗口级几何对表与

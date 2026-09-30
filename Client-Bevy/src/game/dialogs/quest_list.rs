@@ -54,8 +54,11 @@ use crate::ui::theme::{
 pub const LIST_PANEL: (LibraryName, usize) = (LibraryName::Prguse, 950);
 pub const LIST_SIZE: (f32, f32) = (316.0, 466.0);
 /// C# `Location = new Point(NPCDialog.Size.Width + 47, 0)`（`:36`）。
-/// `NPCDialog.Size.Width` = 本端 `npc::PANEL_W`（440）⇒ (487,0)。
-pub const LIST_POS: (f32, f32) = (crate::game::dialogs::npc::PANEL_W + 47.0, 0.0);
+/// `NPCDialog.Size.Width` = `GetTrueSize(Prguse[995])` = **438** ⇒ **(485,0)**（不是图头 440 的 487）。
+///
+/// §3.2cp 批⑤ 原版帧实锤：`%TEMP%\golden_sandbox\shots\orig_questlist.png` 里任务列表面板
+/// `Prguse[950]` 的最佳落点就是 **(485,0)**（`win_locate` 不符率 0.089，同帧 `Prguse[995]` @(0,0) 0.046）。
+pub const LIST_POS: (f32, f32) = (crate::game::dialogs::npc::PANEL_TRUE_W + 47.0, 0.0);
 
 /// C# `Rows = new QuestRow[5]`（`:30`）+ `Location = new Point(9, 36 + i * 19)`（`:322`）
 pub const LIST_ROW_COUNT: usize = 5;
