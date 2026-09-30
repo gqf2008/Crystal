@@ -20,10 +20,6 @@ use crate::ui::theme::{load_lib_image, spawn_icon_button, spawn_image, CloseButt
 /// #2892 批B：面板精灵（C# `SocketDialog.Index = 20; Library = Libraries.Prguse3`）
 pub const PANEL: (LibraryName, usize) = (LibraryName::Prguse3, 20);
 
-/// 背包背景 Title[196] 缺失时的兜底尺寸（真实值运行时从库读取）
-const INV_W_FALLBACK: f32 = 316.0;
-const INV_H_FALLBACK: f32 = 236.0;
-
 /// 人窗（C# `CharacterDialog.Index = 504`）的面板图号与兜底尺寸
 /// （`CharacterDialog.cs:32-34`：`Title[504]` @ `(ScreenWidth-264, 0)`；实测 264x380）
 pub const CHAR_PANEL_INDEX: usize = 504;
@@ -75,14 +71,6 @@ pub fn socket_origin_for(
     socket_origin(origin, size.0, size.1, sock_w)
 }
 
-/// 背包背景 Title[196] 真实尺寸（缺失回退 316x236 实测值）
-fn inventory_real_size(libs: &mut GameLibraries) -> (f32, f32) {
-    match libs.0.get_image(LibraryName::Title, 196) {
-        Some(i) => (i.width.max(0) as f32, i.height.max(0) as f32),
-        None => (INV_W_FALLBACK, INV_H_FALLBACK),
-    }
-}
-
 /// 镶嵌状态（当前展示的物品 + 来源格）
 #[derive(Resource, Default)]
 pub struct SocketState {
@@ -132,7 +120,7 @@ fn spawn_socket(
 
     // 面板（初始 1 孔，打开时按孔数换图并按背包真实尺寸重定位；不加 Overflow::clip，
     // 关闭按钮 left=w-23 时右缘与面板齐平）
-    let (inv_w, inv_h) = inventory_real_size(&mut libs);
+    let (inv_w, inv_h) = crate::game::dialogs::inventory::inventory_real_size(&mut libs);
     let (pw, ph) = match libs.0.get_image(LibraryName::Prguse3, 20) {
         Some(i) => (i.width.max(0) as f32, i.height.max(0) as f32),
         None => (81.0, 62.0),
@@ -246,7 +234,7 @@ fn socket_ui_system(
 
     // 面板按孔数换图 + 按背包真实尺寸重定位（C# SocketDialog.Show：
     // x = inv.X+(inv.W-w)/2、y = inv.Y+inv.H+5、CloseButton = w-23 —— 关闭钮随实际宽度）
-    let (inv_w, inv_h) = inventory_real_size(&mut libs);
+    let (inv_w, inv_h) = crate::game::dialogs::inventory::inventory_real_size(&mut libs);
     // 人窗（C# `CharacterDialog`）：原点取运行期，尺寸取 `Title[504]` 真实值（兜底 264x380）
     let char_origin = roots
         .iter()
@@ -366,14 +354,17 @@ mod tests {
     fn socket_origin_matches_csharp_show() {
         // 原点 (0,0)（默认背包原点，InventoryOrigin 初始值）
         // 1 孔面板宽 81（Prguse3[20] 实测）
+        // §3.2cm 批③：背包尺寸用 **GetTrueSize(Title[196]) = 313x235**（不是图头 316x236）
+        // ⇒ (313-81)/2 = 116、y = 235+5 = 240（C# 是 int 除法：45/2=22 见下条）
         assert_eq!(
-            socket_origin((0.0, 0.0), 316.0, 236.0, 81.0),
-            (117.0, 241.0)
+            socket_origin((0.0, 0.0), 313.0, 235.0, 81.0),
+            (116.0, 240.0)
         );
         // 12 孔面板宽 268（Prguse3[31]）
         assert_eq!(
-            socket_origin((0.0, 0.0), 316.0, 236.0, 268.0),
-            (24.0, 241.0)
+            socket_origin((0.0, 0.0), 313.0, 235.0, 268.0),
+            (22.0, 240.0),
+            "C# (313-268)/2 = 22（int 除法，45/2=22）"
         );
         // 关闭钮跟随实际宽度：w-23（spawn 与运行时同步该公式）
         assert_eq!(
@@ -393,12 +384,12 @@ mod tests {
     /// `Title[504]` 实测 264x380 ⇒ y=380+5=385）。C# `Point` 是 int ⇒ 整除截断。
     #[test]
     fn socket_origin_follows_source_grid_like_csharp_show() {
-        let inv = ((0.0, 0.0), (316.0, 236.0));
+        let inv = ((0.0, 0.0), (313.0, 235.0));
         let ch = ((760.0, 0.0), (264.0, 380.0));
-        // 背包来源：与旧口径逐值一致（y = 0+236+5 = 241）
+        // 背包来源：真尺寸口径（y = 0+235+5 = 240）
         assert_eq!(
             socket_origin_for(SocketSource::Inventory, inv.0, inv.1, ch.0, ch.1, 81.0),
-            (117.0, 241.0)
+            (116.0, 240.0)
         );
         // 装备来源：x = 760 + (264-81)/2 = 760+91 = 851；y = 0+380+5 = 385
         assert_eq!(

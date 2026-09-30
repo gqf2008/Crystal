@@ -4239,6 +4239,55 @@ dbtool <沙箱>\Server setpos 333 384 99 100 ; dbtool <沙箱>\Server setpos gqf
 **未采集**：交易中的「双方都放物品/改金币/按确认锁定」这些**内容态**帧（本轮只做到"空窗"同状态对拍）；
 以及**原版鼠标点 YES 点不动**这条本身（是"控制被盖住"还是"点击语义"没查，如实记）。
 
+### 3.2cn 「按面板真宽度算位置」一族：背包推位四档 + 背包/负重条真尺寸（2026-10-01）
+
+承接 §3.2cl ② / §3.2cm。§3.2cl ③ 表里 **`NPCAwakeDialog 710→309 差 51px`** 那行当时标了"最可疑、先确认 Index 解析"——
+本轮回读完 C# 源码 + 取到原版帧，结论是**工具把"用处"配错了，但 51px 是真缺陷**：错不在觉醒面板自身
+（它的子控件全是字面量），而在 **`NPCAwakeDialog.Show()` 把背包推到 `Size.Width + 5`**（`NPCDialogs.cs:2252`），
+`Size` = `GetTrueSize(Title[710])` = **309** ⇒ x = **314**（按图头 360 会得 365，差 51px）。
+
+#### ① 这一族的五档（四档有原版帧实锤）
+
+`Size` 一律指 `MirImageControl.Size` = `GetTrueSize`；`InventoryDialog` 自己 `Location` 未设 ⇒ (0,0)。
+
+| 站 | C# 出处 | 公式 | 期望 | 原版帧实测（`%TEMP%\golden_sandbox\shots`） | 本端修前 |
+|---|---|---|---|---|---|
+| 交易 | `TradeDialogs.cs:154` | `ScreenWidth - InventoryDialog.Size.Width` | **(711,0)** | `orig_T10_Benter.png`：背包关闭钮 `Prguse2[360]` **0.0000 @(1000,3)** ⇒ 面板 x=711 | 708 |
+| NPC 对话 | `NPCDialogs.cs:1044` | `Size.Width + 5`（`Prguse[995]` 真宽 438） | **(443,0)** | `orig_npc_try2.png`：`Title[196]` @**(443,0)**（0.069） | **未推（0）** |
+| 觉醒 | `NPCDialogs.cs:2252` | `Size.Width + 5`（`Title[710]` 真宽 309）＋ `InventoryDialog.Show()` | **(314,224)** | `orig_awake.png`：`Title[196]` @**(314,224)**（0.055） | **未推（0）** |
+| 寄售 | `TrustMerchantDialog.cs:1435` | `Size.Width + 5`（`Title[786]` 真宽 490） | **(495,0)** | `orig_market4.png`：`Title[196]` @**(495,0)**（0.065） | 497 |
+| 仓库 | `NPCDialogs.cs:2967/2990` | `Size.Width + 5`（`Prguse[586]` **无裁** ⇒ 388） | (393,0) | 真尺寸==图头 ⇒ 本端本就对 | 393 ✓ |
+
+觉醒窗的 y=224 来自 `GameScene.cs:307` `new Point(0, NPCDialog.Size.Height)`（`Prguse[995]` 高不裁 = 224），
+与 `npc_awake::PANEL_ORIGIN` 一致；`NPCAwakeDialog.Hide()`（`:2227-2245`）**不重置**背包位置 —— 照抄，不"顺手修"。
+对照帧：`orig_npc_click_try1.png`（NPC 窗未开）里同一张 `Title[196]` 在 (0,0)，说明 (443,0) 不是巧合。
+
+#### ② 随之收口的三处
+
+1. **`inventory_real_size()` 名不符实**：函数名与注释都写"真实尺寸"，取的是**图头**（316x236）。
+   改取 `get_true_size()`（**313x235**）。连带：邮件包裹窗 `MailDialogs.cs:711` `Size.Width + 10` = **323**（原 326）、
+   镶嵌窗 `SocketDialog.cs:108-110` 的 `inv.W/2` 与 `inv.H + 5` = **116 / 240**（原 117 / 241）。
+   `socket.rs` 里那份**重复实现**删掉，统一走 inventory 模块（防两处再次漂移）。
+2. **`InventoryPlaceAt` 原本只带 x、y 一律归零** ⇒ 觉醒那档会少 224px。改成 `(x, y)` 二维
+   （C# `Location` 本来就是二维点），推位系统同时平移 `left`/`top` 并同步 `InventoryOrigin`。
+3. **负重条填充宽**：C# `InventoryDialog.cs:423` `(WeightBar.Size.Width - 3) * percent`，
+   `WeightBar` = `Prguse[24]` 真宽 **81** ⇒ `78 * percent`；本端按图头写成 `(84-3) * percent`，条尾长 3px。
+   （percent>0.50/0.75 时 C# 换 `UI_32bit[471/470]` 美术，本机**无该库** ⇒ 仍是 §3.2bx 记过的 tint 偏差 #2611，本轮不动。）
+
+#### ③ 本端验证
+
+- `cargo test --lib` = **919 passed**（推位回归改成真尺寸 711，并新增"二维推位 (314,224)"断言）
+- `cargo test --test b0001_smoke --test ui_alignment` = **2 + 54 passed**
+  （新增 `push_inventory_uses_panel_true_width`：逐项钉 `Title[196] 313x235` / `Prguse[995] 438` /
+  `Title[710] 309` / `Title[786] 490` / `Prguse[586] 无裁` / `Prguse[24] 81`，以及 711 / 443 / (314,224) / 495 / 323 五个坐标）
+- `pwsh tools/acceptance/ui_interact_sweep.ps1 -ManageServer` = **pass=46 / total=47 / fail=0 / skip=0 / exit=0**
+- `rustfmt --edition 2024 --check`：6 个改动文件的告警**计数与 master 基线逐个相等**（无新增漂移）
+
+#### ④ 未采集
+
+- **邮件包裹窗（323）与镶嵌窗（116/240）的原版帧**：分别需要"邮件-写包裹"与"背包 Ctrl+右键-镶嵌"两个状态，
+  本轮没取。公式与资产尺寸都已定，属「按同一条口径顺改」；未取帧的部分如实记，不推数。
+
 ### 3.2cm `GetTrueSize` 批②：BigMap / Buff(PoisonBuff) / FishingStatus 三窗（2026-10-01）
 
 承接 §3.2cl（`Size` = `GetTrueSize`，不是图头）。本轮把 §3.2cl ③ 扫出的 22 个类里**三扇能取到帧的**做掉，
@@ -4400,6 +4449,10 @@ PY
 
 > **已收口**（2026-10-01 §3.2cm）：本表的 `FishingStatusDialog` / `BigMapDialog` / `BuffDialog` 三条已按真尺寸修掉
 > 并留下原版帧或源码判据（BigMap/Buff 有原版帧实锤，FishingStatus 只有源码判据）。其余各行仍待办。
+>
+> **一条被更正**（2026-10-01 §3.2cn）：`NPCAwakeDialog 710→309 差 51px` 那行的**用处配错了**——错不在觉醒面板
+> 自身（子控件全是字面量），而在 `NPCAwakeDialog.Show()` 把**背包**推到 `Size.Width + 5`（309+5=314）。
+> 已修并留原版帧实锤。同族还收了 NPC/TM/交易三档推位与背包、负重条的真尺寸。
 
 **同时更正的历史结论**：§3.2cd/§3.2ce 表里把 Friend/Help/KeyboardLayout 的 Δ=(−1,0) 记成"居中窗口径"的那些行，
 按本条应读作"当时未修的真缺口"；本条目已把它们修掉。

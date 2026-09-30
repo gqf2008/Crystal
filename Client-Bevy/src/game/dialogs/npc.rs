@@ -185,7 +185,43 @@ impl Plugin for NpcDialogPlugin {
                 .after(crate::network::network_system)
                 .run_if(in_state(AppState::Game)),
         );
+        // §3.2cm 批③：NPC 对话开/关时把背包推到 C# 的位置（`NPCDialogs.cs:1044/1035`）
+        app.add_systems(Update, npc_push_inventory.run_if(in_state(AppState::Game)));
     }
+}
+
+/// C# `NPCDialog.Show()/Hide()`（`NPCDialogs.cs:1044` / `:1035`）：
+/// **开窗把背包推到 `Size.Width + 5`**，关窗回 `(0,0)`。
+///
+/// `Size` = `GetTrueSize(Prguse[995])` = **438** ⇒ 背包 x = **443**。
+/// 原版帧实锤：`orig_npc_try2.png` 里 `Title[196]` @**(443,0)**（不符率 0.069）；
+/// 对照 `orig_npc_click_try1.png`（NPC 窗未开）里同一张图 @(0,0)。
+///
+/// 本端此前**完全没有这一步**——NPC 对话时背包停在 (0,0)，与原版"并排"不符。
+fn npc_push_inventory(
+    npc: Res<NpcDialogState>,
+    mut place_at: MessageWriter<crate::game::dialogs::inventory::InventoryPlaceAt>,
+    mut libs: ResMut<GameLibraries>,
+    mut prev: Local<bool>,
+) {
+    if *prev == npc.visible {
+        return;
+    }
+    *prev = npc.visible;
+    if !npc.visible {
+        place_at.write(crate::game::dialogs::inventory::InventoryPlaceAt(0.0, 0.0));
+        return;
+    }
+    libs.0.ensure_initialized();
+    let w = match libs.0.get_image(NPC_PANEL.0, NPC_PANEL.1) {
+        Some(i) => i.get_true_size().0.max(0) as f32,
+        None => PANEL_W,
+    };
+    // C# `new Point(Size.Width + 5, 0)`（NPCDialog 未设 Location ⇒ y=0）
+    place_at.write(crate::game::dialogs::inventory::InventoryPlaceAt(
+        w + 5.0,
+        0.0,
+    ));
 }
 
 fn cleanup_npc_dialog(mut commands: Commands, roots: Query<Entity, With<DialogRoot>>) {

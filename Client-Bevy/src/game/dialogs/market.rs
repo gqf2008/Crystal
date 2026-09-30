@@ -127,6 +127,15 @@ pub struct MarketTabBtn(pub &'static str);
 /// C# `TrustMerchantDialog`（`TrustMerchantDialog.cs:86-500`）面板与控件锚点
 pub const TM_PANEL_W: f32 = 492.0;
 pub const TM_PANEL_H: f32 = 478.0;
+
+/// `Title[786]` 的**真宽**（`GetTrueSize` = **490**，图头 492）。
+///
+/// C# `TrustMerchantDialog.Show()`（`TrustMerchantDialog.cs:1435`）把背包推到
+/// `new Point(Size.Width + 5, Location.Y)`，`Size` 是 `GetTrueSize` ⇒ **495**；
+/// 本端此前用 `TM_PANEL_W`(492) ⇒ 497。
+///
+/// 原版帧实锤：`orig_market4.png` 里 `Title[196]` @**(495,0)**（`win_locate` 不符率 0.0648）。
+pub const TM_PANEL_TRUE_W: f32 = 490.0;
 /// C# 未设 `Location`（MirControl 默认 (0,0)）
 const TM_POS: (f32, f32) = (0.0, 0.0);
 const TM_CLOSE: (f32, f32) = (465.0, 3.0);
@@ -1428,9 +1437,12 @@ fn market_ui_system(
     // `DrawFilters(0, -1)` 复位筛选树 + 发 `C.MarketSearch{Match="", Type=Nothing, Usermode=false}`
     if !*requested {
         *requested = true;
-        // C# `TrustMerchantDialog.Show()`（:1435-1436）：背包推到 `Size.Width + 5` 并打开
+        // C# `TrustMerchantDialog.Show()`（:1435-1436）：背包推到 `Size.Width + 5` 并打开。
+        // §3.2cm 批③：`Size` = `GetTrueSize(Title[786])` = 490 ⇒ 495（本端原用图头 492 ⇒ 497）
         place_at.write(crate::game::dialogs::inventory::InventoryPlaceAt(
-            TM_PANEL_W + 5.0,
+            TM_PANEL_TRUE_W + 5.0,
+            // C# `Size.Width + 5, Location.Y`；`TrustMerchantDialog` 未设 Location ⇒ (0,0)
+            0.0,
         ));
         mgr.open(DialogKind::Inventory);
         market.panel = MarketPanelType::Market;
@@ -1454,7 +1466,7 @@ fn market_ui_system(
         if edge(e, inter, &mut prev_inter) {
             mgr.close(DialogKind::Market);
             // C# `Hide()`（:1411）：背包复位到 (0,0)
-            place_at.write(crate::game::dialogs::inventory::InventoryPlaceAt(0.0));
+            place_at.write(crate::game::dialogs::inventory::InventoryPlaceAt(0.0, 0.0));
         }
     }
     // 渲染（#89 滚轮翻页：scroll.offset 行号 ↔ market.page 同步）
@@ -1785,7 +1797,7 @@ fn market_consign_system(
         // 任意关闭路径（关闭键/Control API/联动）都复位背包位置
         if *was_open {
             *was_open = false;
-            place_at.write(crate::game::dialogs::inventory::InventoryPlaceAt(0.0));
+            place_at.write(crate::game::dialogs::inventory::InventoryPlaceAt(0.0, 0.0));
         }
         return;
     }

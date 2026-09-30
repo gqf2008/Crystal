@@ -4903,3 +4903,98 @@ fn close_buttons_native_aligned() {
 
     println!("  ✓ 17 窗关闭钮统一 Prguse2[360..362] 原生 24x21，坐标逐窗对齐 C#");
 }
+
+/// §3.2cm 批③：**「按面板真宽度算位置」**一族——C# 用 `Size`（= `GetTrueSize`）而不是图头，
+/// 本端此前按图头写，四扇窗一起偏（最大 51px）。
+///
+/// 原版帧实锤（`%TEMP%\golden_sandbox\shots`，`win_locate.py`）：
+/// - 交易推背包：`orig_T10_Benter.png` 背包关闭钮 `Prguse2[360]` **0.0000 @(1000,3)** ⇒ 面板 x = 711
+/// - NPC 推背包：`orig_npc_try2.png` 里 `Title[196]` 最佳落点 **(443,0)**（不符率 0.069）
+/// - 觉醒推背包：`orig_awake.png` 里 `Title[196]` 最佳落点 **(314,224)**（不符率 0.055）
+/// - TM 推背包：`orig_market4.png` 里 `Title[196]` 最佳落点 **(495,0)**（不符率 0.065）
+///
+/// 每项都同时钉「真尺寸」与「本端常量」，避免退回图头口径而不自知。
+#[test]
+fn push_inventory_uses_panel_true_width() {
+    require_assets!("push_inventory_uses_panel_true_width");
+    use client_bevy::game::dialogs::inventory as inv;
+    use client_bevy::game::dialogs::mail;
+    use client_bevy::game::dialogs::market;
+    use client_bevy::game::dialogs::npc_awake;
+    let mut libs = Libs::new();
+
+    // ① 背包自身：Title[196] 图头 316x236 / 真 313x235
+    assert_eq!(
+        libs.size(LibraryName::Title, 196),
+        (316.0, 236.0),
+        "[尺寸] 背包图头 316x236（贴图 1:1）"
+    );
+    assert_eq!(
+        libs.true_size(LibraryName::Title, 196),
+        (inv::INV_TRUE_W_FALLBACK, inv::INV_TRUE_H_FALLBACK),
+        "[尺寸] 背包真尺寸 313x235（C# `InventoryDialog.Size`）"
+    );
+    // 交易推背包：`ScreenWidth - Size.Width`
+    assert_eq!(
+        1024.0 - libs.true_size(LibraryName::Title, 196).0,
+        711.0,
+        "[坐标] 交易推背包 x=711（真宽）"
+    );
+
+    // ② NPC 面板 Prguse[995] 图头 440x224 / 真 438x224 ⇒ 推背包 443
+    assert_eq!(libs.true_size(LibraryName::Prguse, 995).0, 438.0);
+    assert_eq!(
+        438.0 + 5.0,
+        443.0,
+        "[坐标] NPC 对话推背包 x=443（`NPCDialogs.cs:1044`）"
+    );
+
+    // ③ 觉醒面板 Title[710] 图头 360x420 / 真 309x420 ⇒ 推背包 (314, 224)
+    assert_eq!(
+        libs.size(LibraryName::Title, 710),
+        npc_awake::PANEL_SIZE,
+        "[尺寸] 觉醒面板图头 360x420"
+    );
+    assert_eq!(
+        libs.true_size(LibraryName::Title, 710),
+        npc_awake::PANEL_TRUE_SIZE,
+        "[尺寸] 觉醒面板真尺寸 309x420（差 51px —— 本轮那 4 处推位就是靠它）"
+    );
+    assert_eq!(
+        (309.0 + 5.0, npc_awake::PANEL_ORIGIN.1),
+        (314.0, 224.0),
+        "[坐标] 觉醒推背包 (314,224)；y 来自 NPCDialog.Size.Height=224"
+    );
+
+    // ④ 寄售窗 Title[786] 图头 492x478 / 真 490x478 ⇒ 推背包 495
+    assert_eq!(
+        libs.true_size(LibraryName::Title, 786),
+        (490.0, 478.0),
+        "[尺寸] 寄售窗真尺寸 490x478"
+    );
+    assert_eq!(
+        market::TM_PANEL_TRUE_W + 5.0,
+        495.0,
+        "[坐标] 寄售推背包 x=495"
+    );
+
+    // ⑤ 仓库 Prguse[586] **无裁剪** ⇒ 真尺寸 == 图头，推位 393 不变（防误改）
+    assert_eq!(
+        libs.true_size(LibraryName::Prguse, 586),
+        libs.size(LibraryName::Prguse, 586),
+        "[尺寸] 仓库面板无裁剪（真尺寸 == 图头 388x346）"
+    );
+
+    // ⑥ 负重条 Prguse[24] 图头 84x6 / 真 81x6 ⇒ 填充宽 (81-3)*percent
+    assert_eq!(libs.size(LibraryName::Prguse, 24), (84.0, 6.0));
+    assert_eq!(
+        libs.true_size(LibraryName::Prguse, 24),
+        (81.0, 6.0),
+        "[尺寸] 负重条真宽 81（C# `(WeightBar.Size.Width - 3) * percent`）"
+    );
+
+    // ⑦ 邮件包裹窗 `Size.Width + 10` = 323（真宽），镶嵌窗 y = 235+5 = 240
+    assert_eq!(313.0 + mail::PARCEL_X_GAP, 323.0, "[坐标] 邮件包裹窗 x=323");
+
+    println!("  ✓ 「按面板真宽推背包」四档 + 背包/负重条真尺寸逐项对齐 C#（§3.2cm 批③）");
+}
