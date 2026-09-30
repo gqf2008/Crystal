@@ -2522,7 +2522,8 @@ fn spawn_inv_confirm(
     let Some(h) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 360) else {
         return;
     };
-    let panel = spawn_panel(&mut commands, h, bx, by, 456.0, 190.0, 45);
+    let panel =
+        crate::game::dialogs::modal_layer::spawn_modal_panel(&mut commands, h, bx, by, 456.0, 190.0);
     commands.entity(panel).insert((
         DialogRoot(DialogKind::Inventory),
         // 独立弹窗不随 Inventory 开关门控；挂 DialogRoot 仅为 OnExit 时随背包窗口一起清理

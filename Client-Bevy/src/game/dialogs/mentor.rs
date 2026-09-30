@@ -236,7 +236,14 @@ fn spawn_mentor(
     // 批 14 修正：旧实现面板 260x120 + 按钮 (240/340,150) 被 Overflow::clip 裁掉不可见）
     let (bx, by) = (284.0, 289.0);
     if let Some(h) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 360) {
-        let inv = spawn_panel(&mut commands, h, bx, by, 456.0, 190.0, 45);
+        let inv = crate::game::dialogs::modal_layer::spawn_modal_panel(
+            &mut commands,
+            h,
+            bx,
+            by,
+            456.0,
+            190.0,
+        );
         commands.entity(inv).insert((
             DialogRoot(DialogKind::Mentor),
             // 独立弹窗不随 Mentor 开关门控；挂 DialogRoot 仅为 OnExit 时随师徒窗口一起清理

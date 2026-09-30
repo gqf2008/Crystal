@@ -312,11 +312,13 @@ mod tests {
         );
     }
 
-    /// 收集 `src/` 下全部 `.rs` 的（路径, 内容）。
+    /// 收集 **crate 全部** `.rs`（`src/` + `tests/` + `examples/` + `benches/`）。
+    ///
+    /// 首版只扫 `src/`，被复核指出 `tests/`、`examples/` 不在内 —— 那是漏报面。
     ///
     /// **为什么扫源码而不是另写一个 `tools/acceptance/*_audit.py`**：本仓那批 `*_audit.py`
     /// **没有被任何脚本或 CI 调用**（`grep audit.py scripts/ .github/` 为空）⇒ 写了也不会拦人，
-    /// 正是 2026-09-30 那条教训「工具/文档声称能拦、实际没人跑 = 假门禁」。这里随 `cargo test --lib` 跑。
+    /// 正是「工具/文档声称能拦、实际没人跑 = 假门禁」。这里随 `cargo test --lib` 跑。
     fn rs_sources() -> Vec<(String, String)> {
         fn walk(dir: &std::path::Path, out: &mut Vec<(String, String)>) {
             let Ok(rd) = std::fs::read_dir(dir) else {
@@ -333,74 +335,101 @@ mod tests {
                 }
             }
         }
-        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
         let mut v = Vec::new();
-        walk(&root, &mut v);
+        for sub in ["src", "tests", "examples", "benches"] {
+            walk(&root.join(sub), &mut v);
+        }
         assert!(
-            !v.is_empty(),
-            "源码扫描必须真扫到文件，否则这道门禁会静默消失：{root:?}"
+            v.len() > 20,
+            "源码扫描必须真扫到文件（当前 {}），否则这道门禁会静默消失",
+            v.len()
         );
         v
     }
 
-    /// 把注释内容替换成空格（**保持字节偏移不变**，便于报行号），字符串字面量原样保留。
+    /// 把**注释**与**字符串/字符字面量的内容**替换成空格，**保持字节偏移不变**（便于报行号）。
     ///
-    /// 为什么必须剥：本用例的文档注释里就写着反例 `spawn_panel(..., 60)` —— 不剥注释会把
-    /// **注释里的例子**当成真实调用报红（首跑就是这么红的第一版）。
-    fn strip_comments(src: &str) -> String {
-        let b = src.as_bytes();
+    /// 为什么必须剥（复核实测，首版两条都中）：
+    /// - 不剥注释 ⇒ 本文档注释里写的反例 `spawn_panel(..., 60)` 被当成真实调用（首跑就这么红的）；
+    /// - 不剥字符串 ⇒ 字符串里的 `spawn_panel(..., 61)` 误报；且 `let q = '"';` 会把 `in_str` 带偏，
+    ///   其后**整段注释不再被剥离**（复核实测第 13 号反例）。
+    /// 字符字面量只认 `'X'` / `'\\X'` 形态，避免把生命周期 `'w` 当字面量。
+    fn strip_comments_and_strs(src: &str) -> String {
+        let c: Vec<char> = src.chars().collect();
         let mut out = String::with_capacity(src.len());
         let (mut i, mut in_str, mut esc, mut line_c, mut blk_c) =
             (0usize, false, false, false, false);
-        while i < b.len() {
-            let c = b[i];
-            let n = b.get(i + 1).copied();
+        while i < c.len() {
+            let ch = c[i];
+            let nx = c.get(i + 1).copied();
             if line_c {
-                if c == b'\n' {
+                if ch == '\n' {
                     line_c = false;
                     out.push('\n');
                 } else {
                     out.push(' ');
                 }
             } else if blk_c {
-                if c == b'*' && n == Some(b'/') {
+                if ch == '*' && nx == Some('/') {
                     blk_c = false;
                     out.push_str("  ");
                     i += 2;
                     continue;
                 }
-                out.push(if c == b'\n' { '\n' } else { ' ' });
+                out.push(if ch == '\n' { '\n' } else { ' ' });
             } else if in_str {
-                out.push(c as char);
                 if esc {
                     esc = false;
-                } else if c == b'\\' {
+                } else if ch == '\\' {
                     esc = true;
-                } else if c == b'"' {
+                } else if ch == '"' {
                     in_str = false;
+                    out.push('"');
+                    i += 1;
+                    continue;
                 }
-            } else if c == b'/' && n == Some(b'/') {
+                out.push(if ch == '\n' { '\n' } else { ' ' });
+            } else if ch == '/' && nx == Some('/') {
                 line_c = true;
                 out.push_str("  ");
                 i += 2;
                 continue;
-            } else if c == b'/' && n == Some(b'*') {
+            } else if ch == '/' && nx == Some('*') {
                 blk_c = true;
                 out.push_str("  ");
                 i += 2;
                 continue;
-            } else {
-                if c == b'"' {
-                    in_str = true;
+            } else if ch == '"' {
+                in_str = true;
+                out.push('"');
+            } else if ch == '\'' {
+                let close = match nx {
+                    Some('\\') => c.get(i + 3).copied() == Some('\''),
+                    Some(_) => c.get(i + 2).copied() == Some('\''),
+                    None => false,
+                };
+                if close {
+                    let n = if nx == Some('\\') { 4 } else { 3 };
+                    out.push('\'');
+                    for _ in 1..n - 1 {
+                        out.push(' ');
+                    }
+                    out.push('\'');
+                    i += n;
+                    continue;
                 }
-                out.push(c as char);
+                out.push('\'');
+            } else {
+                out.push(ch);
             }
             i += 1;
         }
         out
     }
-    /// `name(...)` 的顶层实参列表（括号匹配 + 顶层逗号切分，跳过字符串字面量）。
-    fn top_level_args(src: &str, name: &str) -> Vec<Vec<String>> {
+
+    /// `name(...)` 的顶层实参列表，**连同匹配起始位置**（用于豁免函数定义与唯一入口自身）。
+    fn top_level_args(src: &str, name: &str) -> Vec<(usize, Vec<String>)> {
         let b = src.as_bytes();
         let mut out = Vec::new();
         let mut i = 0usize;
@@ -411,46 +440,19 @@ mod tests {
                 continue;
             }
             let (mut depth, mut j) = (1i32, start + 1);
-            let (mut in_str, mut esc) = (false, false);
             while j < b.len() && depth > 0 {
-                let c = b[j];
-                if in_str {
-                    if esc {
-                        esc = false;
-                    } else if c == b'\\' {
-                        esc = true;
-                    } else if c == b'"' {
-                        in_str = false;
-                    }
-                } else if c == b'"' {
-                    in_str = true;
-                } else if c == b'(' {
+                if b[j] == b'(' {
                     depth += 1;
-                } else if c == b')' {
+                } else if b[j] == b')' {
                     depth -= 1;
                 }
                 j += 1;
             }
             let inner = &src[start + 1..j - 1];
-            let (mut args, mut cur) = (Vec::new(), String::new());
-            let (mut d, mut s, mut e2) = (0i32, false, false);
+            let mut args = Vec::new();
+            let (mut d, mut cur) = (0i32, String::new());
             for ch in inner.chars() {
-                if s {
-                    cur.push(ch);
-                    if e2 {
-                        e2 = false;
-                    } else if ch == '\\' {
-                        e2 = true;
-                    } else if ch == '"' {
-                        s = false;
-                    }
-                    continue;
-                }
                 match ch {
-                    '"' => {
-                        s = true;
-                        cur.push(ch);
-                    }
                     '(' | '[' | '{' => {
                         d += 1;
                         cur.push(ch);
@@ -473,60 +475,144 @@ mod tests {
             if !t.is_empty() {
                 args.push(t.to_string());
             }
-            out.push(args);
+            out.push((start, args));
             i = j;
         }
         out
     }
 
-    /// **门禁（面 A）**：全仓不得出现「手搓模态层根」—— `spawn_panel(..., <字面 z ≥ MODAL_BLOCKER_Z>)`。
-    /// 模态层的根必须经 [`spawn_modal_panel`] 生成（z 由入口内部决定，调用方无从传错）。
+    /// 取 `sig` 所指函数的**字节区间**（从签名到配对的收尾大括号）。
+    ///
+    /// 用途：豁免**唯一入口自己体内**那次 `spawn_panel(..., MODAL_PANEL_Z)` ——
+    /// 否则面 A 会把「合法的那一次」也报红（首跑就是如此）。
+    fn fn_span(src: &str, sig: &str) -> Option<(usize, usize)> {
+        let start = src.find(sig)?;
+        let b = src.as_bytes();
+        let mut i = start + src[start..].find('{')?;
+        let mut depth = 0i32;
+        while i < b.len() {
+            if b[i] == b'{' {
+                depth += 1;
+            } else if b[i] == b'}' {
+                depth -= 1;
+                if depth == 0 {
+                    return Some((start, i));
+                }
+            }
+            i += 1;
+        }
+        None
+    }
+
+    /// 允许**不**走唯一入口的非模态 z 具名常量（白名单；新增必须在此显式表态）。
+    const NON_MODAL_Z_ALLOWED: &[&str] = &["STORAGE_PANEL_Z", "DIALOG_Z_MIN", "DIALOG_Z_MAX"];
+
+    /// **门禁（面 A，fail-closed）**：`spawn_panel(` 的 z 实参**只允许**「字面量 < [`MODAL_BLOCKER_Z`]」
+    /// 或 [`NON_MODAL_Z_ALLOWED`] 里的具名常量；**其余一律报红**。
+    ///
+    /// 为什么是 fail-closed（复核实测首版 6 类静默漏报）：首版用 `parse::<i32>()` 判「是不是 ≥59 的字面量」，
+    /// 解析不了就 `continue` ⇒ `30 + 36` / 具名常量 / `71i32` / `MODAL_PANEL_Z` **全漏**。
+    /// 其中 `spawn_panel(..., MODAL_PANEL_Z)` 最危险：z 对、但绕过唯一入口且不带 `ModalPanel` 标记。
+    /// 改成「不认识的形态就报红」，漏报就变成「必须显式表态」。
     ///
     /// 红检：把任一 `spawn_modal_panel(` 改回 `spawn_panel(..., 60)` → 本用例 FAILED。
     #[test]
     fn no_hand_rolled_modal_layer_root() {
         let mut bad = Vec::new();
-        for (path, src) in rs_sources() {
-            let src = strip_comments(&src);
-            for args in top_level_args(&src, "spawn_panel") {
-                let Some(last) = args.last() else { continue };
-                let Ok(z) = last.trim().parse::<i32>() else {
+        for (path, raw) in rs_sources() {
+            let src = strip_comments_and_strs(&raw);
+            // 豁免一：函数**定义**（`fn spawn_panel(`）不是调用
+            // 豁免二：唯一入口自己体内那次调用（合法）
+            let entry = fn_span(&src, "fn spawn_modal_panel(");
+            for (pos, args) in top_level_args(&src, "spawn_panel") {
+                let before = src[..pos].trim_end();
+                let before = before
+                    .strip_suffix("spawn_panel")
+                    .unwrap_or(before)
+                    .trim_end();
+                if before.ends_with("fn") {
                     continue;
+                }
+                if let Some((a, b)) = entry {
+                    if pos > a && pos < b {
+                        continue;
+                    }
+                }
+                let Some(last) = args.last() else { continue };
+                let z = last.trim();
+                let ok = match z.parse::<i32>() {
+                    Ok(n) => n < MODAL_BLOCKER_Z,
+                    Err(_) => NON_MODAL_Z_ALLOWED.contains(&z),
                 };
-                if z >= MODAL_BLOCKER_Z {
+                if !ok {
                     bad.push(format!("{}: spawn_panel(..., {z})", path));
                 }
             }
         }
         assert!(
             bad.is_empty(),
-            "模态层的根必须走 spawn_modal_panel（不接受调用方传 z）；发现手搓：\n  {}",
+            "spawn_panel 的 z 只允许字面量 < {} 或白名单常量；模态层的根必须走 spawn_modal_panel。疑似手搓：\n  {}",
+            MODAL_BLOCKER_Z,
             bad.join("\n  ")
         );
     }
 
-    /// **门禁（面 B）**：`ModalSources` 的字段集合必须与 [`MODAL_SOURCES`] 表**完全一致**
-    /// —— 「新增/删除模态来源而漏改表」的机械防线（结构体从源码里现读，不靠人记）。
+    /// **门禁（面 A′）**：不得出现 `GlobalZIndex(<字面 z ≥ MODAL_BLOCKER_Z>)` —— 那是不经任何入口
+    /// 直接造模态层根的写法（复核实测：首版完全不看它）。
     ///
-    /// 红检：往 `ModalSources` 加一个字段 → 本用例 FAILED（表没跟着加）。
+    /// 红检：在任一文件里写 `GlobalZIndex(60)` → 本用例 FAILED。
+    #[test]
+    fn no_raw_modal_z_literal() {
+        let mut bad = Vec::new();
+        for (path, raw) in rs_sources() {
+            let src = strip_comments_and_strs(&raw);
+            for (_, args) in top_level_args(&src, "GlobalZIndex") {
+                let Some(a) = args.first() else { continue };
+                if let Ok(n) = a.trim().parse::<i32>() {
+                    if n >= MODAL_BLOCKER_Z {
+                        bad.push(format!("{}: GlobalZIndex({n})", path));
+                    }
+                }
+            }
+        }
+        assert!(
+            bad.is_empty(),
+            "模态层的 z 不得写成裸字面量；请用 spawn_modal_panel（面 A′）：\n  {}",
+            bad.join("\n  ")
+        );
+    }
+
+    /// **门禁（面 B）**：`ModalSources` 的字段集合必须与 [`MODAL_SOURCES`] 表**完全一致**。
+    ///
+    /// 首版两处缺陷（复核实测）已修：**块注释里以 `pub ` 开头的行会误报**（改为先剥注释）、
+    /// **私有（无 `pub`）字段会静默漏报**（改为 `pub` 可选）。
+    ///
+    /// 边界（**本门禁不管**）：它只保证「结构体 == 表」，**表的完备性与正确性没有机械背书** ——
+    /// 复核实测的 `input_box` 漏登记、`assign_key` 依据写错、`confirm` 面板曾低于
+    /// 遮挡层，三件事它一件都抓不到。
+    ///
+    /// 红检：往 `ModalSources` 加一个字段 → 本用例 FAILED。
     #[test]
     fn modal_sources_table_matches_the_param_struct_in_source() {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("src/game/dialogs/modal_layer.rs");
-        let src = std::fs::read_to_string(&path).expect("必须读得到 modal_layer.rs 本体");
-        let src = src.replace("\r\n", "\n");
+        let raw = std::fs::read_to_string(&path).expect("必须读得到 modal_layer.rs 本体");
+        let src = strip_comments_and_strs(&raw);
         let body = src
             .split("pub struct ModalSources<'w> {")
             .nth(1)
-            .and_then(|s| s.split("\n}").next())
+            .and_then(|s| s.split('}').next())
             .expect("必须在源码里找得到 ModalSources 结构体");
         let mut fields: Vec<String> = Vec::new();
         for line in body.lines() {
             let t = line.trim();
-            if let Some(rest) = t.strip_prefix("pub ") {
-                if let Some((name, _)) = rest.split_once(':') {
-                    fields.push(name.trim().to_string());
-                }
+            let t = t.strip_prefix("pub ").unwrap_or(t);
+            let Some((name, _)) = t.split_once(':') else {
+                continue;
+            };
+            let name = name.trim();
+            if !name.is_empty() && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+                fields.push(name.to_string());
             }
         }
         let table: Vec<String> = MODAL_SOURCES.iter().map(|(n, _)| n.to_string()).collect();
