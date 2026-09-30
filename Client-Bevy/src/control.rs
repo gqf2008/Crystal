@@ -570,6 +570,22 @@ enum ControlCommand {
         buffs: Vec<(u8, u32)>,
         reply: Sender<String>,
     },
+    /// 实机夹具（§3.2cf）：把关系/婚姻窗状态摆成夹具给的那一份。
+    ///
+    /// 存在理由：这扇窗的三态（未婚 / 已婚 / 已离）与两个确认框（求婚 / 离婚）此前只能靠
+    /// 「真服务端 + 两个客户端走完整流程」才能摆出来 ⇒ 长尾对表长期只比得上"空窗"。
+    /// 有了它，四行文案（`relationship_line_text` 的三分支）与两个 `MirMessageBox` 都能
+    /// 在 mock 下复现、截图、逐个控件对表。
+    RelationshipSet {
+        married: bool,
+        lover_name: String,
+        date: i64,
+        map_name: String,
+        married_days: i16,
+        invite: Option<String>,
+        divorce_invite: Option<String>,
+        reply: Sender<String>,
+    },
     /// 翻转 HUD 开关（2026-09-28，#3327）：`which` = `"belt"` / `"skillbar"`，
     /// `on = None` = 翻转（与 C# 热键同语义）。逐窗 A/B 的两行 HUD（Belt/Skillbar）
     /// 此前只能整帧比、等于噪声；有了它我方侧也能把这两行摆到屏上做窗内比对。
@@ -904,6 +920,9 @@ struct ControlQueries<'w, 's> {
     /// 放在 `ControlQueries` 里而不是 `apply_control_commands` 的参数表上——
     /// 那台系统已经是 16 个 SystemParam 的上限，多加一个会因 `ObserverSystem` 实现上限而编译失败。
     applied: Res<'w, crate::game::combat::RealHitProbe>,
+    /// §3.2cf 夹具 `relationship_set`：关系/婚姻窗状态（未婚/已婚/已离四行文案 + 求婚/离婚两种确认框）。
+    /// 与 `notice`/`buff` 同样的理由并进本 SystemParam（`apply_control_commands` 的参数表已到 16 上限）。
+    relationship: ResMut<'w, crate::game::dialogs::relationship::RelationshipState>,
     /// 2026-09-28：`Dialog` 分支的 C# `Show()` 前置守卫（宠物/行会/坐骑/钓鱼）。
     /// 与键盘热键路径共用同一份 `ShowGuardParams` 实现；挂在 `ControlQueries` 里是因为
     /// `apply_control_commands` 的参数表已到 16 个 SystemParam 上限。
@@ -1513,6 +1532,56 @@ fn handle_conn(mut stream: std::net::TcpStream, tx: Sender<ControlCommand>) {
                     } else {
                         json!({"error": "control channel closed"})
                     }
+                }
+            }
+            // 实机夹具（§3.2cf）：关系/婚姻窗状态。{married,lover_name,date,map_name,married_days,invite,divorce_invite}
+            "relationship_set" => {
+                let married = params
+                    .get("married")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
+                let lover_name = params
+                    .get("lover_name")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let date = params.get("date").and_then(|v| v.as_i64()).unwrap_or(0);
+                let map_name = params
+                    .get("map_name")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let married_days = params
+                    .get("married_days")
+                    .and_then(|v| v.as_i64())
+                    .unwrap_or(0) as i16;
+                let opt = |k: &str| {
+                    params
+                        .get(k)
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string())
+                        .filter(|s| !s.is_empty())
+                };
+                let (reply_tx, reply_rx) = bounded::<String>(1);
+                if tx
+                    .send(ControlCommand::RelationshipSet {
+                        married,
+                        lover_name,
+                        date,
+                        map_name,
+                        married_days,
+                        invite: opt("invite"),
+                        divorce_invite: opt("divorce_invite"),
+                        reply: reply_tx,
+                    })
+                    .is_ok()
+                {
+                    let s = reply_rx
+                        .recv_timeout(std::time::Duration::from_secs(2))
+                        .unwrap_or_else(|_| "{}".to_string());
+                    serde_json::from_str::<Value>(&s).unwrap_or_else(|_| json!({}))
+                } else {
+                    json!({"error": "control channel closed"})
                 }
             }
             // 实机夹具（§3.2bx）：替换 buff 列表。{buffs:[{tag,remaining_ms},…]}
@@ -3733,6 +3802,36 @@ fn apply_control_commands(
                 q.guard.notice.show(text);
                 let _ = reply.try_send(
                     json!({"ok": true, "visible": q.guard.notice.is_visible()}).to_string(),
+                );
+            }
+            // 实机夹具（§3.2cf）：关系/婚姻窗状态（三态文案 + 求婚/离婚两种确认框）
+            ControlCommand::RelationshipSet {
+                married,
+                lover_name,
+                date,
+                map_name,
+                married_days,
+                invite,
+                divorce_invite,
+                reply,
+            } => {
+                let st = &mut *q.relationship;
+                st.married = married;
+                st.lover_name = lover_name;
+                st.date = date;
+                st.map_name = map_name;
+                st.married_days = married_days;
+                st.invite = invite;
+                st.divorce_invite = divorce_invite;
+                let _ = reply.try_send(
+                    json!({
+                        "ok": true,
+                        "married": st.married,
+                        "lover": st.lover_name,
+                        "has_invite": st.invite.is_some(),
+                        "has_divorce_invite": st.divorce_invite.is_some(),
+                    })
+                    .to_string(),
                 );
             }
             // 实机夹具（§3.2bx）：把 buff 列表替换成夹具给的那组（原版帧是 GameMaster+Rested 两枚）

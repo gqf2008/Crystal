@@ -777,8 +777,12 @@ impl Packet for MockMarriageRequest {
     }
 }
 
-/// #788：离婚请求（空包）
-pub(crate) struct MockDivorceRequest;
+/// 假服务端发来的离婚请求（C# `S.DivorceRequest{Name}`：`[name: DotNet 7-bit string]`）。
+/// 真实 `ServerRust` 就是 `send_divorce_request_packet(requester_name)`（`social_packets.rs:685-701`），
+/// 因此 mock 也必须带名字——否则客户端的「{0} 请求离婚。」确认框拿不到主语。
+pub(crate) struct MockDivorceRequest {
+    pub name: String,
+}
 
 impl Packet for MockDivorceRequest {
     const OPCODE: i16 = mir2_shared::enums::ServerPacketIds::DivorceRequest as i16;
@@ -789,8 +793,8 @@ impl Packet for MockDivorceRequest {
 
     fn write_body<W: std::io::Write>(
         &self,
-        _writer: &mut W,
+        writer: &mut W,
     ) -> mir2_shared::data::stats::SharedResult<()> {
-        Ok(())
+        mir2_shared::binary::write_dotnet_string(writer, &self.name)
     }
 }
