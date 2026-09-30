@@ -47,23 +47,29 @@ pub const MODAL_BLOCKER_Z: i32 = 59;
 /// 模态面板统一 z（C# 里这些面板都是 `MirMessageBox` 系 = `Modal = true`，谁也不能被遮挡层盖住）
 pub const MODAL_PANEL_Z: i32 = 60;
 
-/// 模态面板标记 —— **模态面板的唯一识别方式**（比「z >= [`MODAL_BLOCKER_Z`]」这个代理更硬）。
+/// 模态面板标记 —— 模态面板的**标记**（比「z >= [`MODAL_BLOCKER_Z`]」这个代理更硬，
+/// 但**目前生产代码还没有读它** —— 见下）。
 ///
-/// 由 [`spawn_modal_panel`] 挂；静态审计门禁 `tools/acceptance/csharp_golden/modal_panel_audit.py`
-/// 的「面 A」用它核对「凡模态层的根都经唯一入口生成」。
+/// 由 [`spawn_modal_panel`] 挂。核对它的是**源码扫描门禁**
+/// `no_hand_rolled_modal_layer_root`（随 `cargo test --lib` 跑）。
+/// **注意**：这个标记**目前只有门禁在读** —— `bump_dialog_z` 仍用 `z >= MODAL_BLOCKER_Z`
+/// 这个代理判断「是不是模态层根」；把代理换成读标记是**下一步**（已挂账）。
 #[derive(Component)]
 pub struct ModalPanel;
 
 /// 生成一块**模态面板** —— 模态层的**唯一入口**。
 ///
 /// 与直接调 `ui::theme::spawn_panel(..., z)` 的区别：**这里不接受 z 参数**，固定用
-/// [`MODAL_PANEL_Z`] 并挂 [`ModalPanel`] ⇒ 调用方**没有机会**把 z 传错。
+/// [`MODAL_PANEL_Z`] 并挂 [`ModalPanel`] ⇒ 调用方**不必也无法**传 z。
+/// **但它挡不住全部写法**：直接写 `GlobalZIndex(60)`、或把 `MODAL_PANEL_Z` 传给通用
+/// `spawn_panel`，照样能造出模态层的根且不带标记 —— 那两类由面 A / 面 A′ 拦（见下）。
 ///
 /// 起因（2026-09-30，walgit 线程 `crystal-modal-layer-guards`）：`assign_key.rs` 曾给通用
 /// `spawn_panel` 传字面量 `60` —— 数值恰好等于 `MODAL_PANEL_Z` 而长期「看起来对」。一旦有人
 /// 为插新层调高 `MODAL_PANEL_Z`，该面板会落到遮挡层 `59` **之下**、被自家遮挡层盖住，而它是
 /// 模态的、**没有关闭钮**、也不在实机巡回名单里 ⇒ 可能直接卡住交互。
-/// 把 z 从「调用方传参」改成「入口内部决定」，这类漏改在**构造上**不再可能。
+/// 把 z 从「调用方传参」改成「入口内部决定」，**字面量 z 与裸 `GlobalZIndex` 这两类**漏改
+/// 在构造上不再可能；其余形态（具名常量、表达式、绕过路径）由面 A 的 fail-closed 与面 A′ 兜底。
 pub fn spawn_modal_panel(
     commands: &mut Commands,
     image: Handle<Image>,
@@ -80,8 +86,8 @@ pub fn spawn_modal_panel(
 /// **模态来源表** —— 「哪些本端状态算 C# 的 `Modal = true`」的唯一可审计清单。
 ///
 /// 元素是 `(本端状态名, C# 依据)`；状态名必须与 [`ModalSources`] 的字段、以及
-/// [`modal_any_visible`] 的入参**一一对应** —— 由静态审计门禁
-/// `tools/acceptance/csharp_golden/modal_panel_audit.py` 的「面 B」核对：
+/// [`modal_any_visible`] 的入参**一一对应** —— 由源码扫描门禁
+/// `modal_sources_table_matches_the_param_struct_in_source`（随 `cargo test --lib` 跑）核对：
 /// 新增/删除模态来源而漏改此表会红（这正是 2026-09-30 那轮「`InvClickState.selected`
 /// 被错当模态源」与「4 个真 Modal 框漏掉」两类问题各自的机械防线）。
 pub const MODAL_SOURCES: &[(&str, &str)] = &[
@@ -488,7 +494,13 @@ mod tests {
     fn fn_span(src: &str, sig: &str) -> Option<(usize, usize)> {
         let start = src.find(sig)?;
         let b = src.as_bytes();
-        let mut i = start + src[start..].find('{')?;
+        let brace = src[start..].find('{')?;
+        // 签名与第一个 `{` 之间若先出现 `;` ⇒ 这是**无函数体的声明**（如 trait 方法），
+        // 否则会把后面那个函数的体整段当成它的、静默豁免（复核实测的绕过）。
+        if src[start..start + brace].contains(';') {
+            return None;
+        }
+        let mut i = start + brace;
         let mut depth = 0i32;
         while i < b.len() {
             if b[i] == b'{' {
