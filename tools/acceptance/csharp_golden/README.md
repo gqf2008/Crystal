@@ -4156,6 +4156,55 @@ C# 源码里 `ReturnResult()` 会在动画结束后回 `CallNPC "[<page>]"`，�
 **清理**：GM 售货 NPC 的 `ROLLDIE` 注入与 `GM-Mount/Grocery` 的 Roll 页都是**沙箱副本**上的临时夹具，
 本轮用完已从脚本里**撤掉**（恢复成原样），配方留在上面供复跑。
 
+### 3.2bz 两客户端夹具（Trade 的前置）已跑通；Trade/GuestTrade 的**原版帧仍未采集**（2026-09-30）
+
+**为什么要两客户端**：`TradeDialog`/`GuestTradeDialog` 单开不可达（§3.3 早就把它列 excluded），
+必须**两个玩家成交**。工作站解锁后这件事可以做，本轮把「双开原版客户端」这一层跑通了。
+
+**两客户端夹具（可复跑）**
+
+```powershell
+# ① 第二个账号要有角色且知道口令（只改沙箱副本 Server.MirADB）
+dotnet run --project tools\acceptance\csharp_golden\dbtool\dbtool.csproj -c Release -- "$sb\Server" setpw gqf abbtest123
+# ② 两个角色放同一张图（沙箱 GM 账号登录会被 Login 脚本送到 GM 地图 384）
+dotnet run --project tools\acceptance\csharp_golden\dbtool\dbtool.csproj -c Release -- "$sb\Server" setpos 333 384 95 100
+# ③ 启服务端 + **两次**启动同一个 Client.exe（客户端允许双开，实测两进程各一窗口）
+Start-Process "$sb\Client\Client.exe" -WorkingDirectory "$sb\Client"; Start-Sleep 3; Start-Process "$sb\Client\Client.exe" -WorkingDirectory "$sb\Client"
+```
+
+**驱动要点（本轮实测踩到，写下来省下一轮）**
+
+1. `csharp_client_driver.ps1` 的 `Get-CsHwnd` 只认「沙箱里的**第一个** Client.exe」——双开时必须
+   **自己按 pid 找窗口**再写 `$global:csHwnd`（本轮的 `Two*.Find(pid)` 三行 P/Invoke 即可），
+   且 **不要再调用 `Init-CsClient`**（它会用 `Get-CsHwnd` 覆写掉你选的窗口）。
+2. 登录要 `WM_SETTEXT` 填账号/口令 + **`Send-Key` 式三连（KEYDOWN + `WM_CHAR` + KEYUP）** 回车；
+   只发 KEYDOWN/KEYUP 不行（`LoginDialog.TextBox_KeyPress` 是 **KeyPress = WM_CHAR** 路径）——本轮先踩了这个坑，服务端日志一直不出现 `User logged in`。
+3. 两个窗口**重叠且都 topmost**：每次交互前对目标窗口重设 `SetWindowPos(HWND_TOPMOST)`，
+   否则真实鼠标/键会落到另一个客户端上（本轮把「点 A 却打到 B」当成"菜单没弹"查了一次）。
+4. 实测结果：两账号**都成功进图**（服务端日志 `女道士 has connected` / `战士测试_530 has connected`，后者 `gqf` 账号本来就是 admin）。
+
+**Trade 仍未采集，原因具体化（不猜）**
+
+- 服务端 `PlayerObject.TradeRequest()`（`Server/MirObjects/PlayerObject.cs:10623-10707`）的判据是
+  **「队友站在我正前方那一格」**：`PointMove(CurrentLocation, Direction, 1)` → 取该格里的 `ObjectType.Player`；
+  取不到就 `ReceiveChat(FaceToTrade)`。**不是"选中谁"**——所以发起方必须先**面朝**对方。
+- 客户端入口有两条：`KeyBinds.ini` 的 `[Trade] RequireKey=T`（`KeyBindSettings.cs:340`
+  → `GameScene.cs:776` `Network.Enqueue(new C.TradeRequest())`），以及右键玩家出的玩家菜单。
+  本轮**两条都没成功**：按 `T`（`WM_KEYDOWN/UP` 与真实 `keybd_event` 两种注入都试过）后，
+  对面没有收到 `S.TradeRequest`（无 YesNo 框）、发起方聊天区也没有任何系统反馈；
+  右键玩家精灵也没弹出玩家菜单。**是"没发出请求"还是"发出去被服务端按前置条件拒了"，本轮没有分离**，
+  所以按**未采集**记。
+- 下一轮的两条路（择一）：① 先让发起方**真的面朝**对方（走到相邻格再点对方所在格转身），
+  再按 `T`，并同时抓发起方聊天区（`FaceToTrade` 文案 = 请求确实发出但前置不满足的正证据）；
+  ② 直接从**服务端**造交易态（例如给沙箱加一个只在 `[@MAIN]` 里 `TRADE`/等价动作的 GM NPC 页，
+  或写 `ServerRust`/C# 侧的一次性脚本），绕开客户端输入。
+
+**本端侧**：`trade.rs` 的两窗几何已按 C# 常量 + 单测对齐（我方 `Prguse[389]` 204x152 @(298,418)、
+对方 `[390]` @(522,418)），待原版帧到手即可做窗内 A/B。
+
+**清理**：`setpw gqf abbtest123` 只改**沙箱副本**的口令（原版 DB 未动；`make_sandbox -Force` 会拷回原版口令）；
+两个客户端与服务端进程本轮已停。
+
 ### 3.2bu 原版 C# 客户端连的是**原版 C# 服务端**，不是 `ServerRust`（2026-09-30 实测）
 
 **问题**：原版 `Client.exe` 到底连哪个服务端？——**本目录沙箱里连的是原版 `Server\Server.exe`**
