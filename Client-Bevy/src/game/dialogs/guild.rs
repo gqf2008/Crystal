@@ -27,9 +27,24 @@ use crate::scenes::AppState;
 use crate::ui::sprite_ui::{shared_cjk_font, UiCjkFont, UiFont};
 use crate::ui::theme::{
     load_lib_image, spawn_container, spawn_dropdown_ui, spawn_icon_button, spawn_image,
-    spawn_label, spawn_outlined_label_block, spawn_panel, spawn_scroll_bar_ui, CloseButton,
-    UiDropDown, UiScrollList,
+    spawn_label, spawn_outlined_label_block, spawn_panel, CloseButton, UiDropDown, UiScrollList,
 };
+
+/// 行会窗成员页/仓库页的滚动滑块：C# 是 `MembersPositionBar` / `StoragePositionBar`
+/// （`GuildDialog.cs:441-450` / `:734-743`，`Prguse2[206]` @(337,16)，不写 `Size` ⇒ `GetTrueSize`）。
+/// 两页同一位置、同一美术，故合并成一个 helper。
+fn spawn_guild_scroll_thumb(
+    p: &mut ChildSpawnerCommands,
+    libs: &mut GameLibraries,
+    images: &mut Assets<Image>,
+) {
+    let track = (337.0, 16.0, 16.0, 302.0);
+    let visual = match crate::ui::theme::load_art_thumb(libs, images, LibraryName::Prguse2, 206) {
+        Some((art, size)) => crate::ui::theme::ScrollBarVisual::Art { thumb: art, size },
+        None => crate::ui::theme::ScrollBarVisual::Invisible,
+    };
+    crate::ui::theme::spawn_scroll_bar_ui_styled(p, track, 8, visual);
+}
 
 /// #2892 批B：面板精灵（C# `GuildDialog.Index = 180; Library = Libraries.Prguse`；实测 590x432）
 pub const PANEL: (LibraryName, usize) = (LibraryName::Prguse, 180);
@@ -1048,8 +1063,9 @@ fn spawn_guild(
 
     // ---- MembersPage：成员列表 + 滚动条 + 显示离线（C# `GuildDialog.cs:318-487`）----
     commands.entity(page_members).with_children(|p| {
-        // 视觉轨道与 track_rel 同值（C# `MembersPositionBar` 行程 16..298 + 滑块高 20）
-        spawn_scroll_bar_ui(p, (337.0, 16.0, 16.0, 302.0), 8);
+        // 滑块 = C# 原生美术 `Prguse2[206]`（`GuildDialog.cs:441-450` 的 `MembersPositionBar`
+        // @(337,16)、`GetTrueSize`）——占位灰块会盖住它（§3.2cg 同类问题）。
+        spawn_guild_scroll_thumb(p, &mut libs, &mut images);
         // 上/下翻钮（C# `MembersUpButton`/`MembersDownButton`，`GuildDialog.cs:402-439`）。
         // 此前**完全没建**：成员页上看到的箭头其实是公告页/仓库页的同位控件
         // 越过隐藏页漏出来的（同一个 `Visibility::Visible` 越权问题），一旦按页隐藏就露馅。
@@ -1392,8 +1408,8 @@ fn spawn_guild(
             spawn_icon_button(p, n, h, pr, 120.0, 200.0, 76.0, 25.0, 9).insert(GuildItemWithdraw);
             spawn_label(p, &cjk, "取出", 140.0, 205.0, 11.0, Color::WHITE, 10);
         }
-        // C# `StoragePositionBar` `Prguse2[206]` @(337,16)：共享滚动条（滚轮+拖动+跟随）
-        spawn_scroll_bar_ui(p, (337.0, 16.0, 16.0, 302.0), 8);
+        // C# `StoragePositionBar` `Prguse2[206]` @(337,16)：同成员页，滑块走原生美术
+        spawn_guild_scroll_thumb(p, &mut libs, &mut images);
         // C# 翻页 `Prguse2[197/198/199]` @(337,1)、`[207/208/209]` @(337,318)、`[206]` @(337,16)
         if let (Some(n), Some(h), Some(pr)) = (
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 197),

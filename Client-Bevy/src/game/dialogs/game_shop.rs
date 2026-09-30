@@ -24,8 +24,7 @@ use crate::scenes::AppState;
 use crate::ui::sprite_ui::{shared_cjk_font, UiCjkFont, UiFont};
 use crate::ui::theme::{
     load_lib_image, spawn_close_button, spawn_container, spawn_icon_button, spawn_image,
-    spawn_image_native, spawn_label, spawn_label_center, spawn_panel, spawn_scroll_bar_ui,
-    UiScrollList,
+    spawn_image_native, spawn_label, spawn_label_center, spawn_panel, UiScrollList,
 };
 
 /// #2892 批B：面板精灵与 C# 原生尺寸（C# `GameShopDialog.Index = 749; Location = Center`）
@@ -1162,7 +1161,28 @@ fn spawn_game_shop(
     // 共享 UiScrollList = 滚轮 + 滑块拖动 + 滑块跟随；轨道 (120,117,16,304)
     let mut cat_thumb = None;
     commands.entity(panel).with_children(|p| {
-        let (_, thumb) = spawn_scroll_bar_ui(p, (120.0, 117.0, 16.0, 304.0), 10);
+        // 滑块 = C# 原生美术 `Prguse2[205]`（`GameshopDialog.cs:143-155` 的 `PositionBar`，
+        // `GetTrueSize` 12x18 @(120,117)）——占位灰块会把它盖住（§3.2cg 同类问题），
+        // 且美术跟着 `offset` 走才和原版 `UpdatePositionBar` 一致。
+        let (_, thumb) = match crate::ui::theme::load_art_thumb(
+            &mut libs,
+            &mut images,
+            LibraryName::Prguse2,
+            205,
+        ) {
+            Some((art, size)) => crate::ui::theme::spawn_scroll_bar_ui_styled(
+                p,
+                (120.0, 117.0, 16.0, 304.0),
+                10,
+                crate::ui::theme::ScrollBarVisual::Art { thumb: art, size },
+            ),
+            None => crate::ui::theme::spawn_scroll_bar_ui_styled(
+                p,
+                (120.0, 117.0, 16.0, 304.0),
+                10,
+                crate::ui::theme::ScrollBarVisual::Invisible,
+            ),
+        };
         cat_thumb = Some(thumb);
         // 标题 Title[26]（C# (18,9)）：不设 Size ⇒ 美术原生 **87x15**
         // （曾写死 103x17 = `Title[15]`「QUEST DIARY」的尺寸，把 GAMESHOP 标题拉伸）

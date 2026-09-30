@@ -4239,6 +4239,60 @@ dbtool <沙箱>\Server setpos 333 384 99 100 ; dbtool <沙箱>\Server setpos gqf
 **未采集**：交易中的「双方都放物品/改金币/按确认锁定」这些**内容态**帧（本轮只做到"空窗"同状态对拍）；
 以及**原版鼠标点 YES 点不动**这条本身（是"控制被盖住"还是"点击语义"没查，如实记）。
 
+### 3.2ch 滚动条滑块改成**会跟着滚的 C# 原生美术**（Ranking / GameShop / Guild 共用一套）（2026-09-30）
+
+§3.2cg 把 Ranking 的"灰块盖住美术"修掉时留了个过渡态：美术滑块是**单独摆的一块静态图**，拖动/滚动时它不动
+（只有那块隐形的占位滑块在动）。本轮把它做正：**让滑块节点本身就是那块美术**。
+
+#### ① 改法
+
+* `theme.rs`：`ScrollBarVisual` 增加 `Art { thumb: Handle<Image>, size }` 档 —— 用 `ImageNode` 生成滑块节点，
+  并挂新组件 `UiScrollThumbArt { size }`（尺寸按 `GetTrueSize`）；轨道仍留成**透明**节点（拖动/命中带）。
+* `scroll_list_ui_system`：新增 `thumb_metrics(list, art)` —— 有美术档时 `高度 = 美术高`、`行程 = 轨道高 - 美术高`；
+  无美术档仍按 `visible / total` 比例。**定位、拖动起点、拖动换算三处都换成它**（此前三处各算一遍）。
+  滑块宽度：美术档 = 美术宽（C# `PositionBar` 就是左对齐在轨道 x 上），色块档 = 轨道宽。
+* 新增 `load_art_thumb(libs, images, lib, index) -> Option<(Handle<Image>, (w,h))>`（`Image` + `GetTrueSize` 一次取齐）。
+* 三扇窗改用美术档（C# 对应物见括注）：
+  | 窗 | C# 控件 | 美术 | 轨道（相对面板） |
+  |---|---|---|---|
+  | Ranking | `ScrollBar`（`RankingDialog.cs:158-166`） | `Prguse2[205]` 12x18 | (299,113,16,273) |
+  | GameShop | `PositionBar`（`GameshopDialog.cs:143-155`） | `Prguse2[205]` 12x18 | (120,117,16,304) |
+  | Guild 成员页 / 仓库页 | `MembersPositionBar` / `StoragePositionBar`（`GuildDialog.cs:441-450` / `:734-743`） | `Prguse2[206]` | (337,16,16,302) |
+
+Ranking 里原先"单独摆的那块静态美术"删掉了（否则会变成拖了不动的双份）。
+
+#### ② 实机复验
+
+| 读数 | 期望（C# 推导） | 本端实测 |
+|---|---|---|
+| Ranking `Prguse2[205]` | 面板(350,163)+(299,113) = (649,276) | **(649,276) 0.0000** |
+| GameShop `Prguse2[205]` | 面板(164,146)+(120,117) = (284,263) | **(284,263) 0.0000** |
+| GameShop `Prguse2[197]`（上翻钮） | (284,249) | **(284,249) 0.0000** |
+
+结构判据（`ui_nodes_at` 在 Ranking 滚动条位置采样）——滑块节点**本身就是 12x18 的美术节点**，
+而不再是「16x40 的色块 + 旁边一块静态图」：
+
+```
+entity 726v1 rect=[649,276,12,18] z=40   ← 美术滑块（Prguse2[205]，随 offset 移动）
+entity 728v1 rect=[649,276,16,273] z=39  ← 透明轨道（拖动/命中带）
+```
+
+几何与行程另有单测钉住（`scroll_thumb_metrics_prefer_art_size`：比例档 273×20/100 ≈ 54.6；美术档 18 / 行程 255）。
+
+#### ③ 未采集（如实）
+
+* **滚动中的帧**没取到：这三扇窗在 mock 数据下都**不溢出**（`scroll` RPC 实测 GameShop `total=3 < visible=22`、
+  Ranking `total=2 < visible=20`；Guild 成员页 `total=14 / visible=8` 但本端守卫挡住 mock 开窗——不在行会）。
+  所以"美术跟着 offset 走"这一条目前只有**代码路径 + 节点结构 + 单测**三重证据，缺一张滚动后的实机帧；
+  要补得先有「能让这三扇窗的列表溢出」的夹具（或真服务端数据）。
+* Guild 两页同样**未实机取证**（本端 `Show()` 守卫：不在行会 → 只弹提示不开窗），改法与 GameShop/Ranking 同源。
+
+#### ④ 环境坑（本轮踩到，已记账）
+
+`Client-Bevy/target/debug/incremental` 涨到了 **296 GB**，把 E: 盘写满（`rustc-LLVM ERROR: IO failure on output stream:
+No space left on device`，构建直接失败）。删掉该目录后释放约 254 GB，构建恢复正常。**结论：这台机器上构建前先看 `E:` 剩余空间，
+必要时清 `target/debug/incremental`（或用 `CARGO_INCREMENTAL=0`）**。
+
 ### 3.2cg Ranking 滚动条：占位灰块**盖住 C# 原生滑块**——已定性并修（2026-09-30）
 
 #### ① §3.2ce ⑦ 那条"未定性"的答案
