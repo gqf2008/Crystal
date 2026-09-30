@@ -419,6 +419,26 @@ pub(crate) fn buff_display(tag: u8) -> BuffDisplay {
             stats: D_NONE,
             percent: false,
         },
+        // ===== 特殊类（C# `BuffDialog.BuffImage` 的 `//Special` 段）=====
+        // §3.2bx：这两条原先缺表 ⇒ 落到 `_` 分支拿 icon 0（面板占位图），而原版实机帧里
+        // GM 账号登录会同时出现 **GameMaster + Rested** 两枚图标（`PlayerObject.cs:1341-1347`
+        // 的 `UpdateGMBuff()`，以及 `:1325-1328` 按离线分钟数回的 `_restedCounter`）。
+        // 图标 index 逐字来自 `Client/MirScenes/Dialogs/BuffDialog.cs:478-501`；名称取自
+        // `Client/Localization/Chinese.json` 的 `Enum.BuffType_*`。
+        103 => BuffDisplay {
+            name: "GM",
+            description: "",
+            icon: 173,
+            stats: D_NONE,
+            percent: false,
+        },
+        115 => BuffDisplay {
+            name: "休息奖励",
+            description: "",
+            icon: 240,
+            stats: D_EXP_RATE,
+            percent: true,
+        },
         _ => BuffDisplay {
             name: "未知",
             description: "",
@@ -632,8 +652,10 @@ fn spawn_buff(
     for (i, _) in PANEL_SIZES.iter().enumerate() {
         assets.panels[i] = load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 20 + i);
     }
-    // 0..=28 = Rust `buff_tag` 全量；29/30 = 倍率类（Exp/Drop，批23 单元①）
-    for tag in 0..=30u8 {
+    // 0..=28 = Rust `buff_tag` 全量；29/30 = 倍率类（Exp/Drop，批23 单元①）；
+    // 103..=118 = C# `//Special` 段（`GameMaster/Exp/Drop/Gold/Rested/…`）——**必须一起预载**，
+    // 否则 `buff_ui_system` 拿不到 `assets.icons` 里的句柄、图标位只会停在内置占位图（§3.2bx 实测踩到）。
+    for tag in (0..=30u8).chain(103..=118u8) {
         let icon = buff_display(tag).icon;
         if !assets.icons.contains_key(&icon) {
             if let Some(h) = load_lib_image(&mut libs, &mut images, LibraryName::BuffIcon, icon) {
@@ -1136,6 +1158,20 @@ mod tests {
         assert_eq!((ultimate.name, ultimate.icon), ("终极强化", 35));
         let crit = buff_display(34);
         assert_eq!((crit.name, crit.stats), ("暴击率提升", D_CRIT));
+        // §3.2bx：GM 账号登录时原版会同时出现 GameMaster(103) + Rested(115) 两枚图标
+        // （`PlayerObject.cs:1341-1347` 的 `UpdateGMBuff()` + `:1325-1328` 的离线休整计时）。
+        // 红检：删掉这两条 case ⇒ 落到 `_` 分支拿 icon 0，本断言立刻红。
+        assert_eq!(
+            (buff_display(103).name, buff_display(103).icon),
+            ("GM", 173),
+            "C# `BuffType.GameMaster` → BuffIcon 173"
+        );
+        assert_eq!(
+            (buff_display(115).name, buff_display(115).icon),
+            ("休息奖励", 240),
+            "C# `BuffType.Rested` → BuffIcon 240"
+        );
+        assert_eq!(buff_display(115).stats, D_EXP_RATE, "Rested 加经验获取率");
         assert_ne!(
             (buff_display(2).icon, buff_display(14).icon),
             (249, 249),

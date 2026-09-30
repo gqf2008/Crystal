@@ -4035,8 +4035,44 @@ py -3.12 tools\acceptance\csharp_golden\shot_diff.py "$env:TEMP\golden_sandbox\s
   （右上角常被角色窗/HUD 占位，且当时无法读原版客户端的 buff 列表，判不出「没下发」还是「没画出来」）。
   这条留给下一轮：需要先有一个「读原版客户端 buff 列表」的探针，或解锁后用鼠标开窗。
 
-**下一步（写给下一轮）**：原版侧这帧已经有内容，本端要同状态就得有一条**注入 GM buff** 的夹具
-（`--mock` 现在只有 `--buff-test` 的 Mirroring ×3，与 GM buff 不同态），然后按 §3.2 系做窗内逐像素对表。
+**本端同状态 A/B（本轮补齐，2026-09-30）**
+
+夹具：新增 **`buff_set {buffs:[{tag,remaining_ms},…]}`**（`control.rs`，替换 `BuffState.buffs`；
+`--mock` 自带的 `--buff-test` 只回发 Mirroring ×3，与原版这帧不同态）。
+
+```powershell
+.\target\debug\client_bevy.exe --mock --auto-enter --ui-scale 1 --control-port 9000
+pwsh tools\acceptance\rpc.ps1 -Method buff_set -Params '{"buffs":[{"tag":115,"remaining_ms":600000},{"tag":103,"remaining_ms":600000}]}'
+pwsh tools\acceptance\rpc.ps1 -Method cursor   -Params '{"x":870,"y":15}'   # C# BuffDialog 悬停才显形
+pwsh tools\acceptance\rpc.ps1 -Method screenshot -Params '{"path":"<worktree>\ours_buff2.png"}'
+```
+
+判据（`win_locate.py --lib Data\BuffIcon.Lib`，两端各自最优落点）：
+
+| 图标 | 原版 `orig_kbd_02_ingame.png` | 本端 `ours_buff2.png` | 不符率 |
+|---|---|---|---|
+| `BuffIcon[173]`（C# `BuffType.GameMaster`） | **(841,6)** | **(842,6)** | 0.0000（两端） |
+| `BuffIcon[240]`（C# `BuffType.Rested`） | **(864,6)** | **(865,6)** | 0.0000（两端） |
+
+差的 1px 仍是 §3.2c–§3.2f 的取帧口径；**顺序也对上了**（Rested 在右 = i=0，GM 在左 = i=1，
+与原版一致——C# `AddBuff` 是 `_buffList.Insert(0, …)`「最新在 i=0」，本端 `buff_added` 同样是
+`buffs.insert(0, …)`）。窗内**背景**不可比（buff 面板背后是世界地图，两端地图视野不同）——
+所以这一行只报「图标逐枚 0.0000 + 落点 1px」，不报整块像素占比。
+
+**本轮改了什么**（`Client-Bevy`）
+
+1. `game/dialogs/buff.rs`：`buff_display` 补 **103 `GameMaster`（icon 173）/ 115 `Rested`（icon 240）**
+   ——原先落到 `_` 分支拿 icon 0（占位图），原版帧这两枚根本画不出来；名称取自
+   `Chinese.json` 的 `Enum.BuffType_*`，图标 index 逐字取自 `BuffDialog.cs:478-501`。
+2. 同文件：**图标预载**从 `0..=30` 扩到把 C# `//Special` 段 `103..=118` 一起载入
+   （`buff_ui_system` 只从 `assets.icons` 取句柄，漏载的 tag 即使表里有 icon 也只会画占位图）。
+3. `control.rs`：`buff_set` 夹具（并进 `ControlQueries`，`apply_control_commands` 已在 16 参数上限）。
+
+**门禁**：`cargo test --lib` **900 passed / 0 failed**；`ui_interact_sweep.ps1 -ManageServer`
+**pass=46 total=47 fail=0 skip=0 exit=0**；改动文件 `cargo fmt -- --check` 与 master 基线逐 hunk 一致。
+
+**仍未采集**：Buff 面板在**未展开**（只画 i=0）与**悬停渐隐动画**这两档还没逐帧比
+（原版那档要真鼠标悬停/点展开钮；本端是直接显隐，不逐帧复刻 `Opacity` 渐隐）。
 
 ### 3.2bu 原版 C# 客户端连的是**原版 C# 服务端**，不是 `ServerRust`（2026-09-30 实测）
 

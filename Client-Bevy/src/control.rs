@@ -561,6 +561,15 @@ enum ControlCommand {
         text: String,
         reply: Sender<String>,
     },
+    /// 实机夹具（§3.2bx，walgut `crystal-zero-ab-windows` 的 Buff 行）：**替换**本端 buff 列表。
+    ///
+    /// 存在理由：原版侧的 buff 帧靠 `dbtool setadmin` + GM 登录的 `UpdateGMBuff()` 拿到
+    /// （GameMaster + Rested 两枚），而本端 `--mock --buff-test` 只会回发 Mirroring ×3——
+    /// **不同态就没法做窗内逐像素对表**。这条夹具让实机能把任意 `tag/剩余时长` 摆成与原版一致。
+    BuffSet {
+        buffs: Vec<(u8, u32)>,
+        reply: Sender<String>,
+    },
     /// 翻转 HUD 开关（2026-09-28，#3327）：`which` = `"belt"` / `"skillbar"`，
     /// `on = None` = 翻转（与 C# 热键同语义）。逐窗 A/B 的两行 HUD（Belt/Skillbar）
     /// 此前只能整帧比、等于噪声；有了它我方侧也能把这两行摆到屏上做窗内比对。
@@ -854,6 +863,8 @@ struct ControlQueries<'w, 's> {
     /// §3.2bv 实机夹具 `notice_set` 用：写公告状态（`apply_control_commands` 已是 Bevy 的
     /// 16 参数上限，新资源必须并进本 `SystemParam`，不能再加一个系统参数）。
     notice: ResMut<'w, crate::game::dialogs::notice::NoticeState>,
+    /// §3.2bx 夹具 `buff_set` 用：替换 Buff 列表（与 `notice` 同样的「并进 SystemParam」理由）
+    buff: ResMut<'w, crate::game::dialogs::buff::BuffState>,
     /// `state` 用：会话里的服务器权威位置留痕（`UserLocation`）——移动同步判据见
     /// `SessionState::last_server_position` 的注释。
     session: Res<'w, crate::network::SessionState>,
@@ -1488,6 +1499,39 @@ fn handle_conn(mut stream: std::net::TcpStream, tx: Sender<ControlCommand>) {
                     if tx
                         .send(ControlCommand::NoticeBoxShow {
                             text,
+                            reply: reply_tx,
+                        })
+                        .is_ok()
+                    {
+                        let s = reply_rx
+                            .recv_timeout(std::time::Duration::from_secs(2))
+                            .unwrap_or_else(|_| "{}".to_string());
+                        serde_json::from_str::<Value>(&s).unwrap_or_else(|_| json!({}))
+                    } else {
+                        json!({"error": "control channel closed"})
+                    }
+                }
+            }
+            // 实机夹具（§3.2bx）：替换 buff 列表。{buffs:[{tag,remaining_ms},…]}
+            "buff_set" => {
+                let mut list: Vec<(u8, u32)> = Vec::new();
+                if let Some(arr) = params.get("buffs").and_then(|v| v.as_array()) {
+                    for it in arr {
+                        let tag = it.get("tag").and_then(|v| v.as_u64()).unwrap_or(255) as u8;
+                        let ms = it
+                            .get("remaining_ms")
+                            .and_then(|v| v.as_u64())
+                            .unwrap_or(600_000) as u32;
+                        list.push((tag, ms));
+                    }
+                }
+                if list.is_empty() {
+                    json!({"error": "missing buffs"})
+                } else {
+                    let (reply_tx, reply_rx) = bounded::<String>(1);
+                    if tx
+                        .send(ControlCommand::BuffSet {
+                            buffs: list,
                             reply: reply_tx,
                         })
                         .is_ok()
@@ -3660,6 +3704,23 @@ fn apply_control_commands(
                 let _ = reply.try_send(
                     json!({"ok": true, "visible": q.guard.notice.is_visible()}).to_string(),
                 );
+            }
+            // 实机夹具（§3.2bx）：把 buff 列表替换成夹具给的那组（原版帧是 GameMaster+Rested 两枚）
+            ControlCommand::BuffSet { buffs, reply } => {
+                q.buff.buffs = buffs
+                    .into_iter()
+                    .map(
+                        |(tag, remaining_ms)| crate::game::dialogs::buff::BuffEntry {
+                            tag,
+                            remaining_ms,
+                            paused: false,
+                            values: Vec::new(),
+                        },
+                    )
+                    .collect();
+                q.buff.message.clear();
+                let _ =
+                    reply.try_send(json!({"ok": true, "count": q.buff.buffs.len()}).to_string());
             }
             ControlCommand::MiniMapProbe { reply } => {
                 // 绘制侧真值（只读）：判定"裁错"还是"画错"只需要这几项
