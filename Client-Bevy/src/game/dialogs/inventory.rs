@@ -424,15 +424,41 @@ const QUEST_GRID_SIZE: usize = GRID_COLS * GRID_ROWS; // 任务格 8x5=40（C# Q
 const CELL_W: f32 = 36.0;
 const CELL_H: f32 = 32.0;
 
-/// 背包背景 Title[196] 真实尺寸（C# InventoryDialog.Size 即背景图尺寸；
-/// 探针实测 316x236，缺失回退同值）。交易开窗推位公式用（TradeDialogs.cs:154
-/// `ScreenWidth - InventoryDialog.Size.Width`）。
+/// 背包背景 `Title[196]` 的**真尺寸**（C# `InventoryDialog.Size` = `Library.GetTrueSize(196)`）。
+///
+/// §3.2cl ②：`AutoSize`（构造默认 true）下 `Size` 取 `GetTrueSize`（裁 alpha=0 的边）⇒
+/// `Title[196]` 图头 316x236、**真尺寸 313x235**（最右 3 列 / 最下 1 行全透明）。
+///
+/// C# 里凡「按背包宽度算位置」都用这个 `Size`，本端此前拿的是**图头**——四处一起偏：
+///
+/// | 用处 | C# | 真尺寸 | 本端修前（图头） |
+/// |---|---|---|---|
+/// | 交易推背包 | `TradeDialogs.cs:154` `ScreenWidth - Size.Width` | **711** | 708 |
+/// | NPC 对话推背包 | `NPCDialogs.cs:1044` `Size.Width + 5` | **443** | 未推 |
+/// | 邮件包裹窗 | `MailDialogs.cs:711` `Size.Width + 10` | **323** | 326 |
+/// | 镶嵌窗居中 | `SocketDialog.cs:108-110` `inv.W/2`、`inv.H + 5` | **116 / 240** | 117 / 241 |
+///
+/// 2026-10-01 原版帧实锤（`%TEMP%\golden_sandbox\shots`，`win_locate.py`）：
+/// 交易帧 `orig_T10_Benter.png` 里背包关闭钮 `Prguse2[360]` **0.0000 @(1000,3)** ⇒ 面板在 x=**711**
+/// （= 1024-313）；`orig_npc_try2.png` 里 `Title[196]` @**(443,0)**（不符率 0.069）。
 pub fn inventory_real_size(libs: &mut GameLibraries) -> (f32, f32) {
     match libs.0.get_image(LibraryName::Title, 196) {
-        Some(i) => (i.width.max(0) as f32, i.height.max(0) as f32),
-        None => (316.0, 236.0),
+        Some(i) => {
+            let (w, h) = i.get_true_size();
+            (w.max(0) as f32, h.max(0) as f32)
+        }
+        None => (INV_TRUE_W_FALLBACK, INV_TRUE_H_FALLBACK),
     }
 }
+
+/// `Title[196]` 真尺寸缺省回退（= 实机 `GetTrueSize` 实测值）
+pub const INV_TRUE_W_FALLBACK: f32 = 313.0;
+pub const INV_TRUE_H_FALLBACK: f32 = 235.0;
+
+/// 负重条 `Prguse[24]` 的**真宽**（图头 84x6、真尺寸 **81x6**）。
+/// C# `InventoryDialog.cs:423` 填充段宽 = `(WeightBar.Size.Width - 3) * percent`
+/// （`WeightBar` = `MirImageControl(Index=24, DrawImage=false)` ⇒ `Size` = `GetTrueSize(24)`）。
+const WEIGHT_BAR_TRUE_W: f32 = 81.0;
 
 #[derive(Component)]
 pub struct InventoryPanel;
@@ -479,8 +505,10 @@ fn inv_weight_bar_system(
     };
     for (mut node, mut img) in &mut bars {
         img.color = tint;
-        // 左端对齐裁宽（宽度按比例缩放；percent=0 不绘制——C# :402 早退）
-        node.width = Val::Px((84.0 - 3.0) * percent);
+        // 左端对齐裁宽（宽度按比例缩放；percent=0 不绘制——C# :402 早退）。
+        // §3.2cm 批③：C# 用 `(WeightBar.Size.Width - 3)`，`Size` = `GetTrueSize(Prguse[24])` = **81**
+        // ⇒ (81-3)*percent；本端此前按图头 84 写成 (84-3)，条尾长 3px。
+        node.width = Val::Px((WEIGHT_BAR_TRUE_W - 3.0) * percent);
     }
 }
 
@@ -1015,7 +1043,12 @@ pub struct InventoryShiftRight;
 /// 交易走 [`InventoryShiftRight`]（`ScreenWidth - inv.W`）；TrustMerchant `Show()`
 /// （TrustMerchantDialog.cs:1435）用 `Size.Width + 5`，`Hide()` 复位到 0。
 #[derive(Message, Debug)]
-pub struct InventoryPlaceAt(pub f32);
+/// 把背包面板**放到** `(x, y)` —— C# `InventoryDialog.Location = new Point(x, y)` 的直译。
+///
+/// §3.2cm 批③：C# 各窗推背包时给的是**二维点**，其中 `NPCAwakeDialog.Show()`
+/// （`NPCDialogs.cs:2252`）给的是 `new Point(Size.Width + 5, Location.Y)` = **(314,224)**
+/// （觉醒窗原点 y = `NPCDialog.Size.Height` = 224）。本端此前只带 x、y 一律归零 ⇒ 觉醒那一档少 224px。
+pub struct InventoryPlaceAt(pub f32, pub f32);
 
 /// 光标坐标 → 背包格（按当前页与格数）；供仓库/交易/英雄对话框复用。
 /// 对齐 C# InventoryDialog：page 0=道具（0..min(40,size)），1=道具2（40..size-1），
@@ -1733,18 +1766,20 @@ fn inventory_shift_right_system(
     mut inv_origin: ResMut<InventoryOrigin>,
 ) {
     let (inv_w, _) = inventory_real_size(&mut libs);
-    let mut target: Option<f32> = None;
+    let mut target: Option<(f32, f32)> = None;
     for _ in events.read() {
-        target = Some(1024.0 - inv_w);
+        // 交易：C# `TradeDialogs.cs:154` 只给 x（y 固定 0）
+        target = Some((1024.0 - inv_w, 0.0));
     }
     for e in place_at.read() {
-        target = Some(e.0);
+        target = Some((e.0, e.1));
     }
-    let Some(target_x) = target else {
+    let Some((target_x, target_y)) = target else {
         return;
     };
     // bevy_ui：背包面板根 Node.left = 屏幕 x；子节点（格/按钮/文本）随根整体平移
     let mut min_x = f32::MAX;
+    let mut min_y = f32::MAX;
     for (node, root) in inv_entities.iter() {
         if root.0 != DialogKind::Inventory {
             continue;
@@ -1752,11 +1787,19 @@ fn inventory_shift_right_system(
         if let Val::Px(v) = node.left {
             min_x = min_x.min(v);
         }
+        if let Val::Px(v) = node.top {
+            min_y = min_y.min(v);
+        }
     }
     if min_x == f32::MAX {
         return; // 背包未生成
     }
     let dx = target_x - min_x;
+    let dy = if min_y == f32::MAX {
+        0.0
+    } else {
+        target_y - min_y
+    };
     for (mut node, root) in inv_entities.iter_mut() {
         if root.0 != DialogKind::Inventory {
             continue;
@@ -1766,9 +1809,16 @@ fn inventory_shift_right_system(
             _ => 0.0,
         };
         node.left = Val::Px(cur + dx);
+        if min_y != f32::MAX {
+            let cur = match node.top {
+                Val::Px(v) => v,
+                _ => 0.0,
+            };
+            node.top = Val::Px(cur + dy);
+        }
     }
     // 同步 InventoryOrigin（镶嵌面板锚定 / Ctrl+右键入口等读背包当前原点的系统跟随推位）
-    *inv_origin = InventoryOrigin(target_x, 0.0);
+    *inv_origin = InventoryOrigin(target_x, target_y);
 }
 
 /// `MirItemCell.Locked` 的锁定来源。C# 里同一个 `Locked` 标志被多处共用（Craft 放材料、
@@ -3765,13 +3815,16 @@ mod tests {
             .run_system_once(inventory_shift_right_system)
             .expect("shift right 应成功");
 
-        // target_x = 1024 - 316 = 708：只有面板根被平移；子格相对位保持不变；
+        // target_x = 1024 - **313**（真尺寸）= 711：只有面板根被平移；子格相对位保持不变；
         // 交易窗不动（三者皆防回潮——尤其"子格被二次 +dx"的原始回归形态）
         let panel_x = match world.get::<Node>(panel).unwrap().left {
             Val::Px(v) => v,
             _ => f32::MAX,
         };
-        assert_eq!(panel_x, 708.0, "面板根应右移到 target_x");
+        assert_eq!(
+            panel_x, 711.0,
+            "面板根应右移到 target_x = 1024-GetTrueSize(196).Width"
+        );
         let cell_x = match world.get::<Node>(cell).unwrap().left {
             Val::Px(v) => v,
             _ => f32::MAX,
@@ -3789,13 +3842,13 @@ mod tests {
         }
         // InventoryOrigin 覆写
         let origin = world.resource::<InventoryOrigin>();
-        assert_eq!((origin.0, origin.1), (708.0, 0.0));
+        assert_eq!((origin.0, origin.1), (711.0, 0.0));
 
-        // #2742：`InventoryPlaceAt(x)` 走同一套推位（C# TrustMerchant `Show()` 用
-        // `Size.Width + 5`、`Hide()` 复位 0）；已在 708 处 → 目标 0 时 dx = -708
+        // #2742：`InventoryPlaceAt(x, y)` 走同一套推位（C# TrustMerchant `Show()` 用
+        // `Size.Width + 5`、`Hide()` 复位 0）；已在 711 处 → 目标 0 时 dx = -711
         world
             .resource_mut::<Messages<InventoryPlaceAt>>()
-            .write(InventoryPlaceAt(0.0));
+            .write(InventoryPlaceAt(0.0, 0.0));
         world
             .run_system_once(inventory_shift_right_system)
             .expect("place at 应成功");
@@ -3803,7 +3856,7 @@ mod tests {
             Val::Px(v) => v,
             _ => f32::MAX,
         };
-        assert_eq!(panel_x, 0.0, "InventoryPlaceAt(0) 应把背包复位到 x=0");
+        assert_eq!(panel_x, 0.0, "InventoryPlaceAt(0,0) 应把背包复位到 x=0");
         assert_eq!(
             (
                 world.resource::<InventoryOrigin>().0,
@@ -3817,6 +3870,29 @@ mod tests {
                 _ => f32::MAX,
             },
             9.0
+        );
+
+        // §3.2cm 批③：二维推位（C# `NPCAwakeDialog.Show()` → `new Point(314, 224)`）。
+        // 修前 `InventoryPlaceAt` 只带 x、y 一律归零 ⇒ 觉醒那一档少 224px。
+        world
+            .resource_mut::<Messages<InventoryPlaceAt>>()
+            .write(InventoryPlaceAt(314.0, 224.0));
+        world
+            .run_system_once(inventory_shift_right_system)
+            .expect("place at 二维应成功");
+        let node = world.get::<Node>(panel).unwrap();
+        assert_eq!(
+            (node.left, node.top),
+            (Val::Px(314.0), Val::Px(224.0)),
+            "觉醒窗推背包：面板应落到 (314,224)"
+        );
+        assert_eq!(
+            (
+                world.resource::<InventoryOrigin>().0,
+                world.resource::<InventoryOrigin>().1
+            ),
+            (314.0, 224.0),
+            "InventoryOrigin 应同步 y"
         );
     }
 

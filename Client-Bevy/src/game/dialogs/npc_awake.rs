@@ -36,7 +36,11 @@ use crate::ui::theme::{
 
 /// #2892 批B：面板精灵与 C# 原生尺寸（C# `NPCAwakeDialog.Index = 710; Library = Libraries.Title`）
 pub const PANEL: (LibraryName, usize) = (LibraryName::Title, 710);
+/// 贴图用的**图头**尺寸（`Library.Draw` 原样 1:1）
 pub const PANEL_SIZE: (f32, f32) = (360.0, 420.0);
+/// `GetTrueSize(Title[710])` = **309x420**（图头 360x420 的最右 51 列全透明）。
+/// C# 的 `NPCAwakeDialog.Size` 就是它 —— `Show()` 推背包用 `Size.Width + 5` ⇒ 314。
+pub const PANEL_TRUE_SIZE: (f32, f32) = (309.0, 420.0);
 /// 面板原点：**不是**类构造器里写的 `(0,0)`。
 ///
 /// C# `NPCAwakeDialog` 的 `Location = new Point(0, 0)`（`NPCDialogs.cs:1884`）会被 `GameScene`
@@ -293,7 +297,46 @@ impl Plugin for NpcAwakePlugin {
                 .chain()
                 .run_if(in_state(AppState::Game)),
         );
+        // §3.2cm 批③：觉醒窗 Show() 里把背包推到 `(Size.Width + 5, Location.Y)` 并**强制打开背包**
+        app.add_systems(
+            Update,
+            npc_awake_push_inventory.run_if(in_state(AppState::Game)),
+        );
     }
+}
+
+/// C# `NPCAwakeDialog.Show()`（`NPCDialogs.cs:2247-2254`）：
+/// `InventoryDialog.Location = new Point(Size.Width + 5, Location.Y)` **且** `InventoryDialog.Show()`。
+///
+/// `Size` = `GetTrueSize(Title[710])` = **309**（图头 360）；`Location.Y` = 觉醒窗原点 y = **224**
+/// （`GameScene.cs:307` `new Point(0, NPCDialog.Size.Height)`）⇒ 背包落在 **(314,224)**。
+///
+/// 原版帧实锤：`orig_awake.png` 里 `Title[196]` @**(314,224)**（不符率 0.055）；按图头 360 会算成 365。
+/// `Hide()`（`:2227-2245`）**不重置**背包位置 —— 照抄，不"顺手修"。
+fn npc_awake_push_inventory(
+    mut mgr: ResMut<DialogManager>,
+    mut place_at: MessageWriter<crate::game::dialogs::inventory::InventoryPlaceAt>,
+    mut libs: ResMut<GameLibraries>,
+    mut prev: Local<bool>,
+) {
+    let open = mgr.is_open(DialogKind::NpcAwake);
+    if *prev == open {
+        return;
+    }
+    *prev = open;
+    if !open {
+        return;
+    }
+    libs.0.ensure_initialized();
+    let w = match libs.0.get_image(PANEL.0, PANEL.1) {
+        Some(i) => i.get_true_size().0.max(0) as f32,
+        None => PANEL_TRUE_SIZE.0,
+    };
+    place_at.write(crate::game::dialogs::inventory::InventoryPlaceAt(
+        w + 5.0,
+        PANEL_ORIGIN.1,
+    ));
+    mgr.open(DialogKind::Inventory);
 }
 
 /// 格 3..6 的点击交互（C# `MirItemCell.cs:1655-1785` To Awakening / `:1164-1178` From AwakenItem）：
