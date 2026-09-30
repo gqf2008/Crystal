@@ -828,8 +828,9 @@ fn dialog_hotkey_system(
     mut page: ResMut<CharPage>,
     mut opt: ResMut<crate::game::dialogs::option::OptionState>,
     mut potion_belt_visible: ResMut<crate::game::dialogs::potion_belt::PotionBeltVisible>,
-    // #2836 单元②：英雄三键的 `Hero == null` 守卫（C# `GameScene.cs:581-606`）
-    hero: Res<crate::game::dialogs::hero::HeroState>,
+    // #2836 单元②：英雄三键的 `Hero == null` 守卫（C# `GameScene.cs:581-606`）。
+    // 英雄状态**不在这里再挂一份**——`guard`（`ShowGuardParams`）里已经是 `ResMut<HeroState>`，
+    // 同系统再来一个 `Res<HeroState>` 会 B0002 panic（§3.2ci 实机踩到两次）；这里改用 `guard.hero()`。
     // #2892 批58：英雄对话框四页共窗 → 装备/技能键按页切换
     mut hero_pages: ResMut<crate::game::dialogs::hero_pages::HeroPageState>,
     // 2026-09-28：宠物/行会/坐骑/钓鱼四窗的 C# `Show()` 前置守卫（状态缺失 ⇒ 只弹 MirMessageBox）
@@ -953,7 +954,7 @@ fn dialog_hotkey_system(
     //   HeroSkills   : 守卫 + 同上（SkillPage）
     // 本端英雄装备/技能是**两个独立窗**（C# 是同属 `HeroDialog` 的两页）→ 打开目标页时关掉另一页，
     // 「Hero == null」对应 `HeroState.current.is_none()`（与 HUD 英雄按钮显隐同一判据）。
-    let has_hero = hero.current.is_some();
+    let has_hero = guard.hero().current.is_some();
     if has_hero {
         for action in ["英雄背包"] {
             if let Some(b) = kb.bindings.iter().find(|b| b.action == action) {

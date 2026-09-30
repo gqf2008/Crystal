@@ -4239,6 +4239,57 @@ dbtool <沙箱>\Server setpos 333 384 99 100 ; dbtool <沙箱>\Server setpos gqf
 **未采集**：交易中的「双方都放物品/改金币/按确认锁定」这些**内容态**帧（本轮只做到"空窗"同状态对拍）；
 以及**原版鼠标点 YES 点不动**这条本身（是"控制被盖住"还是"点击语义"没查，如实记）。
 
+### 3.2ci 英雄背包/英雄装备的 **`Hero == null` 静默守卫**补齐（+ `hero_set` 夹具 + 巡回脚本同步）（2026-09-30）
+
+#### ① 缺口：C# 无英雄时**静默不开窗**，本端会照开
+
+| | C# | 本端（修复前） |
+|---|---|---|
+| 英雄背包 | `GameScene.cs:581-585`：`case HeroInventory: if (Hero == null) break;` | `show_guard()` 里**没有**这条 → `dialog open hero_inventory` 直接开窗 |
+| 英雄装备 | `GameScene.cs:587-596`：同上 + 页切换 | 同上 |
+
+**原版侧怎么证**：这两扇的键位是 `Ctrl+I` / `Ctrl+C`（`KeyBindSettings.cs:195/197`），而注入的 Ctrl 修饰键不被 WinForms 认
+（`KeyEventArgs.Control` 读**真实**键盘状态，`SendMessage` 改不了）⇒ 改用**沙箱专属键位改写**（`Client\KeyBinds.ini` 里把
+`[HeroInventory]/[HeroEquipment]` 的 `RequireCtrl` 1→2、`RequireKey` 换成没被占用的 `PageUp/PageDown`，**用完从
+`KeyBinds.ini.abb_backup` 还原**）。按下去之后帧里**既没有窗**（`Prguse[1422]` 未命中）**也没有消息框** ⇒
+「静默 `break`」而不是像宠物/坐骑那样弹提示。**注意**：第一次改键时把两扇绑到了 `J/K`，而这两个键本机已被
+`MountWindow/Ranking` 占用 ⇒ 弹的是坐骑守卫提示（假线索）；**改键前先列一遍 `RequireKey` 占用表**。
+
+#### ② 修法（与 §3.2ce/§3.2cf 同一族）
+
+`notice_box.rs`：`ShowGuardState` 加 `has_hero`（= `HeroState.current.is_some()` ⇔ C# `GameScene.Hero != null`），
+`show_guard` 加 `DialogKind::HeroInventory | DialogKind::HeroEquipment if !st.has_hero => BlockSilent`
+（**静默**档，与大地图同型）。
+
+顺带修掉两处 **B0002 panic**（本轮实机连着踩两次）：把 `HeroState` 收进 `ShowGuardParams`（`ResMut`）后，
+`ControlQueries.hero` 与 `dialog_hotkey_system.hero` 里那两份**同资源访问**必须撤掉，否则客户端一进游戏就
+`error[B0002] ... conflicts with a previous system parameter`；两处改走 `guard.hero()/hero_mut()`。
+
+#### ③ 实机验证（`hero_set` 夹具，两种状态各一键）
+
+新增客户端夹具 `hero_set {current: "英雄名"|null}`（与 `buff_set`/`notice_set`/`relationship_set` 同款；mock 登录时
+`ManageHeroes` 带的是一个**没有 current** 的列表 ⇒ 默认就是"无英雄"，正好是 C# 守卫会拦的那一态）：
+
+| 状态 | `dialog open hero_inventory` / `hero_equipment` | `notice_probe` | 帧判据 |
+|---|---|---|---|
+| `hero_set {current: null}` | `dialogs` = `[Minimap]`（**两窗都没开**） | `text = null`（**静默**，无提示框） | `Prguse[1422]` 未命中（0.6991） |
+| `hero_set {current: "英雄小刀"}` | `dialogs` = `[Minimap, HeroInventory]`（正常开窗） | — | `Prguse[1422]` @(0,0) **0.0040**（与 §3.2ao 记录一致） |
+
+客户端日志对应两条：`🛡️ HeroInventory/HeroEquipment 前置不成立 → 不开窗（C# Show() 静默返回，不弹提示）`。
+
+#### ④ 门禁脚本同步（否则这条守卫会让巡回恒红）
+
+`tools/acceptance/ui_interact_sweep.ps1` 里这两扇是"逐窗点 X"的严格判据 ⇒ 无英雄账号上永远开不出窗。
+按大地图"锚图"的同一性质，在逐窗前对这两扇**先摆一个有英雄的状态**（`Rpc 'hero_set' @{current='英雄小刀'}`）。
+改后巡回 **pass=46 total=47 fail=0 skip=0 exit=0**。
+
+#### ⑤ 未定性（如实记）
+
+本轮手动 `--mock` 实例里**所有** `click` RPC 都落到同一个非 UI 实体（`hits=["66v0 ? []"]`，无 `ComputedNode` 尺寸）且不生效
+——点 HUD 背包钮、点 hero_manage 的 X、点 inventory 的 X 都一样；同期**巡回脚本**（`--real-net`、由脚本前置窗口）的同类点击**全绿**。
+判据侧因此改用 `dialogs`/`notice_probe`/帧模板匹配（不依赖点击）完成 ①②③。**疑似与窗口焦点有关，本轮未定性**，
+下一轮先查「未聚焦窗口下注入 `PointerInput` 是否还会被 UI 接住」。
+
 ### 3.2ch 滚动条滑块改成**会跟着滚的 C# 原生美术**（Ranking / GameShop / Guild 共用一套）（2026-09-30）
 
 §3.2cg 把 Ranking 的"灰块盖住美术"修掉时留了个过渡态：美术滑块是**单独摆的一块静态图**，拖动/滚动时它不动
