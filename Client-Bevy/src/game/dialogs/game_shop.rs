@@ -1631,14 +1631,13 @@ fn spawn_game_shop(
     // Yes `Title[206..208]` @(260,157) / No `Title[210..212]` @(360,157)）
     if let Some(bg) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 360) {
         // 模态面板统一 z（C# `MirMessageBox` 系 `Modal = true`；不能被 `modal_layer` 的遮挡层盖住）
-        let confirm = spawn_panel(
+        let confirm = crate::game::dialogs::modal_layer::spawn_modal_panel(
             &mut commands,
             bg,
             284.0,
             289.0,
             456.0,
             190.0,
-            crate::game::dialogs::modal_layer::MODAL_PANEL_Z,
         );
         commands.entity(confirm).insert((
             GameShopConfirm,

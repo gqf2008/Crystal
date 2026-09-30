@@ -47,6 +47,57 @@ pub const MODAL_BLOCKER_Z: i32 = 59;
 /// 模态面板统一 z（C# 里这些面板都是 `MirMessageBox` 系 = `Modal = true`，谁也不能被遮挡层盖住）
 pub const MODAL_PANEL_Z: i32 = 60;
 
+/// 模态面板标记 —— **模态面板的唯一识别方式**（比「z >= [`MODAL_BLOCKER_Z`]」这个代理更硬）。
+///
+/// 由 [`spawn_modal_panel`] 挂；静态审计门禁 `tools/acceptance/csharp_golden/modal_panel_audit.py`
+/// 的「面 A」用它核对「凡模态层的根都经唯一入口生成」。
+#[derive(Component)]
+pub struct ModalPanel;
+
+/// 生成一块**模态面板** —— 模态层的**唯一入口**。
+///
+/// 与直接调 `ui::theme::spawn_panel(..., z)` 的区别：**这里不接受 z 参数**，固定用
+/// [`MODAL_PANEL_Z`] 并挂 [`ModalPanel`] ⇒ 调用方**没有机会**把 z 传错。
+///
+/// 起因（2026-09-30，walgit 线程 `crystal-modal-layer-guards`）：`assign_key.rs` 曾给通用
+/// `spawn_panel` 传字面量 `60` —— 数值恰好等于 `MODAL_PANEL_Z` 而长期「看起来对」。一旦有人
+/// 为插新层调高 `MODAL_PANEL_Z`，该面板会落到遮挡层 `59` **之下**、被自家遮挡层盖住，而它是
+/// 模态的、**没有关闭钮**、也不在实机巡回名单里 ⇒ 可能直接卡住交互。
+/// 把 z 从「调用方传参」改成「入口内部决定」，这类漏改在**构造上**不再可能。
+pub fn spawn_modal_panel(
+    commands: &mut Commands,
+    image: Handle<Image>,
+    x: f32,
+    y: f32,
+    w: f32,
+    h: f32,
+) -> Entity {
+    let panel = crate::ui::theme::spawn_panel(commands, image, x, y, w, h, MODAL_PANEL_Z);
+    commands.entity(panel).insert(ModalPanel);
+    panel
+}
+
+/// **模态来源表** —— 「哪些本端状态算 C# 的 `Modal = true`」的唯一可审计清单。
+///
+/// 元素是 `(本端状态名, C# 依据)`；状态名必须与 [`ModalSources`] 的字段、以及
+/// [`modal_any_visible`] 的入参**一一对应** —— 由静态审计门禁
+/// `tools/acceptance/csharp_golden/modal_panel_audit.py` 的「面 B」核对：
+/// 新增/删除模态来源而漏改此表会红（这正是 2026-09-30 那轮「`InvClickState.selected`
+/// 被错当模态源」与「4 个真 Modal 框漏掉」两类问题各自的机械防线）。
+pub const MODAL_SOURCES: &[(&str, &str)] = &[
+    ("amount", "`MirAmountBox.cs:21,100`（数量框）"),
+    ("confirm", "`MirMessageBox`（丢弃 / 扩容确认）"),
+    ("assign_key", "`MirInputBox.cs:14`（快捷键分配框）"),
+    (
+        "notice",
+        "`MirMessageBox.cs:19`（通用提示框 `notice_box.rs`）",
+    ),
+    ("group", "`MirMessageBox`（组队邀请）"),
+    ("guild", "`MirMessageBox`（行会邀请）"),
+    ("shop", "`MirMessageBox`（商城购买确认）"),
+    ("hero", "`MirMessageBox`（`MakeActiveHero` 询问）"),
+];
+
 /// 遮挡节点标记（全客户区、`Button` + `Interaction` ⇒ bevy_ui picking 会命中它而不是下层按钮）
 #[derive(Component)]
 pub struct ModalBlocker;
@@ -225,6 +276,295 @@ mod tests {
                 "第 {i} 个模态来源为真时应当遮挡"
             );
         }
+    }
+
+    /// 模态层**唯一入口**：产出的根必须恒在模态面板 z，且带 `ModalPanel` 标记。
+    ///
+    /// 红检：把 `spawn_modal_panel` 里改成 `z = MODAL_BLOCKER_Z` → 本用例 FAILED。
+    #[test]
+    fn spawn_modal_panel_pins_z_and_marks() {
+        use bevy::ecs::world::CommandQueue;
+        let world = World::new();
+        let mut queue = CommandQueue::default();
+        let mut commands = Commands::new(&mut queue, &world);
+        let e = spawn_modal_panel(
+            &mut commands,
+            Handle::<Image>::default(),
+            1.0,
+            2.0,
+            3.0,
+            4.0,
+        );
+        let mut world = world;
+        queue.apply(&mut world);
+        assert_eq!(
+            world.entity(e).get::<GlobalZIndex>().map(|z| z.0),
+            Some(MODAL_PANEL_Z),
+            "唯一入口必须把 z 钉在 MODAL_PANEL_Z（不接受调用方传参）"
+        );
+        assert!(
+            world.entity(e).get::<ModalPanel>().is_some(),
+            "唯一入口必须挂 ModalPanel 标记"
+        );
+        assert!(
+            MODAL_PANEL_Z > MODAL_BLOCKER_Z,
+            "模态面板必须高于全屏遮挡层"
+        );
+    }
+
+    /// 收集 `src/` 下全部 `.rs` 的（路径, 内容）。
+    ///
+    /// **为什么扫源码而不是另写一个 `tools/acceptance/*_audit.py`**：本仓那批 `*_audit.py`
+    /// **没有被任何脚本或 CI 调用**（`grep audit.py scripts/ .github/` 为空）⇒ 写了也不会拦人，
+    /// 正是 2026-09-30 那条教训「工具/文档声称能拦、实际没人跑 = 假门禁」。这里随 `cargo test --lib` 跑。
+    fn rs_sources() -> Vec<(String, String)> {
+        fn walk(dir: &std::path::Path, out: &mut Vec<(String, String)>) {
+            let Ok(rd) = std::fs::read_dir(dir) else {
+                return;
+            };
+            for e in rd.flatten() {
+                let p = e.path();
+                if p.is_dir() {
+                    walk(&p, out);
+                } else if p.extension().and_then(|s| s.to_str()) == Some("rs") {
+                    if let Ok(s) = std::fs::read_to_string(&p) {
+                        out.push((p.display().to_string(), s));
+                    }
+                }
+            }
+        }
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut v = Vec::new();
+        walk(&root, &mut v);
+        assert!(
+            !v.is_empty(),
+            "源码扫描必须真扫到文件，否则这道门禁会静默消失：{root:?}"
+        );
+        v
+    }
+
+    /// 把注释内容替换成空格（**保持字节偏移不变**，便于报行号），字符串字面量原样保留。
+    ///
+    /// 为什么必须剥：本用例的文档注释里就写着反例 `spawn_panel(..., 60)` —— 不剥注释会把
+    /// **注释里的例子**当成真实调用报红（首跑就是这么红的第一版）。
+    fn strip_comments(src: &str) -> String {
+        let b = src.as_bytes();
+        let mut out = String::with_capacity(src.len());
+        let (mut i, mut in_str, mut esc, mut line_c, mut blk_c) =
+            (0usize, false, false, false, false);
+        while i < b.len() {
+            let c = b[i];
+            let n = b.get(i + 1).copied();
+            if line_c {
+                if c == b'\n' {
+                    line_c = false;
+                    out.push('\n');
+                } else {
+                    out.push(' ');
+                }
+            } else if blk_c {
+                if c == b'*' && n == Some(b'/') {
+                    blk_c = false;
+                    out.push_str("  ");
+                    i += 2;
+                    continue;
+                }
+                out.push(if c == b'\n' { '\n' } else { ' ' });
+            } else if in_str {
+                out.push(c as char);
+                if esc {
+                    esc = false;
+                } else if c == b'\\' {
+                    esc = true;
+                } else if c == b'"' {
+                    in_str = false;
+                }
+            } else if c == b'/' && n == Some(b'/') {
+                line_c = true;
+                out.push_str("  ");
+                i += 2;
+                continue;
+            } else if c == b'/' && n == Some(b'*') {
+                blk_c = true;
+                out.push_str("  ");
+                i += 2;
+                continue;
+            } else {
+                if c == b'"' {
+                    in_str = true;
+                }
+                out.push(c as char);
+            }
+            i += 1;
+        }
+        out
+    }
+    /// `name(...)` 的顶层实参列表（括号匹配 + 顶层逗号切分，跳过字符串字面量）。
+    fn top_level_args(src: &str, name: &str) -> Vec<Vec<String>> {
+        let b = src.as_bytes();
+        let mut out = Vec::new();
+        let mut i = 0usize;
+        while let Some(pos) = src[i..].find(name) {
+            let start = i + pos + name.len();
+            if b.get(start) != Some(&b'(') {
+                i = start;
+                continue;
+            }
+            let (mut depth, mut j) = (1i32, start + 1);
+            let (mut in_str, mut esc) = (false, false);
+            while j < b.len() && depth > 0 {
+                let c = b[j];
+                if in_str {
+                    if esc {
+                        esc = false;
+                    } else if c == b'\\' {
+                        esc = true;
+                    } else if c == b'"' {
+                        in_str = false;
+                    }
+                } else if c == b'"' {
+                    in_str = true;
+                } else if c == b'(' {
+                    depth += 1;
+                } else if c == b')' {
+                    depth -= 1;
+                }
+                j += 1;
+            }
+            let inner = &src[start + 1..j - 1];
+            let (mut args, mut cur) = (Vec::new(), String::new());
+            let (mut d, mut s, mut e2) = (0i32, false, false);
+            for ch in inner.chars() {
+                if s {
+                    cur.push(ch);
+                    if e2 {
+                        e2 = false;
+                    } else if ch == '\\' {
+                        e2 = true;
+                    } else if ch == '"' {
+                        s = false;
+                    }
+                    continue;
+                }
+                match ch {
+                    '"' => {
+                        s = true;
+                        cur.push(ch);
+                    }
+                    '(' | '[' | '{' => {
+                        d += 1;
+                        cur.push(ch);
+                    }
+                    ')' | ']' | '}' => {
+                        d -= 1;
+                        cur.push(ch);
+                    }
+                    ',' if d == 0 => {
+                        let t = cur.trim();
+                        if !t.is_empty() {
+                            args.push(t.to_string());
+                        }
+                        cur.clear();
+                    }
+                    _ => cur.push(ch),
+                }
+            }
+            let t = cur.trim();
+            if !t.is_empty() {
+                args.push(t.to_string());
+            }
+            out.push(args);
+            i = j;
+        }
+        out
+    }
+
+    /// **门禁（面 A）**：全仓不得出现「手搓模态层根」—— `spawn_panel(..., <字面 z ≥ MODAL_BLOCKER_Z>)`。
+    /// 模态层的根必须经 [`spawn_modal_panel`] 生成（z 由入口内部决定，调用方无从传错）。
+    ///
+    /// 红检：把任一 `spawn_modal_panel(` 改回 `spawn_panel(..., 60)` → 本用例 FAILED。
+    #[test]
+    fn no_hand_rolled_modal_layer_root() {
+        let mut bad = Vec::new();
+        for (path, src) in rs_sources() {
+            let src = strip_comments(&src);
+            for args in top_level_args(&src, "spawn_panel") {
+                let Some(last) = args.last() else { continue };
+                let Ok(z) = last.trim().parse::<i32>() else {
+                    continue;
+                };
+                if z >= MODAL_BLOCKER_Z {
+                    bad.push(format!("{}: spawn_panel(..., {z})", path));
+                }
+            }
+        }
+        assert!(
+            bad.is_empty(),
+            "模态层的根必须走 spawn_modal_panel（不接受调用方传 z）；发现手搓：\n  {}",
+            bad.join("\n  ")
+        );
+    }
+
+    /// **门禁（面 B）**：`ModalSources` 的字段集合必须与 [`MODAL_SOURCES`] 表**完全一致**
+    /// —— 「新增/删除模态来源而漏改表」的机械防线（结构体从源码里现读，不靠人记）。
+    ///
+    /// 红检：往 `ModalSources` 加一个字段 → 本用例 FAILED（表没跟着加）。
+    #[test]
+    fn modal_sources_table_matches_the_param_struct_in_source() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("src/game/dialogs/modal_layer.rs");
+        let src = std::fs::read_to_string(&path).expect("必须读得到 modal_layer.rs 本体");
+        let src = src.replace("\r\n", "\n");
+        let body = src
+            .split("pub struct ModalSources<'w> {")
+            .nth(1)
+            .and_then(|s| s.split("\n}").next())
+            .expect("必须在源码里找得到 ModalSources 结构体");
+        let mut fields: Vec<String> = Vec::new();
+        for line in body.lines() {
+            let t = line.trim();
+            if let Some(rest) = t.strip_prefix("pub ") {
+                if let Some((name, _)) = rest.split_once(':') {
+                    fields.push(name.trim().to_string());
+                }
+            }
+        }
+        let table: Vec<String> = MODAL_SOURCES.iter().map(|(n, _)| n.to_string()).collect();
+        assert!(
+            !fields.is_empty(),
+            "源码解析必须真解出字段，否则这道门禁会静默消失"
+        );
+        assert_eq!(
+            fields, table,
+            "ModalSources 字段与 MODAL_SOURCES 表必须一一对应"
+        );
+    }
+
+    /// **模态来源表**必须与 `ModalSources` 的字段一一对应（名字 + 顺序 + 非空依据）。
+    ///
+    /// 红检：往 `ModalSources` 加一个字段而不同步 `MODAL_SOURCES` → 本用例 FAILED
+    /// （顺序/集合断言会先红）；从 `modal_any_visible` 增删入参同理。
+    #[test]
+    fn modal_sources_table_covers_the_param_struct() {
+        let names: Vec<&str> = MODAL_SOURCES.iter().map(|(n, _)| *n).collect();
+        assert_eq!(
+            names,
+            vec![
+                "amount",
+                "confirm",
+                "assign_key",
+                "notice",
+                "group",
+                "guild",
+                "shop",
+                "hero",
+            ],
+            "MODAL_SOURCES 的名字/顺序必须与 ModalSources 字段、modal_any_visible 入参一致"
+        );
+        assert!(
+            MODAL_SOURCES.iter().all(|(_, src)| !src.is_empty()),
+            "每一项都必须写明 C# 依据，空依据等于没登记"
+        );
     }
 
     /// 遮挡节点：全客户区 + z=59 + 可拾取（`Button`/`Interaction`）+ 默认隐藏。

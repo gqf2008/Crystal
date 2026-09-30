@@ -1617,14 +1617,13 @@ fn spawn_guild(
     let (bx, by) = (284.0, 289.0);
     if let Some(h) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 360) {
         // 模态面板统一 z（C# 邀请提示也是 `MirMessageBox`，`Modal = true`）
-        let popup = spawn_panel(
+        let popup = crate::game::dialogs::modal_layer::spawn_modal_panel(
             &mut commands,
             h,
             bx,
             by,
             456.0,
             190.0,
-            crate::game::dialogs::modal_layer::MODAL_PANEL_Z,
         );
         commands.entity(popup).insert((
             DialogRoot(DialogKind::Guild),
