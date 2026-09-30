@@ -703,8 +703,23 @@ fn spawn_buff(
                 ));
             }
         }
-        // 收起时的数量标签（C# `_buffCountLabel`：黄色粗体）
-        spawn_label(p, &cjk, "", 18.0, 9.0, 12.0, Color::srgb(1.0, 1.0, 0.0), 10).insert(BuffCount);
+        // 收起时的数量标签（C# `_buffCountLabel`：`Font(Settings.FontName, 10F, Bold)` + 黄色 + 默认描边）
+        //
+        // §3.2bx（原版收起态 A/B）：C# 用的是 **`Settings.FontName`（ini 默认 Arial）10pt**，
+        // 即 10×4/3 ≈ **13.33px**；本端此前拿 CJK 主字体（宋体）12px 画，实拍字形只有 **4x8 px**
+        // （原版 7x10、黄像素 43 vs 12）。数字是 ASCII，改走 UI 字体（非 CJK）+ 13.33px。
+        // **Bold 面本端没有**（宋体无粗体、Bevy 不合成）——与 §3.2bv 公告标题同一条已知简化。
+        spawn_label(
+            p,
+            &ui_font.0,
+            "",
+            18.0,
+            9.0,
+            10.0 * 4.0 / 3.0,
+            Color::srgb(1.0, 1.0, 0.0),
+            10,
+        )
+        .insert(BuffCount);
         // 展开/收起按钮（C# `_expandCollapseButton`：`Prguse2[7/8/9]`，16x15 @(panel_w-15, 0)）
         if let (Some(n), Some(h), Some(pr)) = (
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 7),
@@ -751,7 +766,7 @@ fn buff_ui_system(
         ),
     >,
     mut expand: Query<
-        (Entity, &Interaction, &mut Node),
+        (Entity, &Interaction, &mut Node, &mut Visibility),
         (
             With<BuffExpand>,
             Without<BuffPanel>,
@@ -788,7 +803,14 @@ fn buff_ui_system(
     let hovered = cursor
         .map(|c| c.x >= panel_left && c.x <= PANEL_RIGHT && c.y >= PANEL_Y && c.y <= PANEL_Y + ph)
         .unwrap_or(false);
-    let visible = count > 0 && hovered;
+    // §3.2bx（原版收起态实拍）：C# `BuffDialog.Process()`（`:172-205`）的 `Opacity` 淡入淡出**只作用在
+    // **面板本体 + 展开钮**上（`Opacity += FadeRate` 仅在 `IsMouseOver` 时执行），而图标行与
+    // `_buffCountLabel` 是自带 `Opacity = 1f` / `Visible = true` 的子控件 ⇒ **不悬停也一直看得见**。
+    // 原版收起态那帧（`orig_kbd_02_ingame.png`，`ExpandedBuffWindow=False`）里 Rested 图标与黄色 "2"
+    // 都在、面板底图却是透明的，正是这条；本端此前把整族一起按 hover 隐藏（把面板的淡入淡出
+    // 误当成整窗显隐）⇒ 本轮按实机帧改正。
+    let panel_visible = count > 0 && hovered;
+    let row_visible = count > 0;
 
     // 每个可见槽的目标状态（显隐 / 位置 / 图标 / Hint）
     let mut icon_states: Vec<(bool, f32, f32, usize, String)> =
@@ -810,7 +832,11 @@ fn buff_ui_system(
         };
         icon_states.push((shown, x, y, d.icon, hint));
     }
-    let panel_vis = if visible {
+    // 面板**节点**要一直可见（有 buff 时）：图标行/数量标签是它的子控件，Bevy 里父节点一 Hidden
+    // 子节点就整族不渲染（`InheritedVisibility`）——C# 那边父亲只是 `Opacity` 渐隐，子控件照画。
+    // 「面板底图随 hover 淡入淡出」改由**贴图 tint** 实现（下面 `image.color`），语义与 C# 的
+    // `Opacity +=/-= FadeRate` 一致。
+    let panel_vis = if row_visible {
         Visibility::Visible
     } else {
         Visibility::Hidden
@@ -821,7 +847,7 @@ fn buff_ui_system(
         None
     };
     let count_text = format!("{count}");
-    let count_vis = if visible && !expanded {
+    let count_vis = if row_visible && !expanded {
         Visibility::Visible
     } else {
         Visibility::Hidden
@@ -838,12 +864,23 @@ fn buff_ui_system(
                     image.image = h;
                 }
             }
+            // C# `BuffDialog.Process()`：`Opacity +=/-= FadeRate` 只作用在面板本体 +
+            // 展开钮（`IsMouseOver(CMain.MPoint)` 分支）。这里用贴图 tint 复刻同一个观感：
+            // 悬停 → 完全不透明；不悬停 → 全透明（图标行由上面的 `row_visible` 单独管）。
+            let want_tint = if panel_visible {
+                Color::WHITE
+            } else {
+                Color::NONE
+            };
+            if image.color != want_tint {
+                image.color = want_tint;
+            }
             continue;
         }
         if let Some(slot) = icon {
             match icon_states.get(slot.0) {
                 Some((shown, x, y, icon_index, hint_text)) => {
-                    *vis = if visible && *shown {
+                    *vis = if row_visible && *shown {
                         Visibility::Visible
                     } else {
                         Visibility::Hidden
@@ -881,10 +918,16 @@ fn buff_ui_system(
     }
 
     // 展开/收起按钮（C#：`_expandCollapseButton` @(panel_w - 15, 0)；1 个 buff 时点击必展开）
-    for (e, inter, mut node) in &mut expand {
+    for (e, inter, mut node, mut vis) in &mut expand {
         node.left = Val::Px(pw - 15.0);
         node.top = Val::Px(0.0);
-        if !visible || !edge(e, inter, &mut prev_inter) {
+        // C#：展开钮的 `Opacity` 与面板本体同一条淡入淡出 ⇒ 不悬停时既不显示也不可点
+        *vis = if panel_visible {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
+        if !panel_visible || !edge(e, inter, &mut prev_inter) {
             continue;
         }
         if state.buffs.len() == 1 {
