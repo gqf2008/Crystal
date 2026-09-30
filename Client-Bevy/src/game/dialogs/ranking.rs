@@ -362,7 +362,15 @@ fn spawn_ranking(
     let mut rank_thumb: Option<Entity> = None;
     if let Ok(mut pcmd) = commands.get_entity(panel) {
         pcmd.with_children(|p| {
-            let (_, thumb) = crate::ui::theme::spawn_scroll_bar_ui(p, SCROLL_TRACK, 39);
+            // 视觉走**本窗自己的 C# 原生滑块**（下面 `Prguse2[205/206]` @(299,113)），
+            // 占位灰条只留交互节点（`ScrollBarVisual::Invisible`）——否则 z=40 的浅灰块
+            // 会盖住 z=10 的美术滑块（2026-09-30 A/B：原版 (649,276) 0.0000，本端在该处只见灰块）。
+            let (_, thumb) = crate::ui::theme::spawn_scroll_bar_ui_styled(
+                p,
+                SCROLL_TRACK,
+                39,
+                crate::ui::theme::ScrollBarVisual::Invisible,
+            );
             rank_thumb = Some(thumb);
         });
     }
