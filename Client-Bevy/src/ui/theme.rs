@@ -1061,6 +1061,18 @@ pub fn item_cell_ui_system(
 
 #[cfg(test)]
 mod tests {
+    /// 2026-09-30（§3.2cg）：滚动条的「只留交互、不画像素」档必须**真的全透明**——
+    /// Ranking 窗自己画 C# 原生滑块（`Prguse2[205]`），占位灰条若还有 alpha 就会把它盖住
+    /// （实机 A/B：原版 (649,276) 0.0000 命中，本端当时只看到浅灰块）。
+    #[test]
+    fn scroll_bar_invisible_visual_is_fully_transparent() {
+        let (t, th) = super::scroll_bar_colours(super::ScrollBarVisual::Default);
+        assert!(t.alpha() > 0.0 && th.alpha() > 0.0, "默认档要画出来");
+        let (t, th) = super::scroll_bar_colours(super::ScrollBarVisual::Invisible);
+        assert_eq!(t.alpha(), 0.0, "轨道必须全透明");
+        assert_eq!(th.alpha(), 0.0, "滑块必须全透明");
+    }
+
     /// #2892 批D 单元①：下拉框弹出面板的命中矩形必须带上拖动偏移
     /// （C# `MirDropDownBox.Movable = true`：拖走后选项行/滚轮/点击外部关闭都要跟着走）。
     ///
@@ -1650,6 +1662,32 @@ pub fn spawn_scroll_bar_ui(
     track_rel: (f32, f32, f32, f32),
     z: i32,
 ) -> (Entity, Entity) {
+    spawn_scroll_bar_ui_styled(parent, track_rel, z, ScrollBarVisual::Default)
+}
+
+/// 滚动条的**视觉样式**。
+///
+/// 为什么要有这个开关：本端这条「半透明轨道 + 浅色滑块」是**占位视觉**（C# 那些窗的滚动条
+/// 多数是美术滑块，不是纯色块）。窗口若自己画了 C# 原生滑块（如 Ranking `Prguse2[205]`
+/// @(299,113)），再叠一层占位视觉就会把美术**盖住**——2026-09-30 的 A/B 实测正是如此：
+/// 原版帧 `Prguse2[205]` 在 (649,276) 0.0000 命中，本端同一帧该处是不透光的浅灰块
+/// （`Color::srgba(0.85,0.85,0.9,0.9)`，z=40 压住 z=10 的美术）。
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum ScrollBarVisual {
+    /// 占位视觉：半透明深色轨道 + 浅色滑块（无原生美术滑块的窗用）
+    Default,
+    /// 只留**交互节点**（滚轮命中/滑块拖动仍可用），不带任何可见像素
+    Invisible,
+}
+
+/// [`spawn_scroll_bar_ui`] 的带样式版本（返回值同为 `(track, thumb)`，交互节点一个不少）。
+pub fn spawn_scroll_bar_ui_styled(
+    parent: &mut ChildSpawnerCommands,
+    track_rel: (f32, f32, f32, f32),
+    z: i32,
+    visual: ScrollBarVisual,
+) -> (Entity, Entity) {
+    let (track_colour, thumb_colour) = scroll_bar_colours(visual);
     // 轨道（半透明深色）
     let track = parent
         .spawn((
@@ -1659,7 +1697,7 @@ pub fn spawn_scroll_bar_ui(
                 Some(track_rel.2),
                 Some(track_rel.3),
             ),
-            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.35)),
+            BackgroundColor(track_colour),
             ZIndex(z),
         ))
         .id();
@@ -1667,12 +1705,25 @@ pub fn spawn_scroll_bar_ui(
     let thumb = parent
         .spawn((
             abs_node(track_rel.0, track_rel.1, Some(track_rel.2), Some(40.0)),
-            BackgroundColor(Color::srgba(0.85, 0.85, 0.9, 0.9)),
+            BackgroundColor(thumb_colour),
             UiScrollThumb,
             ZIndex(z + 1),
         ))
         .id();
     (track, thumb)
+}
+
+/// 滚动条两种视觉的实际颜色（纯函数，便于单测钉住「透明档真的透明」）。
+pub fn scroll_bar_colours(visual: ScrollBarVisual) -> (Color, Color) {
+    match visual {
+        ScrollBarVisual::Default => (
+            Color::srgba(0.0, 0.0, 0.0, 0.35),
+            Color::srgba(0.85, 0.85, 0.9, 0.9),
+        ),
+        // `Color::NONE` = alpha 0：不画任何像素。拖动命中走 `scroll_list_ui_system` 自己按
+        // `Node` 矩形判定（不依赖 bevy picking 的可见性），所以透明不影响交互。
+        ScrollBarVisual::Invisible => (Color::NONE, Color::NONE),
+    }
 }
 
 /// bevy_ui 滚轮滚动 + 滑块定位 + 滑块拖动

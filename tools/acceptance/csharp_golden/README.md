@@ -4239,6 +4239,46 @@ dbtool <沙箱>\Server setpos 333 384 99 100 ; dbtool <沙箱>\Server setpos gqf
 **未采集**：交易中的「双方都放物品/改金币/按确认锁定」这些**内容态**帧（本轮只做到"空窗"同状态对拍）；
 以及**原版鼠标点 YES 点不动**这条本身（是"控制被盖住"还是"点击语义"没查，如实记）。
 
+### 3.2cg Ranking 滚动条：占位灰块**盖住 C# 原生滑块**——已定性并修（2026-09-30）
+
+#### ① §3.2ce ⑦ 那条"未定性"的答案
+
+原版帧里 `Prguse2[205]`（C# `RankingDialog.ScrollBar`，`RankingDialog.cs:158-166`）在 **(649,276)** 0.0000 命中；
+本端同一处**只有一块不透光的浅灰**，`win_locate` 全屏最佳落点跑到了 (707,118) 0.3657。本轮定性：
+
+```rust
+// Client-Bevy/src/ui/theme.rs（旧）
+pub fn spawn_scroll_bar_ui(...) {
+    track: BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.35)),   // z
+    thumb: BackgroundColor(Color::srgba(0.85, 0.85, 0.9, 0.9)),   // z+1
+}
+```
+
+Ranking 窗**两套都画**了：`ranking.rs` 既按 C# 画了美术滑块 `Prguse2[205/206]` @(299,113)（z=10），
+又调了 `spawn_scroll_bar_ui(p, SCROLL_TRACK(299,113,16,273), 39)`——后者 z=39/40 **压在美术之上**，
+而它的滑块颜色是 `(0.85,0.85,0.9,α=0.9)` ⇒ 帧里看到的就是那块浅灰（不是"美术画错位置"，也不是"没有美术"）。
+
+#### ② 修法：占位视觉可关，交互节点保留
+
+`theme.rs` 新增 `ScrollBarVisual{Default, Invisible}` + `spawn_scroll_bar_ui_styled()`（旧函数保留为 `Default` 包装），
+`Invisible` 档的轨道/滑块都是 `Color::NONE`（alpha 0）——**只留交互节点**：
+滚轮命中与滑块拖动由 `scroll_list_ui_system` 自己按 `Node` 矩形判定（不依赖 bevy picking 的可见性），
+所以透明不影响拖拽。Ranking 改调 `Invisible`，视觉交给 C# 原生滑块。
+
+#### ③ 实机复验（`dialog open ranking`）
+
+| 读数 | 原版 | 本端（修复前） | 本端（修复后） |
+|---|---|---|---|
+| 滚动手柄 `Prguse2[205]` 12x18 | (649,276) 0.0000 | **未命中**（最佳 (707,118) 0.3657） | **(649,276) 0.0000** |
+| 上滚 `Prguse2[197]` / 下滚 `Prguse2[207]` | (649,263) / (649,549) 0.0000 | 同左 0.0000 | 同左 0.0000 |
+| 面板 `Title[728]` 324x441 | (350,163) | (350,163) 0.0470 | (350,163) **0.0179** |
+
+面板不符率也顺带降下来了（灰块原本盖住了面板右侧一列像素）。肉眼对照（同一 40x50 区域，左原版/右本端）：
+两侧都是「上箭头 + 棕色纹理手柄」，不再有灰块。
+
+**同一批窗口的残余**：其它用了 `spawn_scroll_bar_ui` 的窗（guild / storage / npc_goods / game_shop / market / mail / npc）
+若其 C# 对应物也是**美术滑块**，会有同样的覆盖问题——本轮只按已取证的 Ranking 改，其余留待逐窗取证后再改。
+
 ### 3.2cf 离婚请求确认框补齐（本端此前**没有入口**）+ Relationship 三态实机复现夹具（2026-09-30）
 
 #### ① 缺口：C# 有 YesNo 确认框，本端把整个包丢了
