@@ -1660,6 +1660,12 @@ pub fn dialog_front_system(
 ///
 /// 按**实体**判而不是按 kind 判：商城确认框与商城面板**共享** `DialogKind::GameShop`，
 /// 按 kind 会把整扇商城窗一起排除出排名。
+///
+/// ⚠️ **前提（P3，独立复核 2026-09-30 提出）**：这里用 `z >= 59` **代理**「是不是模态层」。
+/// 成立的前提是「非模态根的静态 z 最大 51」—— 本仓实测如此（`roll.rs` 的掷骰窗最大 51），
+/// 且 `modal_layer::tests::blocker_z_sits_between_normal_windows_and_modal_panels`
+/// 已把 `MODAL_BLOCKER_Z > 51` 钉住。**今后若出现静态 z ≥ 59 的非模态窗，它会被这里
+/// 静默排除出置顶排名** —— 到那时请改成**显式标记组件**（如 `ModalPanel`），别再靠 z 代理。
 fn is_modal_layer_root(gz: i32) -> bool {
     gz >= crate::game::dialogs::modal_layer::MODAL_BLOCKER_Z
 }

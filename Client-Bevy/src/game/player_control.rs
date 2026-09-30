@@ -303,8 +303,8 @@ struct UiLockState<'w> {
 /// - 「选中物品」**不是** C# 的 `Modal`（见 `modal_layer::modal_any_visible` 的说明），
 ///   把它算进 **UI 遮挡**会让「背包里单击选中一件物品」凭空升起全屏遮挡层，
 ///   把背包自己与其它对话框的按钮全冻住；
-/// - 但「选中物品时**世界点击**让路」是本仓既有且刻意的行为
-///   （原 `modal_ui_locked(selected, amount, confirm, assign_key)` 就带它），**保留**。
+/// - 但「选中物品时**世界点击**让路」是本仓既有且刻意的行为（#3396 之前该函数是
+///   `modal_ui_locked(selected, amount, confirm, assign_key, notice)` —— **5 参**，第 1 参就是它），**保留**。
 fn world_click_locked(occlusion: bool, selected: bool) -> bool {
     occlusion || selected
 }
