@@ -694,11 +694,28 @@ pub const HUD_EXP_LABEL_DY: f32 = 10.0;
 
 /// 模式标签 X（C# MiniMapDialog.Process :2082-2087：MiniMapDialog.X - 3 = 898 - 3）
 pub const MODE_LABEL_X: f32 = MINIMAP_X - 3.0; // 895
-/// 三标签 y 偏移（C# Process: S=H+150 / A=H+165 / P=H+180；
-/// 绝对 y = 小地图高 + offset - 152，其中 152 = ScreenHeight(768) - MainDialog.Y(616)）
-pub const S_MODE_DY: f32 = -2.0;
-pub const A_MODE_DY: f32 = 13.0;
-pub const P_MODE_DY: f32 = 28.0;
+
+/// HUD 底条 `Prguse[1]` 的**真实高度**（= C# `MirImageControl.Size`）。
+///
+/// 图头是 1024x**152**，但末 2 行 alpha 恒 0；C# `MirImageControl.Size`
+/// （`Client/MirControls/MirImageControl.cs:145-151`）走 `Library.GetTrueSize(Index)`
+/// ——**裁掉透明边**，`MLibrary.MImage.GetTrueSize()` 逐列/逐行找可见像素 ⇒ **150**。
+///
+/// 2026-09-30 实机对拍（`tools/acceptance/csharp_golden/README.md` §3.2cd）：
+/// 原版帧 `Prguse[1903]@(928,694)`、`Prguse[1960]@(969,653)`、菜单窗 `Title[633]@(991,363)`；
+/// 本端按**图头 152** 算得 692/651/361——整条底栏 + 菜单窗整体高 2px。
+pub const MAIN_DIALOG_H: f32 = 150.0;
+/// MainDialog 顶边 Y = `ScreenHeight - MainDialog.Size.Height`（C# `MainDialogs.cs:39`）= 768-150 = **618**。
+/// 底条本身、底条上所有子控件（球/经验条/5 个 HUD 钮…）、菜单窗、模式标签都以它为基准。
+pub const MAIN_DIALOG_Y: f32 = 768.0 - MAIN_DIALOG_H; // 618
+
+/// 三标签 y 偏移（C# `MiniMapDialog.Process:2082-2087` 给的是**面板相对**坐标：
+/// `(MiniMap.Size.Height + 150) - ScreenHeight`）。
+/// 换成本端要的**绝对** y：`MainDialog.Y + (小地图高 + offset - 768) = 小地图高 + offset - 150`
+/// ⇒ S/A/P = 小地图高 + **0 / 15 / 30**（旧值 -2/13/28 是把 MainDialog.Y 当 616 推的，整体高 2px）。
+pub const S_MODE_DY: f32 = 0.0;
+pub const A_MODE_DY: f32 = 15.0;
+pub const P_MODE_DY: f32 = 30.0;
 
 /// 模式标签绝对 y（随小地图大/小模式，C# Process 每帧重定位；复用 dura_btn_y 的大/小高选择）
 pub fn mode_label_y(minimap_big: bool, dy: f32) -> f32 {
@@ -866,11 +883,21 @@ fn spawn_hud(
     let bg_info = libs
         .0
         .get_image(LibraryName::Prguse, resolution_index)
-        .map(|i| (i.width.max(0) as f32, i.height.max(0) as f32))
-        .unwrap_or((1024.0, 150.0));
+        // C# `MirImageControl.Size` = `Library.GetTrueSize(Index)`（裁透明边），**不是图头高**：
+        // Prguse[1] 图头 152、真实 150（末 2 行 alpha=0）⇒ main_y = 618（见 `MAIN_DIALOG_H`）。
+        // 用图头会把整条底栏与其子控件、菜单窗、模式标签一起抬高 2px。
+        .map(|i| {
+            let (tw, th) = i.get_true_size();
+            (tw.max(0) as f32, th.max(0) as f32)
+        })
+        .unwrap_or((1024.0, MAIN_DIALOG_H));
     let (bg_w, bg_h) = bg_info;
     let main_x = (1024.0 - bg_w) / 2.0;
     let main_y = 768.0 - bg_h;
+    debug_assert!(
+        (main_y - MAIN_DIALOG_Y).abs() < 0.5,
+        "Prguse[1] 真实高度变了（实测 {bg_h}，期望 {MAIN_DIALOG_H}）：底栏/菜单窗/模式标签的 y 基准都挂在 MAIN_DIALOG_Y 上"
+    );
 
     // #70：HUD 数据根实体（无渲染，仅承载 HudData；值变化时触发 Changed 门控更新）
     commands.spawn((UiEntity, HudData::default()));
@@ -2854,7 +2881,8 @@ mod tests {
     }
 
     /// 模式标签随小地图大/小模式重定位（C# MiniMapDialog.Process :2082-2087 每帧定位）。
-    /// X=MiniMap.X-3=895；大模式 y=152/167/182、小模式 y=43/58/73（S/A/P 顶→底），Bevy Transform.y 取负。
+    /// X=MiniMap.X-3=895；大模式 y=154/169/184、小模式 y=45/60/75（S/A/P 顶→底），Bevy Transform.y 取负。
+    /// 154 = 小地图高(Prguse[2090] 真实高 154) + 0；换绝对坐标见 `S_MODE_DY` 的注释（基准是 `MAIN_DIALOG_Y`=618）。
     #[test]
     fn mode_labels_follow_minimap_mode() {
         use bevy::ecs::system::RunSystemOnce;
@@ -2893,17 +2921,50 @@ mod tests {
         world
             .run_system_once(attack_mode_text_system)
             .expect("系统应成功");
-        assert_eq!(ty(&world, sm), -152.0, "大模式 SMode y");
-        assert_eq!(ty(&world, am), -167.0, "大模式 AMode y");
-        assert_eq!(ty(&world, pm), -182.0, "大模式 PMode y");
+        assert_eq!(ty(&world, sm), -154.0, "大模式 SMode y");
+        assert_eq!(ty(&world, am), -169.0, "大模式 AMode y");
+        assert_eq!(ty(&world, pm), -184.0, "大模式 PMode y");
 
         world.resource_mut::<MiniMapMode>().big = false;
         world
             .run_system_once(attack_mode_text_system)
             .expect("系统应成功");
-        assert_eq!(ty(&world, sm), -43.0, "小模式 SMode y");
-        assert_eq!(ty(&world, am), -58.0, "小模式 AMode y");
-        assert_eq!(ty(&world, pm), -73.0, "小模式 PMode y");
+        assert_eq!(ty(&world, sm), -45.0, "小模式 SMode y");
+        assert_eq!(ty(&world, am), -60.0, "小模式 AMode y");
+        assert_eq!(ty(&world, pm), -75.0, "小模式 PMode y");
+    }
+
+    /// 2026-09-30（§3.2cd 实机对拍归因）：`Prguse[1]` **图头 1024x152，但真实高 150**
+    /// （末 2 行 alpha 恒 0）；C# `MirImageControl.Size` 走 `Library.GetTrueSize(Index)`
+    /// （裁透明边）⇒ `MainDialog.Y = 768-150 = 618`。
+    /// 谁把基准改回图头 152，整条底栏 + 它的所有子控件 + 菜单窗 + 模式标签会一起**高 2px**
+    /// （原版帧 `Prguse[1903]@y=694` / `Title[633]@y=363`，本端当时是 692 / 361）。
+    #[test]
+    fn main_dialog_basis_is_true_size_not_header() {
+        assert_eq!(MAIN_DIALOG_H, 150.0, "真实高（= GetTrueSize）");
+        assert_eq!(MAIN_DIALOG_Y, 618.0, "MainDialog.Y = ScreenHeight - 150");
+
+        if !crate::resources::libraries::data_assets_present() {
+            eprintln!("skip main_dialog_basis_is_true_size_not_header: 无 Data 资产");
+            return;
+        }
+        use crate::resources::libraries::{Libraries, resolve_data_path};
+
+        let mut libs = Libraries::new(resolve_data_path());
+        libs.ensure_initialized();
+        let img = libs
+            .get_image(LibraryName::Prguse, 1)
+            .expect("Prguse[1] 缺失");
+        assert_eq!(
+            (img.width, img.height),
+            (1024, 152),
+            "图头就是 1024x152 —— 正因如此才不能用它定位"
+        );
+        assert_eq!(
+            img.get_true_size(),
+            (1024, 150),
+            "真实高（裁掉末 2 行 alpha=0）才是 C# 的 MainDialog.Size.Height"
+        );
     }
 
     /// 模式标签描边（#2563：C# MainDialogs.cs:356/366/376 仅设 OutLineColour 未关

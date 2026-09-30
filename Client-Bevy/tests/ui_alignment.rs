@@ -67,6 +67,18 @@ impl Libs {
         )
     }
 
+    /// C# `MirImageControl.Size` 用的**真实尺寸**（`MLibrary.GetTrueSize`：裁掉 alpha=0 的边）。
+    /// 与 [`Self::size`]（图头）在 Prguse[1] 这类「末几行全透明」的美术上会差 1..2px —— 布局必须用这个，
+    /// 否则整条 HUD 底栏 / 菜单窗会整体偏（见 2026-09-30 §3.2cd：图头 152 vs 真实 150）。
+    fn true_size(&mut self, lib: LibraryName, idx: usize) -> (f32, f32) {
+        let i = self
+            .0
+            .get_image(lib, idx)
+            .unwrap_or_else(|| panic!("{:?}[{}] 缺失", lib, idx));
+        let (w, h) = i.get_true_size();
+        (w as f32, h as f32)
+    }
+
     /// 真实精灵像素（RGBA）；用于区分「尺寸相同但内容不同」的帧。
     fn pixels(&mut self, lib: LibraryName, idx: usize) -> Vec<u8> {
         let i = self
@@ -787,8 +799,19 @@ fn hud_labels_aligned() {
         assert_eq!(got, want, "[常量] {what}");
     }
 
-    // 底栏真实尺寸（Prguse[1]=1024x152）：main_x=(1024-w)/2, main_y=768-h；经验条宽 Prguse[8]=1004
-    let (bw, bh) = libs.size(LibraryName::Prguse, 1);
+    // 底栏**真实**尺寸（Prguse[1] 图头 1024x152、`GetTrueSize` 1024x150 ⇒ main_y=618）：
+    // main_x=(1024-w)/2, main_y=768-h；经验条宽 Prguse[8]=1004（见 §3.2cd）
+    let (bw, bh) = libs.true_size(LibraryName::Prguse, 1);
+    assert_eq!(
+        (bw, bh),
+        (1024.0, hud::MAIN_DIALOG_H),
+        "底栏真实尺寸必须 == hud::MAIN_DIALOG_H（否则底栏/菜单/模式标签的 y 基准会漂）"
+    );
+    assert_eq!(
+        SH - bh,
+        hud::MAIN_DIALOG_Y,
+        "main_y 必须 == hud::MAIN_DIALOG_Y（C# MainDialog.Location.Y）"
+    );
     let (ew, _eh) = libs.size(LibraryName::Prguse, 8);
     let main_x = (SW - bw) / 2.0;
     let main_y = SH - bh;
@@ -1155,8 +1178,10 @@ fn login_select_meta_aligned() {
 }
 
 /// 菜单对话框 + 耐久切换钮（对齐 C# MenuDialog / DuraStatusDialog，MainDialogs.cs）。
-/// 两者都曾被硬编码的错误精灵尺寸假设带偏（菜单 Title[567] 误为 44x224、底栏误为 150；
+/// 两者都曾被硬编码的错误精灵尺寸假设带偏（菜单 Title[567] 误为 44x224；
 /// 耐久钮漏算 +20 相对偏移且 y 用既非大也非小的 124）。这里锚定真实精灵尺寸。
+/// 2026-09-30（§3.2cd 实机对拍）：主底栏基准是 `GetTrueSize(Prguse[1])`=**150**（不是图头 152）
+/// ⇒ `MainDialog.Y=618`、菜单原点 `(988,351)`；原版帧 `Prguse[1994]@(991,610)`、`Title[633]@(991,363)`。
 #[test]
 fn menu_dura_aligned() {
     use client_bevy::game::dialogs::dura_status as ds;
@@ -1167,12 +1192,17 @@ fn menu_dura_aligned() {
     // ---- 菜单（C# MenuDialog，MainDialogs.cs:3024-3029）常量 == C# 字面值/实测 ----
     assert_eq!(mu::MENU_W, 36.0, "菜单宽 = Title[567] 实测 36");
     assert_eq!(mu::MENU_H, 282.0, "菜单高 = Title[567] 实测 282");
-    assert_eq!(mu::MAIN_DIALOG_H, 152.0, "主底栏高 = Prguse[1] 实测 152");
+    assert_eq!(
+        libs.true_size(LibraryName::Prguse, 1),
+        (1024.0, 150.0),
+        "底栏真实高 = GetTrueSize(Prguse[1])（图头 152 的末 2 行 alpha=0 被裁掉）"
+    );
+    assert_eq!(mu::MAIN_DIALOG_Y, 618.0, "MainDialog.Y = 768 - 150");
     assert_eq!(mu::MENU_X, 988.0, "菜单 x = ScreenWidth-Width = 1024-36");
     assert_eq!(
         mu::MENU_Y,
-        349.0,
-        "菜单 y = MainDialog.Y(616)-Height(282)+15"
+        351.0,
+        "菜单 y = MainDialog.Y(618)-Height(282)+15"
     );
     assert_eq!(mu::MENU_BTN_DX, 3.0, "按钮相对 x = C# 按钮 Location.X=3");
     // 菜单背景 Title[567] 实测尺寸 == 常量，且 ⊆ 画布
@@ -1209,12 +1239,15 @@ fn menu_dura_aligned() {
     assert_in_canvas("耐久钮(大模式)", ds::BTN_X, ds::dura_btn_y(true), bw, bh);
     assert_in_canvas("耐久钮(小模式)", ds::BTN_X, ds::dura_btn_y(false), bw, bh);
 
-    println!("  ✓ 菜单背景(988,349) Title[567]=36x282、耐久钮(1004, 小地图高154/45) 对齐 C#");
+    println!("  ✓ 菜单背景(988,351) Title[567]=36x282、耐久钮(1004, 小地图高154/45) 对齐 C#");
 }
 
 /// 模式标签（C# AMode/PMode/SModeLabel，MainDialogs.cs:2082-2087 MiniMapDialog.Process 每帧定位）。
-/// X = MiniMap.X-3 = 898-3 = 895；顶→底 S/A/P；y = 小地图高 + {-2,+13,+28}
-/// （大模式 152/167/182、小模式 43/58/73；偏移 = Process 的 Height+{150,165,180} 再 -ScreenHeight(768)+MainDialog.Y(616)）。
+/// X = MiniMap.X-3 = 898-3 = 895；顶→底 S/A/P；绝对 y = 小地图高 + {0,+15,+30}
+/// （大模式 154/169/184、小模式 45/60/75）。
+/// 推导：C# 给的是**面板相对** y = `Height + {150,165,180} - ScreenHeight(768)`，换成屏幕绝对
+/// y 要再加 `MainDialog.Y`——而 MainDialog.Y = `768 - GetTrueSize(Prguse[1]).Height(150)` = **618**
+/// ⇒ 绝对偏移 = `{150,165,180} - 768 + 618` = `{0,15,30}`（旧值 -2/13/28 是把 MainDialog.Y 当 616）。
 #[test]
 fn mode_labels_aligned() {
     use client_bevy::game::dialogs::dura_status as ds;
@@ -1227,40 +1260,40 @@ fn mode_labels_aligned() {
         ds::MINIMAP_X - 3.0,
         "应与耐久钮同源 MiniMap.X"
     );
-    // y 偏移 == C# Process 的 Height+{150,165,180} 再 -152（ScreenHeight-MainDialog.Y）
-    assert_eq!(h::S_MODE_DY, -2.0, "SMode dy = 150-152");
-    assert_eq!(h::A_MODE_DY, 13.0, "AMode dy = 165-152");
-    assert_eq!(h::P_MODE_DY, 28.0, "PMode dy = 180-152");
+    // y 偏移 == C# Process 的 Height+{150,165,180} 再 -150（= ScreenHeight - MainDialog.Y，见上）
+    assert_eq!(h::S_MODE_DY, 0.0, "SMode dy = 150-150");
+    assert_eq!(h::A_MODE_DY, 15.0, "AMode dy = 165-150");
+    assert_eq!(h::P_MODE_DY, 30.0, "PMode dy = 180-150");
     // 绝对 y（大/小模式）== C# 字面值（小地图高 154/45 + 偏移）
     assert_eq!(
         h::mode_label_y(true, h::S_MODE_DY),
-        152.0,
-        "大模式 SMode y=154-2"
+        154.0,
+        "大模式 SMode y=154+0"
     );
     assert_eq!(
         h::mode_label_y(true, h::A_MODE_DY),
-        167.0,
-        "大模式 AMode y=154+13"
+        169.0,
+        "大模式 AMode y=154+15"
     );
     assert_eq!(
         h::mode_label_y(true, h::P_MODE_DY),
-        182.0,
-        "大模式 PMode y=154+28"
+        184.0,
+        "大模式 PMode y=154+30"
     );
     assert_eq!(
         h::mode_label_y(false, h::S_MODE_DY),
-        43.0,
-        "小模式 SMode y=45-2"
+        45.0,
+        "小模式 SMode y=45+0"
     );
     assert_eq!(
         h::mode_label_y(false, h::A_MODE_DY),
-        58.0,
-        "小模式 AMode y=45+13"
+        60.0,
+        "小模式 AMode y=45+15"
     );
     assert_eq!(
         h::mode_label_y(false, h::P_MODE_DY),
-        73.0,
-        "小模式 PMode y=45+28"
+        75.0,
+        "小模式 PMode y=45+30"
     );
     // 顶→底顺序 S < A < P（C# 堆叠顺序；Bevy 旧版误为 S,P,A）
     assert!(

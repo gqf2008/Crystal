@@ -2,7 +2,8 @@
 // 游戏菜单对话框（M9 第 1 批）
 // 布局参考：C# GameScene MenuDialog（macroquad menu_dialog.rs）
 //   - 背景 Title[567]（实测 36x282），位置 (ScreenWidth-36, MainDialog.Y-282+15)
-//     MainDialog.Y = 768 - Prguse[1]高152 = 616 → 背景绝对原点 (988, 349)
+//     MainDialog.Y = 618（= 768 - Prguse[1] **真实**高 150，C# `GetTrueSize` 裁掉末 2 行透明边；
+//     不是图头 152）→ 背景绝对原点 (988, 351)
 //   - 按钮（x=3，y=12..259 共 13 个）：退出/下线/帮助/键盘/排名/宠物/坐骑/钓鱼/好友/师徒/夫妻/队伍/行会
 // ============================================================================
 
@@ -75,16 +76,17 @@ pub struct MenuExitNo;
 
 // C# MenuDialog（MainDialogs.cs:3024-3029）：Index=567 Library=Title，
 //   Location = (ScreenWidth - Size.Width, MainDialog.Y - Size.Height + 15)。
-//   Title[567] 实测 36x282；MainDialog 背景 Prguse[1] 实测 1024x152 → MainDialog.Y = 768-152 = 616。
+//   Title[567] 实测 36x282；MainDialog 背景 Prguse[1] 图头 1024x152 但**真实高 150**
+//   （C# `MirImageControl.Size` → `Library.GetTrueSize` 裁透明边）→ MainDialog.Y = 618。
 /// 菜单背景宽/高 = Title[567] 实测
 pub const MENU_W: f32 = 36.0;
 pub const MENU_H: f32 = 282.0;
-/// 主底栏高 = Prguse[1] 实测（决定 MainDialog.Y = 768-152）
-pub const MAIN_DIALOG_H: f32 = 152.0;
+/// MainDialog 顶边 Y（C# `MainDialog.Location.Y`；真值来源见 `game::hud::MAIN_DIALOG_Y` 与 §3.2cd 实机对拍）
+pub const MAIN_DIALOG_Y: f32 = crate::game::hud::MAIN_DIALOG_Y; // 618
 /// 菜单背景绝对原点 X = ScreenWidth - Width（C#）
 pub const MENU_X: f32 = 1024.0 - MENU_W; // 988
 /// 菜单背景绝对原点 Y = MainDialog.Y - Height + 15（C#）
-pub const MENU_Y: f32 = 768.0 - MAIN_DIALOG_H - MENU_H + 15.0; // 349
+pub const MENU_Y: f32 = MAIN_DIALOG_Y - MENU_H + 15.0; // 351
 /// 按钮相对菜单的 x（C# 所有按钮 Location.X = 3）
 pub const MENU_BTN_DX: f32 = 3.0;
 
@@ -262,7 +264,7 @@ fn spawn_menu_dialog(
     // 可能含中文（动态填充/服务端文案）：用自带 CJK 的主字体（Arial handle 画中文是豆腐）
     let cjk = shared_cjk_font(&mut fonts, &mut cjk_font);
 
-    // 背景 Title[567]（C# Location=(ScreenWidth-Width, MainDialog.Y-Height+15) → (988,349)）
+    // 背景 Title[567]（C# Location=(ScreenWidth-Width, MainDialog.Y-Height+15) → (988,351)）
     let Some(bg) = load_lib_image(&mut libs, &mut images, LibraryName::Title, 567) else {
         return;
     };
@@ -480,5 +482,24 @@ mod tests {
                 "{action:?} 的按钮尺寸必须等于 libextract 量到的图头尺寸"
             );
         }
+    }
+
+    /// 2026-09-30（§3.2cd）：菜单窗绝对原点 = `(988, 351)`，**不是 (988, 349)**。
+    /// 351 = MainDialog.Y(618) - 282 + 15；618 来自 `GetTrueSize(Prguse[1]).Height = 150`
+    /// （图头 152 会把整扇菜单窗抬高 2px）。原版帧实测：`Title[567]@(988,351)`、
+    /// `Title[633]@(991,363)`、`Prguse[1994]@(991,610)`。
+    #[test]
+    fn menu_origin_uses_true_main_dialog_height() {
+        assert_eq!(MAIN_DIALOG_Y, 618.0);
+        assert_eq!(MENU_X, 988.0);
+        assert_eq!(MENU_Y, 351.0);
+        assert_eq!(
+            MENU_Y + MENU_H - 15.0,
+            MAIN_DIALOG_Y,
+            "MENU_Y 必须由 MAIN_DIALOG_Y 反推（改一边要连带另一边）"
+        );
+        let abs_y = |rel: f32| MENU_Y + rel;
+        assert_eq!(abs_y(12.0), 363.0, "退出钮（原版帧 991,363）");
+        assert_eq!(abs_y(259.0), 610.0, "行会钮（原版帧 991,610）");
     }
 }
