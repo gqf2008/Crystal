@@ -3028,17 +3028,34 @@ fn panel_sprites_batch_b3_match_csharp() {
         "[坐标] C# `Location = (ScreenWidth-126, 0)`"
     );
 
-    // 大地图：C# `Title[820]` 760x500 居中
+    // 大地图：C# `Title[820]` 图头 760x500、真尺寸 759x500（§3.2cm）
     let (bmw, bmh) = libs.size(big_map::PANEL.0, big_map::PANEL.1);
+    let (btw, bth) = libs.true_size(big_map::PANEL.0, big_map::PANEL.1);
     assert_eq!(
         (bmw, bmh),
         (big_map::PANEL_W, big_map::PANEL_H),
-        "[尺寸] 大地图 760x500"
+        "[尺寸] 大地图**图头** 760x500"
     );
     assert_eq!(
-        (((SW - bmw) / 2.0).floor(), ((SH - bmh) / 2.0).floor()),
-        (132.0, 134.0),
-        "[居中] C# `BigMapDialog.Location = Center`"
+        (btw, bth),
+        (big_map::PANEL_TRUE_W, big_map::PANEL_TRUE_H),
+        "[尺寸] 大地图真尺寸 = C# `Size` = GetTrueSize (759x500)"
+    );
+    // 原点用**真尺寸**的整数除法：(1024-759)/2 = 132（真宽是奇数 759，浮点会得 132.5）
+    assert_eq!(
+        (((SW - btw) / 2.0).floor(), ((SH - bth) / 2.0).floor()),
+        big_map::PANEL_ORIGIN,
+        "[居中] C# `BigMapDialog.Location = Center` = (132,134)"
+    );
+    // C# 右锚子控件用 `Size.Width`：上滚钮 `Prguse2[197]` @ 面板 + (759-21, 48) = (870,182)
+    // （原版帧 `orig_bm0_open.png` win_locate 不符率 0.0000 实测值）
+    assert_eq!(
+        (
+            big_map::PANEL_ORIGIN.0 + btw - 21.0,
+            big_map::PANEL_ORIGIN.1 + 48.0
+        ),
+        (870.0, 182.0),
+        "[坐标] 大地图上滚钮（按图头 760 会得 871）"
     );
 
     // 钓鱼：C# `Prguse[1340]` 200x287 居中
@@ -3084,20 +3101,28 @@ fn panel_sprites_batch_b3_match_csharp() {
     );
     assert_eq!(quest_list::LIST_POS, (487.0, 0.0));
 
-    // Buff：`Prguse2[20..30]` 11 档 art 尺寸逐一核对（布局基准），右缘恒 898（C# 右锚 `newX`）
+    // Buff：`Prguse2[20..30]` 11 档 art 尺寸逐一核对。
+    // §3.2cm：贴图用**图头** `PANEL_SIZES`，布局/锚点用**真尺寸** `PANEL_TRUE_SIZES`（= `GetTrueSize`）。
     for (i, expected) in buff::PANEL_SIZES.iter().enumerate() {
         let real = libs.size(LibraryName::Prguse2, 20 + i);
+        let true_size = libs.true_size(LibraryName::Prguse2, 20 + i);
         assert_eq!(
             real,
             *expected,
-            "[尺寸] Buff 面板 Prguse2[{}] 实测尺寸应与 PANEL_SIZES[{i}] 一致",
+            "[尺寸] Buff 面板 Prguse2[{}] 实测**图头**应与 PANEL_SIZES[{i}] 一致",
+            20 + i
+        );
+        assert_eq!(
+            true_size,
+            buff::PANEL_TRUE_SIZES[i],
+            "[尺寸] Buff 面板 Prguse2[{}] 真尺寸应与 PANEL_TRUE_SIZES[{i}] 一致（C# `Size` = GetTrueSize）",
             20 + i
         );
     }
     assert_eq!(
-        buff::PANEL_RIGHT - buff::PANEL_SIZES[0].0,
+        buff::PANEL_RIGHT - buff::PANEL_TRUE_SIZES[0].0,
         854.0,
-        "[坐标] C# `Location.X = ScreenWidth - 170` = 854（收起态 44 宽 → 右缘 898）"
+        "[坐标] C# `Location.X = ScreenWidth - 170` = 854（收起态真宽 43 → 右缘 897）"
     );
     assert_eq!(buff::PANEL_Y, 0.0);
 
@@ -4072,12 +4097,15 @@ fn panel_sprites_batch_b23_match_fishing_split() {
     assert_eq!(
         (w2, h2),
         f::STATUS_SIZE,
-        "[尺寸] Prguse[1341] 状态窗 244x128"
+        "[尺寸] Prguse[1341] 状态窗**图头** 244x128（贴图 1:1 用）"
     );
+    // §3.2cm：C# `Size` 取 `GetTrueSize(1341)` = 241x127（源码字面 `new Size(244,128)` 被 getter 顶掉）
+    let (tw2, th2) = libs.true_size(f::STATUS_PANEL.0, f::STATUS_PANEL.1);
+    assert_eq!((tw2, th2), (241.0, 127.0), "[尺寸] Prguse[1341] 真尺寸");
     assert_eq!(
         (f::STATUS_X, f::STATUS_Y),
-        ((SW - w2) / 2.0, 300.0),
-        "[坐标] C# `Location = ((SW-Size.Width)/2, 300)`"
+        (((SW - tw2) / 2.0).floor(), 300.0),
+        "[坐标] C# `Location = ((SW-GetTrueSize.Width)/2, 300)` = (391,300)"
     );
     assert_in_canvas("钓鱼状态窗", f::STATUS_X, f::STATUS_Y, w2, h2);
     // 状态窗子控件精灵

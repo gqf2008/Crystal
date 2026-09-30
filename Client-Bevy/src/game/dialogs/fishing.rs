@@ -26,10 +26,17 @@ use crate::ui::theme::{
 /// #2892 批B：面板精灵与 C# 原生尺寸（C# `FishingDialog.Index = 1340; Location = Center`）
 pub const PANEL: (LibraryName, usize) = (LibraryName::Prguse, 1340);
 pub const PANEL_SIZE: (f32, f32) = (200.0, 287.0);
-/// C# `FishingStatusDialog`（`FishingDialog.cs:159-179`）：`Prguse[1341]` 244x128 @(390,300)、`Movable`
+/// C# `FishingStatusDialog`（`FishingDialog.cs:159-179`）：`Prguse[1341]`、`Movable`。
+///
+/// 源码写的是 `Size = new Size(244, 128)`，但 `MirImageControl.Size` 在 `AutoSize`（构造默认 true）下
+/// 返回 `Library.GetTrueSize(Index)`（`MirImageControl.cs:142-151`）⇒ 真尺寸 **241x127**
+/// （`Prguse[1341]` 图头 244x128，最右 3 列 / 最下 1 行 alpha=0，见 §3.2cl ②）。
+/// `Location = ((ScreenWidth - Size.Width) / 2, 300)` = `((1024-241)/2, 300)` = **(391,300)**（整数除法）。
+/// 2026-10-01 §3.2cm：此前按图头算成 390，整窗偏左 1px。
 pub const STATUS_PANEL: (LibraryName, usize) = (LibraryName::Prguse, 1341);
+/// 贴图用的**图头**尺寸（`Library.Draw` 原样 1:1 铺，不参与缩放）
 pub const STATUS_SIZE: (f32, f32) = (244.0, 128.0);
-pub const STATUS_X: f32 = 390.0;
+pub const STATUS_X: f32 = 391.0;
 pub const STATUS_Y: f32 = 300.0;
 /// 关闭键 `Prguse2[360..362]` @(175,3)（`FishingDialog.cs:44-48`，无 `Size` → 原生 24x21）；
 /// 曾错作 (176,3) → 偏右 1px
@@ -204,8 +211,8 @@ fn spawn_fishing(
         .entity(panel)
         .insert((DialogRoot(DialogKind::Fishing), FishingWidget));
 
-    // ---- FishingStatusDialog（C# `FishingDialog.cs:159-320`）：`Prguse[1341]` 244x128
-    //      @ ((1024-244)/2, 300) = (390,300)，`Movable = true`；与主窗**分开**（C# 两个独立窗）。
+    // ---- FishingStatusDialog（C# `FishingDialog.cs:159-320`）：`Prguse[1341]`
+    //      @ ((1024-GetTrueSize=241)/2, 300) = (391,300)，`Movable = true`；与主窗**分开**（C# 两个独立窗）。
     if let Some(bg2) = load_lib_image(&mut libs, &mut images, STATUS_PANEL.0, STATUS_PANEL.1) {
         let status = spawn_panel(
             &mut commands,
@@ -623,6 +630,27 @@ fn fishing_server_events(
 
 #[cfg(test)]
 mod tests {
+    /// §3.2cm：状态窗原点按 C# `Size` = `GetTrueSize(Prguse[1341])` = **241x127** 算
+    /// （不是源码字面 `new Size(244, 128)`；`MirImageControl.Size` getter 在 `AutoSize` 下取真尺寸），
+    /// 且 C# 是**整数除法**：`(1024-241)/2 = 391`（浮点会得 391.5）。
+    #[test]
+    fn fishing_status_origin_uses_get_true_size() {
+        assert_eq!(super::STATUS_X, 391.0, "((1024-241)/2, 300)");
+        assert_eq!(super::STATUS_Y, 300.0, "C# 固定 y=300，不垂直居中");
+        assert_eq!(
+            ((1024.0f32 - 241.0) / 2.0).floor(),
+            super::STATUS_X,
+            "真宽 241 是奇数：必须 floor"
+        );
+        assert_ne!(
+            ((1024.0f32 - super::STATUS_SIZE.0) / 2.0).floor(),
+            super::STATUS_X,
+            "按图头 244 会得 390（本轮修前的值）"
+        );
+        // 贴图节点仍按图头 244x128 铺（`Library.Draw` 原样 1:1）
+        assert_eq!(super::STATUS_SIZE, (244.0, 128.0));
+    }
+
     /// 表征（#2954 同类防护）：`vis_q` 限定钓鱼部件后，无标记实体不得被
     /// fishing_ui_system 触碰；FishingWidget 显隐仍跟随主窗开关。
     #[test]

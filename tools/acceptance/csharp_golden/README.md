@@ -4239,6 +4239,95 @@ dbtool <沙箱>\Server setpos 333 384 99 100 ; dbtool <沙箱>\Server setpos gqf
 **未采集**：交易中的「双方都放物品/改金币/按确认锁定」这些**内容态**帧（本轮只做到"空窗"同状态对拍）；
 以及**原版鼠标点 YES 点不动**这条本身（是"控制被盖住"还是"点击语义"没查，如实记）。
 
+### 3.2cm `GetTrueSize` 批②：BigMap / Buff(PoisonBuff) / FishingStatus 三窗（2026-10-01）
+
+承接 §3.2cl（`Size` = `GetTrueSize`，不是图头）。本轮把 §3.2cl ③ 扫出的 22 个类里**三扇能取到帧的**做掉，
+并补一条可复跑的工具 `libtruesize.py`。
+
+#### ① 新工具：`libtruesize.py`（精确复刻 `MImage.GetTrueSize`）
+
+```
+py -3.12 tools/acceptance/csharp_golden/libtruesize.py --data Data Title:820 Prguse2:20 Prguse:1341
+```
+
+输出「图头 WxH / 真尺寸 WxH / 裁剪框 ltrb / Δ」。**判据用原始 alpha 字节**（`MLibrary.cs:1027-1048` 的
+`VisiblePixel` 只读 alpha，不做"纯黑当透明"）；全透明帧返回 (W,H) 而非 (0,0)，找 r/b 的扫描顺序也与 C# 逐行对齐。
+
+本批用到的实测值：
+
+| 美术 | 图头 | 真尺寸 |
+|---|---|---|
+| `Title[820]`（大地图面板） | 760x500 | **759x500**（最右 1 列 alpha=0） |
+| `Prguse2[20]`（Buff 收起面板） | 44x34 | **43x34** |
+| `Prguse2[21..30]`（Buff 展开档） | 68 / 92 / 112 / 136 / 160 / 184 / 204 / 228 / 252 / 252 | **66 / 89 / 112 / 135 / 158 / 181 / 204 / 227 / 250 / 250** |
+| `Prguse[1341]`（钓鱼状态窗） | 244x128 | **241x127** |
+
+#### ② BigMap：右锚子控件 + 雷达点居中（**原版帧实锤**）
+
+C# `BigMapDialog`（`BigMapDialog.cs:106/118/181/246`）的子控件一律 `Location = new Point(Size.Width - k, y)`，
+`Size` = `GetTrueSize(820)` = **759**（不是图头 760）。原版帧 `%TEMP%\golden_sandbox\shots\orig_bm0_open.png`
+（`win_locate.py` 模板匹配 **不符率 0.0000**）：
+
+| 控件 | C# 期望 | 原版帧实测 | 本端修前 |
+|---|---|---|---|
+| 上滚钮 `Prguse2[197]` | (870,182) = 132 + (759-21)，134 + 48 | **(870,182)** ✓ | 871 ✗ |
+| 下滚钮 `Prguse2[207]` | (870,551) | **(870,551)** ✓ | 871 ✗ |
+| 我的位置钮 `Title[824]` | (532,601) = 132 + 400，134 + (500-33) | **(532,601)** ✓ | 同（y 不受宽度影响） |
+
+⇒ 修法：面板**贴图**仍按图头 760 铺（节点尺寸 760），**子控件原点**用真宽 759。同时把 `PANEL_ORIGIN` 写成
+常量 `(132,134)`（C# `MirControl.Center` 整数除法；真宽 759 是**奇数**，浮点会得 132.5）并加测试钉住。
+
+**顺带一处同类缺陷**：玩家雷达点 `Prguse2[1350]`（图头 12x10，真尺寸 **10x10**）C# 用
+`Location = ((int)x - s.Width/2, (int)y - s.Height/2)`（`BigMapDialog.cs:709-710`）居中，本端此前**整段漏了居中**，
+点整体偏右下 (5,5)，已按真尺寸 -5,-5 修。
+（对照：同文件 `:765/775` 的 NPC 图标用的是 `MapLinkIcon.GetSize` = **图头** —— `GetSize` 与 `GetTrueSize`
+是两个函数，别混。本端 NPC/队友点仍是 3x3 自绘方块，属另一批「美术对齐」，本轮未动。）
+
+#### ③ Buff / PoisonBuff：面板锚点 + 图标行 + 展开钮（**原版帧实锤**）
+
+C# `BuffDialog.UpdateWindow`（`BuffDialog.cs:232-270`）与每帧 `Process` 调用的图标行（`:148`）里出现的
+`Size.Width` 全是 `GetTrueSize(20+i)`；构造字面 `Location = (ScreenWidth-170, 0)` = **854**，配合
+`newX = Location.X - Size.Width(新) + oldWidth(旧)` ⇒ **右缘恒 = 854 + GetTrueSize(20).Width = 897**。
+
+原版帧 `%TEMP%\golden_sandbox\shots\orig_kbd_02_ingame.png`（GM 登录收起态；`BuffIcon[240]` 模板匹配
+**不符率 0.0000**）：Rested 图标精确落在 **(864,6)** = 面板 854 + `icon_offset(0, 真宽 43).0`（= 43-10-23 = **10**）、y=6。
+按图头 44 会算成 **865**（本端修前的值）。
+
+| 项 | C#（真尺寸） | 本端修前 | 本端修后 |
+|---|---|---|---|
+| 面板右缘 `PANEL_RIGHT` | **897**（854+43） | 898（854+44） | 897 |
+| 收起态图标 i=0 的 x | 854 + 10 = **864** | 865 | 864 |
+| 展开钮 x（面板内） | `Size.Width - 15` = **28** | 29 | 28 |
+
+新增 `PANEL_TRUE_SIZES[11]`（真尺寸）与 `PANEL_SIZES[11]`（图头，贴图用）并存，测试同时钉「节点尺寸=图头、
+布局=真尺寸」与「真尺寸 ≤ 图头、本族只裁宽不裁高」。
+
+**未采集**：①**展开态**原版帧 —— 面板只在悬停时淡入（`Process` 的 `Opacity` 由 `IsMouseOver(CMain.MPoint)` 驱动），
+本机 `Move-Image` 驱动不了 `CMain.MPoint`，改用 `Click-Image` 点展开钮又落到地图上把角色拖走（帧作废）；
+②**数量标签 x=18** 是 §3.2bx 的原版帧实测值，本轮没重测 —— 改真宽后理论上应为 `43/2 - label_w/2`，
+**未验证前不动**（保留原值）。
+
+#### ④ FishingStatus：整窗 1px（**只有源码判据，原版帧未采集**）
+
+C# `FishingStatusDialog`（`FishingDialog.cs:174-179`）源码写 `Size = new Size(244,128)`、
+`Location = ((ScreenWidth - Size.Width)/2, 300)`；`Size` 是真尺寸 **241x127** ⇒ `((1024-241)/2, 300)` =
+**(391,300)**（整数除法；浮点是 391.5）。本端此前按图头算成 390（整窗偏左 1px），已改 391。
+
+**未采集**：原版状态窗帧。归档的四张 `orig_*fishing*.png` 里 `Prguse[1341]`（面板）与 `Prguse2[360]`（关闭钮）
+模板匹配都不在位（最佳落点不符率 0.48–0.94，等于"这张画面上没有"）——这扇窗只在
+`S.FishingUpdate.Fishing=true` 才 `Show()`（`GameScene.cs:3057`），沙箱角色没有鱼竿/水面，**触发不了**。
+故本条**只有源码判据**，如实记"未采集"。
+
+#### ⑤ 本端验证
+
+- `cargo test --lib` = **919 passed**（新增 3 条：`bigmap_child_anchors_use_get_true_size`、
+  `buff_panel_anchors_use_get_true_size`、`fishing_status_origin_uses_get_true_size`）
+- `cargo test --test b0001_smoke --test ui_alignment` = **2 + 53 passed**（`ui_alignment` 里两条按旧口径
+  （390 / 898）写死的断言改按真尺寸代入；大地图那条补了「按真尺寸 → (132,134) / 上滚钮 (870,182)」的断言）
+- `pwsh tools/acceptance/ui_interact_sweep.ps1 -ManageServer -RepoRoot <worktree> -ClientExe <主仓 target 的 client_bevy.exe>`
+  = **pass=46 / total=47 / fail=0 / skip=0 / exit=0**
+- `rustfmt --edition 2024 --check`：改动 4 个文件的告警集合与 master 基线**逐条对应**（无新增漂移）
+
 ### 3.2cl **更正口径**：所谓「居中窗恒定 +1px 取帧口径」其实是 `GetTrueSize` 少算 1–3px（2026-10-01）
 
 #### ① 更正
@@ -4308,6 +4397,9 @@ PY
 | `DuraStatusDialog` | `Prguse[2113]` | 20x19 | **19x19** | HUD 小钮 |
 | `MainDialog`（枚举左端）`Prguse[12]` | 68x96 | **66x95** | 左右端饰件 | |
 | `MiniMapDialog` | `Prguse[2090]` | 128x154 | **126x154** | 宽差 2（`MiniMap.X` 用的是字面 126，本端已一致；仍要核 `Size.Width` 的其它用处） |
+
+> **已收口**（2026-10-01 §3.2cm）：本表的 `FishingStatusDialog` / `BigMapDialog` / `BuffDialog` 三条已按真尺寸修掉
+> 并留下原版帧或源码判据（BigMap/Buff 有原版帧实锤，FishingStatus 只有源码判据）。其余各行仍待办。
 
 **同时更正的历史结论**：§3.2cd/§3.2ce 表里把 Friend/Help/KeyboardLayout 的 Δ=(−1,0) 记成"居中窗口径"的那些行，
 按本条应读作"当时未修的真缺口"；本条目已把它们修掉。

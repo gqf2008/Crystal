@@ -48,12 +48,37 @@ pub const PANEL_SIZES: [(f32, f32); 11] = [
     (252.0, 58.0),
 ];
 
-/// 面板**右边**锚点（C# `Location = (ScreenWidth - 170, 0)` 且展开时 `newX = Location.X -
-/// Size.Width + oldWidth` → 右缘恒在 `854 + 44 = 898`，向左长；正好贴着小地图左缘）
-pub const PANEL_RIGHT: f32 = 898.0;
+/// 面板精灵 `Prguse2[20..=30]` 的**真尺寸**（C# `MirImageControl.Size` = `GetTrueSize(20+i)`）。
+///
+/// §3.2cl ②：`AutoSize`（构造默认 true）下 `Size` 取 `GetTrueSize`（裁掉 alpha=0 的边），
+/// 源码里写的 `Size = new Size(44, 34)` / `new Size(n*23, …)` **都被 getter 顶掉**。
+/// **布局/命中/锚点一律用真尺寸**；贴图仍按 `PANEL_SIZES`（图头）1:1 铺。
+///
+/// 实测（`py -3.12 tools/acceptance/csharp_golden/libtruesize.py --data Data Prguse2:20 …`）：
+/// 宽 43/66/89/112/135/158/181/204/227/250/250（仅 idx 23/27 未被裁），高 34/…/58。
+pub const PANEL_TRUE_SIZES: [(f32, f32); 11] = [
+    (43.0, 34.0),
+    (66.0, 34.0),
+    (89.0, 34.0),
+    (112.0, 34.0),
+    (135.0, 34.0),
+    (158.0, 34.0),
+    (181.0, 34.0),
+    (204.0, 34.0),
+    (227.0, 34.0),
+    (250.0, 34.0),
+    (250.0, 58.0),
+];
+
+/// 面板**右缘**（C# 不变式）：构造 `Location = (ScreenWidth - 170, 0)` = **854**，展开/收起走
+/// `newX = Location.X - Size.Width(新) + oldWidth(旧)` ⇒ `Location.X + Size.Width` **恒定**、
+/// 面板向左长。`Size.Width` 是 `GetTrueSize` ⇒ 右缘 = `854 + GetTrueSize(20).Width = 854 + 43 = 897`。
+///
+/// 2026-10-01 §3.2cm：此前按图头记 898（= 854+44）⇒ 展开态/图标锚点整体偏右 1px。
+pub const PANEL_RIGHT: f32 = 897.0;
 pub const PANEL_Y: f32 = 0.0;
-/// 收起态宽度（C# `Size(44, 34)`）
-const PANEL_COLLAPSED_W: f32 = 44.0;
+/// 收起态**真宽**（C# 源码写 `Size = new Size(44, 34)`，但 getter 返回 `GetTrueSize(20)` = 43）
+const PANEL_COLLAPSED_W: f32 = 43.0;
 
 /// 图标槽上限（C# 两行 × 10）
 pub(crate) const BUFF_ICON_SLOTS: usize = 20;
@@ -666,6 +691,8 @@ fn spawn_buff(
     commands.insert_resource(assets);
 
     let (pw, ph) = PANEL_SIZES[0];
+    // 子控件位置用**真尺寸**（C# `Size` = `GetTrueSize`），节点尺寸仍用图头
+    let lw = PANEL_TRUE_SIZES[0].0;
     let Some(bg) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 20) else {
         return;
     };
@@ -692,7 +719,7 @@ fn spawn_buff(
     commands.entity(panel).with_children(|p| {
         // 图标槽（C# 每 buff 一个 MirImageControl；本端固定 20 槽按 count 显隐）
         for i in 0..BUFF_ICON_SLOTS {
-            let (x, y) = icon_offset(i, pw);
+            let (x, y) = icon_offset(i, lw);
             if let Some(h) = load_lib_image(&mut libs, &mut images, LibraryName::BuffIcon, 0) {
                 spawn_image(p, h, x, y, ICON_SIZE, ICON_SIZE, 5).insert((
                     BuffIcon(i),
@@ -726,7 +753,7 @@ fn spawn_buff(
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 8),
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 9),
         ) {
-            spawn_icon_button(p, n, h, pr, pw - 15.0, 0.0, 16.0, 15.0, 10).insert(BuffExpand);
+            spawn_icon_button(p, n, h, pr, lw - 15.0, 0.0, 16.0, 15.0, 10).insert(BuffExpand);
         }
     });
 }
@@ -793,15 +820,17 @@ fn buff_ui_system(
     let expanded = state.expanded;
     let index = panel_index_for(count, expanded);
     let (pw, ph) = PANEL_SIZES[index - 20];
+    // C# `Size` = `GetTrueSize(index)`：锚点/命中/子控件位置都用它（节点尺寸仍给图头）
+    let (lw, lh) = PANEL_TRUE_SIZES[index - 20];
 
     // 悬停面板矩形才显形（C# `Process` 的 Opacity 渐隐；本端直接显隐）
     let cursor = crate::control::resolve_cursor(
         probe.pos,
         windows.single().ok().and_then(|w| w.cursor_position()),
     );
-    let panel_left = PANEL_RIGHT - pw;
+    let panel_left = PANEL_RIGHT - lw;
     let hovered = cursor
-        .map(|c| c.x >= panel_left && c.x <= PANEL_RIGHT && c.y >= PANEL_Y && c.y <= PANEL_Y + ph)
+        .map(|c| c.x >= panel_left && c.x <= PANEL_RIGHT && c.y >= PANEL_Y && c.y <= PANEL_Y + lh)
         .unwrap_or(false);
     // §3.2bx（原版收起态实拍）：C# `BuffDialog.Process()`（`:172-205`）的 `Opacity` 淡入淡出**只作用在
     // **面板本体 + 展开钮**上（`Opacity += FadeRate` 仅在 `IsMouseOver` 时执行），而图标行与
@@ -818,7 +847,7 @@ fn buff_ui_system(
     for i in 0..count.min(BUFF_ICON_SLOTS) {
         let entry = &state.buffs[i];
         let d = buff_display(entry.tag);
-        let (x, y) = icon_offset(i, pw);
+        let (x, y) = icon_offset(i, lw);
         // C#：展开态全部显示；收起态只显示 i==0；≤5s 闪烁
         let shown = if expanded {
             !blink_hidden(entry.remaining_ms, entry.paused)
@@ -919,7 +948,7 @@ fn buff_ui_system(
 
     // 展开/收起按钮（C#：`_expandCollapseButton` @(panel_w - 15, 0)；1 个 buff 时点击必展开）
     for (e, inter, mut node, mut vis) in &mut expand {
-        node.left = Val::Px(pw - 15.0);
+        node.left = Val::Px(lw - 15.0);
         node.top = Val::Px(0.0);
         // C#：展开钮的 `Opacity` 与面板本体同一条淡入淡出 ⇒ 不悬停时既不显示也不可点
         *vis = if panel_visible {
@@ -1099,6 +1128,38 @@ mod tests {
         assert_eq!(icon_offset(2, 92.0), (13.0, 6.0));
         assert_eq!(icon_offset(0, 252.0), (219.0, 6.0));
         assert_eq!(icon_offset(10, 252.0), (219.0, 30.0), "第 11 格换行回右侧");
+    }
+
+    /// §3.2cm：面板锚点 / 图标行 / 展开钮一律按 `GetTrueSize`（收起态真宽 **43**），不是图头 44。
+    ///
+    /// 原版帧实测（`%TEMP%\golden_sandbox\shots\orig_kbd_02_ingame.png`，GM 登录收起态，
+    /// `win_locate.py` 对 `BuffIcon[240]` 模板匹配不符率 **0.0000**）：图标落在 **(864,6)**。
+    /// 面板左缘 = C# 构造字面 `ScreenWidth-170 = 854`；`864 = 854 + (43-10-23)` ⇒ 坐实真宽 43。
+    /// 按图头 44 会算成 865（本轮修前的值）。
+    #[test]
+    fn buff_panel_anchors_use_get_true_size() {
+        assert_eq!((PANEL_SIZES[0].0, PANEL_TRUE_SIZES[0].0), (44.0, 43.0));
+        // 面板左缘：右缘 897 - 真宽 43 = 854（= C# `Location = ScreenWidth - 170`）
+        assert_eq!(PANEL_RIGHT - PANEL_TRUE_SIZES[0].0, 854.0);
+        assert_ne!(PANEL_RIGHT - PANEL_SIZES[0].0, 854.0, "图头模型 = 853");
+        // 收起态图标 i=0：854 + icon_offset(0, 43).0 = 864（原版帧实测值）
+        assert_eq!(854.0 + icon_offset(0, PANEL_TRUE_SIZES[0].0).0, 864.0);
+        assert_ne!(
+            854.0 + icon_offset(0, PANEL_SIZES[0].0).0,
+            864.0,
+            "图头模型 = 865（原版帧证否）"
+        );
+        assert_eq!(icon_offset(0, PANEL_TRUE_SIZES[0].0).1, 6.0);
+        // 展开钮：真宽 - 15 = 28（图头 29）
+        assert_eq!(PANEL_TRUE_SIZES[0].0 - 15.0, 28.0);
+        // 真尺寸逐项 ≤ 图头；本族只裁宽不裁高；idx 23/27 恰好未被裁
+        for (i, (tw, th)) in PANEL_TRUE_SIZES.iter().enumerate() {
+            let (hw, hh) = PANEL_SIZES[i];
+            assert!(*tw <= hw, "真宽不可能大于图头（idx {}）", i + 20);
+            assert_eq!(*th, hh, "本族只裁宽不裁高（idx {}）", i + 20);
+        }
+        assert_eq!(PANEL_TRUE_SIZES[3].0, PANEL_SIZES[3].0, "idx 23 无裁剪");
+        assert_eq!(PANEL_TRUE_SIZES[7].0, PANEL_SIZES[7].0, "idx 27 无裁剪");
     }
 
     /// #2791 单元④：`BuffString` 文案（C# `Chinese.json` Text/Enum 逐字）
