@@ -133,13 +133,30 @@ pub fn stamp_slots(stamped: bool) -> usize {
 }
 
 // C# MailListDialog（MailDialogs.cs:32-35）布局锚点。
-const MAIL_W: f32 = 312.0;
+/// 列表窗**布局宽** = C# `MailListDialog.Size.Width`。
+///
+/// C# `MirImageControl.Size` 在 `AutoSize`（构造默认 `true`）下**返回 `Library.GetTrueSize(Index)`** ——
+/// 源码里那句 `Size = new Size(312, 444)`（`MailDialogs.cs:32`）写进的是 `base.Size`，**getter 不读它**。
+/// `Title[670]` 图头 312x444、**真实 310x444**（右侧 2 列 alpha 恒 0）⇒
+/// `Location.X = (ScreenWidth - 310) - 150 = **564**`，子控件偏移也都按 310 算（关闭钮 `310-24=286`）。
+///
+/// 2026-09-30 原版帧实测（四项全部 0.0000）：面板内容 564、标题 `Title[7]`@582、上一页 `Prguse2[240]`@666、
+/// 下一页 `[243]`@756、关闭钮 `[360]`@850；本端按**图头**算成 562/580/664/754（整窗左移 2px）——与 §3.2cd
+/// 的 HUD 底栏（`Prguse[1]` 图头 152 / 真实 150）是同一类 `GetTrueSize` 缺陷。
+const MAIL_W: f32 = 310.0;
+/// 美术**原生**宽（图头 312）：面板节点按它铺，避免被 2px 横向压缩
+/// （C# 那边是 `Library.Draw` 原样贴图，`Size` 只影响布局/命中/裁剪）。
+const MAIL_ART_W: f32 = 312.0;
 const MAIL_H: f32 = 444.0;
 /// #2892 批B：列表面板精灵（C# `MailListDialog.Index = 670; Library = Libraries.Title`）
 pub const PANEL: (LibraryName, usize) = (LibraryName::Title, 670);
 pub const PANEL_SIZE: (f32, f32) = (MAIL_W, MAIL_H);
 /// 关闭键 `Prguse2[360..362]` @ (`Size.Width`-24, 3)（`MailDialogs.cs:78-79`，无 `Size` → 原生 24x21）
 pub const CLOSE_POS: (f32, f32) = (MAIL_W - 24.0, 3.0);
+/// C# `MailListDialog.HelpButton`（`MailDialogs.cs:87-97`）：`Prguse2[257/258/259]` 24x21
+/// @ `(Size.Width - 50, 3)` = **(260, 3)** → 绝对 (824, 8)；点它 `HelpDialog.DisplayPage("")`。
+/// 2026-09-30 原版帧实测该美术在 (824,8) 0.0000 —— 本端当时**整颗没画**（A/B 里它是唯一缺失项）。
+pub const HELP_POS: (f32, f32) = (MAIL_W - 50.0, 3.0);
 /// #3103：两张**写邮件**窗自己的拖动/置顶分组。
 ///
 /// `dialog_drag_system`（按 `DialogRoot` 的 kind 聚合包围盒与位移）与 `bump_dialog_z`
@@ -536,6 +553,10 @@ pub struct MailWidget;
 
 #[derive(Component)]
 pub struct MailClose;
+
+/// C# `MailListDialog.HelpButton`（点它开帮助窗）
+#[derive(Component)]
+pub struct MailHelp;
 
 #[derive(Component)]
 pub struct MailDelete;
@@ -1819,7 +1840,9 @@ fn spawn_mail(
     let Some(bg) = load_lib_image(&mut libs, &mut images, LibraryName::Title, 670) else {
         return;
     };
-    let list = spawn_panel(&mut commands, bg, panel_x, panel_y, MAIL_W, MAIL_H, 30);
+    // 节点按**美术原生宽**铺（312），布局/子控件偏移仍用 C# 的 `Size`（310）——两者差 2px，
+    // 压成 310 会把贴图横向压缩（C# 不压）。
+    let list = spawn_panel(&mut commands, bg, panel_x, panel_y, MAIL_ART_W, MAIL_H, 30);
     commands.entity(list).insert((
         DialogRoot(DialogKind::Mail),
         MailWidget,
@@ -1887,6 +1910,14 @@ fn spawn_mail(
             spawn_close_button(p, &mut libs, &mut images, CLOSE_POS.0, CLOSE_POS.1, 10)
         {
             btn.insert(MailClose);
+        }
+        // C# `HelpButton`（`MailDialogs.cs:87-97`）：`Prguse2[257/258/259]` 24x21 @(260,3)。
+        if let (Some(n), Some(h), Some(pr)) = (
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 257),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 258),
+            load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 259),
+        ) {
+            spawn_icon_button(p, n, h, pr, HELP_POS.0, HELP_POS.1, 24.0, 21.0, 10).insert(MailHelp);
         }
         // C# 10 行 @ 55 + 33*i；行点击由 mail_ui_system 按同一常量命中。
         // #3120 ①：每行按 C# `MailItemRow` 铺 7 个 UI 层（选中底图 / 图标 / 未读·锁定·包裹 /
@@ -2101,13 +2132,22 @@ pub(crate) struct MailRowQueries<'w, 's> {
         Query<'w, 's, &'static mut Text, (With<MailPageLabel>, Without<MailRowSlot>)>,
 }
 
+/// 列表窗右上角两颗「简单按钮」查询（关闭 / 帮助）——同样是为了 16 元组上限而打包。
+#[derive(bevy::ecs::system::SystemParam)]
+pub(crate) struct MailListBtnQueries<'w, 's> {
+    pub(crate) close: Query<'w, 's, (Entity, &'static Interaction), With<MailClose>>,
+    pub(crate) help: Query<'w, 's, (Entity, &'static Interaction), With<MailHelp>>,
+}
+
 fn mail_ui_system(
     mut mgr: ResMut<DialogManager>,
     mut mail: ResMut<MailState>,
     net: Res<NetConnection>,
     mouse: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window>,
-    close: Query<(Entity, &Interaction), With<MailClose>>,
+    // bevy 的 `SystemParam` 只实现到 16 元组：本系统已经贴着上限，所以把「关闭钮 + 帮助钮」
+    // 两个简单查询并进一个 `SystemParam`（同 `MailRowQueries` 的做法）。
+    list_btns: MailListBtnQueries,
     delete_btn: Query<(Entity, &Interaction), With<MailDelete>>,
     read_btn: Query<(Entity, &Interaction), With<MailReadBtn>>,
     // #3103 读侧：阅读态不再画在列表窗内（内容改由独立读邮件窗渲染）。
@@ -2141,13 +2181,20 @@ fn mail_ui_system(
     if !open {
         return;
     }
-    for (e, inter) in &close {
+    for (e, inter) in &list_btns.close {
         if edge(e, inter, &mut prev_inter) {
             // C# `MailDialogs.cs:85` `CloseButton.Click += Hide()`——只关列表窗本身。
             // 读邮件窗是**独立窗**（`:701-703`），不随列表关闭；只有 ESC 的 Closeall
             // 会把它们一起隐藏（见 `mail_compose_follow_system`）。
             mail.selected = None;
             mgr.close(DialogKind::Mail);
+        }
+    }
+    for (e, inter) in &list_btns.help {
+        if edge(e, inter, &mut prev_inter) {
+            // C# `MailDialogs.cs:97`：`HelpButton.Click += HelpDialog.DisplayPage("")`
+            // （本端帮助窗是一块面板 + 上一页/下一页，没有 C# 的"指定页"入参，故等价于打开它）
+            mgr.open(DialogKind::Help);
         }
     }
     // #3120 ③：分页键（C# `MailDialogs.cs:109-120` / `:141-151`）——
@@ -3018,7 +3065,15 @@ mod tests {
 
     #[test]
     fn mail_list_layout_matches_csharp_anchor() {
-        assert_eq!(mail_panel_origin(MAIL_SCREEN_W), (562.0, 5.0));
+        // C# `Size.Width` = `GetTrueSize(670)` = **310**（图头 312 的右侧 2 列全透明）
+        // ⇒ `Location.X = (1024-310) - 150 = 564`（2026-09-30 原版帧实测内容起点 564）…
+        assert_eq!(mail_panel_origin(MAIL_SCREEN_W), (564.0, 5.0));
+        // …且子控件偏移也按 310 算：关闭钮 `Size.Width-24` → 绝对 850（原版帧实测 850）
+        assert_eq!(CLOSE_POS, (286.0, 3.0));
+        assert_eq!(mail_panel_origin(MAIL_SCREEN_W).0 + CLOSE_POS.0, 850.0);
+        // 帮助钮 `Size.Width-50` → 绝对 824（原版帧实测 `Prguse2[257]` @(824,8)）
+        assert_eq!(HELP_POS, (260.0, 3.0));
+        assert_eq!(mail_panel_origin(MAIL_SCREEN_W).0 + HELP_POS.0, 824.0);
         assert_eq!(mail_row_y(0), 55.0);
         assert_eq!(mail_row_y(MAIL_VISIBLE_ROWS - 1), 352.0);
         assert!(mail_row_y(MAIL_VISIBLE_ROWS - 1) + MAIL_ROW_H < MAIL_BUTTON_Y);

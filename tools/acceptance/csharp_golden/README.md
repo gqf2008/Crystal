@@ -4239,6 +4239,65 @@ dbtool <沙箱>\Server setpos 333 384 99 100 ; dbtool <沙箱>\Server setpos gqf
 **未采集**：交易中的「双方都放物品/改金币/按确认锁定」这些**内容态**帧（本轮只做到"空窗"同状态对拍）；
 以及**原版鼠标点 YES 点不动**这条本身（是"控制被盖住"还是"点击语义"没查，如实记）。
 
+### 3.2ck 邮件列表窗：`Size` 取 `GetTrueSize`（310）而非源码字面（312）——**整窗 2px + 缺一颗帮助钮**（2026-09-30）
+
+#### ① 原版入口（可复跑）
+
+邮件窗的入口是**小地图上的邮件钮**：C# `MainDialogs.cs:1804-1815` `MailButton`（`Prguse[2099/2100/2101]`），
+位置 `(4, Size.Height-23)`，大模式（`Prguse[2090]` 高 154）= `(4,131)` → 小地图 (898,0) ⇒ **绝对 (902,131)**。
+
+```powershell
+Msg-Key 0x1B                       # Closeall（清掉 F9/F10/F11 等）
+Move-Image 912 140; Msg-Click 912 140   # 邮件钮中心（小的命中 40x40 也够）
+Move-Image 400 300; Shot-Cs b2g_mail
+```
+
+#### ② 两端对表（`win_locate.py`，前后各一列）
+
+| 控件 | C# 出处 | 原版帧 | 本端（修前） | 本端（修后） |
+|---|---|---|---|---|
+| 面板 `Title[670]` 内容起点 | `Location=(ScreenWidth-Size.Width)-150` | **(564,5)** | (562,5) | **(564,5)** ✓ |
+| 标题 `Title[7]` | @(18,9) | **(582,14)** | (580,14) | **(582,14)** ✓ |
+| 上一页 `Prguse2[240]` | @(102, H-55=389) | **(666,394)** | (664,394) | **(666,394)** ✓ |
+| 下一页 `Prguse2[243]` | @(192,389) | **(756,394)** | (754,394) | **(756,394)** ✓ |
+| 关闭钮 `Prguse2[360]` | @(`Size.Width`-24, 3) | **(850,8)** | (850,8) | **(850,8)** ✓ |
+| **帮助钮 `Prguse2[257]`** | @(`Size.Width`-50, 3) | **(824,8) 0.0000** | **整颗没画**（0.9449） | **(824,8) 0.0000** ✓ |
+
+#### ③ 根因：`MirImageControl.Size` 的 getter 盖掉源码字面
+
+```csharp
+// MailDialogs.cs:32
+Size = new Size(312, 444);                              // 写进 base.Size
+// :35
+Location = new Point((Settings.ScreenWidth - Size.Width) - 150, 5);
+// MirImageControl.cs:145-151
+public override Size Size { get => AutoSize && Library != null && Index >= 0
+                                    ? Library.GetTrueSize(Index)   // ← 默认 AutoSize=true，走这里
+                                    : base.Size; set { base.Size = value; } }
+```
+
+`Title[670]` 图头 312x444、**真实 310x444**（右侧 2 列 alpha 恒 0）⇒ C# 实际拿到 `Size.Width = 310`：
+原点 **564**、子控件偏移全按 310（关闭钮 `310-24=286`、帮助钮 `310-50=260`）。这与 §3.2cd 的 HUD 底栏
+（`Prguse[1]` 图头 152 / 真实 150）是**同一类**缺陷——**凡是 `AutoSize` 下的显式 `Size =` 都是幌子，得看 `GetTrueSize`**。
+
+#### ④ 修法
+
+* 布局宽 `MAIL_W: 312 → 310`（原点/子控件偏移/行命中区都跟着它）；新增 `MAIL_ART_W = 312` **只用于铺图**——
+  C# 是 `Library.Draw` 原样贴图（`Size` 只影响布局/命中/裁剪），本端若按 310 铺节点会把贴图横向压缩 2px。
+* **补画帮助钮**：`Prguse2[257/258/259]` 24x21 @(260,3)，点击 → 打开帮助窗
+  （C# `MailDialogs.cs:97` `HelpButton.Click += HelpDialog.DisplayPage("")`）。实机点它后 `dialogs` 出现 `Help` ✓。
+* `mail_ui_system` 的参数撞上 Bevy 的 **16 元组上限**（加一个 Query 就编不过）⇒ 新增 `MailListBtnQueries`
+  把关闭/帮助两个简单查询打包（同 `MailRowQueries` 的做法）。
+
+#### ⑤ 未采集 / 有待下一轮
+
+* **另四张邮件面板**（写信 `671`、待寄包裹 `674`、读信 `672`、读包裹 `675`）在源码上同样受这条影响
+  （真宽 **233** vs 字面 236 → 子控件偏移差 3px），但**还没取到原版帧**（要先进写/读邮件态），
+  本轮**只改了有帧证据的列表窗**，其余留待取证后再动；`ui_alignment::mail_window_panels_native_aligned`
+  里已就地标注这个口径差异。
+* 本轮的 `ui_alignment` 三处旧断言（`panel_sprites_batch_b1` / `mail_window_panels_native_aligned` /
+  `close_buttons_native_aligned`）此前都按**图头**写，已按新证据改成 `GetTrueSize` 口径并注明出处。
+
 ### 3.2cj `click` 命中栈诊断升级：一眼看出「光标下到底是什么」（+ 本机 mock 点击不稳的实测记录）（2026-09-30）
 
 #### ① 为什么要升
