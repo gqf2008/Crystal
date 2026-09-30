@@ -31,9 +31,28 @@ use crate::ui::theme::{
 /// #2892 批B：面板精灵（C# `BigMapDialog.Index = 820; Library = Libraries.Title; Location = Center`）
 pub const PANEL: (LibraryName, usize) = (LibraryName::Title, 820);
 
-/// 面板尺寸（Title[820] 实测 760x500）
+/// 面板尺寸（Title[820] **图头** 760x500）——`Library.Draw` 原样 1:1 铺，节点尺寸按它给
 pub const PANEL_W: f32 = 760.0;
 pub const PANEL_H: f32 = 500.0;
+/// 面板**真尺寸**（C# `MirImageControl.Size` = `Library.GetTrueSize(820)`）。
+///
+/// §3.2cl ②：`AutoSize`（构造默认 true）下 `Size` 取 `GetTrueSize` —— 裁掉 alpha=0 的边
+/// （`Client/MirGraphics/MLibrary.cs:1050-1127`）。`Title[820]` 最右 1 列全透明 ⇒ 真宽 **759**，
+/// 高不裁 ⇒ **500**。**布局/命中/裁剪一律用真尺寸**；贴图仍按图头 760 铺。
+///
+/// 2026-10-01 原版帧实测（`%TEMP%\golden_sandbox\shots\orig_bm0_open.png`，模板匹配 0.0000）：
+/// 上滚钮 `Prguse2[197]` 在 **(870,182)** = 面板 132 + (`Size.Width`-21) + 48 ⇒ `Size.Width`=759 坐实。
+pub const PANEL_TRUE_W: f32 = 759.0;
+pub const PANEL_TRUE_H: f32 = 500.0;
+/// 面板屏内原点（C# `MirControl.Center` = `((Settings.ScreenWidth - Size.Width)/2, …)` 整数除法）：
+/// `((1024-759)/2, (768-500)/2)` = **(132,134)**。
+/// 注意 `Title[820]` 真宽是奇数 759 ⇒ 若误用浮点除会得 132.5（§3.2cl 的 Help 同款坑）。
+pub const PANEL_ORIGIN: (f32, f32) = (132.0, 134.0);
+/// 玩家雷达点 `Prguse2[1350]`：图头 12x10、真尺寸 **10x10**。C# `BigMapDialog.cs:709-710`
+/// `Location = ((int)x - s.Width/2, (int)y - s.Height/2)`，`s = UserRadarDot.Size` = `GetTrueSize(1350)`
+/// ⇒ 居中偏移是 **-5,-5**（不是图头 12 的 -6）。
+const DOT_TRUE_W: f32 = 10.0;
+const DOT_TRUE_H: f32 = 10.0;
 /// 搜索输入框（C# BigMapDialog.cs:204,207 SearchTextBox Location(59, Size.Height-27) Size(130,10)；
 /// C# 无独立"搜索:"label，仅 SearchButton 带 Hint）。SEARCH_Y 为相对面板底部的偏移（H-27）。
 pub const SEARCH_X: f32 = 59.0;
@@ -219,8 +238,15 @@ fn spawn_big_map(
         Some(i) => (i.width.max(0) as f32, i.height.max(0) as f32),
         None => (PANEL_W, PANEL_H),
     };
-    let px = (1024.0 - pw) / 2.0;
-    let py = (768.0 - ph) / 2.0;
+    // C# 子控件一律按面板的 `Size` 定位 = `GetTrueSize(820)` = (759,500)，**不是图头** (760,500)
+    let (lw, lh) = match libs.0.get_image(LibraryName::Title, 820) {
+        Some(i) => {
+            let (tw, th) = i.get_true_size();
+            (tw.max(0) as f32, th.max(0) as f32)
+        }
+        None => (PANEL_TRUE_W, PANEL_TRUE_H),
+    };
+    let (px, py) = PANEL_ORIGIN;
 
     // 面板 Title[820]（760x500）@ 屏心
     let Some(bg) = load_lib_image(&mut libs, &mut images, LibraryName::Title, 820) else {
@@ -241,7 +267,7 @@ fn spawn_big_map(
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 361),
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 362),
         ) {
-            spawn_icon_button(p, n, h, pr, pw - 25.0, 3.0, 24.0, 21.0, 8)
+            spawn_icon_button(p, n, h, pr, lw - 25.0, 3.0, 24.0, 21.0, 8)
                 .insert((BigMapBtn(BigMapBtnKind::Close), CloseButton));
         }
         // 大图（`Data/mmap.Lib[MapInfo.BigMap]`，首帧生成后填充）。
@@ -282,7 +308,7 @@ fn spawn_big_map(
         ) {
             // 尺寸取**美术原生**（`Prguse2[197]` 图头 12x12）：C# `ScrollUpButton` 不设 `Size`，
             // 而 `MirImageControl` 构造器把 `AutoSize` 置 true ⇒ 尺寸一律由帧决定
-            spawn_icon_button(p, n, h, pr, pw - 21.0, 48.0, 12.0, 12.0, 8)
+            spawn_icon_button(p, n, h, pr, lw - 21.0, 48.0, 12.0, 12.0, 8)
                 .insert(BigMapBtn(BigMapBtnKind::ScrollUp));
         }
         if let (Some(n), Some(h), Some(pr)) = (
@@ -290,12 +316,12 @@ fn spawn_big_map(
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 208),
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 209),
         ) {
-            spawn_icon_button(p, n, h, pr, pw - 21.0, 417.0, 12.0, 12.0, 8)
+            spawn_icon_button(p, n, h, pr, lw - 21.0, 417.0, 12.0, 12.0, 8)
                 .insert(BigMapBtn(BigMapBtnKind::ScrollDown));
         }
         // 位置条 Prguse2[205] (W-21, 61) 12x18（y 随滚动动态调整）
         if let Some(h) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 205) {
-            spawn_image(p, h, pw - 21.0, 61.0, 12.0, 18.0, 7).insert(BigMapPosBar);
+            spawn_image(p, h, lw - 21.0, 61.0, 12.0, 18.0, 7).insert(BigMapPosBar);
         }
         // 世界地图按钮 Title[827/828/829] (250, H-33)
         if let (Some(n), Some(h), Some(pr)) = (
@@ -303,7 +329,7 @@ fn spawn_big_map(
             load_lib_image(&mut libs, &mut images, LibraryName::Title, 828),
             load_lib_image(&mut libs, &mut images, LibraryName::Title, 829),
         ) {
-            spawn_icon_button(p, n, h, pr, 250.0, ph - 33.0, 80.0, 25.0, 8).insert(BigMapWorld);
+            spawn_icon_button(p, n, h, pr, 250.0, lh - 33.0, 80.0, 25.0, 8).insert(BigMapWorld);
         }
         // 我的位置 Title[824/825/826] (400, H-33)
         if let (Some(n), Some(h), Some(pr)) = (
@@ -311,7 +337,7 @@ fn spawn_big_map(
             load_lib_image(&mut libs, &mut images, LibraryName::Title, 825),
             load_lib_image(&mut libs, &mut images, LibraryName::Title, 826),
         ) {
-            spawn_icon_button(p, n, h, pr, 400.0, ph - 33.0, 80.0, 25.0, 8)
+            spawn_icon_button(p, n, h, pr, 400.0, lh - 33.0, 80.0, 25.0, 8)
                 .insert(BigMapBtn(BigMapBtnKind::MyLocation));
         }
         // 传送按钮 Title[821/822/823] (W-122, 432)
@@ -320,7 +346,7 @@ fn spawn_big_map(
             load_lib_image(&mut libs, &mut images, LibraryName::Title, 822),
             load_lib_image(&mut libs, &mut images, LibraryName::Title, 823),
         ) {
-            spawn_icon_button(p, n, h, pr, pw - 122.0, 432.0, 72.0, 25.0, 8)
+            spawn_icon_button(p, n, h, pr, lw - 122.0, 432.0, 72.0, 25.0, 8)
                 .insert(BigMapBtn(BigMapBtnKind::Teleport));
         }
         // 搜索按钮 Prguse2[1340/1341/1342] (23, H-36)
@@ -329,14 +355,14 @@ fn spawn_big_map(
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 1341),
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 1342),
         ) {
-            spawn_icon_button(p, n, h, pr, 23.0, ph - 36.0, 32.0, 30.0, 8)
+            spawn_icon_button(p, n, h, pr, 23.0, lh - 36.0, 32.0, 30.0, 8)
                 .insert(BigMapBtn(BigMapBtnKind::Search));
         }
         // 搜索输入框（C# SearchTextBox (59, H-27) 130x10；TextInputField id=10）
         spawn_container(
             p,
             SEARCH_X,
-            ph - SEARCH_Y_FROM_BOTTOM,
+            lh - SEARCH_Y_FROM_BOTTOM,
             SEARCH_W,
             SEARCH_H,
             8,
@@ -346,7 +372,7 @@ fn spawn_big_map(
             TextInputField(10),
             TextInputRect(
                 px + SEARCH_X,
-                py + ph - SEARCH_Y_FROM_BOTTOM,
+                py + lh - SEARCH_Y_FROM_BOTTOM,
                 SEARCH_W,
                 SEARCH_H,
             ),
@@ -545,13 +571,8 @@ fn big_map_ui_system(
             if mouse.just_pressed(MouseButton::Left) {
                 let (ox, oy) = panel_origin
                     .single()
-                    .map(|n| {
-                        crate::ui::theme::node_origin(
-                            n,
-                            ((1024.0 - PANEL_W) / 2.0, (768.0 - PANEL_H) / 2.0),
-                        )
-                    })
-                    .unwrap_or(((1024.0 - PANEL_W) / 2.0, (768.0 - PANEL_H) / 2.0));
+                    .map(|n| crate::ui::theme::node_origin(n, PANEL_ORIGIN))
+                    .unwrap_or(PANEL_ORIGIN);
                 for i in 0..MAX_ROWS {
                     let ry = oy + 50.0 + i as f32 * 21.0;
                     if cursor.x >= ox + 590.0
@@ -690,14 +711,10 @@ fn big_map_world_system(
     }
 
     // 图标同步 + 悬停标题 + 点击（C# WorldMapImage.MakeButtons：MapLinkIcon 帧 offset，UseOffSet=true）
-    let (pw, ph) = match libs.0.get_image(LibraryName::Title, 820) {
-        Some(i) => (i.width.max(0) as f32, i.height.max(0) as f32),
-        None => (PANEL_W, PANEL_H),
-    };
     let (ox, oy) = panel_origin
         .single()
-        .map(|n| crate::ui::theme::node_origin(n, ((1024.0 - pw) / 2.0, (768.0 - ph) / 2.0)))
-        .unwrap_or(((1024.0 - pw) / 2.0, (768.0 - ph) / 2.0));
+        .map(|n| crate::ui::theme::node_origin(n, PANEL_ORIGIN))
+        .unwrap_or(PANEL_ORIGIN);
     let (wm_x, wm_y) = (ox + 10.0, oy);
 
     let mut hover_title = String::new();
@@ -824,8 +841,7 @@ fn big_map_hint_system(
             return;
         }
     };
-    let px = (1024.0 - PANEL_W) / 2.0;
-    let py = (768.0 - PANEL_H) / 2.0;
+    let (px, py) = PANEL_ORIGIN;
     let local = (cursor.x - px, cursor.y - py);
     // 1) 队友光点：3x3 小方块，命中放宽到 ±4px（C# 控件 Size 同为小方块，人手可点）
     for (node, vis, dot) in &dots {
@@ -875,7 +891,7 @@ fn big_map_dot_hit(local: (f32, f32), dot_x: f32, dot_y: f32) -> bool {
 
 /// 搜索按钮命中（C# `SearchButton` @(23, H-36) 32x30）
 fn big_map_search_hit(local: (f32, f32)) -> bool {
-    let (x, y) = (23.0, PANEL_H - 36.0);
+    let (x, y) = (23.0, PANEL_TRUE_H - 36.0);
     local.0 >= x && local.0 <= x + 32.0 && local.1 >= y && local.1 <= y + 30.0
 }
 
@@ -910,8 +926,7 @@ fn big_map_member_system(
         }
         return;
     }
-    let px = (1024.0 - PANEL_W) / 2.0;
-    let py = (768.0 - PANEL_H) / 2.0;
+    let (px, py) = PANEL_ORIGIN;
     let vx = px + VIEW_X + (VIEW_W - tw) / 2.0;
     let vy = py + VIEW_Y + (VIEW_H - th) / 2.0;
     for (mut node, mut vis, dot) in &mut dots {
@@ -1072,10 +1087,8 @@ fn big_map_viewport_system(
     }
     let (ox, oy) = panel_origin
         .single()
-        .map(|n| {
-            crate::ui::theme::node_origin(n, ((1024.0 - PANEL_W) / 2.0, (768.0 - PANEL_H) / 2.0))
-        })
-        .unwrap_or(((1024.0 - PANEL_W) / 2.0, (768.0 - PANEL_H) / 2.0));
+        .map(|n| crate::ui::theme::node_origin(n, PANEL_ORIGIN))
+        .unwrap_or(PANEL_ORIGIN);
     let vx = ox + VIEW_X + (VIEW_W - tw) / 2.0;
     let vy = oy + VIEW_Y + (VIEW_H - th) / 2.0;
 
@@ -1083,8 +1096,11 @@ fn big_map_viewport_system(
     if let Ok(player_tf) = players.single() {
         let (tx, ty) = world_to_tile(player_tf.translation.x, player_tf.translation.y);
         if let Ok((mut node, mut vis)) = player_dot.single_mut() {
-            node.left = Val::Px(vx + (tx as f32 / mw) * tw - ox);
-            node.top = Val::Px(vy + (ty as f32 / mh) * th - oy);
+            // C# `BigMapDialog.cs:709-710`：`Location = ((int)x - s.Width/2, (int)y - s.Height/2)`，
+            // `s = UserRadarDot.Size` = `GetTrueSize(1350)` = (10,10) ⇒ 减 (5,5)。
+            // §3.2cm：此前漏了这一步，雷达点整体偏右下 (5,5)。
+            node.left = Val::Px(vx + (tx as f32 / mw) * tw - ox - DOT_TRUE_W / 2.0);
+            node.top = Val::Px(vy + (ty as f32 / mh) * th - oy - DOT_TRUE_H / 2.0);
             *vis = Visibility::Visible;
         }
     }
@@ -1212,16 +1228,59 @@ mod tests {
     fn big_map_hint_hit_matches_csharp() {
         // （Hint 命中与视口画幅是两件事，视口见 `bigmap_view_layout_matches_csharp`）
         // 搜索按钮内部
-        assert!(big_map_search_hit((30.0, PANEL_H - 30.0)));
+        assert!(big_map_search_hit((30.0, PANEL_TRUE_H - 30.0)));
         // 按钮上/下/右侧（右侧即搜索输入框区域，C# 无 Hint）
-        assert!(!big_map_search_hit((30.0, PANEL_H - 40.0)));
-        assert!(!big_map_search_hit((30.0, PANEL_H - 4.0)));
-        assert!(!big_map_search_hit((60.0, PANEL_H - 30.0)));
+        assert!(!big_map_search_hit((30.0, PANEL_TRUE_H - 40.0)));
+        assert!(!big_map_search_hit((30.0, PANEL_TRUE_H - 4.0)));
+        assert!(!big_map_search_hit((60.0, PANEL_TRUE_H - 30.0)));
         // 队友点：±4px 内命中，超过不命中
         assert!(big_map_dot_hit((100.0, 100.0), 102.0, 98.0));
         assert!(big_map_dot_hit((100.0, 100.0), 96.0, 104.0));
         assert!(!big_map_dot_hit((100.0, 100.0), 106.0, 98.0));
         assert!(!big_map_dot_hit((100.0, 100.0), 100.0, 92.0));
+    }
+
+    /// §3.2cm：`BigMapDialog` 的子控件全按面板的 `Size` = `GetTrueSize(Title[820])` 定位。
+    ///
+    /// 真尺寸 (759,500)：宽裁掉最右 1 列 alpha=0，高不裁。原版帧 `orig_bm0_open.png` 实测
+    /// （win_locate 模板匹配不符率 0.0000）：
+    /// - 上滚钮 `Prguse2[197]` @ **(870,182)** = `PANEL_ORIGIN.0 + (759-21)` , `PANEL_ORIGIN.1 + 48`
+    /// - 下滚钮 `Prguse2[207]` @ **(870,551)** = 同上 x，y = 134 + 417
+    /// - 我的位置钮 `Title[824]` @ **(532,601)** = 132 + 400, 134 + (500-33)
+    ///
+    /// 守两点：①真尺寸常量与图头不同（否则退回图头就静默偏 1px）；②真宽必须是**奇数**、
+    /// 原点用整数除法（`(1024-759)/2 = 132` 而非浮点 132.5）。
+    #[test]
+    fn bigmap_child_anchors_use_get_true_size() {
+        assert_eq!((PANEL_W, PANEL_H), (760.0, 500.0), "图头（贴图 1:1 用）");
+        assert_eq!(
+            (PANEL_TRUE_W, PANEL_TRUE_H),
+            (759.0, 500.0),
+            "C# GetTrueSize(820)"
+        );
+        assert_eq!(PANEL_ORIGIN, (132.0, 134.0), "Center 整数除法");
+        assert_eq!(
+            ((1024.0 - PANEL_TRUE_W) / 2.0).floor(),
+            PANEL_ORIGIN.0,
+            "真宽 759 是奇数：必须 floor，不能用 (1024-760)/2 蒙对"
+        );
+        // 图头模型（错）与真尺寸模型（对）在右锚控件上差 1px：
+        assert_eq!(PANEL_ORIGIN.0 + (PANEL_TRUE_W - 21.0), 870.0, "上/下滚钮 x");
+        assert_ne!(
+            PANEL_ORIGIN.0 + (PANEL_W - 21.0),
+            870.0,
+            "图头模型 = 871（原版帧证否）"
+        );
+        assert_eq!(PANEL_ORIGIN.1 + 48.0, 182.0, "上滚钮 y");
+        assert_eq!(
+            PANEL_ORIGIN.1 + (PANEL_TRUE_H - 33.0),
+            601.0,
+            "我的位置钮 y"
+        );
+        assert_eq!(PANEL_ORIGIN.0 + 400.0, 532.0, "我的位置钮 x");
+        // 雷达点居中偏移取真尺寸 10/2 = 5（图头 12 会得 6）
+        assert_eq!(DOT_TRUE_W / 2.0, 5.0);
+        assert_eq!(DOT_TRUE_H / 2.0, 5.0);
     }
 
     /// 2026-09-28 金标准 A/B（README §3.2g）：原版大地图视口 = `Data/mmap.Lib[MapInfo.BigMap]`
