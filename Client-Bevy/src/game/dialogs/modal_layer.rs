@@ -16,8 +16,10 @@
 //
 //   * z = [`MODAL_BLOCKER_Z`]（59）：高于全部非模态窗（观察到的最大 51），
 //     低于全部模态面板（[`MODAL_PANEL_Z`] = 60）⇒ 框**自己**的按钮照常可点；
-//   * 「有没有模态」只有**一处真值**：[`modal_sources`]，世界点击闸与 UI 遮挡层共用它
+//   * 「有没有模态」只有**一处真值**：[`ModalSources`] / [`modal_any_visible`]
 //     （此前 7 处各自挑 z：60/60/60/45/45/46/47，正是本仓反复吃过的「两处维护同一份真值」）。
+//     注意世界点击闸 = 该真值 **∪**「物品已选中」（`player_control::world_click_locked`）——
+//     两者刻意不是一个集合，见 [`modal_any_visible`] 的说明。
 //
 // ⚠️ 这条遮挡**离线证不了**（bevy_ui picking 的命中栈要真光标）：`dialogs/interact_gate.rs`
 // 模块头自己写明不守遮挡。判据在 `tools/acceptance/ui_interact_sweep.ps1` 的
@@ -33,7 +35,7 @@ use crate::game::dialogs::game_shop::GameShopState;
 use crate::game::dialogs::group::GroupState;
 use crate::game::dialogs::guild::GuildState;
 use crate::game::dialogs::hero::HeroState;
-use crate::game::dialogs::inventory::{InvClickState, InvDropConfirm};
+use crate::game::dialogs::inventory::InvDropConfirm;
 use crate::game::dialogs::notice_box::NoticeBox;
 use crate::scenes::AppState;
 
@@ -52,8 +54,6 @@ pub struct ModalBlocker;
 /// 所有模态来源的状态（C# `Modal = true` 的那些控件对应的本端状态）。
 #[derive(SystemParam)]
 pub struct ModalSources<'w> {
-    /// 背包选中物品（拖动/丢弃路径的模态态）
-    pub click: Res<'w, InvClickState>,
     /// `MirAmountBox`（数量框）
     pub amount: Res<'w, AmountBoxState>,
     /// 丢弃确认（`MirMessageBox`）
@@ -76,7 +76,6 @@ impl ModalSources<'_> {
     /// 任一模态控件可见 ⇒ 必须遮挡。
     pub fn any_visible(&self) -> bool {
         modal_any_visible(
-            self.click.selected.is_some(),
             self.amount.visible,
             self.confirm.visible,
             self.assign_key.visible,
@@ -89,10 +88,24 @@ impl ModalSources<'_> {
     }
 }
 
-/// 「有没有模态」的**纯函数真值**（世界点击闸与 UI 遮挡层共用；单测直接钉它）。
+/// 「有没有模态」的**纯函数真值**（UI 遮挡层用，单测直接钉它）。
+///
+/// 世界点击闸**不等于**它：世界点击闸 = 本函数 ∪ 「物品已选中」
+/// （`player_control::world_click_locked`）。两者刻意不是一个集合，理由见下。
+///
+/// **为什么这里不含「选中物品」**（2026-09-30 修 #3396 引入的回归）：
+/// C# 全仓 `Modal = true` 只有 7 处 —— `MirMessageBox.cs:19`、`MirAmountBox.cs:21,100`、
+/// `MirInputBox.cs:14`、`NewCharacterDialog.cs:51`、`MainDialogs.cs:2013,3802`
+/// （其中 `2013` 因 `NotControl` 失效）—— **没有一处对应「选中物品」**。
+/// 把它算进遮挡真值，就会让「背包里单击选中一件物品」凭空升起一层全屏遮挡节点
+/// （z = [`MODAL_BLOCKER_Z`] 盖住 z ∈ [`DIALOG_Z_MIN`, `DIALOG_Z_MAX`] 的全部对话框）
+/// ⇒ 连背包自己的 X / Add / Del 都点不动。
+///
+/// 而「选中物品时**世界点击**让路」是本仓既有且刻意的行为（原
+/// `modal_ui_locked(selected, amount, confirm, assign_key)` 就带它，并有真值表单测），
+/// 所以它留在 `world_click_locked` 里，不进这里。
 #[allow(clippy::too_many_arguments)]
 pub fn modal_any_visible(
-    selected: bool,
     amount: bool,
     confirm: bool,
     assign_key: bool,
@@ -102,8 +115,7 @@ pub fn modal_any_visible(
     shop_confirm: bool,
     hero_confirm: bool,
 ) -> bool {
-    selected
-        || amount
+    amount
         || confirm
         || assign_key
         || notice
@@ -194,18 +206,22 @@ mod tests {
         );
     }
 
-    /// 真值函数：9 个来源任一为真即遮挡；全假时不遮挡。
+    /// 真值函数：8 个来源任一为真即遮挡；全假时不遮挡。
+    ///
+    /// 8 = C# `Modal = true` 对应的本端状态（数量框/丢弃确认/快捷键/通用 MirMessageBox +
+    /// 组队·行会·商城·英雄四处 MirMessageBox）。**不含「选中物品」**——那不是 C# 的 Modal，
+    /// 算进来会让单击选中一件物品就升起全屏遮挡层（#3396 回归，见函数文档）。
     #[test]
     fn modal_any_visible_is_union_of_sources() {
-        let none = [false; 9];
+        let none = [false; 8];
         assert!(!modal_any_visible(
-            none[0], none[1], none[2], none[3], none[4], none[5], none[6], none[7], none[8]
+            none[0], none[1], none[2], none[3], none[4], none[5], none[6], none[7]
         ));
-        for i in 0..9 {
+        for i in 0..8 {
             let mut v = none;
             v[i] = true;
             assert!(
-                modal_any_visible(v[0], v[1], v[2], v[3], v[4], v[5], v[6], v[7], v[8]),
+                modal_any_visible(v[0], v[1], v[2], v[3], v[4], v[5], v[6], v[7]),
                 "第 {i} 个模态来源为真时应当遮挡"
             );
         }
