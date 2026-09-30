@@ -504,6 +504,68 @@ mod tests {
         assert_eq!(shop_plain, vec![DIALOG_Z_MAX], "普通根照常排到带顶");
     }
 
+    /// **饱和回归（2026-09-30，walgit 线程 `crystal-compact-z-saturation`）**：
+    /// `DialogKind` 有 **51** 个变体、其中 **47** 个有字面 `DialogRoot(DialogKind::X)` 实体，
+    /// 而带容量只有 **26** ⇒ 用 `compact_zs(n)` 会在顶端并列 55、`delta = 0`
+    /// ⇒「点窗置前」静默失效。
+    ///
+    /// 本用例钉住用户实际依赖的那一条不变式：**被点的那扇（恒在末尾）严格高于其余每一扇**。
+    ///
+    /// 红检：把 `plan_dialog_zs` 的饱和分支改成 `compact_zs_in(len, DIALOG_Z_MIN, DIALOG_Z_MAX)`
+    /// （即不腾出带顶）→ 饱和档的「其余严格低于带顶」失败（并列 55）。
+    #[test]
+    fn plan_dialog_zs_puts_bumped_kind_strictly_on_top() {
+        // 不饱和：其余保持原 z（churn 最小），只有被点的动
+        let zs = plan_dialog_zs(&[DIALOG_Z_MIN, 40]);
+        assert_eq!(zs, vec![DIALOG_Z_MIN, 40, DIALOG_Z_MAX]);
+        assert_eq!(
+            plan_dialog_zs(&[]),
+            vec![DIALOG_Z_MAX],
+            "只有一扇窗时直接带顶"
+        );
+
+        // 饱和档：其余有人已占住带顶 ⇒ 必须压缩腾位，否则被点的与被占的并列
+        for n_others in [1usize, 2, 25, 26, 50] {
+            for others_keep in [
+                vec![DIALOG_Z_MAX; n_others],
+                (0..n_others)
+                    .map(|i| DIALOG_Z_MIN + (i as i32 % 20))
+                    .collect::<Vec<_>>(),
+            ] {
+                let zs = plan_dialog_zs(&others_keep);
+                assert_eq!(zs.len(), n_others + 1, "n_others={n_others}");
+                assert_eq!(
+                    *zs.last().unwrap(),
+                    DIALOG_Z_MAX,
+                    "n_others={n_others}：被点的必须拿带顶"
+                );
+                assert!(
+                    zs[..n_others].iter().all(|z| *z < DIALOG_Z_MAX),
+                    "n_others={n_others}：其余必须**严格**低于带顶，否则点窗置前失效"
+                );
+            }
+        }
+
+        // 51 = DialogKind 全量，饱和最严重的一档：50 个其余（全部占住带顶）+ 1 个被点
+        let zs = plan_dialog_zs(&[DIALOG_Z_MAX; 50]);
+        assert_eq!(zs.len(), 51);
+        assert_eq!(*zs.last().unwrap(), DIALOG_Z_MAX);
+        assert!(
+            zs[..50].iter().all(|z| *z < DIALOG_Z_MAX),
+            "51 个 kind 时其余仍须严格低于带顶"
+        );
+        assert!(
+            zs[..50]
+                .iter()
+                .all(|z| (DIALOG_Z_MIN..=DIALOG_Z_MAX - 1).contains(z)),
+            "压缩后其余必须落在 [DIALOG_Z_MIN, DIALOG_Z_MAX - 1]"
+        );
+        assert!(
+            DIALOG_Z_MAX < crate::game::dialogs::modal_layer::MODAL_BLOCKER_Z,
+            "带顶仍须低于全屏遮挡层"
+        );
+    }
+
     #[test]
     fn state_dialog_sync_truth_table() {
         let mut m = DialogManager::default();
@@ -1363,21 +1425,58 @@ pub struct DialogZ {
 pub const DIALOG_Z_MIN: i32 = 30;
 pub const DIALOG_Z_MAX: i32 = 55;
 
-/// 排名压缩：把 `n` 个已按 z 升序排好的对话框映射回 `[DIALOG_Z_MIN, DIALOG_Z_MAX]`。
+/// 排名压缩（任意区间）：把 `n` 个已按 z 升序排好的对话框映射进 `[lo, hi]`。
 ///
-/// 不变式（单测钉住）：非降序、`<= DIALOG_Z_MAX`、`>= DIALOG_Z_MIN`；`n=1` 取带顶。
-pub fn compact_zs(n: usize) -> Vec<i32> {
+/// 不变式（单测钉住）：非降序、`<= hi`、`>= lo`；`n=1` 取 `hi`。
+/// 注：`n > hi - lo + 1` 时**顶端并列**（容量不够）—— 这正是 `plan_dialog_zs` 要处理的问题。
+pub fn compact_zs_in(n: usize, lo: i32, hi: i32) -> Vec<i32> {
     match n {
         0 => Vec::new(),
-        1 => vec![DIALOG_Z_MAX],
+        1 => vec![hi],
         _ => {
-            let span = DIALOG_Z_MAX - DIALOG_Z_MIN;
+            let span = hi - lo;
             let step = (span / (n as i32 - 1)).max(1);
-            (0..n)
-                .map(|i| (DIALOG_Z_MIN + i as i32 * step).min(DIALOG_Z_MAX))
-                .collect()
+            (0..n).map(|i| (lo + i as i32 * step).min(hi)).collect()
         }
     }
+}
+
+/// 排名压缩：`[DIALOG_Z_MIN, DIALOG_Z_MAX]` 区间上的 `compact_zs_in`。
+pub fn compact_zs(n: usize) -> Vec<i32> {
+    compact_zs_in(n, DIALOG_Z_MIN, DIALOG_Z_MAX)
+}
+
+/// 新 z 规划：入参是**其余 kind 的当前 z**（按排名升序），返回值按同一顺序给出各自的**新 z**，
+/// 末尾追加**被点的那扇**的 z。
+///
+/// 语义：**默认只动被点的那扇**（取带顶 `DIALOG_Z_MAX`），其余**保持原 z** ⇒ churn 最小、
+/// 不与既有单测钉住的「非被点窗留在原处」冲突；只有当其余里**已经有人占住带顶**（真饱和）时，
+/// 才把它们按排名压进 `[DIALOG_Z_MIN, DIALOG_Z_MAX - 1]` 腾出带顶。
+///
+/// 不变式（单测钉住，也正是用户实际依赖的那一条）：
+/// **末尾 = `DIALOG_Z_MAX`，其余每一项都严格小于它** ⇒ 被点的那扇**严格高于**其它每一扇。
+///
+/// **为什么不能直接 `compact_zs(n)`**（2026-09-30 修饱和，walgit 线程
+/// `crystal-compact-z-saturation`）：`DialogKind` 有 **51** 个变体 —— **47** 个写字面
+/// `DialogRoot(DialogKind::X)`，另 3 个（`NpcGoods` / `MailCompose` / `MailRead`）走全路径或常量，
+/// 合计 **50** 个有 `DialogRoot` 实体；`ChatNotice` 连实体都没有（状态驱动的顶部横幅）。
+/// 而这 50 个里 **`InputBox` 不参与带内排名** —— 它唯一的根恒在模态层（`MODAL_PANEL_Z` = 60），
+/// 建 `per_kind` 时被 `is_modal_layer_root` 跳过 ⇒ 实际**参与排名的是 49 个**。
+/// 而带容量只有 `55 - 30 + 1 = 26` ⇒ 只要同时参与排名的 kind 超过 26 个（本仓稳态下必然如此）
+/// `compact_zs` 就在**顶端并列 55**，于是 `delta = 55 - 55 = 0`，**「点窗置前」静默失效**（点哪扇都不动）。
+///
+/// 可用区间（高于 HUD chrome ≤ 25、低于全屏遮挡层 59）**放不下 49 个互不相同的 z**，
+/// 所以这里**不追求全序**，只保证用户真正依赖的那条：**最后被点的那扇严格在最上**。
+/// 其余并列者的先后由 `ui_stack_system` 的根序决定（稳定但任意）—— 这是该区间下的必然取舍。
+pub fn plan_dialog_zs(others_keep: &[i32]) -> Vec<i32> {
+    let occupied_top = others_keep.iter().any(|z| *z >= DIALOG_Z_MAX);
+    let mut v: Vec<i32> = if occupied_top {
+        compact_zs_in(others_keep.len(), DIALOG_Z_MIN, DIALOG_Z_MAX - 1)
+    } else {
+        others_keep.to_vec()
+    };
+    v.push(DIALOG_Z_MAX);
+    v
 }
 
 /// 根面板 Node 矩形（屏幕坐标：根面板是 UI 根的子节点，left/top 即绝对坐标）。
@@ -1648,8 +1747,6 @@ pub fn dialog_front_system(
     }
 }
 
-/// 把指定对话框整体平移到置顶 z（保留内部相对层级：整体平移使最高者 = z.top，
-/// 覆盖层如 MailCompose/StorageUnlock 保持高于其父面板）
 /// 这个根是否属于**模态层**（z ≥ [`modal_layer::MODAL_BLOCKER_Z`]）：`MirMessageBox` 系
 /// 覆盖层、数量框、输入框、快捷键框等。它们**不参与** z 带的排名与平移。
 ///
@@ -1697,8 +1794,14 @@ fn bump_dialog_z(
     order.retain(|k| *k != kind);
     order.push(kind);
 
-    // 3) 排名 → 带内新 z（非降序、≤ 带顶）
-    let zs = compact_zs(order.len());
+    // 3) 新 z 规划（见 `plan_dialog_zs`）：默认只动被点的那扇；
+    //    只有在别的窗已占住带顶（kind 数 > 带容量 26）时才压缩其余腾位 ——
+    //    这是「点窗置前」在 51 个 kind 下仍然成立的关键。
+    let others_keep: Vec<i32> = order[..order.len() - 1]
+        .iter()
+        .map(|k| per_kind.get(k).copied().unwrap_or(DIALOG_Z_MIN))
+        .collect();
+    let zs = plan_dialog_zs(&others_keep);
     let mut new_z: std::collections::HashMap<DialogKind, i32> = std::collections::HashMap::new();
     for (i, k) in order.iter().enumerate() {
         new_z.insert(*k, zs[i]);
