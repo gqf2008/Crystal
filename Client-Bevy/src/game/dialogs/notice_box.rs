@@ -233,6 +233,10 @@ pub struct ShowGuardState {
     pub has_fishing_rod: bool,
     /// 当前地图有没有大地图：`GameData.big_map_index > 0`（C# `MapControl.BigMap > 0`）
     pub has_big_map: bool,
+    /// 是否已有英雄：`HeroState.current.is_some()`（C# `GameScene.Hero != null`）——
+    /// 无英雄时 C# 对英雄背包/英雄装备是 **`if (Hero == null) break;` 静默不开窗**
+    /// （`GameScene.cs:582/588/598`，连提示框都没有），见 §3.2ci。
+    pub has_hero: bool,
 }
 
 /// 钓鱼竿判定用的武器 shape 白名单（C# `Shared/Globals.cs`：`n = new int[] { 49, 50 }`）
@@ -262,6 +266,11 @@ pub fn show_guard(kind: DialogKind, st: &ShowGuardState) -> ShowGuard {
         DialogKind::Fishing if !st.has_fishing_rod => ShowGuard::Block("你没有拿着鱼竿。"),
         // `BigMapDialog.Show()`：`if (map.BigMap <= 0) return;`——**静默**不开窗，没有提示框
         DialogKind::BigMap if !st.has_big_map => ShowGuard::BlockSilent,
+        // `GameScene.cs:581-596`：英雄背包/英雄装备在 `Hero == null` 时直接 `break`——**静默**，
+        // 既不开窗也不弹提示（与上面四扇「弹框」的守卫不是同一种拦法）。
+        DialogKind::HeroInventory | DialogKind::HeroEquipment if !st.has_hero => {
+            ShowGuard::BlockSilent
+        }
         _ => ShowGuard::Allow,
     }
 }
@@ -271,6 +280,13 @@ pub fn show_guard(kind: DialogKind, st: &ShowGuardState) -> ShowGuard {
 pub struct ShowGuardParams<'w, 's> {
     guild: Res<'w, crate::game::dialogs::guild::GuildState>,
     creatures: Res<'w, crate::game::dialogs::creature::CreatureState>,
+    /// 英雄状态：`current.is_some()` ⇔ C# `GameScene.Hero != null`（英雄背包/装备的静默守卫）。
+    ///
+    /// **必须是 `ResMut`**：`control.rs` 的 `ControlQueries` 里**不再**单独挂一份 `HeroState`
+    /// （RPC 的 `hero_manage` 开关、`hero_set` 夹具、`hero_probe` 都改走这里的 accessor）——
+    /// 同一系统里 `ResMut<HeroState>` 与 `Res<HeroState>` 并存会直接触发 Bevy **B0002** panic
+    /// （本轮实机踩到：客户端一起来就 `error[B0002] ... conflicts with a previous system parameter`）。
+    hero: ResMut<'w, crate::game::dialogs::hero::HeroState>,
     mounts:
         Query<'w, 's, Option<&'static crate::actor::MountState>, With<crate::actor::LocalPlayer>>,
     loadout:
@@ -281,6 +297,16 @@ pub struct ShowGuardParams<'w, 's> {
 }
 
 impl ShowGuardParams<'_, '_> {
+    /// 只读英雄状态（`hero_probe` / 守卫判定用）
+    pub fn hero(&self) -> &crate::game::dialogs::hero::HeroState {
+        &self.hero
+    }
+
+    /// 可写英雄状态（`hero_manage` RPC 开关、`hero_set` 夹具用）
+    pub fn hero_mut(&mut self) -> &mut crate::game::dialogs::hero::HeroState {
+        &mut self.hero
+    }
+
     pub fn state(&self) -> ShowGuardState {
         let has_mount = self.mounts.iter().any(|m| m.is_some());
         let has_fishing_rod = self
@@ -297,6 +323,7 @@ impl ShowGuardParams<'_, '_> {
             has_mount,
             has_fishing_rod,
             has_big_map: self.game_data.big_map_index > 0,
+            has_hero: self.hero.current.is_some(),
         }
     }
 
@@ -355,6 +382,7 @@ mod tests {
             has_mount: true,
             has_fishing_rod: true,
             has_big_map: true,
+            has_hero: true,
         }
     }
 
@@ -369,6 +397,8 @@ mod tests {
             DialogKind::Mount,
             DialogKind::Fishing,
             DialogKind::BigMap,
+            DialogKind::HeroInventory,
+            DialogKind::HeroEquipment,
             DialogKind::Inventory,
         ] {
             assert_eq!(
@@ -430,6 +460,22 @@ mod tests {
             ),
             ShowGuard::BlockSilent
         );
+        // 英雄背包 / 英雄装备：C# `GameScene.cs:581-596` 的 `if (Hero == null) break;` ——
+        // 同样是**静默**拦下（连提示框都没有），2026-09-30 由原版帧反证：
+        // 把两窗临时改绑到 PageUp/PageDown 后按键，帧里既没有窗、也没有消息框。
+        for k in [DialogKind::HeroInventory, DialogKind::HeroEquipment] {
+            assert_eq!(
+                show_guard(
+                    k,
+                    &ShowGuardState {
+                        has_hero: false,
+                        ..ok
+                    }
+                ),
+                ShowGuard::BlockSilent,
+                "{k:?} 无英雄时应静默拦下"
+            );
+        }
         // 无守卫的窗不受影响
         assert_eq!(
             show_guard(DialogKind::Inventory, &ShowGuardState::default()),

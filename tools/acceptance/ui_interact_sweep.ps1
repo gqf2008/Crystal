@@ -360,6 +360,14 @@ try {
         # 清场：上一扇窗若走过 Show() 守卫，会留下一个 MirMessageBox；不清掉会让下一扇
         # 看似"守卫了"（假 GUARDED），也可能挡住关闭钮的点击（#3314 之后新增的探针）。
         Rpc 'notice_probe' @{ action = 'close' } | Out-Null
+        # 英雄背包/英雄装备的 C# `Show()` 守卫是**静默**的（`GameScene.cs:582/588`
+        # `if (Hero == null) break;`——不开窗也不弹提示）。巡回是"逐窗点 X"的门禁，
+        # 所以这两扇要先**摆一个有英雄的状态**（客户端夹具 `hero_set`，与 big_map 的锚图同性质：
+        # 没有它，跑在无英雄账号上会恒红，红的却是夹具起点）。
+        if ($k -eq 'hero_inventory' -or $k -eq 'hero_equipment') {
+            Rpc 'hero_set' @{ current = '英雄小刀' } | Out-Null
+            Start-Sleep -Milliseconds 200
+        }
         Rpc 'dialog' @{ kind = $k; action = 'open' } | Out-Null
         Start-Sleep -Milliseconds 800
         $rect = Rpc 'dialog_rect' @{ kind = $k }

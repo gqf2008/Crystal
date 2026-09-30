@@ -586,6 +586,15 @@ enum ControlCommand {
         divorce_invite: Option<String>,
         reply: Sender<String>,
     },
+    /// 实机夹具（§3.2ci）：把 `HeroState.current` 摆成「有英雄 / 无英雄」。
+    ///
+    /// 存在理由：C# 对英雄背包/英雄装备有**静默**前置守卫（`GameScene.cs:582/588`
+    /// `if (Hero == null) break;`），而 mock 一登录就带一个英雄 ⇒ 没法验证「无英雄时不开窗」
+    /// 这一支。这条夹具让两种状态都能一键摆出来（`current = None` / `Some(...)`）。
+    HeroSet {
+        current: Option<String>,
+        reply: Sender<String>,
+    },
     /// 翻转 HUD 开关（2026-09-28，#3327）：`which` = `"belt"` / `"skillbar"`，
     /// `on = None` = 翻转（与 C# 热键同语义）。逐窗 A/B 的两行 HUD（Belt/Skillbar）
     /// 此前只能整帧比、等于噪声；有了它我方侧也能把这两行摆到屏上做窗内比对。
@@ -1104,9 +1113,10 @@ struct ControlQueries<'w, 's> {
     primary_window: Query<'w, 's, &'static Window, With<PrimaryWindow>>,
     /// dialog_rect 诊断：任意实体的 Visibility 读取（关闭钮祖先链诊断）
     all_visibility: Query<'w, 's, &'static Visibility>,
-    /// #2791：`hero_manage` 是状态驱动窗（不经 `DialogManager.open`，见 dialogs/mod.rs
-    /// 的 `DialogKind::HeroManage`），RPC 直接切 `HeroState.managing`
-    hero: ResMut<'w, crate::game::dialogs::hero::HeroState>,
+    // #2791：`hero_manage` 是状态驱动窗（不经 `DialogManager.open`，见 dialogs/mod.rs 的
+    // `DialogKind::HeroManage`），RPC 直接切 `HeroState.managing`。
+    // 注意：`HeroState` **挂在 `guard`（`ShowGuardParams`）里**，本结构不再单独挂一份——
+    // 同系统内 `ResMut` 与 `Res` 并存会 B0002 panic（§3.2ci 实机踩到）。
     /// #2801 单元②③：任务详情窗状态（`quest_detail` RPC 直接指定任务/分页首行/询问框）
     quest_detail: ResMut<'w, crate::game::dialogs::quest_log::QuestDetailState>,
     /// #2892 批C：`MirInputBox` 是状态驱动窗（服务端 `S.GuildNameRequest`/`S.GuildRequestWar`
@@ -1532,6 +1542,29 @@ fn handle_conn(mut stream: std::net::TcpStream, tx: Sender<ControlCommand>) {
                     } else {
                         json!({"error": "control channel closed"})
                     }
+                }
+            }
+            // 实机夹具（§3.2ci）：英雄「有/无」两态。{current: "英雄名"|null}
+            "hero_set" => {
+                let current = params
+                    .get("current")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string())
+                    .filter(|s| !s.is_empty());
+                let (reply_tx, reply_rx) = bounded::<String>(1);
+                if tx
+                    .send(ControlCommand::HeroSet {
+                        current,
+                        reply: reply_tx,
+                    })
+                    .is_ok()
+                {
+                    let s = reply_rx
+                        .recv_timeout(std::time::Duration::from_secs(2))
+                        .unwrap_or_else(|_| "{}".to_string());
+                    serde_json::from_str::<Value>(&s).unwrap_or_else(|_| json!({}))
+                } else {
+                    json!({"error": "control channel closed"})
                 }
             }
             // 实机夹具（§3.2cf）：关系/婚姻窗状态。{married,lover_name,date,map_name,married_days,invite,divorce_invite}
@@ -3113,12 +3146,15 @@ fn apply_control_commands(
                 // 不进 `DialogManager.open`——RPC 直接切 `HeroState.managing`
                 if kind == DialogKind::HeroManage {
                     match action {
-                        DialogAction::Open => q.hero.managing = true,
+                        DialogAction::Open => q.guard.hero_mut().managing = true,
                         DialogAction::Close => {
-                            q.hero.managing = false;
-                            q.hero.confirm_slot = None;
+                            q.guard.hero_mut().managing = false;
+                            q.guard.hero_mut().confirm_slot = None;
                         }
-                        DialogAction::Toggle => q.hero.managing = !q.hero.managing,
+                        DialogAction::Toggle => {
+                            let v = q.guard.hero().managing;
+                            q.guard.hero_mut().managing = !v;
+                        }
                     }
                 } else if kind == DialogKind::InputBox {
                     // #2892 批C：`MirInputBox` 由业务状态驱动（服务端发起），RPC 直接切状态
@@ -3804,6 +3840,22 @@ fn apply_control_commands(
                     json!({"ok": true, "visible": q.guard.notice.is_visible()}).to_string(),
                 );
             }
+            // 实机夹具（§3.2ci）：英雄「有/无」两态（供 hero 静默守卫取证）
+            ControlCommand::HeroSet { current, reply } => {
+                q.guard.hero_mut().current =
+                    current.map(
+                        |name| mir2_shared::data::client_data::ClientHeroInformation {
+                            index: 1,
+                            name,
+                            level: 30,
+                            class: mir2_shared::enums::MirClass::Warrior,
+                            gender: mir2_shared::enums::MirGender::Male,
+                        },
+                    );
+                let _ = reply.try_send(
+                    json!({"ok": true, "has_hero": q.guard.hero().current.is_some()}).to_string(),
+                );
+            }
             // 实机夹具（§3.2cf）：关系/婚姻窗状态（三态文案 + 求婚/离婚两种确认框）
             ControlCommand::RelationshipSet {
                 married,
@@ -4375,21 +4427,22 @@ fn apply_control_commands(
                 // 判据用「运行时 `hero_max_exp` == 配置曲线 `Level<英雄等级>`」，同时能证明
                 // >u32::MAX 的曲线值没有被截断（原版 Level100=5_400_000_000）。
                 let list: Vec<serde_json::Value> = q
-                    .hero
+                    .guard
+                    .hero()
                     .heroes
                     .iter()
                     .map(|h| json!({"index": h.index, "name": h.name, "level": h.level}))
                     .collect();
                 let payload = json!({
                     "ok": true,
-                    "hero_index": q.hero.hero_index,
-                    "object_id": q.hero.object_id,
-                    "hero_level": q.hero.hero_level,
-                    "hero_exp": q.hero.hero_exp,
-                    "hero_max_exp": q.hero.hero_max_exp,
-                    "hero_hp": q.hero.hero_hp,
-                    "hero_max_hp": q.hero.hero_max_hp,
-                    "managing": q.hero.managing,
+                    "hero_index": q.guard.hero().hero_index,
+                    "object_id": q.guard.hero().object_id,
+                    "hero_level": q.guard.hero().hero_level,
+                    "hero_exp": q.guard.hero().hero_exp,
+                    "hero_max_exp": q.guard.hero().hero_max_exp,
+                    "hero_hp": q.guard.hero().hero_hp,
+                    "hero_max_hp": q.guard.hero().hero_max_hp,
+                    "managing": q.guard.hero().managing,
                     "list": list,
                 });
                 tracing::info!("🎮 control hero_probe: {payload}");
