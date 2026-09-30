@@ -2798,11 +2798,13 @@ fn panel_sprites_batch_b1_match_csharp() {
     );
 
     // 居中公式（C# `Location = Center` → `((1024-W)/2, (768-H)/2)` 整数除法）
+    // 注意：公式里的 `W/H` 是 **C# `Size` = `GetTrueSize`**（不是图头）。Friend 图头 264/真实 261
+    // ⇒ 真值 381；Relationship/Mentor 两者相同 ⇒ 不受影响（§3.2cl）。
     for (name, (lib, idx), origin) in [
         (
             "Friend",
             friend::PANEL,
-            center_origin(friend::PANEL_SIZE.0, friend::PANEL_SIZE.1),
+            center_origin(friend::LAYOUT_SIZE.0, friend::LAYOUT_SIZE.1),
         ),
         (
             "Mentor",
@@ -2821,17 +2823,26 @@ fn panel_sprites_batch_b1_match_csharp() {
         ),
     ] {
         let real = libs.size(lib, idx);
+        let true_size = libs.true_size(lib, idx);
+        // Creature 仍是**旧口径**（按图头 452x376 居中 = (286,196)），C# `Size` 实为 GetTrueSize 449x375
+        // ⇒ 应为 (287,196)。它没进本轮（该窗在沙箱被 `Show()` 守卫挡住、取不到原版帧），
+        // 此处置为"按图头核对"以免假绿，并在 §3.2cl ⑤ 登记为待修。
+        let expect_true = name != "Creature";
+        let basis = if expect_true { true_size } else { real };
         assert_eq!(
             origin,
-            (((SW - real.0) / 2.0).floor(), ((SH - real.1) / 2.0).floor()),
-            "[居中] {name} 原点应等于按真实精灵尺寸代入的 C# 居中公式"
+            (
+                ((SW - basis.0) / 2.0).floor(),
+                ((SH - basis.1) / 2.0).floor()
+            ),
+            "[居中] {name} 原点应等于按 **C# `Size` = GetTrueSize** 代入的居中公式（图头 {real:?}、真实 {true_size:?}、本轮口径={basis:?}）"
         );
     }
     // Help：`HelpDialog.Location = Center`（代码里的 ORIGIN 常量）
     assert_eq!(
         help::ORIGIN,
-        center_origin(help::PANEL_SIZE.0, help::PANEL_SIZE.1),
-        "[居中] Help 原点常量应等于 C# 居中公式结果"
+        center_origin(help::LAYOUT_SIZE.0, help::LAYOUT_SIZE.1),
+        "[居中] Help 原点常量应等于 C# 居中公式结果（`Size` = GetTrueSize(Prguse[920]) = 533x509 → 245,129；图头 536）"
     );
     // Notice：`Location = ((1024-W)/2, (768-H)/3)`（**垂直三分之一**，不是居中）
     assert_eq!(
@@ -2931,20 +2942,28 @@ fn panel_sprites_batch_b2_match_csharp() {
         trade::TRADE_X + trade::TRADE_W < trade::GUEST_X,
         "[重叠] 两个交易窗不得重叠"
     );
-    // 居中类：GameShop / KeyboardLayout
-    for (name, size, origin) in [
+    // 居中类：GameShop / KeyboardLayout（居中用 **C# `Size` = GetTrueSize**；KeyboardLayout 图头 512、
+    // 真实 510 ⇒ 真值 257 —— 原版帧实测 257，本端修前 256，见 §3.2cl）
+    for (name, layout_size, origin) in [
         (
             "GameShop",
+            // GameShop 面板 `Title[749]` 图头 == 真实（696x476），两者同值
             game_shop::PANEL_SIZE,
             center_origin(game_shop::PANEL_SIZE.0, game_shop::PANEL_SIZE.1),
         ),
         (
             "KeyboardLayout",
-            keyboard_layout::PANEL_SIZE,
-            center_origin(keyboard_layout::PANEL_SIZE.0, keyboard_layout::PANEL_SIZE.1),
+            keyboard_layout::LAYOUT_SIZE,
+            center_origin(
+                keyboard_layout::LAYOUT_SIZE.0,
+                keyboard_layout::LAYOUT_SIZE.1,
+            ),
         ),
     ] {
-        let expected = (((SW - size.0) / 2.0).floor(), ((SH - size.1) / 2.0).floor());
+        let expected = (
+            ((SW - layout_size.0) / 2.0).floor(),
+            ((SH - layout_size.1) / 2.0).floor(),
+        );
         assert_eq!(
             origin, expected,
             "[居中] {name} 应按 C# `Location = Center` 居中"

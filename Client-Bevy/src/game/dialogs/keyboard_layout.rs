@@ -350,6 +350,12 @@ pub fn default_bindings() -> Vec<KeyBinding> {
 /// 面板尺寸（Title[119] 实测 512x430）
 const PANEL_W: f32 = 512.0;
 const PANEL_H: f32 = 430.0;
+/// **布局**尺寸 = C# `Size` = `GetTrueSize(Title[119])` = **510x430**（图头 512x430，右侧 2 列 alpha=0）。
+/// `Location = Center` = `((1024-510)/2, (768-430)/2)` = **(257,169)**——原版帧实测正是 (257,169)；
+/// 本端此前按图头算成 256（§3.2cl：这不是"居中窗口径 +1px"，是 `GetTrueSize` 少算）。
+pub const LAYOUT_SIZE: (f32, f32) = (510.0, 430.0);
+const LAYOUT_W: f32 = LAYOUT_SIZE.0;
+const LAYOUT_H: f32 = LAYOUT_SIZE.1;
 
 /// 键位设置状态
 #[derive(Resource)]
@@ -526,12 +532,22 @@ fn spawn_keyboard_layout(
     let cjk = shared_cjk_font(&mut fonts, &mut cjk_font);
 
     // 面板 Title[119]（512x430），居中
-    let (pw, ph) = match libs.0.get_image(LibraryName::Title, 119) {
-        Some(i) => (i.width.max(0) as f32, i.height.max(0) as f32),
-        None => (PANEL_W, PANEL_H),
+    // 铺图按**图头**（512x430，1:1）；居中按 C# 的 `Size` = `GetTrueSize`（510x430）——两者差 2px，
+    // 用图头居中会整窗左移 1px（原版帧实测 257，本端旧值 256）。
+    let (pw, ph, lw, lh) = match libs.0.get_image(LibraryName::Title, 119) {
+        Some(i) => {
+            let (tw, th) = i.get_true_size();
+            (
+                i.width.max(0) as f32,
+                i.height.max(0) as f32,
+                tw.max(0) as f32,
+                th.max(0) as f32,
+            )
+        }
+        None => (PANEL_W, PANEL_H, LAYOUT_W, LAYOUT_H),
     };
-    let px = (1024.0 - pw) / 2.0;
-    let py = (768.0 - ph) / 2.0;
+    let px = (1024.0 - lw) / 2.0;
+    let py = (768.0 - lh) / 2.0;
 
     let Some(bg) = load_lib_image(&mut libs, &mut images, LibraryName::Title, 119) else {
         return;
@@ -713,10 +729,10 @@ fn keyboard_layout_ui_system(
                         .map(|n| {
                             crate::ui::theme::node_origin(
                                 n,
-                                ((1024.0 - PANEL_W) / 2.0, (768.0 - PANEL_H) / 2.0),
+                                ((1024.0 - LAYOUT_W) / 2.0, (768.0 - LAYOUT_H) / 2.0),
                             )
                         })
-                        .unwrap_or(((1024.0 - PANEL_W) / 2.0, (768.0 - PANEL_H) / 2.0));
+                        .unwrap_or(((1024.0 - LAYOUT_W) / 2.0, (768.0 - LAYOUT_H) / 2.0));
                     for spec in build_rows(&state) {
                         if let RowSpec::Bind { y, index, .. } = spec {
                             let ry = oy + base + y;
