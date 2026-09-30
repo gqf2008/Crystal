@@ -4239,6 +4239,79 @@ dbtool <沙箱>\Server setpos 333 384 99 100 ; dbtool <沙箱>\Server setpos gqf
 **未采集**：交易中的「双方都放物品/改金币/按确认锁定」这些**内容态**帧（本轮只做到"空窗"同状态对拍）；
 以及**原版鼠标点 YES 点不动**这条本身（是"控制被盖住"还是"点击语义"没查，如实记）。
 
+### 3.2cl **更正口径**：所谓「居中窗恒定 +1px 取帧口径」其实是 `GetTrueSize` 少算 1–3px（2026-10-01）
+
+#### ① 更正
+
+§3.2c–§3.2f 起一直被当作"取帧口径、别当缺陷修"的那条 **+1px**，本轮查清是**真缺陷**：
+
+```csharp
+// MirControl.cs:643-646
+protected Point Center => new Point((Settings.ScreenWidth - Size.Width) / 2,
+                                    (Settings.ScreenHeight - Size.Height) / 2);   // 整数除法
+// MirImageControl.cs:145-151（AutoSize 构造默认 true）
+public override Size Size => AutoSize && Library != null && Index >= 0
+                             ? Library.GetTrueSize(Index)   // ← 裁掉 alpha=0 的边
+                             : base.Size;
+```
+
+**居中用的是 `GetTrueSize`（真宽），不是图头宽**。图头比真宽大 1–3px 时，`(1024-真宽)/2` 恰好比 `(1024-图头宽)/2` 大 1px——这就是历轮 A/B 表里那批"原版总比我方 +1px"的来源。
+
+| 窗 | 面板美术 | 图头 | 真实 | C# `Center.x=(1024-真宽)/2` | 原版帧实测 | 本端（修前，按图头） |
+|---|---|---|---|---|---|---|
+| **Friend** | `Title[199]` | 264 | **261** | **381** | 381 ✓ | 380 ✗ |
+| **Help** | `Prguse[920]` | 536 | **533** | **245** | 245 ✓ | 244 ✗ |
+| **KeyboardLayout** | `Title[119]` | 512 | **510** | **257** | 257 ✓ | 256 ✗ |
+
+修后本端逐项 Δ=(0,0)（`Title[199]` 381,248 / `Prguse[920]` 245,129 / `Title[119]` 257,169）。
+**注意**：`(1024-533)/2` 在 C# 是**整数除法** 245；Rust 写 `(1024.0-533.0)/2.0` 会得 245.5（少一次 floor 就偏 0.5px）——
+`help::ORIGIN` 因此写成字面 `(245,129)` 并在注释里留推导。
+
+#### ② 通用规则（写死，后续所有窗都按它核）
+
+1. **布局/命中/裁剪**用 `Size` = `GetTrueSize(Index)`（= alpha>0 的内容 bbox），**不是图头**；
+2. **贴图**仍按图头原尺寸 1:1 铺（C# 是 `Library.Draw` 原样贴，`Size` 不参与缩放）——本端节点尺寸给图头、
+   位置用真尺寸推出来的原点，两者差多少都别把图压了（§3.2ck 邮件窗、§3.2cl 这三扇都是这么改的）；
+3. 位置公式里凡出现 `Size.Width/Height`、`Center`、`(ScreenWidth-W)/2`、`ScreenWidth-W-k` 的，都要按真尺寸算。
+
+#### ③ 全仓扫描配方（可复跑，下一批就靠它）
+
+```python
+# 在仓库根跑：列出「面板 Index 与 Library 相邻声明」且「类体内用 Size 推位置」、
+# 而该美术 图头 != 真宽/真高 的类。
+py -3.12 - <<'PY'   # （bash 下可用 here-doc；pwsh 下把脚本存成文件再跑）
+import re, glob, os, sys, numpy as np
+sys.path.insert(0, 'tools/acceptance/csharp_golden'); from win_locate import load_lib, decode_entry
+LIB = r'%TEMP%\golden_sandbox\Client\Data'
+# …（完整脚本见 walgit 线程 crystal-zero-ab-batch2 的 status 条目，或按上面 ①② 两条规则手查）
+PY
+```
+
+本轮扫出 **22 个类**落入"图头≠真尺寸 **且** 位置公式用到 `Size`"，**除已修的三扇外都还没取原版帧**，按窗口可达性排下一批：
+
+| 类 | 面板/美术 | 图头 | 真实 | 差值提示 |
+|---|---|---|---|---|
+| `MailCompose/Read Letter|Parcel` | `Title[671/674/672/675]` | 236x300/384 | **233x298/383** | 子控件 `Size.Width-27` 差 3px（写/读态可取帧） |
+| `NoticeDialog` | `Prguse[961]` | 316x466 | **314x466** | 居中 x 354→355 |
+| `ChatOptionDialog` | `Title[466]` | 224x180 | **222x180** | 居中 x 400→401 |
+| `ChatNoticeDialog` | `Prguse[1361]` | 660x25 | **659x25** | 居中 x 182→182（差 1 会被整除吃掉，仍要按真值核） |
+| `FishingStatusDialog` | `Prguse[1341]` | 244x128 | **241x127** | 居中/固定 y=300 |
+| `BigMapDialog` | `Title[820]` | 760x500 | **759x500** | `Size.Width-21` 差 1px |
+| `InventoryDialog` | `Title[196]` | 316x236 | **313x235** | 中心类 |
+| `IntelligentCreatureDialog` | `Title[468]` | 452x376 | **449x375** | `Size.Width-25` 差 3px（**守卫窗**：沙箱无宠物取不到帧） |
+| `NewCharacterDialog` | `Prguse[73]` | 588x460 | **583x454** | 居中（选角场景） |
+| `NPCDialog` / `NPCGoodsDialog` / `NPCDropDialog` | `Prguse[995/1000/392]` | 440/244/176 | **438/242/174** | 类内互相引用 `Size.Height/Width` |
+| `NPCAwakeDialog` | `Title[710]` | 360x420 | **309x420** | `Size.Width+5` 差 **51px**（这处最可疑，取帧前先确认面板 Index 解析没错） |
+| `TrustMerchantDialog` | `Title[786]` | 492x478 | **490x478** | 类内引用 |
+| `BuffDialog` / `PoisonBuffDialog` | `Prguse2[20/40]` | 44x34 | **43x34** | `Size.Width-15` 差 1px |
+| `HeroMenuPanel` | `Prguse[2179]` | 24x61 | **22x61** | 居中 |
+| `DuraStatusDialog` | `Prguse[2113]` | 20x19 | **19x19** | HUD 小钮 |
+| `MainDialog`（枚举左端）`Prguse[12]` | 68x96 | **66x95** | 左右端饰件 | |
+| `MiniMapDialog` | `Prguse[2090]` | 128x154 | **126x154** | 宽差 2（`MiniMap.X` 用的是字面 126，本端已一致；仍要核 `Size.Width` 的其它用处） |
+
+**同时更正的历史结论**：§3.2cd/§3.2ce 表里把 Friend/Help/KeyboardLayout 的 Δ=(−1,0) 记成"居中窗口径"的那些行，
+按本条应读作"当时未修的真缺口"；本条目已把它们修掉。
+
 ### 3.2ck 邮件列表窗：`Size` 取 `GetTrueSize`（310）而非源码字面（312）——**整窗 2px + 缺一颗帮助钮**（2026-09-30）
 
 #### ① 原版入口（可复跑）

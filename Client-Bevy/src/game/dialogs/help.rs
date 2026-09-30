@@ -31,9 +31,17 @@ use crate::ui::theme::{
 /// #2892 批B：面板精灵与 C# 原生尺寸（C# `HelpDialog.Index = 920; Library = Libraries.Prguse`）
 pub const PANEL: (LibraryName, usize) = (LibraryName::Prguse, 920);
 pub const PANEL_SIZE: (f32, f32) = (536.0, 509.0);
+/// C# `HelpDialog.Size` = `GetTrueSize(Prguse[920])` = **533x509**（图头 536x509，右侧 3 列 alpha=0）
+/// ⇒ `Location = Center` = `((1024-533)/2, (768-509)/2)` = **(245,129)**。
+///
+/// 2026-09-30 原版帧实测 `Prguse[920]` @(245,129)（§3.2ce 表里记的 (245,129) 当时被我按
+/// "居中窗口径 +1px" 解释掉了——**那条口径是错的**，见 §3.2cl）；本端按图头算成 244。
+pub const LAYOUT_SIZE: (f32, f32) = (533.0, 509.0);
 
 /// 背景 Prguse[920] 实测 536x509；Location = Center = ((1024-536)/2, (768-509)/2)
-pub const ORIGIN: (f32, f32) = (244.0, 129.0);
+/// C# 是**整数除法**：`(1024-533)/2 = 245`、`(768-509)/2 = 129`（Rust 浮点除会得 245.5/129.5，
+/// 少一次 floor 就整窗右下偏 0.5px）。
+pub const ORIGIN: (f32, f32) = (245.0, 129.0);
 /// 快捷键页行容量（C# ShortcutPage1/2 各 18 行，留 20）
 pub const SHORTCUT_ROWS: usize = 20;
 

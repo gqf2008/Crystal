@@ -24,6 +24,12 @@ use crate::ui::theme::{
 /// #2892 批B：面板精灵与 C# 原生尺寸（C# `FriendDialog.Index = 199; Library = Libraries.Title`）
 pub const PANEL: (LibraryName, usize) = (LibraryName::Title, 199);
 pub const PANEL_SIZE: (f32, f32) = (264.0, 272.0);
+/// C# `FriendDialog.Size` = `GetTrueSize(Title[199])` = **261x271**（图头 264x272，右 3 列与末 1 行 alpha=0）
+/// ⇒ `Location = Center` = `((1024-261)/2, (768-271)/2)` = **(381,248)**。
+///
+/// 2026-09-30 原版帧实测 `Title[199]` @(381,248)；本端按图头算成 380 —— §3.2ce 当时把这条
+/// 当成"居中窗口径 +1px"记下来了，**那是错的**（§3.2cl）。面板节点仍按图头 264x272 铺，贴图 1:1。
+pub const LAYOUT_SIZE: (f32, f32) = (261.0, 271.0);
 /// 关闭键 `Prguse2[360..362]` @(237,3)（`FriendDialog.cs:123-124`，无 `Size` → 原生 24x21）；
 /// 曾错作 (206,3) → 偏左 31px
 pub const CLOSE_POS: (f32, f32) = (237.0, 3.0);
@@ -257,7 +263,7 @@ fn spawn_friend(
     let Some(bg) = load_lib_image(&mut libs, &mut images, LibraryName::Title, 199) else {
         return;
     };
-    let (px, py) = crate::game::dialogs::center_origin(264.0, 272.0);
+    let (px, py) = crate::game::dialogs::center_origin(LAYOUT_SIZE.0, LAYOUT_SIZE.1);
     let panel = spawn_panel(&mut commands, bg, px, py, PANEL_SIZE.0, PANEL_SIZE.1, 30);
     commands
         .entity(panel)
@@ -820,9 +826,11 @@ mod tests {
 
     #[test]
     fn friend_origin_is_csharp_center() {
+        // C# `Size` = `GetTrueSize(Title[199])` = 261x271 ⇒ `Center` = ((1024-261)/2, (768-271)/2) = (381,248)
+        // 原版帧实测正是 (381,248)（§3.2cl）；旧值 (380,248) 是按图头 264 算的。
         assert_eq!(
-            crate::game::dialogs::center_origin(264.0, 272.0),
-            (380.0, 248.0)
+            crate::game::dialogs::center_origin(LAYOUT_SIZE.0, LAYOUT_SIZE.1),
+            (381.0, 248.0)
         );
     }
 
