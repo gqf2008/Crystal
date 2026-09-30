@@ -168,7 +168,8 @@ fn spawn_assign_key_panel(
     };
     let (w, h) = (380.0, 144.0);
     let (px, py) = ((1024.0 - w) / 2.0, (768.0 - h) / 2.0);
-    let panel = spawn_panel(&mut commands, bg, px, py, w, h, 60);
+    let panel =
+        crate::game::dialogs::modal_layer::spawn_modal_panel(&mut commands, bg, px, py, w, h);
     commands.entity(panel).insert(AssignKeyWidget);
 
     commands.entity(panel).with_children(|p| {

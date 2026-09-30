@@ -1259,14 +1259,13 @@ fn spawn_market(
     // #2720：买/取回确认框（C# `MirMessageBox` YesNo）——独立根节点（不在 TM 面板裁剪内，
     // C# 里也是全局模态框）
     if let Some(h) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 360) {
-        let panel = spawn_panel(
+        let panel = crate::game::dialogs::modal_layer::spawn_modal_panel(
             &mut commands,
             h,
             TM_CONFIRM_POS.0,
             TM_CONFIRM_POS.1,
             TM_CONFIRM_W,
             TM_CONFIRM_H,
-            45,
         );
         commands.entity(panel).insert((
             DialogRoot(DialogKind::Market),

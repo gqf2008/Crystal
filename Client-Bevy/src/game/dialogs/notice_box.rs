@@ -145,15 +145,13 @@ fn spawn_notice_box(
     let Some(bg) = load_lib_image(&mut libs, &mut images, PANEL.0, PANEL.1) else {
         return;
     };
-    let panel = spawn_panel(
+    let panel = crate::game::dialogs::modal_layer::spawn_modal_panel(
         &mut commands,
         bg,
         PANEL_POS.0,
         PANEL_POS.1,
         PANEL_SIZE.0,
         PANEL_SIZE.1,
-        // 模态面板统一 z（`modal_layer::MODAL_PANEL_Z`）：必须高于遮挡层 59
-        crate::game::dialogs::modal_layer::MODAL_PANEL_Z,
     );
     commands
         .entity(panel)

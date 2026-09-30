@@ -133,14 +133,13 @@ fn spawn_input_box(
     };
     let (ox, oy) = PANEL_ORIGIN;
     // 模态面板统一 z（`modal_layer::MODAL_PANEL_Z`）：必须高于遮挡层 59
-    let panel = spawn_panel(
+    let panel = crate::game::dialogs::modal_layer::spawn_modal_panel(
         &mut commands,
         bg,
         ox,
         oy,
         PANEL_W,
         PANEL_H,
-        crate::game::dialogs::modal_layer::MODAL_PANEL_Z,
     );
     commands.entity(panel).insert((
         DialogRoot(DialogKind::InputBox),

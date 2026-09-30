@@ -189,15 +189,8 @@ fn spawn_amount_box(
         return;
     };
     // 模态面板统一 z（`modal_layer::MODAL_PANEL_Z`）：必须高于遮挡层 59
-    let panel = spawn_panel(
-        &mut commands,
-        bg,
-        x,
-        y,
-        204.0,
-        109.0,
-        crate::game::dialogs::modal_layer::MODAL_PANEL_Z,
-    );
+    let panel =
+        crate::game::dialogs::modal_layer::spawn_modal_panel(&mut commands, bg, x, y, 204.0, 109.0);
     commands.entity(panel).insert(AmountBoxWidget);
 
     commands.entity(panel).with_children(|p| {
