@@ -630,8 +630,15 @@ pub enum ServerEvent {
         map_name: String,
         married_days: i16,
     },
-    /// DivorceRequest：离婚请求
-    DivorceRequest,
+    /// DivorceRequest：离婚请求（C# `S.DivorceRequest{Name}` ——`GameScene.cs:6212-6220` 收到后弹 YesNo 框，
+    /// Yes/No → `C.DivorceReply{AcceptInvite}`）。
+    ///
+    /// `name` = 发起方名字（`ServerRust/src/actors/social_packets.rs:685-701` 写的就是
+    /// `requester_name` 的 DotNet 字符串）。**空串 = 服务端没带名字**（历史/异常形状），
+    /// 客户端对此只发系统聊天提示、不弹框（否则会弹一个没有主语的确认框）。
+    DivorceRequest {
+        name: String,
+    },
     /// ItemRentalRequest：租赁会话建立（C# `S.ItemRentalRequest{Name, Renting}`）
     /// `renting = false` → 本端物主（自有物品窗 + 对方费用窗）
     /// `renting = true`  → 本端租客（自有费用窗 + 对方物品窗）；`name` = 对方名

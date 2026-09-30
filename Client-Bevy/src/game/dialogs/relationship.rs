@@ -87,7 +87,25 @@ pub struct RelationshipState {
     pub married_days: i16,
     /// 收到结婚邀请（对方名字）
     pub invite: Option<String>,
+    /// 收到离婚请求（对方名字）——C# `GameScene.cs:6212-6220` 的 YesNo 框；
+    /// 与 `invite` 分开存，避免自动 e2e 里「看到 invite 就回 MarriageReply」那条路径误判。
+    pub divorce_invite: Option<String>,
     pub message: String,
+}
+
+/// 关系确认框的两种语义（决定回 `MarriageReply` 还是 `DivorceReply`）
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum RelationshipPrompt {
+    Marriage,
+    Divorce,
+}
+
+/// 关系确认框正文（逐字取 C# 键值：`PlayerAskedForMarriage` / `PlayerRequestedDivorce`）
+pub fn relationship_prompt_text(prompt: RelationshipPrompt, name: &str) -> String {
+    match prompt {
+        RelationshipPrompt::Marriage => format!("{name} 向你求婚。"),
+        RelationshipPrompt::Divorce => format!("{name} 请求离婚。"),
+    }
 }
 
 /// C# `Date < new DateTime(2000)` 对应的 unix 秒（2000-01-01T00:00:00Z）：
@@ -267,7 +285,7 @@ impl Plugin for RelationshipPlugin {
             Update,
             (
                 relationship_ui_system,
-                marriage_invite_system,
+                relationship_prompt_system,
                 // #2786：伴侣钮动态 Hint（已婚/未婚两态）
                 relationship_allow_hint_system,
             )
@@ -575,8 +593,12 @@ fn relationship_ui_system(
     }
 }
 
-/// 婚姻邀请弹窗：Yes/No → MarriageReply
-fn marriage_invite_system(
+/// 关系确认弹窗（求婚 / 离婚共用同一块 `Prguse[360]` 框）：Yes/No → `MarriageReply` 或 `DivorceReply`。
+///
+/// C# 两处都是 `MirMessageBox(…, YesNo)`：
+/// * 求婚 `GameScene.cs:6204`（`PlayerAskedForMarriage` = 「{0} 向你求婚。」）→ `C.MarriageReply`
+/// * 离婚 `GameScene.cs:6212-6220`（`PlayerRequestedDivorce` = 「{0} 请求离婚。」）→ `C.DivorceReply`
+fn relationship_prompt_system(
     mut state: ResMut<RelationshipState>,
     net: Res<NetConnection>,
     yes: Query<(Entity, &Interaction), With<MarriageInviteYes>>,
@@ -593,24 +615,29 @@ fn marriage_invite_system(
         let was = prev.insert(e, *inter);
         *inter == Interaction::Pressed && was != Some(Interaction::Pressed)
     }
-    let has_invite = state.invite.is_some();
+    // 两个提示同屏时以「求婚」优先（C# 里两者各自弹独立消息框；本端复用一块框）
+    let prompt: Option<(RelationshipPrompt, String)> = match (&state.invite, &state.divorce_invite)
+    {
+        (Some(n), _) => Some((RelationshipPrompt::Marriage, n.clone())),
+        (None, Some(n)) => Some((RelationshipPrompt::Divorce, n.clone())),
+        (None, None) => None,
+    };
     for mut vis in widgets.iter_mut() {
-        *vis = if has_invite {
+        *vis = if prompt.is_some() {
             Visibility::Visible
         } else {
             Visibility::Hidden
         };
     }
     for (mut text, _) in &mut texts {
-        text.0 = match state.invite.as_ref() {
-            // C# `GameScene.cs:6204`：`PlayerAskedForMarriage` = 「{0} 向你求婚。」（句号，非感叹号）
-            Some(name) => format!("{name} 向你求婚。"),
+        text.0 = match &prompt {
+            Some((kind, name)) => relationship_prompt_text(*kind, name),
             None => String::new(),
         };
     }
-    if state.invite.is_none() {
+    let Some((kind, _)) = prompt else {
         return;
-    }
+    };
     let mut accept: Option<bool> = None;
     for (e, inter) in &yes {
         if edge(e, inter, &mut prev_inter) {
@@ -623,9 +650,22 @@ fn marriage_invite_system(
         }
     }
     if let Some(a) = accept {
-        net.send_packet(&mir2_shared::packets::client::misc::MarriageReply { accept_invite: a });
-        tracing::info!("💍 婚姻邀请回复: accept={}", a);
-        state.invite = None;
+        match kind {
+            RelationshipPrompt::Marriage => {
+                net.send_packet(&mir2_shared::packets::client::misc::MarriageReply {
+                    accept_invite: a,
+                });
+                tracing::info!("💍 婚姻邀请回复: accept={}", a);
+                state.invite = None;
+            }
+            RelationshipPrompt::Divorce => {
+                net.send_packet(&mir2_shared::packets::client::misc::DivorceReply {
+                    accept_invite: a,
+                });
+                tracing::info!("💔 离婚请求回复: accept={}", a);
+                state.divorce_invite = None;
+            }
+        }
     }
 }
 
@@ -658,8 +698,14 @@ fn relationship_server_events(
                     "婚姻关系已解除".to_string()
                 };
             }
-            ServerEvent::DivorceRequest => {
-                relationship.message = "收到离婚请求".to_string();
+            ServerEvent::DivorceRequest { name } => {
+                // C# 一定带名字（弹「{0} 请求离婚。」的 YesNo 框）；空名只降级成聊天提示，不弹框。
+                if name.is_empty() {
+                    relationship.message = "收到离婚请求".to_string();
+                } else {
+                    relationship.divorce_invite = Some(name.clone());
+                    relationship.message = format!("收到 {name} 的离婚请求");
+                }
             }
             _ => {}
         }
@@ -824,5 +870,58 @@ mod tests {
             relationship_short_date(RELATIONSHIP_EARLY_EPOCH - 86_400),
             "1999/12/31"
         );
+    }
+
+    /// 2026-09-30（§3.2cf）：离婚请求确认框的文案（C# `GameScene.cs:6204/6214` 两个键）。
+    #[test]
+    fn relationship_prompt_text_matches_csharp_keys() {
+        assert_eq!(
+            relationship_prompt_text(RelationshipPrompt::Marriage, "bevychar"),
+            "bevychar 向你求婚。"
+        );
+        assert_eq!(
+            relationship_prompt_text(RelationshipPrompt::Divorce, "bevychar"),
+            "bevychar 请求离婚。"
+        );
+    }
+
+    /// 收到 `S.DivorceRequest{Name}` → 记下待确认的离婚请求（并保留含「离婚请求」字样的状态文案，
+    /// 自动 e2e `[MARRYACC]` 阶段 2 就是按这条文案触发 `DivorceReply` 的）；
+    /// 空名（历史/异常形状）→ 只提示、不弹框。
+    #[test]
+    fn divorce_request_event_sets_prompt_and_keeps_e2e_marker() {
+        use crate::network::server_event::ServerEvent;
+        use bevy::ecs::system::RunSystemOnce;
+
+        // `run_system_once` 每次都新建系统实例（`MessageReader` 游标从 0 起）⇒ 两种输入各起一个新 App，
+        // 否则第二次会把第一条消息再读一遍（本轮就踩了这个，断言在"空名"那条挂）。
+        fn run(name: &str) -> (Option<String>, String) {
+            let mut app = App::new();
+            app.add_message::<ServerEvent>();
+            app.init_resource::<RelationshipState>();
+            app.add_systems(Update, relationship_server_events);
+            app.world_mut()
+                .resource_mut::<bevy::ecs::message::Messages<ServerEvent>>()
+                .write(ServerEvent::DivorceRequest {
+                    name: name.to_string(),
+                });
+            app.world_mut()
+                .run_system_once(relationship_server_events)
+                .expect("系统应成功");
+            let st = app.world().resource::<RelationshipState>();
+            (st.divorce_invite.clone(), st.message.clone())
+        }
+
+        let (prompt, message) = run("bevychar");
+        assert_eq!(prompt.as_deref(), Some("bevychar"));
+        assert!(
+            message.contains("离婚请求"),
+            "[MARRYACC] 阶段 2 依赖这条文案：{}",
+            message
+        );
+
+        // 空名 → 不弹框
+        let (prompt, _) = run("");
+        assert!(prompt.is_none(), "空名不应弹确认框");
     }
 }

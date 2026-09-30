@@ -969,8 +969,15 @@ pub(crate) fn handle_progress(
             }
         }
         x if x == ServerPacketIds::DivorceRequest as i16 => {
-            server_events.write(ServerEvent::DivorceRequest);
-            tracing::info!("💔 收到离婚请求");
+            // C# `GameScene.cs:6212-6220`：`S.DivorceRequest` 带 `Name`（发起方），客户端据此弹 YesNo 框。
+            // 本端此前**整个 body 丢掉** ⇒ 玩家看不到是谁请求、也没有任何确认入口（只能等对方单方面解除）。
+            // 空 body（历史/异常形状）→ name = ""，由对话框侧降级成聊天提示。
+            let name = mir2_shared::binary::read_dotnet_string(&mut cur).unwrap_or_default();
+            tracing::info!(
+                "💔 收到离婚请求: {}",
+                if name.is_empty() { "(无名)" } else { &name }
+            );
+            server_events.write(ServerEvent::DivorceRequest { name });
         }
 
         x if x == ServerPacketIds::ObjectColourChanged as i16 => {

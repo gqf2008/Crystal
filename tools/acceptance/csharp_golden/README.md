@@ -4239,6 +4239,68 @@ dbtool <沙箱>\Server setpos 333 384 99 100 ; dbtool <沙箱>\Server setpos gqf
 **未采集**：交易中的「双方都放物品/改金币/按确认锁定」这些**内容态**帧（本轮只做到"空窗"同状态对拍）；
 以及**原版鼠标点 YES 点不动**这条本身（是"控制被盖住"还是"点击语义"没查，如实记）。
 
+### 3.2cf 离婚请求确认框补齐（本端此前**没有入口**）+ Relationship 三态实机复现夹具（2026-09-30）
+
+#### ① 缺口：C# 有 YesNo 确认框，本端把整个包丢了
+
+| | C# | 本端（修复前） |
+|---|---|---|
+| 数据 | `S.DivorceRequest{Name}`（`GameScene.cs:6212-6220`） | 同（`ServerRust/src/actors/social_packets.rs:685-701` 写的就是 `requester_name`） |
+| 客户端 | 弹 `MirMessageBox(PlayerRequestedDivorce = "{0} 请求离婚。", YesNo)`，Yes/No → `C.DivorceReply{AcceptInvite}` | `handle_progress.rs` **忽略 body**、只写一条无参 `ServerEvent::DivorceRequest`；`relationship.rs` 仅改内部 `message` ⇒ **玩家点不了「同意离婚」** |
+
+修法（本轮）：
+
+1. `server_event.rs`：`DivorceRequest` 带 `name`（空串 = 服务端没带名字）。
+2. `handle_progress.rs`：读 `read_dotnet_string`（空 body → `""`）。
+3. `relationship.rs`：新增 `divorce_invite` 与 `RelationshipPrompt{Marriage,Divorce}`；确认框复用同一块 `Prguse[360]` 框，
+   Yes/No 按语义分别回 `MarriageReply` / `DivorceReply`；空名只发聊天提示、**不弹无主语的框**。
+4. mock：`MockDivorceRequest` 由空包改为带名（真实服务端就是带名的），`--marriage-accept` 场景推的离婚请求因此能弹出真框。
+
+#### ② 实机验证（`--mock`，两条路径都跑）
+
+夹具 `relationship_set`（本轮新增，见 ③）把状态摆好 → 截图 → 用 `win_locate.py` 比 C# 的 `MirMessageBox` 几何：
+
+| 判据 | C# 期望（`MirMessageBox.cs:23-96`） | 本端实测 |
+|---|---|---|
+| 框背景 `Prguse[360]` 456x190 | `((1024-456)/2, (768-190)/2)` = (284,289) | **(284,289)** 0.0359 |
+| YES `Title[206]` 76x25 | `MSG+(260,157)` = (544,446) | **(544,446)** 0.0000 |
+| NO `Title[210]` 76x25 | `MSG+(360,157)` = (644,446) | **(644,446)** 0.0000 |
+| 正文 | `PlayerRequestedDivorce` = 「{0} 请求离婚。」 | **`bevychar 请求离婚。`** |
+
+点击路径（RPC `click` 走真实 picking）：
+
+| 操作 | 命中 | 客户端日志 | 服务端（mock）反馈 |
+|---|---|---|---|
+| 点 YES (582,458) | `76x25 [root=Relationship]` | `💔 离婚请求回复: accept=true` | `💔 [MOCK] 接受离婚，回发未婚` |
+| 点 NO (682,458) | `76x25 [root=Relationship]` | `💔 离婚请求回复: accept=false` | —（框关闭） |
+
+#### ③ 新增夹具 `relationship_set`（让这扇窗三态 + 两种确认框都能摆出来）
+
+```powershell
+pwsh tools\acceptance\rpc.ps1 -Method relationship_set -Params '{"married":true,"lover_name":"老婆大人","date":1700000000,"map_name":"比奇省","married_days":12}'
+pwsh tools\acceptance\rpc.ps1 -Method relationship_set -Params '{"married":false,"lover_name":"","date":1700000000,"married_days":30}'          # 已离态
+pwsh tools\acceptance\rpc.ps1 -Method relationship_set -Params '{"married":true,"lover_name":"老婆大人","date":1700000000,"map_name":"比奇省","married_days":12,"divorce_invite":"bevychar"}'
+```
+
+存在理由：这扇窗的「已婚 / 已离」四行与「求婚 / 离婚」两个确认框此前**只能靠真服务端 + 两个客户端走完整流程**才能摆出来，
+长尾对表长期只比得上"空窗"。三态实机读数（本端，逐字对 `Chinese.json`）：
+
+| 态 | 四行 |
+|---|---|
+| 未婚 | `伴侣：` / `结婚日期：` / `持续：0天` / `位置：离线` |
+| 已婚 | `伴侣：老婆大人` / `结婚日期：2023/11/14` / `持续：12天` / `位置：比奇省` |
+| 已离 | `伴侣：` / `离婚日期：2023/11/14` / `已过去：30天` / `位置：` |
+
+（原版侧同态帧本轮**未采集**——需要两个客户端互为配偶才能触发对方向本端发起离婚；本端侧已按上面三态实机取证，
+文案判据用的是 `Client/Localization/Chinese.json` 的键值本身，不是像素。）
+
+#### ④ 本轮踩的两个坑（留给后面的回合）
+
+1. `run_system_once` 每调用一次都是**新的系统实例**：`MessageReader` 游标从 0 起 ⇒ 同一个 `App` 里连跑两次会把
+   第一条消息再读一遍（本轮单测就先被这个坑红了一次）。多输入场景要**每种输入一个新 `App`**。
+2. 本端 mock 里角色会被怪打（本轮日志里 hp 一路掉），`revive_town` 后会重建场景 ⇒ 测到一半窗口会没了；
+   夹具截图前先 `revive_town` + `dialog open`，别拿陈旧帧下结论。
+
 ### 3.2ce 批次②续：**Help / KeyboardLayout / Group 三窗两端 0.0000** + 四扇 `Show()` 守卫窗**守卫语义两端一致** + **Relationship 文案按 C# 逐键重写**（2026-09-30）
 
 #### ① 本轮工具口径（两条，各踩一次）

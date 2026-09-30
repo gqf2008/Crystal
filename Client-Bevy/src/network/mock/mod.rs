@@ -3686,7 +3686,13 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                             .unwrap_or(false)
                         {
                             mock_marriage_divorce_sent = true;
-                            send(&to_client, &MockDivorceRequest);
+                            // 与 `MockMarriageRequest` 同一套陪练名（C# 框里显示「{0} 请求离婚。」）
+                            send(
+                                &to_client,
+                                &MockDivorceRequest {
+                                    name: "bevychar".to_string(),
+                                },
+                            );
                             tracing::info!("💔 [MOCK] 推送离婚请求");
                         }
                     }
