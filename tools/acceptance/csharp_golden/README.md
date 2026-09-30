@@ -4071,8 +4071,41 @@ pwsh tools\acceptance\rpc.ps1 -Method screenshot -Params '{"path":"<worktree>\ou
 **门禁**：`cargo test --lib` **900 passed / 0 failed**；`ui_interact_sweep.ps1 -ManageServer`
 **pass=46 total=47 fail=0 skip=0 exit=0**；改动文件 `cargo fmt -- --check` 与 master 基线逐 hunk 一致。
 
-**仍未采集**：Buff 面板在**未展开**（只画 i=0）与**悬停渐隐动画**这两档还没逐帧比
-（原版那档要真鼠标悬停/点展开钮；本端是直接显隐，不逐帧复刻 `Opacity` 渐隐）。
+**收起态 A/B（本轮补，2026-09-30）**
+
+收起态**不用鼠标**也能取：它是配置档 `[Game] ExpandedBuffWindow=False`（C# `Settings.Load`
+读该键 → `BuffDialog.UpdateWindow()` 的 `_buffCount > 0 && !ExpandedBuffWindow` 分支）。
+
+```powershell
+# 原版侧：改沙箱 Client\Mir2Config.ini 的 [Game] 段 → 键盘登录 → 进图那帧即收起态
+# 本端侧：把同键写进**客户端 cwd 下**的 Mir2Config.ini 的 [Game] 段（Bevy 读 `./Mir2Config.ini`）
+```
+
+> ⚠️ **口径坑**：仓库里那份 `Client-Bevy\Mir2Config.ini` 把 `ExpandedBuffWindow` 放在
+> **`[Sound]` 段**下（历史遗留），而本端解析器按 `[Game]` 段取键 ⇒ 直接改那一行**不生效**
+> （默认 true）。要复现收起态必须**在 `[Game]` 段里加**这个键（本轮实测踩到）。
+
+| 判据 | 原版（收起态） | 本端（收起态） |
+|---|---|---|
+| `BuffIcon[173]`（GM） | **不在屏上** | **不在屏上**（0.85）✔ 只画 i=0 |
+| `BuffIcon[240]`（Rested） | (864,6) | (865,6) |
+| 黄色数量标签 "2" | bbox (872,12)-(878,21)，43 px | bbox (873,12)-(877,20)，15 px |
+| 面板底图 | 全透明（`Opacity` 未悬停 → 0） | 全透明（贴图 tint `Color::NONE`） |
+
+**本轮改了什么**（`Client-Bevy/src/game/dialogs/buff.rs`）
+
+1. **显隐语义改正**：C# `Process()`（`:172-205`）的 `Opacity` 淡入淡出**只作用在面板本体 +
+   展开钮**，图标行与 `_buffCountLabel` 是自带 `Opacity=1f` 的子控件 ⇒ **不悬停也一直可见**。
+   本端此前把整族一起按 hover 隐藏，且图标是面板的**子节点**（Bevy 父 Hidden 子不渲染）
+   ⇒ 不悬停时连图标都看不见。现改为：面板**节点**在有 buff 时常驻可见（子控件才能渲染）、
+   「底图随 hover 淡出」用贴图 tint（`ImageNode.color`）实现、展开钮随面板显隐。
+2. **数量标签字体**：C# 是 `Font(Settings.FontName, 10F, Bold)`（ini 默认 Arial ⇒ 10×4/3 ≈ 13.33px），
+   本端此前拿 CJK 主字体 12px 画 ⇒ 字形只有 4x8。现改走 **UI 字体（非 CJK）+ 13.33px**，
+   位置对齐到原版的 (873,12)/(872,12)。**Bold 面本端没有**（Bevy 不合成粗体）——实测黄像素
+   43（原版）vs 15（本端），**如实记为字体简化**（与 §3.2bv 公告标题同一条已知简化）。
+
+**仍未采集**：悬停**渐隐动画**本身（C# `Opacity ±= 0.2/帧`、`FadeDelay=55ms`）——本端是
+「悬停即显示 / 离开即隐藏」的直接显隐，不逐帧复刻补间；这一档要真鼠标悬停 + 连续取帧。
 
 ### 3.2bu 原版 C# 客户端连的是**原版 C# 服务端**，不是 `ServerRust`（2026-09-30 实测）
 
