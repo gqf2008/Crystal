@@ -84,6 +84,11 @@ pub const HERO_HEALTH_BOX_POS: (f32, f32) = (57.0, 26.0);
 /// 三条百分比条的相对位置（HP/MP/EXP，容器内）
 pub const HERO_BAR_POS: [(f32, f32); 3] = [(18.0, 6.0), (18.0, 19.0), (18.0, 32.0)];
 pub const HERO_BAR_SIZE: (f32, f32) = (52.0, 8.0);
+/// 三条百分比条的**真宽**：`GetTrueSize(Prguse[1951..1953])` = **50**（图头 52，最右 2 列全透明）。
+///
+/// C# `HeroDialogs.cs:653/674/691` 的填充段宽 = `Bar.Size.Width * percent`（`Size` = 真尺寸）
+/// ⇒ 满值 50px；本端此前按图头 52 裁，百分比 >96% 时条尾长 2px（§3.2co 批④）。
+pub const HERO_BAR_TRUE_W: f32 = 50.0;
 pub const HERO_HP_LABEL_POS: (f32, f32) = (71.0, 28.0);
 pub const HERO_MP_LABEL_POS: (f32, f32) = (71.0, 41.0);
 pub const HERO_EXP_LABEL_POS: (f32, f32) = (71.0, 54.0);
@@ -164,8 +169,14 @@ pub struct HeroBehaviourBtn {
 // HUD 另有召唤钮 `Prguse[2167..2169]` 20x20 @ `(Width-160, 90)` → 发聊天 `@SUMMONHERO`。
 // ---------------------------------------------------------------------------
 pub const HERO_MENU_PANEL_INDEX: usize = 2179;
-pub const HERO_MENU_PANEL_ORIGIN: (f32, f32) = (862.0, 630.0);
+/// 英雄菜单面板原点：C# `HeroDialogs.cs:396`
+/// `((SW/2) - (Size.Width/2)) + 362, SH - Size.Height - 77`，`Size` = `GetTrueSize(2179)` = **22x61**
+/// 且**逐项整除** ⇒ `512 - 11 + 362 = 863`、`768 - 61 - 77 = 630`。
+/// 本端此前按图头 24 算成 862（§3.2co 批④）。
+pub const HERO_MENU_PANEL_ORIGIN: (f32, f32) = (863.0, 630.0);
 pub const HERO_MENU_PANEL_SIZE: (f32, f32) = (24.0, 61.0);
+/// `GetTrueSize(Prguse[2179])` = **22x61**（图头 24x61 的最右 2 列全透明）——布局用。
+pub const HERO_MENU_PANEL_TRUE_SIZE: (f32, f32) = (22.0, 61.0);
 pub const HERO_MENU_BTN_SIZE: (f32, f32) = (16.0, 16.0);
 /// `(首帧索引, x, y)`：顺序 = 技能 / 背包 / 角色（C# 构造顺序）
 pub const HERO_MENU_BUTTONS: [(usize, f32, f32); 3] =
@@ -1264,7 +1275,7 @@ fn spawn_hud(
             commands.entity(e).insert((
                 HeroPanelBar {
                     kind: i,
-                    full_w: HERO_BAR_SIZE.0,
+                    full_w: HERO_BAR_TRUE_W,
                 },
                 HeroPanelChild,
                 Visibility::Hidden,
@@ -2096,12 +2107,12 @@ mod tests {
         assert_eq!(
             HERO_MENU_PANEL_ORIGIN,
             (
-                ((1024.0 - HERO_MENU_PANEL_SIZE.0) / 2.0) + 362.0,
+                ((1024.0 - HERO_MENU_PANEL_TRUE_SIZE.0) / 2.0) + 362.0,
                 768.0 - HERO_MENU_PANEL_SIZE.1 - 77.0
             ),
-            "C# `(((ScreenWidth-W)/2)+362, ScreenHeight-H-77)`"
+            "C# `(((ScreenWidth-Size.Width)/2)+362, ScreenHeight-Size.Height-77)`（Size = GetTrueSize）"
         );
-        assert_eq!(HERO_MENU_PANEL_ORIGIN, (862.0, 630.0));
+        assert_eq!(HERO_MENU_PANEL_ORIGIN, (863.0, 630.0));
         assert_eq!(HERO_MENU_BTN_SIZE, (16.0, 16.0));
         assert_eq!(
             HERO_MENU_BUTTONS,
@@ -2329,7 +2340,7 @@ mod tests {
                     .spawn((
                         HeroPanelBar {
                             kind: i,
-                            full_w: HERO_BAR_SIZE.0,
+                            full_w: HERO_BAR_TRUE_W,
                         },
                         HeroPanelChild,
                         Sprite::default(),
@@ -2399,13 +2410,14 @@ mod tests {
                 .map(|r| r.max.x)
                 .unwrap_or(0.0)
         };
-        assert_eq!(width(&app, bars[0]), 26.0, "HP 50% → 26px");
+        // §3.2co 批④：满值宽用**真尺寸 50**（C# `Bar.Size.Width`），不是图头 52 ⇒ 50% = 25px
+        assert_eq!(width(&app, bars[0]), 25.0, "HP 50% → 25px（50 × 50%）");
         assert_eq!(
             width(&app, bars[1]),
             0.0,
             "MP 0% → 0px（C# percent<=0 直接 return）"
         );
-        assert_eq!(width(&app, bars[2]), 10.0, "EXP 20% → 10px");
+        assert_eq!(width(&app, bars[2]), 10.0, "EXP 20% → 10px（50 × 20%）");
         assert_eq!(app.world().entity(level).get::<Text2d>().unwrap().0, "42");
         assert_eq!(
             app.world().entity(name).get::<Text2d>().unwrap().0,

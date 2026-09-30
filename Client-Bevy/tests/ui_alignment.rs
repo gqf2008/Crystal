@@ -2602,14 +2602,21 @@ fn hero_menu_panel_aligned() {
     let (main_x, main_y) = ((SW - bg_w) / 2.0, SH - bg_h);
 
     let (pw, ph) = libs.size(LibraryName::Prguse, hud::HERO_MENU_PANEL_INDEX);
+    let (ptw, pth) = libs.true_size(LibraryName::Prguse, hud::HERO_MENU_PANEL_INDEX);
     assert_eq!(
         (pw, ph),
         hud::HERO_MENU_PANEL_SIZE,
-        "[尺寸] 菜单面板应取 Prguse[2179] 24x61"
+        "[尺寸] 菜单面板**图头**应取 Prguse[2179] 24x61（贴图 1:1）"
     );
-    // C# 该面板用**屏幕绝对坐标**（`((ScreenWidth-W)/2)+362, ScreenHeight-H-77`）
+    assert_eq!(
+        (ptw, pth),
+        hud::HERO_MENU_PANEL_TRUE_SIZE,
+        "[尺寸] 菜单面板真尺寸 = GetTrueSize(2179) = 22x61（§3.2co 批④：原点用它）"
+    );
+    // C# 该面板用**屏幕绝对坐标**（`((ScreenWidth-Size.Width)/2)+362, ScreenHeight-Size.Height-77`），
+    // `Size` = GetTrueSize ⇒ `512-11+362 = 863`（按图头 24 会得 862）
     let (px, py) = hud::HERO_MENU_PANEL_ORIGIN;
-    assert_eq!((px, py), (862.0, 630.0));
+    assert_eq!((px, py), (863.0, 630.0));
     assert_in_canvas("英雄菜单", px, py, pw, ph);
 
     for (base, dx, dy) in hud::HERO_MENU_BUTTONS {
@@ -2848,10 +2855,10 @@ fn panel_sprites_batch_b1_match_csharp() {
     assert_eq!(
         notice::ORIGIN,
         (
-            ((SW - notice::BG_W) / 2.0).trunc(),
+            ((SW - notice::BG_TRUE_W) / 2.0).trunc(),
             ((SH - notice::BG_H) / 3.0).trunc()
         ),
-        "[坐标] Notice 使用 C# 的「屏心偏上」公式（y = (768-H)/3）"
+        "[坐标] Notice 用「屏心偏上」公式且 `Size` = GetTrueSize(961) = 314 ⇒ x 355（y 仍 /3）"
     );
 
     println!("  ✓ 批B 面板精灵核对：Group/Friend/Mentor/Relationship/Help/Notice/Mail/Creature");
@@ -4997,4 +5004,71 @@ fn push_inventory_uses_panel_true_width() {
     assert_eq!(313.0 + mail::PARCEL_X_GAP, 323.0, "[坐标] 邮件包裹窗 x=323");
 
     println!("  ✓ 「按面板真宽推背包」四档 + 背包/负重条真尺寸逐项对齐 C#（§3.2cm 批③）");
+}
+
+/// §3.2co 批④：**「居中 / 锚点 / 条填充按真尺寸」第二批**——四扇窗 + 三条 HUD 条。
+///
+/// 全部为**源码判据**（原版帧未采集，理由见 README §3.2co ④）：
+/// - `NoticeDialog`：`((SW - Size.Width)/2, (SH - Size.Height)/3)`，`Prguse[961]` 真尺寸 314x466 ⇒ **(355,100)**
+/// - `ChatNoticeDialog`：`(SW/2 - Size.Width/2, SH/6 - Size.Height/2)`，`Prguse[1361]` 真尺寸 659x25 ⇒ **(183,116)**
+///   ——659 是**奇数**，整除下正好差 1px；§3.2cl ③ 原表写的"差 1 会被整除吃掉 ⇒ 182→182"是错的
+/// - `HeroMenuPanel`：`((SW/2) - (Size.Width/2)) + 362, SH - Size.Height - 77`，`Prguse[2179]` 真尺寸 22x61 ⇒ **(863,630)**
+/// - HUD 三条百分比条：`Bar.Size.Width * percent`，`Prguse[1951..1953]` 真宽 **50**（图头 52）
+/// - 邮件四窗关闭钮：`Size.Width - 27` = **206**（`Title[671/674/672/675]` 真宽 233、图头 236）
+#[test]
+fn centered_and_anchor_windows_use_true_size_batch4() {
+    require_assets!("centered_and_anchor_windows_use_true_size_batch4");
+    use client_bevy::game::dialogs::chat_notice as cn;
+    use client_bevy::game::dialogs::mail;
+    use client_bevy::game::dialogs::notice;
+    use client_bevy::game::hud;
+    let mut libs = Libs::new();
+
+    // ① 公告窗 Prguse[961]：图头 316x466 / 真 314x466 ⇒ x 354→355（y 用 /3 = 100 不变）
+    assert_eq!(libs.size(LibraryName::Prguse, 961), (316.0, 466.0));
+    assert_eq!(libs.true_size(LibraryName::Prguse, 961), (314.0, 466.0));
+    assert_eq!(notice::ORIGIN, (355.0, 100.0));
+
+    // ② 聊天公告 Prguse[1361]：图头 660x25 / 真 659x25 ⇒ x 182→183
+    assert_eq!(libs.size(LibraryName::Prguse, 1361), (660.0, 25.0));
+    assert_eq!(
+        libs.true_size(LibraryName::Prguse, 1361),
+        cn::PANEL_TRUE_SIZE
+    );
+
+    // ③ 英雄菜单面板 Prguse[2179]：图头 24x61 / 真 22x61 ⇒ x 862→863
+    assert_eq!(libs.size(LibraryName::Prguse, 2179), (24.0, 61.0));
+    assert_eq!(
+        libs.true_size(LibraryName::Prguse, 2179),
+        hud::HERO_MENU_PANEL_TRUE_SIZE
+    );
+    assert_eq!(hud::HERO_MENU_PANEL_ORIGIN, (863.0, 630.0));
+
+    // ④ HUD 三条 Prguse[1951..1953]：图头 52x8 / 真 50x8 ⇒ 满值填充 52→50
+    for idx in [1951usize, 1952, 1953] {
+        assert_eq!(libs.size(LibraryName::Prguse, idx), (52.0, 8.0));
+        assert_eq!(libs.true_size(LibraryName::Prguse, idx), (50.0, 8.0));
+    }
+    assert_eq!(hud::HERO_BAR_TRUE_W, 50.0);
+    assert_eq!(hud::hero_bar_width(hud::HERO_BAR_TRUE_W, 1.0), 50.0);
+    assert_ne!(
+        hud::hero_bar_width(hud::HERO_BAR_SIZE.0, 1.0),
+        50.0,
+        "图头模型满值 = 52（本轮修前的值）"
+    );
+
+    // ⑤ 邮件四窗 Title[671/674/672/675]：图头 236 / 真 233 ⇒ 关闭钮 x 209→206
+    for idx in [671usize, 674, 672, 675] {
+        assert_eq!(libs.size(LibraryName::Title, idx).0, 236.0);
+        assert_eq!(libs.true_size(LibraryName::Title, idx).0, 233.0);
+    }
+    assert_eq!(
+        mail::MAIL_PANEL_TRUE_W - mail::COMPOSE_CLOSE_DX,
+        206.0,
+        "[坐标] 邮件四窗关闭钮 x = GetTrueSize(233) - 27"
+    );
+
+    println!(
+        "  ✓ 「真尺寸」第二批：Notice/ChatNotice/HeroMenuPanel + 3 条 HUD 条 + 邮件四窗关闭钮（§3.2co 批④，源码判据）"
+    );
 }
