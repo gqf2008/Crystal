@@ -4239,6 +4239,56 @@ dbtool <沙箱>\Server setpos 333 384 99 100 ; dbtool <沙箱>\Server setpos gqf
 **未采集**：交易中的「双方都放物品/改金币/按确认锁定」这些**内容态**帧（本轮只做到"空窗"同状态对拍）；
 以及**原版鼠标点 YES 点不动**这条本身（是"控制被盖住"还是"点击语义"没查，如实记）。
 
+### 3.2cp 「真尺寸」批⑤：NPC 任务列表挂点 + 新建角色窗 + 宠物窗与两条宠物条（2026-10-01）
+
+#### ① 任务列表挂点（**原版帧实锤**）
+
+`QuestListDialog.Location = new Point(NPCDialog.**Size**.Width + 47, 0)`（`QuestDialogs.cs:36`）；
+`Size` = `GetTrueSize(Prguse[995])` = **438** ⇒ **(485,0)**（本端原按图头 440 算成 487）。
+
+原版帧 `%TEMP%\golden_sandbox\shots\orig_questlist.png`：任务列表面板 `Prguse[950]` 最佳落点
+**(485,0)**（`win_locate` 不符率 0.089；同一帧 `Prguse[995]` @(0,0) 不符率 0.046 作对照，
+两扇窗同屏共现 ⇒ 不是巧合命中）。
+
+#### ② 新建角色窗（源码判据，帧未采集）
+
+C# `NewCharacterDialog.cs:50` `Location = ((SW - Size.Width)/2, (SH - Size.Height)/2)`，
+`Size` = `GetTrueSize(Prguse[73])` = **583x454**（图头 588x460，四边各裁 1–3px）⇒ **(220,157)**：
+`441/2 = 220`、`314/2 = 157` 都是**整数除法**（浮点会得 220.5）。本端原按图头算成 (218,154)，整窗偏左上。
+
+#### ③ 宠物窗 + 两条宠物条（源码判据，帧未采集）
+
+`IntelligentCreatureDialog`：`Index = 468; Location = Center`，关闭钮 `Size.Width - 25`、
+帮助钮 `Size.Width - 48`（`IntelligentCreatureDialogs.cs:38/46/58`），`Size` = `GetTrueSize(Title[468])` = **449x375**：
+
+| 项 | 图头模型（本端修前） | 真尺寸口径（C#） |
+|---|---|---|
+| 居中 | (286,196) | **(287,196)** |
+| 关闭钮 x | 427 | **424** |
+| 帮助钮 x | 404 | **401** |
+
+两条宠物条：C# `section.Width = (int)(FG.Size.Width * percent)`
+（`:365` 完整度、`:397` 黑石）⇒ 完整度 `Prguse2[531]` 真宽 **246**（图头 248）、
+黑石 `Prguse2[420]` 真宽 **169**（图头 172）；贴图仍按图头 1:1 铺，刻度
+`FG.Location.X + 段宽 - 8`（`:371/376`）随之用真段宽。
+
+#### ④ 本端验证
+
+- `cargo test --lib` = **920 passed**（`creature_origin_is_csharp_center` 改为真尺寸 (287,196)）
+- `cargo test --test b0001_smoke --test ui_alignment` = **2 + 56 passed**
+  （新增 `questlist_and_creature_use_true_size_batch5`：钉 `Prguse[995]` 真宽 438、`LIST_POS=(485,0)`、
+  `Title[468]` 449x375 → 居中 (287,196)、`Prguse2[531/420]` 真宽 246/169；`new_character_dialog_aligned`
+  与另一条 `LIST_POS` 断言按真尺寸改）
+- `pwsh tools/acceptance/ui_interact_sweep.ps1 -ManageServer` = **pass=46 / total=47 / fail=0 / skip=0 / exit=0**
+- `rustfmt --edition 2024 --check`：5 个改动文件的告警**计数与 master 基线逐个相等**
+
+#### ⑤ 未采集
+
+- **宠物窗**：沙箱角色**没有任何宠物** ⇒ `IntelligentCreatureDialog` 开不出来
+  （`ui_interact_sweep` 里这扇窗的期望就是守卫文案「你没有任何宠物。」）。
+- **新建角色窗**：归档帧 `orig_kbd_01_select.png` 是**选角界面**，建角窗（`Prguse[73]`）未打开
+  （该帧模板匹配最佳落点 (350,308)、不符率 0.156，等于"没画"）。要取帧得在选角界面点"创建"按钮。
+
 ### 3.2co 「真尺寸」批④：Notice / ChatNotice / HeroMenuPanel / HUD 三条 / 邮件四窗关闭钮（2026-10-01）
 
 #### ① 这几处（**只有源码判据**，未采集原版帧 —— 理由见 ④）

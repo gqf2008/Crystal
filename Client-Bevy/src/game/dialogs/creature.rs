@@ -310,6 +310,22 @@ fn cleanup_creature(mut commands: Commands, roots: Query<Entity, With<DialogRoot
 }
 
 const CREATURE_W: f32 = 452.0;
+/// `GetTrueSize(Title[468])` = **449x375**（图头 452x376）。
+///
+/// C# `IntelligentCreatureDialog`：`Index = 468; Location = Center`，且关闭钮/帮助钮都用
+/// `Size.Width - k`（`IntelligentCreatureDialogs.cs:38/46/58`），`Size` = 真尺寸
+/// ⇒ 居中 **(287,196)**（按图头 452 会得 286）、关闭钮 x = 449-25 = **424**（本端原 427）、
+/// 帮助钮 x = 449-48 = **401**（本端原 404）。§3.2cp 批⑤。
+///
+/// 原版帧**未采集**：沙箱角色没有宠物 ⇒ 这扇窗开不出来（同 §3.2cl ③ 的"守卫窗"标注）。
+pub const CREATURE_TRUE_SIZE: (f32, f32) = (449.0, 375.0);
+
+/// 宠物窗原点：C# Location = Center，Size = GetTrueSize(Title[468]) = 449x375 ⇒ **(287,196)**。
+/// 单独成函数是为了让四处 .map(|n| node_origin(n, …)) 的实参短到不触发行宽重排。
+#[must_use]
+pub fn creature_origin() -> (f32, f32) {
+    crate::game::dialogs::center_origin(CREATURE_TRUE_SIZE.0, CREATURE_TRUE_SIZE.1)
+}
 const CREATURE_H: f32 = 376.0;
 /// #2892 批B：面板精灵（C# `IntelligentCreatureDialog.Index = 468; Library = Libraries.Title`）
 pub const PANEL: (LibraryName, usize) = (LibraryName::Title, 468);
@@ -326,6 +342,10 @@ const CREATURE_SLOT_H: f32 = 32.0;
 const CREATURE_FULLNESS_X: f32 = 185.0;
 const CREATURE_FULLNESS_Y: f32 = 129.0;
 const CREATURE_FULLNESS_W: f32 = 248.0;
+/// 完整度条**填充**用的真宽：`GetTrueSize(Prguse2[531])` = **246**（图头 248）。
+/// C# `FullnessForeGround_AfterDraw`（`IntelligentCreatureDialogs.cs:365`）的
+/// `section.Width = (int)(FullnessFG.Size.Width * percent)` 用的就是它；贴图仍按图头 248 铺。
+const CREATURE_FULLNESS_TRUE_W: f32 = 246.0;
 const CREATURE_FULLNESS_H: f32 = 12.0;
 /// C# `FullnessMin`（`Prguse2[532]`）16x24、`FullnessNow`（`Prguse2[533]`）16x9 的基准坐标
 const CREATURE_MARKER_MIN_Y: f32 = 118.0;
@@ -340,12 +360,15 @@ const CREATURE_BLACKSTONE_Y: f32 = 348.0;
 /// 「宠物帮助」钮（C# `HelpPetButton`）：`Prguse2[257/258/259]` @ `(Size.Width - 48, 3)`
 /// → 452-48 = **(404,3)**，精灵原生 **24x21**（`IntelligentCreatureDialogs.cs:54-65`）。
 /// 原版**没有** `HelpPetButton.Click`（全树只有声明与构造）⇒ 本端只画不接点击。
-const HELP_PET_POS: (f32, f32) = (404.0, 3.0);
+const HELP_PET_POS: (f32, f32) = (CREATURE_TRUE_SIZE.0 - 48.0, 3.0);
 const HELP_PET_FRAMES: (usize, usize, usize) = (257, 258, 259);
 const HELP_PET_SIZE: (f32, f32) = (24.0, 21.0);
 const CREATURE_BLACKSTONE_FG_X: f32 = 242.0;
 const CREATURE_BLACKSTONE_FG_Y: f32 = 353.0;
 const CREATURE_BLACKSTONE_FG_W: f32 = 172.0;
+/// 黑石条**填充**用的真宽：`GetTrueSize(Prguse2[420])` = **169**（图头 172）。
+/// C# `:397` `section.Width = (int)(BlackStoneImageFG.Size.Width * percent)`。
+const CREATURE_BLACKSTONE_FG_TRUE_W: f32 = 169.0;
 const CREATURE_BLACKSTONE_FG_H: f32 = 7.0;
 /// C# `IntelligentCreatureDialogs.blackstoneProduceTime = 10800`（3 小时，秒）
 const BLACKSTONE_PRODUCE_TIME: f32 = 10800.0;
@@ -692,7 +715,7 @@ fn spawn_creature(
     let Some(bg) = load_lib_image(&mut libs, &mut images, LibraryName::Title, 468) else {
         return;
     };
-    let (px, py) = crate::game::dialogs::center_origin(CREATURE_W, CREATURE_H);
+    let (px, py) = creature_origin();
     let panel = spawn_panel(&mut commands, bg, px, py, CREATURE_W, CREATURE_H, 30);
     commands
         .entity(panel)
@@ -705,8 +728,18 @@ fn spawn_creature(
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 361),
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 362),
         ) {
-            spawn_icon_button(p, n, h, pr, 427.0, 3.0, 24.0, 21.0, 10)
-                .insert((CreatureClose, CloseButton));
+            spawn_icon_button(
+                p,
+                n,
+                h,
+                pr,
+                CREATURE_TRUE_SIZE.0 - 25.0,
+                3.0,
+                24.0,
+                21.0,
+                10,
+            )
+            .insert((CreatureClose, CloseButton));
         }
         // 「宠物帮助」钮 C# `HelpPetButton` = `Prguse2[257/258/259]` @(Size.Width-48, 3) = (404,3)，
         // 精灵原生 24x21。
@@ -1188,13 +1221,8 @@ fn creature_ui_system(
             if let Some(cursor) = window.cursor_position() {
                 let (ox, oy) = panel_origin
                     .single()
-                    .map(|n| {
-                        crate::ui::theme::node_origin(
-                            n,
-                            crate::game::dialogs::center_origin(CREATURE_W, CREATURE_H),
-                        )
-                    })
-                    .unwrap_or(crate::game::dialogs::center_origin(CREATURE_W, CREATURE_H));
+                    .map(|n| crate::ui::theme::node_origin(n, creature_origin()))
+                    .unwrap_or(creature_origin());
                 for i in 0..10usize {
                     let (x, y, w, h) = creature_slot_rect(i, ox, oy);
                     if cursor.x >= x && cursor.x <= x + w && cursor.y >= y && cursor.y <= y + h {
@@ -1351,13 +1379,8 @@ fn creature_bars_system(
         .map(|cur| {
             let (ox, oy) = panel
                 .single()
-                .map(|n| {
-                    crate::ui::theme::node_origin(
-                        n,
-                        crate::game::dialogs::center_origin(CREATURE_W, CREATURE_H),
-                    )
-                })
-                .unwrap_or(crate::game::dialogs::center_origin(CREATURE_W, CREATURE_H));
+                .map(|n| crate::ui::theme::node_origin(n, creature_origin()))
+                .unwrap_or(creature_origin());
             (cur.x - ox, cur.y - oy)
         });
     let label = selected
@@ -2061,13 +2084,8 @@ fn creature_options_system(
             if let Some(cursor) = window.cursor_position() {
                 let (ox, oy) = panel_origin
                     .single()
-                    .map(|n| {
-                        crate::ui::theme::node_origin(
-                            n,
-                            crate::game::dialogs::center_origin(CREATURE_W, CREATURE_H),
-                        )
-                    })
-                    .unwrap_or(crate::game::dialogs::center_origin(CREATURE_W, CREATURE_H));
+                    .map(|n| crate::ui::theme::node_origin(n, creature_origin()))
+                    .unwrap_or(creature_origin());
                 for i in 0..9usize {
                     let y = oy + 40.0 + i as f32 * 22.0;
                     if cursor.x >= ox + 20.0
@@ -2493,9 +2511,13 @@ mod tests {
     }
     #[test]
     fn creature_origin_is_csharp_center() {
-        assert_eq!(
-            crate::game::dialogs::center_origin(CREATURE_W, CREATURE_H),
-            (286.0, 196.0)
+        // §3.2cp 批⑤：C# `Location = Center` 用 `Size` = `GetTrueSize(Title[468])` = 449x375
+        // ⇒ ((1024-449)/2, (768-375)/2) = **(287,196)**（按图头 452x376 会得 286,196）
+        assert_eq!(creature_origin(), (287.0, 196.0));
+        assert_ne!(
+            crate::game::dialogs::center_origin(CREATURE_W, CREATURE_H).0,
+            287.0,
+            "图头模型 x = 286（本轮修前的值）"
         );
     }
 }
@@ -2818,30 +2840,33 @@ mod layout_tests {
     ///
     /// 依据：C# `IntelligentCreatureDialogs.cs:54-65` 的 `HelpPetButton = new MirButton {
     /// Index = 257; HoverIndex = 258; PressedIndex = 259; Library = Libraries.Prguse2;
-    /// Location = new Point(Size.Width - 48, 3) }`（452-48 = 404），不设 `Size` ⇒ 美术原生 24x21。
+    /// Location = new Point(Size.Width - 48, 3) }`，不设 `Size` ⇒ 美术原生 24x21。
     /// 而**全树 `rg -n 'HelpPetButton' Client` 只有两处命中**（声明 `:15` + 构造 `:54`），
     /// **没有任何 `.Click +=`** ⇒ 原版这颗钮是"画出来、点了没反应"。本端此前**完全没画它**。
     ///
-    /// 阳性对照：把 `HELP_PET_POS` 改成 `(427.0, 3.0)`（关闭钮的位置）→ 第一条断言红。
+    /// §3.2cp 批⑤：`Size` = `GetTrueSize(Title[468])` = **449x375**（图头 452x376）
+    /// ⇒ 帮助钮 x = 449-48 = **401**（本端原按图头算成 404）、关闭钮 x = 449-25 = **424**（原 427）。
+    ///
+    /// 阳性对照：把 `HELP_PET_POS` 改成 `(424.0, 3.0)`（关闭钮的位置）→ 第一条断言红。
     #[test]
     fn creature_help_button_matches_csharp_but_stays_inert() {
         assert_eq!(
             HELP_PET_POS,
-            (404.0, 3.0),
-            "C# Location = (Size.Width-48, 3)"
+            (401.0, 3.0),
+            "C# Location = (GetTrueSize.Width-48, 3) = (449-48, 3)"
         );
         assert_eq!(HELP_PET_FRAMES, (257, 258, 259));
         assert_eq!(HELP_PET_SIZE, (24.0, 21.0), "Prguse2[257] 图头原生 24x21");
         // 两钮都是"距右边固定偏移"：帮助 = Size.Width-48、关闭 = Size.Width-25（都 y=3）。
-        // 注意 404+24 = 428 > 427 ⇒ 原版这两颗**本来就重叠 1px**（不是本端的问题，别自作主张改位置）；
+        // 注意 401+24 = 425 > 424 ⇒ 原版这两颗**本来就重叠 1px**（不是本端的问题，别自作主张改位置）；
         // 断言写成"距右缘的偏移"而不是"互不重叠"，才是把 C# 的真值钉住。
         assert_eq!(
-            CREATURE_W - HELP_PET_POS.0,
+            CREATURE_TRUE_SIZE.0 - HELP_PET_POS.0,
             48.0,
             "帮助钮距右缘 48（C# Size.Width-48）"
         );
         assert_eq!(
-            CREATURE_W - 427.0,
+            CREATURE_TRUE_SIZE.0 - (CREATURE_TRUE_SIZE.0 - 25.0),
             25.0,
             "关闭钮距右缘 25（C# Size.Width-25）"
         );
