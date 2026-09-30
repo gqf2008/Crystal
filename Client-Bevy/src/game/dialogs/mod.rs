@@ -441,6 +441,69 @@ mod tests {
         );
     }
 
+    /// **P1 回归（2026-09-30，修 #3396）**：模态面板**不许**被 `bump_dialog_z` 压进 z 带内。
+    ///
+    /// 场景就是商城买路：商城面板（`DialogRoot(GameShop)`，z=30）与购买确认框
+    /// （**同一个 kind**，z=[`modal_layer::MODAL_PANEL_Z`]=60）。点一下触发 `bump(GameShop)`，
+    /// 修前确认框被整体平移到带顶 55 < 遮挡层 59 ⇒ 被自家全屏遮挡层盖住、Yes/No 点不动。
+    ///
+    /// 红检：把 `bump_dialog_z` 里两处 `is_modal_layer_root` 判断去掉 → 本用例 FAILED
+    /// （确认框 60→55，断言 `> MODAL_BLOCKER_Z` 失败）。
+    #[test]
+    fn modal_panels_are_never_compacted_into_the_z_band() {
+        use crate::game::dialogs::modal_layer::{MODAL_BLOCKER_Z, MODAL_PANEL_Z};
+        let mut world = World::new();
+        world.insert_resource(DialogZ::default());
+        world.insert_resource(ButtonInput::<MouseButton>::default());
+        let mut mgr = DialogManager::default();
+        mgr.open.push(DialogKind::GameShop);
+        world.insert_resource(mgr);
+        // 商城主面板：普通根
+        world.spawn((
+            DialogRoot(DialogKind::GameShop),
+            Visibility::Visible,
+            Node::default(),
+            GlobalZIndex(DIALOG_Z_MIN),
+        ));
+        // 购买确认框：**同 kind** + 模态层 + `AlwaysVisible`（与实机一致）
+        let confirm = world
+            .spawn((
+                DialogRoot(DialogKind::GameShop),
+                AlwaysVisible,
+                Visibility::Visible,
+                Node::default(),
+                GlobalZIndex(MODAL_PANEL_Z),
+            ))
+            .id();
+        // 再放一扇普通窗，保证排名里不止一个 kind
+        world.spawn((
+            DialogRoot(DialogKind::Mail),
+            Visibility::Visible,
+            Node::default(),
+            GlobalZIndex(DIALOG_Z_MIN),
+        ));
+
+        // 新开 GameShop ⇒ dialog_front_system 走 `:1548-1550` 那条 bump 路径
+        world
+            .run_system_once(dialog_front_system)
+            .expect("front 系统应运行");
+
+        let gz = world.entity(confirm).get::<GlobalZIndex>().unwrap().0;
+        assert_eq!(gz, MODAL_PANEL_Z, "模态面板不得被重排（必须恒在模态层 z）");
+        assert!(
+            gz > MODAL_BLOCKER_Z,
+            "模态面板 {gz} 必须高于全屏遮挡层 {MODAL_BLOCKER_Z}，否则被自家遮挡层盖住"
+        );
+        // 顺带钉：同 kind 的**普通**根照常参与重排（被抬到带顶）
+        let mut q = world.query::<(&DialogRoot, &GlobalZIndex)>();
+        let shop_plain: Vec<i32> = q
+            .iter(&world)
+            .filter(|(r, g)| r.0 == DialogKind::GameShop && g.0 < MODAL_BLOCKER_Z)
+            .map(|(_, g)| g.0)
+            .collect();
+        assert_eq!(shop_plain, vec![DIALOG_Z_MAX], "普通根照常排到带顶");
+    }
+
     #[test]
     fn state_dialog_sync_truth_table() {
         let mut m = DialogManager::default();
@@ -1587,14 +1650,32 @@ pub fn dialog_front_system(
 
 /// 把指定对话框整体平移到置顶 z（保留内部相对层级：整体平移使最高者 = z.top，
 /// 覆盖层如 MailCompose/StorageUnlock 保持高于其父面板）
+/// 这个根是否属于**模态层**（z ≥ [`modal_layer::MODAL_BLOCKER_Z`]）：`MirMessageBox` 系
+/// 覆盖层、数量框、输入框、快捷键框等。它们**不参与** z 带的排名与平移。
+///
+/// 为什么（2026-09-30 修 #3396 引入的 P1 回归）：这些面板必须**恒高于**全屏遮挡层
+/// （[`modal_layer::MODAL_BLOCKER_Z`] = 59），否则会被**自家**遮挡层盖住 ⇒
+/// 自己的 Yes/No 点不动。触发不需要巧合——商城点「购买」那一下的落点就在 `GameShop` 的
+/// `DialogRoot` 矩形内，`dialog_front_system` 随即 `bump(GameShop)`，把确认框从 60 压到带顶 55。
+///
+/// 按**实体**判而不是按 kind 判：商城确认框与商城面板**共享** `DialogKind::GameShop`，
+/// 按 kind 会把整扇商城窗一起排除出排名。
+fn is_modal_layer_root(gz: i32) -> bool {
+    gz >= crate::game::dialogs::modal_layer::MODAL_BLOCKER_Z
+}
+
 fn bump_dialog_z(
     kind: DialogKind,
     z: &mut DialogZ,
     dialogs: &mut Query<(Entity, &DialogRoot, &Visibility, &Node, &mut GlobalZIndex)>,
 ) {
-    // 1) 每个 kind 当前的最大 z（同一扇窗的多个根共享一个层，整体平移才不破坏内部层级）
+    // 1) 每个 kind 当前的最大 z（同一扇窗的多个根共享一个层，整体平移才不破坏内部层级）。
+    //    模态层根**跳过**：否则该 kind 的最大 z 会被模态面板的 60 拉高，平移时再把它们一起压下来。
     let mut per_kind: std::collections::HashMap<DialogKind, i32> = std::collections::HashMap::new();
     for (_, r, _, _, gz) in dialogs.iter() {
+        if is_modal_layer_root(gz.0) {
+            continue;
+        }
         per_kind
             .entry(r.0)
             .and_modify(|v| *v = (*v).max(gz.0))
@@ -1617,9 +1698,13 @@ fn bump_dialog_z(
         new_z.insert(*k, zs[i]);
     }
 
-    // 4) 逐实体按 kind 的 delta 平移（同 kind 共享 delta ⇒ 内部相对层级不变）
+    // 4) 逐实体按 kind 的 delta 平移（同 kind 共享 delta ⇒ 内部相对层级不变）。
+    //    模态层根**跳过**：保持恒在 [`modal_layer::MODAL_PANEL_Z`]，不被压到遮挡层之下。
     let mut applied = false;
     for (_, r, _, _, mut gz) in dialogs.iter_mut() {
+        if is_modal_layer_root(gz.0) {
+            continue;
+        }
         let (Some(new), Some(old)) = (new_z.get(&r.0), per_kind.get(&r.0)) else {
             continue;
         };

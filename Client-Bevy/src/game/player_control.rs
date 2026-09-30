@@ -297,11 +297,22 @@ struct UiLockState<'w> {
     hero: Res<'w, crate::game::dialogs::hero::HeroState>,
 }
 
+/// 世界点击闸 = **UI 遮挡真值**（C# `Modal = true` 那 8 源）∪「物品已选中」。
+///
+/// 两者**刻意不是一个集合**（2026-09-30 修 #3396 引入的回归）：
+/// - 「选中物品」**不是** C# 的 `Modal`（见 `modal_layer::modal_any_visible` 的说明），
+///   把它算进 **UI 遮挡**会让「背包里单击选中一件物品」凭空升起全屏遮挡层，
+///   把背包自己与其它对话框的按钮全冻住；
+/// - 但「选中物品时**世界点击**让路」是本仓既有且刻意的行为
+///   （原 `modal_ui_locked(selected, amount, confirm, assign_key)` 就带它），**保留**。
+fn world_click_locked(occlusion: bool, selected: bool) -> bool {
+    occlusion || selected
+}
+
 impl UiLockState<'_> {
-    fn locked(&self) -> bool {
-        // 单一真值（`modal_layer::modal_any_visible`）：9 个模态来源，UI 遮挡层与这里一字不差。
+    /// C# `Modal = true` 的 **UI 遮挡真值**（8 源）——与遮挡层 `ModalSources` 一字不差。
+    fn modal(&self) -> bool {
         crate::game::dialogs::modal_layer::modal_any_visible(
-            self.click.selected.is_some(),
             self.amount.visible,
             self.confirm.visible,
             self.assign_key.visible,
@@ -311,6 +322,10 @@ impl UiLockState<'_> {
             self.shop.pending.is_some(),
             self.hero.managing && self.hero.confirm_slot.is_some(),
         )
+    }
+
+    fn locked(&self) -> bool {
+        world_click_locked(self.modal(), self.click.selected.is_some())
     }
 
     /// 任意 UI 模态层或窗口类对话框打开（小地图除外）。
@@ -1905,25 +1920,46 @@ mod tests {
         assert!(!is_archer);
     }
 
+    /// UI 遮挡真值（8 源）：「任一来源为真即遮挡」。
     #[test]
-    fn modal_ui_lock_truth_table() {
-        // ①（2026-09-30）：真值函数收敛到 `modal_layer::modal_any_visible`（9 个来源），
-        // 世界点击闸与 UI 遮挡层共用；这里只钉「任一来源为真即锁」这条语义。
-        use crate::game::dialogs::modal_layer::modal_any_visible as locked;
-        assert!(!locked(
-            false, false, false, false, false, false, false, false, false
+    fn modal_occlusion_truth_table() {
+        use crate::game::dialogs::modal_layer::modal_any_visible as occl;
+        assert!(!occl(
+            false, false, false, false, false, false, false, false
         ));
-        // 9 个来源逐个置真：**任一**为真都必须锁（前 5 项 = 选中物品/数量框/丢弃确认/快捷键/
-        // C# `MirMessageBox`；后 4 项 = 组队邀请/行会邀请/商城确认/英雄询问，同为 `Modal`）
-        for i in 0..9 {
-            let mut v = [false; 9];
+        // 8 个来源逐个置真：**任一**为真都必须遮挡。
+        // 数量框/丢弃确认/快捷键 = `MirAmountBox`/`MirMessageBox`/`MirInputBox`；
+        // notice + 组队/行会/商城/英雄 = 五处 `MirMessageBox`。
+        for i in 0..8 {
+            let mut v = [false; 8];
             v[i] = true;
             assert!(
-                locked(v[0], v[1], v[2], v[3], v[4], v[5], v[6], v[7], v[8]),
-                "第 {i} 个模态来源为真时必须锁"
+                occl(v[0], v[1], v[2], v[3], v[4], v[5], v[6], v[7]),
+                "第 {i} 个模态来源为真时必须遮挡"
             );
         }
-        assert!(locked(true, true, true, true, true, true, true, true, true));
+        assert!(occl(true, true, true, true, true, true, true, true));
+    }
+
+    /// **世界点击闸 ≠ UI 遮挡真值** —— 2026-09-30 修 #3396 回归的核心判据。
+    ///
+    /// 「物品已选中」只拦**世界点击**，**不**升起 UI 遮挡层。
+    /// 红检：一旦有人把「选中物品」塞回 `modal_any_visible`（变成第 9 参），
+    /// 本用例与 `modal_occlusion_truth_table` 的调用点参数个数立刻不符 ⇒ 编译失败/变红。
+    #[test]
+    fn selected_item_locks_world_but_not_ui_occlusion() {
+        use crate::game::dialogs::modal_layer::modal_any_visible as occl;
+        // 只有「选中物品」：世界点击锁住，但 UI 遮挡**不**锁
+        assert!(world_click_locked(false, true), "选中物品必须拦世界点击");
+        assert!(
+            !occl(false, false, false, false, false, false, false, false),
+            "无任何 C# Modal 来源时不得遮挡（否则单击选中物品会冻住所有对话框按钮）"
+        );
+        // 真模态来源：两侧都锁
+        assert!(world_click_locked(true, false));
+        assert!(world_click_locked(true, true));
+        // 都没有：都不锁
+        assert!(!world_click_locked(false, false));
     }
 
     /// 通用 MirMessageBox 的可见性就是 C# `Modal` 的生效期（`MirMessageBox.cs:19`）。
