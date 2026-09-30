@@ -4239,6 +4239,95 @@ dbtool <沙箱>\Server setpos 333 384 99 100 ; dbtool <沙箱>\Server setpos gqf
 **未采集**：交易中的「双方都放物品/改金币/按确认锁定」这些**内容态**帧（本轮只做到"空窗"同状态对拍）；
 以及**原版鼠标点 YES 点不动**这条本身（是"控制被盖住"还是"点击语义"没查，如实记）。
 
+### 3.2ce 批次②续：**Help / KeyboardLayout / Group 三窗两端 0.0000** + 四扇 `Show()` 守卫窗**守卫语义两端一致** + **Relationship 文案按 C# 逐键重写**（2026-09-30）
+
+#### ① 本轮工具口径（两条，各踩一次）
+
+1. **真实鼠标点击在本会话再次"不驱动"原版**（原版窗口非前台、本进程 `SetForegroundWindow` 返回 False）：
+   同一颗菜单钮 `Move-Image 989 673` 后 `Click-Image` **不开窗**，`Msg-Click` **开窗**（`Title[633]` 命中 0.0000）。
+   ⇒ **取证一律用 `Move-Image` + `Msg-Click`**；真实 `Click-Image` 只在原版窗口处于前台时可用（§3.2cd 那次是前台态）。
+2. **`MirMessageBox` 是模态且 `Escape`（C# Closeall）关不掉它**——必须先点它的 OK（`Title[200]` @(644,446)，
+   456x190 消息框的左/右布局见 `MirMessageBox.cs:43-96`）再进下一轮。本轮第一遍 5 个"守卫窗"帧**全是同一条宠物消息**，
+   就是模态框把后续 `MouseMove` 全吞了（`MouseControl` 停在上一个钮）——**别把这批帧当"五个窗都弹宠物提示"**。
+
+#### ② Help / KeyboardLayout / Group：两端逐窗 A/B（`win_locate.py`）
+
+配方：`ESC` → `Move+Msg-Click` 菜单钮 → `Move+Msg-Click` 菜单项（x=1007，y=351+rel+9）→ 移开光标 → `Shot-Cs`。
+
+| 窗 | 面板美术 / 尺寸 | 原版 x,y / 不符率 | 本端 x,y / 不符率 | Δ |
+|---|---|---|---|---|
+| **Help**（帮助，rel 50） | `Prguse[920]` 536x509 | (245,129) / 0.0324 | (244,129) / 0.0195 | (−1,0) |
+| **KeyboardLayout**（键盘，rel 69） | `Title[119]` 512x430 | (257,169) / 0.1113 | (256,169) / 0.0357 | (−1,0) |
+| **Group**（队伍，rel 240） | `Prguse[120]` 232x249 | (396,259) / 0.0649 | (396,259) / 0.0649 | (0,0) |
+
+三窗都落在 C# 的 `Location = Center` 上（Help/Keyboard 的 x 差 1px 仍是 §3.2c–§3.2f 的**居中窗取帧口径**，非缺陷）。
+
+#### ③ 四扇 `Show()` 守卫窗：原版**弹框不开窗**，本端**同语义 + 同文案**
+
+C# 四个 `Show()` 前置守卫（`#3314` 的同一批）：
+
+| 窗 | C# 守卫（源码） | 文案键 | C# 中文（`Client/Localization/Chinese.json`） | 本端 notice |
+|---|---|---|---|---|
+| 宠物 `IntelligentCreatureDialog` | `!User.IntelligentCreatures.Any()`（`:836-841`） | `NoCreatures` | 你没有任何宠物。 | **同字** |
+| 坐骑 `MountDialog` | `User.MountType < 0`（`:243-248`） | `NoMount` | 你没有坐骑。 | **同字** |
+| 钓鱼 `FishingDialog` | `!User.HasFishingRod`（`:139-144`） | `NoFishingRod` | 你没有拿着鱼竿。 | **同字** |
+| 行会 `GuildDialog` | `User.GuildName == ""`（`:2160-2165`） | `NotInGuild` | 你不在任何公会中。 | **同字** |
+
+**原版侧实测**（本轮 4 帧，全部同一判据）：帧里出现 `Prguse[360]` 消息框 @(284,289)（0.019，**命中**）
++ OK 钮 `Title[200]`@(644,446)（0.0000），**且该窗的面板美术一个都没出现** ⇒ 「弹提示、不开窗」。
+**本端侧实测**（`notice_probe` + `dialogs`）：四者都返回 `ok=true` 且文本与上表**逐字相同**，`dialogs` 里不含该窗
+⇒ 两端守卫语义与文案一致（本端为中文客户端，故用中文键值比对；沙箱原版渲染的是英文键值，如
+`You do not own any creatures.`）。
+
+顺带排除一个误判：**队伍（Group）没有守卫**（`GroupDialog` 无 `Show()` 覆写），本轮它的原版帧是**开窗**的——
+之前那张"队伍弹宠物提示"的帧是模态框没关干净的假象（见 ①.2）。
+
+#### ④ Relationship 窗**文案**按 C# 逐键重写（几何上一轮已 0.0000）
+
+§3.2cd ⑦ 记的残差是「窗内文案自造」。本轮对着 `RelationshipDialog.UpdateInterface:212-244` 逐行重写
+（`relationship_line_text`，键值全部取自 `Client/Localization/Chinese.json`）：
+
+| 行 | C# 键 | 本端（修复后） | 旧实现（已删） |
+|---|---|---|---|
+| 0 | `LoverName` = 伴侣：{0} | `伴侣：{名}` | 关系（婚姻） |
+| 1 | `MarriageDate` / `DivorcedDate` / `LoverDate`（三分支） | `结婚日期：{日期}` / `离婚日期：{日期}` / `日期：` | 婚姻状态: 已婚（…）/未婚 |
+| 2 | `LengthDays` / `TimeSinceDays` / `LoverLength` | `持续：{n}天` / `已过去：{n}天` / `持续时间：` | （状态文案） |
+| 3 | `LoverLocation` / `LoverLocationOffline` / `LoverLocationTitle` | `位置：{地图}` / `位置：离线` / `位置：` | 配偶位置: … |
+
+日期用 `DateTime.ToShortDateString()` 等价（`yyyy/M/d`、**月/日不补零**，纯整数 `civil_from_days` 实现，单测钉闰年/世纪边界）。
+五个操作钮也按 C# 补齐了守卫与反馈去向：未婚点求婚/离婚/邮件 → 系统聊天 `你尚未结婚。`；已婚点求婚 → `你已经结婚了。`；
+配偶不在线点私聊 → `伴侣未在线`（C# 用 `ChatDialog.ReceiveChat(..., ChatType.System)`，本端用共享聊天 `add_line`）。
+
+**两端文本行带**（同一区域取「亮像素行」做行带，x 395..645）：
+
+| 行 | 原版 `orig_b2_rel.png` | 本端（修复后） |
+|---|---|---|
+| 1 | 340–347 | 338–348 |
+| 2 | 363–372 | 363–373 |
+| 3 | 388–397 | 388–398 |
+| 4 | 413–422 | 413–423 |
+
+四行 + 五钮（两帧都在 y=449）纵向对齐，逐行差 ≤1px。
+
+**仍然保留的一处协议性差异（有意，非缺陷）**：本端 `ServerRust` 的 `MarriageRequest` 带 `target_name`
+（`ServerRust/src/gate/actor.rs:4218`：`[target_name: Dotnet string]`），而 C# 的 `C.MarriageRequest` 没有字段、
+由服务端定目标 ⇒ 本端必须在面板内保留一个目标名输入框（原版没有这个控件）。按仓库规则「协议以 Rust 客户端+服务端自洽为准」，
+这里不动协议，只把文案/守卫/反馈对齐 C#。
+
+顺带对齐：邀请框正文改为 C# 键值（`PlayerAskedForMarriage` = `{0} 向你求婚。`，原来是自造的 `…向你求婚！`）。
+
+**本轮新记的缺口（未修，留给下一轮）**：
+
+1. **离婚请求确认框缺失**：C# `GameScene.cs:6212-6220` 收到 `S.DivorceRequest{Name}` 会弹 YesNo `MirMessageBox`
+   （`PlayerRequestedDivorce` = `{0} 请求离婚。`），Yes/No → `C.DivorceReply{AcceptInvite}`。
+   本端 `handle_progress.rs:971-974` 把该包**整个 body 丢掉**、只写一条 `ServerEvent::DivorceRequest`（无名字），
+   `relationship_server_events` 也仅改内部 `message` ⇒ **玩家点不了"同意离婚"**（无 UI 入口）。
+   并且 `ServerRust` 侧该 opcode 有**两种形状**：`send_divorce_request_packet` 带 `requester_name`
+   （`social_packets.rs:690-701`）、`send_divorce_packet` 是**空 body**（`:703-714`，"confirmation/completion"）⇒
+   客户端得按 body 长度区分「带名字的请求（弹框）」与「空体完成通知（只提示）」再实现。
+2. **私聊入口**：C# 是 `ChatTextBox.Text = ":)"` 并把焦点给聊天框；本端写的是 `/w <名> ` 前缀（本端聊天支持的语法）。
+   属产品化差异，未改。
+
 ### 3.2cd 批次②第一扇 **Menu**：两端逐控件 0.0000 + **整条 HUD 底栏 2px 基准修复**（2026-09-30）
 
 本轮从 Menu（菜单条）打进去，顺带把批次②里「窗内控件/面板」这条路走通，并**捞出一处全 HUD 的 2px 系统性偏差**。

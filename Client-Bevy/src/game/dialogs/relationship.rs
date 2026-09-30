@@ -15,7 +15,7 @@
 
 use bevy::prelude::*;
 
-use crate::game::chat::ChatState;
+use crate::game::chat::{ChatChannel, ChatState};
 use crate::game::dialogs::mail::ComposeMail;
 use crate::game::dialogs::{AlwaysVisible, DialogKind, DialogManager, DialogRoot};
 use crate::map_renderer::GameLibraries;
@@ -88,6 +88,80 @@ pub struct RelationshipState {
     /// 收到结婚邀请（对方名字）
     pub invite: Option<String>,
     pub message: String,
+}
+
+/// C# `Date < new DateTime(2000)` 对应的 unix 秒（2000-01-01T00:00:00Z）：
+/// `RelationshipDialog.UpdateInterface` 用它把「刚结束的关系」与「已离婚」分成两支文案。
+const RELATIONSHIP_EARLY_EPOCH: i64 = 946_684_800;
+
+/// C# `RelationshipDialog.UpdateInterface:221` 的「离婚支」判据：`(LoverName == "") && (Date != default)`。
+fn relationship_divorced_branch(state: &RelationshipState) -> bool {
+    state.lover_name.is_empty() && state.date != 0
+}
+
+/// C# `DateTime.ToShortDateString()` 等价（中西文 culture 都是 `yyyy/M/d`、**月日不补零**；
+/// 沙箱原版帧实测渲染 `0001/1/1`）。
+///
+/// unix 秒 → (y,m,d)：Howard Hinnant 的 `civil_from_days`，纯整数、无日期库依赖。
+pub fn relationship_short_date(unix: i64) -> String {
+    let z = unix.div_euclid(86_400) + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = yoe + era * 400 + i64::from(m <= 2);
+    format!("{y}/{m}/{d}")
+}
+
+/// C# `RelationshipDialog.UpdateInterface:212-244` 的四行信息文本，**逐键照抄**
+/// `Client/Localization/Chinese.json`（`LoverName` / `LoverDate` / `LoverLength` /
+/// `LoverLocation{,Offline,Title}` / `MarriageDate` / `LengthDays` / `DivorcedDate` / `TimeSinceDays`）。
+///
+/// 抽成纯函数是为了单测能钉住四行 + 三种状态分支（已婚 / 未婚 / 已离），
+/// 免得以后又被"关系（婚姻）"这类自造文案覆盖（2026-09-30 §3.2ce）。
+pub fn relationship_line_text(i: usize, state: &RelationshipState) -> String {
+    let divorced = relationship_divorced_branch(state);
+    let early = state.date < RELATIONSHIP_EARLY_EPOCH;
+    match i {
+        0 => format!("伴侣：{}", state.lover_name),
+        1 => {
+            if divorced {
+                if early {
+                    "日期：".to_string()
+                } else {
+                    format!("离婚日期：{}", relationship_short_date(state.date))
+                }
+            } else if state.date == 0 {
+                "结婚日期：".to_string()
+            } else {
+                format!("结婚日期：{}", relationship_short_date(state.date))
+            }
+        }
+        2 => {
+            if divorced {
+                if early {
+                    "持续时间：".to_string()
+                } else {
+                    format!("已过去：{}天", state.married_days)
+                }
+            } else {
+                format!("持续：{}天", state.married_days)
+            }
+        }
+        3 => {
+            if divorced {
+                "位置：".to_string()
+            } else if state.map_name.is_empty() {
+                "位置：离线".to_string()
+            } else {
+                format!("位置：{}", state.map_name)
+            }
+        }
+        _ => String::new(),
+    }
 }
 
 #[derive(Component)]
@@ -400,87 +474,104 @@ fn relationship_ui_system(
         }
     }
     for (mut text, line) in &mut lines {
-        text.0 = match line.0 {
-            0 => "关系（婚姻）".to_string(),
-            1 => {
-                if state.married {
-                    format!(
-                        "婚姻状态: 已婚（{}，{} 天）",
-                        state.lover_name, state.married_days
-                    )
-                } else {
-                    "婚姻状态: 未婚".to_string()
-                }
-            }
-            2 => state.message.clone(),
-            3 => {
-                if state.married {
-                    format!(
-                        "配偶位置: {}",
-                        if state.map_name.is_empty() {
-                            "未知"
-                        } else {
-                            state.map_name.as_str()
-                        }
-                    )
-                } else {
-                    "输入目标名 → 求婚；已婚可离婚".to_string()
-                }
-            }
-            _ => String::new(),
-        };
+        // C# `UpdateInterface` 的四行（文案/分支见 `relationship_line_text`）
+        text.0 = relationship_line_text(line.0, &state);
     }
     for (e, inter) in &allow_btn {
         if edge(e, inter, &mut prev_inter) {
+            // C# `RelationshipDialog.cs:61`：只发包，不提示
             net.send_packet(&mir2_shared::packets::client::misc::ChangeMarriage);
-            state.message = "已切换求婚/结婚模式".to_string();
         }
     }
 
     for (e, inter) in &mail_btn {
-        if edge(e, inter, &mut prev_inter) && !state.lover_name.is_empty() {
-            compose_mail.write(ComposeMail {
-                to: state.lover_name.clone(),
-                message: None,
-                // C# `RelationshipDialog.cs:126` → 写信窗
-                parcel: false,
-            });
-            state.message = format!("写信给 {}", state.lover_name);
+        if !edge(e, inter, &mut prev_inter) {
+            continue;
         }
+        // C# `RelationshipDialog.cs:120-122`：未婚 → 系统聊天提示后 return
+        if state.lover_name.is_empty() {
+            chat.add_line(
+                "你尚未结婚。".to_string(),
+                Color::srgb(1.0, 0.3, 0.3),
+                ChatChannel::System,
+            );
+            continue;
+        }
+        compose_mail.write(ComposeMail {
+            to: state.lover_name.clone(),
+            message: None,
+            // C# `RelationshipDialog.cs:126` → 写信窗
+            parcel: false,
+        });
     }
 
     for (e, inter) in &whisper_btn {
-        if edge(e, inter, &mut prev_inter) && !state.lover_name.is_empty() {
+        if !edge(e, inter, &mut prev_inter) {
+            continue;
+        }
+        // C# `RelationshipDialog.cs:140-152`：未婚 → `YouAreNotMarried`；名字有但 `MapName == ""` → `LoverIsNotOnline`
+        if state.lover_name.is_empty() {
+            chat.add_line(
+                "你尚未结婚。".to_string(),
+                Color::srgb(1.0, 0.3, 0.3),
+                ChatChannel::System,
+            );
+        } else if state.map_name.is_empty() {
+            chat.add_line(
+                "伴侣未在线".to_string(),
+                Color::srgb(1.0, 0.3, 0.3),
+                ChatChannel::System,
+            );
+        } else {
             chat.input_active = true;
             chat.input_text = format!("/w {} ", state.lover_name);
-            state.message = format!("私聊 {}", state.lover_name);
         }
     }
 
     for (e, inter) in &propose_btn {
-        if edge(e, inter, &mut prev_inter) {
-            let name = input.texts.get(13).cloned().unwrap_or_default();
-            let name = name.trim().to_string();
-            if !name.is_empty() && !state.married {
-                net.send_packet(&crate::network::MarriageRequestWire {
-                    target_name: name.clone(),
-                });
-                state.message = format!("已向 {} 求婚", name);
-                tracing::info!("💍 求婚 → {}", name);
-                input.texts[13].clear();
-                input.active = None;
-            }
+        if !edge(e, inter, &mut prev_inter) {
+            continue;
+        }
+        // C# `RelationshipDialog.cs:76-80`：已婚 → `YouAreAlreadyMarried` 后 return
+        if !state.lover_name.is_empty() {
+            chat.add_line(
+                "你已经结婚了。".to_string(),
+                Color::srgb(1.0, 0.3, 0.3),
+                ChatChannel::System,
+            );
+            continue;
+        }
+        // 本端协议差异：`ServerRust` 的 `MarriageRequest` 带 `target_name`
+        // （C# `C.MarriageRequest` 无字段、由服务端定目标）⇒ 保留面板内的目标名输入框。
+        let name = input.texts.get(13).cloned().unwrap_or_default();
+        let name = name.trim().to_string();
+        if !name.is_empty() {
+            net.send_packet(&crate::network::MarriageRequestWire {
+                target_name: name.clone(),
+            });
+            tracing::info!("💍 求婚 → {}", name);
+            input.texts[13].clear();
+            input.active = None;
         }
     }
     for (e, inter) in &divorce_btn {
-        if edge(e, inter, &mut prev_inter) && state.married {
-            // 服务端离婚流程：发起离婚请求 → 对方确认
-            net.send_packet(&crate::network::DivorceRequestWire {
-                partner_name: String::new(),
-            });
-            state.message = "已发起离婚请求".to_string();
-            tracing::info!("💔 发起离婚");
+        if !edge(e, inter, &mut prev_inter) {
+            continue;
         }
+        // C# `RelationshipDialog.cs:98-102`：未婚 → `YouAreNotMarried` 后 return
+        if state.lover_name.is_empty() {
+            chat.add_line(
+                "你尚未结婚。".to_string(),
+                Color::srgb(1.0, 0.3, 0.3),
+                ChatChannel::System,
+            );
+            continue;
+        }
+        // 服务端离婚流程：发起离婚请求 → 对方确认
+        net.send_packet(&crate::network::DivorceRequestWire {
+            partner_name: String::new(),
+        });
+        tracing::info!("💔 发起离婚");
     }
 }
 
@@ -512,7 +603,8 @@ fn marriage_invite_system(
     }
     for (mut text, _) in &mut texts {
         text.0 = match state.invite.as_ref() {
-            Some(name) => format!("{} 向你求婚！", name),
+            // C# `GameScene.cs:6204`：`PlayerAskedForMarriage` = 「{0} 向你求婚。」（句号，非感叹号）
+            Some(name) => format!("{name} 向你求婚。"),
             None => String::new(),
         };
     }
@@ -653,5 +745,84 @@ mod tests {
                 y + 15.0
             );
         }
+    }
+
+    /// 2026-09-30（§3.2ce）：四行文案必须**逐字**等于 C# `UpdateInterface` 用的
+    /// `Client/Localization/Chinese.json` 键值——旧实现是自造的「关系（婚姻）/婚姻状态/输入目标名」。
+    #[test]
+    fn relationship_lines_match_csharp_localization() {
+        // 未婚：名字空、无日期、无地图
+        let single = RelationshipState::default();
+        assert_eq!(relationship_line_text(0, &single), "伴侣：");
+        assert_eq!(relationship_line_text(1, &single), "结婚日期：");
+        assert_eq!(relationship_line_text(2, &single), "持续：0天");
+        assert_eq!(relationship_line_text(3, &single), "位置：离线");
+
+        // 已婚：名字 + 日期 + 天数 + 在线地图
+        let married = RelationshipState {
+            married: true,
+            lover_name: "老婆大人".to_string(),
+            date: 1_700_000_000, // 2023/11/14
+            map_name: "比奇省".to_string(),
+            married_days: 12,
+            ..Default::default()
+        };
+        assert_eq!(relationship_line_text(0, &married), "伴侣：老婆大人");
+        assert_eq!(
+            relationship_line_text(1, &married),
+            "结婚日期：2023/11/14",
+            "C# `MarriageDate` = 「结婚日期：{{0}}」，日期取 ToShortDateString（月日不补零）"
+        );
+        assert_eq!(relationship_line_text(2, &married), "持续：12天");
+        assert_eq!(relationship_line_text(3, &married), "位置：比奇省");
+
+        // 已婚但配偶离线
+        let offline = RelationshipState {
+            married: true,
+            lover_name: "老婆大人".to_string(),
+            date: 1_700_000_000,
+            map_name: String::new(),
+            married_days: 12,
+            ..Default::default()
+        };
+        assert_eq!(relationship_line_text(3, &offline), "位置：离线");
+
+        // 关系刚结束（名字空 + 早于 2000 的日期）→ `LoverDate`/`LoverLength`/`LoverLocationTitle`
+        let early = RelationshipState {
+            date: 1, // 1970/1/1
+            ..Default::default()
+        };
+        assert!(relationship_divorced_branch(&early));
+        assert_eq!(relationship_line_text(1, &early), "日期：");
+        assert_eq!(relationship_line_text(2, &early), "持续时间：");
+        assert_eq!(relationship_line_text(3, &early), "位置：");
+
+        // 已离婚（名字空 + 2000 之后）→ `DivorcedDate`/`TimeSinceDays`
+        let divorced = RelationshipState {
+            date: 1_700_000_000,
+            married_days: 30,
+            ..Default::default()
+        };
+        assert_eq!(relationship_line_text(1, &divorced), "离婚日期：2023/11/14");
+        assert_eq!(relationship_line_text(2, &divorced), "已过去：30天");
+    }
+
+    /// `ToShortDateString` 等价的纯整数换算：月/日不补零，闰年/世纪边界不能漂。
+    #[test]
+    fn relationship_short_date_matches_csharp_to_short_date_string() {
+        assert_eq!(relationship_short_date(0), "1970/1/1");
+        assert_eq!(relationship_short_date(1_700_000_000), "2023/11/14");
+        // 2000-02-29（闰年 + 世纪闰）与 2024-02-29
+        assert_eq!(relationship_short_date(951_782_400), "2000/2/29");
+        assert_eq!(relationship_short_date(1_709_164_800), "2024/2/29");
+        // 2000-01-01 00:00:00Z = 早/晚分界
+        assert_eq!(
+            relationship_short_date(RELATIONSHIP_EARLY_EPOCH),
+            "2000/1/1"
+        );
+        assert_eq!(
+            relationship_short_date(RELATIONSHIP_EARLY_EPOCH - 86_400),
+            "1999/12/31"
+        );
     }
 }
