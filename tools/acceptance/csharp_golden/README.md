@@ -4239,6 +4239,56 @@ dbtool <沙箱>\Server setpos 333 384 99 100 ; dbtool <沙箱>\Server setpos gqf
 **未采集**：交易中的「双方都放物品/改金币/按确认锁定」这些**内容态**帧（本轮只做到"空窗"同状态对拍）；
 以及**原版鼠标点 YES 点不动**这条本身（是"控制被盖住"还是"点击语义"没查，如实记）。
 
+### 3.2cs 「语言对齐」这条 A/B 口径：老 exe 改 ini **无效**；重建原版客户端**能起但接不进登录夹具**（2026-10-01）
+
+**动机**：§3.2cr 的表里 Relationship 11.8% / Help 10.6% / Keybind 16.3% / Options 6.2% / Quests 6.8% 这几行，
+历轮记的残留原因多是「**语言**」（沙箱原版是英文、本端是中文）。若能把原版侧也切中文，这些行就能从"语言噪声"
+变成可判定的**绘制**差异，而不是永远挂在表里。
+
+#### ① 原版侧切语言：机制在源码里，但沙箱那份 exe 不认
+
+- 机制：`Client/Settings.cs:161/265` 的 `[Game] Language=`（默认 `English`）＋ `:320-326`
+  `GameLanguage.LoadClientLanguage(".\Localization\<Language>.json")`；`Shared/Language.cs:4143-4179` 把 JSON 的
+  `Text`/`Enum` 覆盖到内置英文 `ClientTextMap` 上（找不到文件则就地写一份并 return）。
+- 沙箱 `Client/Localization/` **只有 `Chinese.json`**（78,331 B，与仓库那份**逐字节相同**）⇒ 现状是
+  "English.json 不存在 → `LoadClientLanguage` 抛异常被 catch → 用内置英文"。
+- 实测：往沙箱 `Mir2Config.ini` 插 `[Game] Language=Chinese` → 重启 → 用 `golden_kbd_windows.ps1` **重取 20 扇原版帧**：
+  **新旧原版帧在窗内逐像素几乎完全相同**（Relationship / Ranking **0.00%**、Friends 0.20%、Quests 0.12%），
+  整表 A/B 也几乎不动（Relationship 11.8→11.8、Keybind 16.3→16.3、Help 10.7→10.6）⇒ **语言没切过去**。
+- 根因（确定性）：沙箱 `Client.dll`/`Client.exe` 是 **2025-10-05** 的构建，**早于** `Localization/*.json` 这套机制
+  （仓库 `Shared/Language.cs` 才有它）⇒ 老 exe 既不读那个键、也不读那个文件。**别再在老 exe 上试切语言。**
+
+#### ② 于是自己重建一个"认 Localization"的原版客户端：能构建、能起、**但接不进登录夹具**
+
+- **构建可行且快**：`dotnet build Client\Client.csproj -c Release`（本机 .NET SDK 9.0.313 + VS2022 的 MSBuild +
+  `Components\SlimDX.dll` 都在）⇒ **14 秒 / 0 错误**（8 条既有 warning），产物在 `Build\Client\Release\`
+  （csproj 的 `BaseOutputPath=..\Build\Client\`、`AppendTargetFrameworkToOutputPath=false`）。
+  产物的 `Client.deps.json` 是 **12,519 B**，与沙箱那份**同尺寸** ⇒ 部署形态一致，可以整目录对拷。
+- 把 `Client.dll` / `Shared.dll` / `Client.exe` 换进沙箱（原文件已备份为 `*.abb_orig`）后启动：
+  **窗口标题变成「传奇 2」** ⇒ 重建版**确实加载了 `Localization/Chinese.json`**（机制在重建版里是活的）。
+- **但登录接不进**（三处实测）：
+  1. `csharp_kbd_login.ps1` 走不通：它启动后等 22s + 轮询 30s 找 `WindowsForms10.Edit` 子窗口，**一直是 0 个**
+     （老 exe 在同样时限内能拿到 2 个）。
+  2. 改成"复用已在跑的客户端"再找，**能**拿到两个 `WindowsForms10.Edit.app.0.28c5305_r3_ad1`，但它们的
+     rect 是**屏幕外** `(-31232, -31684)`（老 exe 那两个在屏内、脚本用的正则只认非负坐标）。
+  3. 对该两框 `WM_SETTEXT` 账号/密码 + 发 `Enter` 后，**服务端只看到 `Connected` + `Client version matched`，
+     没有 `User logging in`**（3 次尝试一样）；两张帧 `orig_cn_01_select.png` / `orig_cn_02_in_game.png`
+     **逐像素相同（0.0%）** ⇒ 卡在登录界面没进游戏。
+- 排查到的一处相关源码（**不是**本轮失败的成因，但下次会撞到）：`Client/Program.cs:46-53` ——
+  `Settings.P_Patcher`（读 `[Launcher] Enabled`，**默认 true**）为真时跑的是 **`AMain`（WebView2 启动器窗体）**，
+  否则才跑 `CMain`（游戏窗体）。沙箱那份 ini 里已经是 `[Launcher] Enabled=False`，所以新老两条本轮都走 `CMain`。
+- **未查完（下一轮切口）**：`Client/MirScenes/LoginScene.cs` 里登录窗在当前源码下的创建/定位——
+  老 exe 的输入框在屏内、重建版在屏幕外，差在哪一步（父窗体坐标系？`AMain`/DPI？）。
+
+#### ③ 收尾：沙箱已**完整复位**并复验可用
+
+- 三个二进制从 `*.abb_orig` 还原；`Mir2Config.ini` 从 `.abb_langbak` 还原（`Language` 行已移除，0 命中）；
+  `orig_win_*.png`（20 扇）与 `orig_baseline_none.png` 从 `_en` 档案还原（`_en` 副本已删）。
+- 复位后复跑一次 `csharp_kbd_login.ps1`：服务端日志出现 **`User logged in` + `女道士 has connected`** ✓（夹具可用）。
+
+**结论**：**「语言对齐」这条口径本轮没打通**（如实记，不推数）；要拿"中文原版帧"，得先解决**重建版怎么登录**
+（或另找一个带 `Localization` 的旧发行版 exe）。在解决之前，A/B 表里那几行的"语言差"应按「不可判」对待。
+
 ### 3.2cr 「零对拍」A/B 表在 master `0f23dc12f` 复跑：**±1px 位移行归零**、无回归（2026-10-01）
 
 §3.2cl～§3.2cq 那九笔改的全是"布局按真尺寸/真宽度"，所以按 §3.2aq 的老配方原样复跑一遍，看有没有带坏别处、
