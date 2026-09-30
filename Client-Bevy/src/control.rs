@@ -2986,7 +2986,46 @@ fn drive_pending_click(world: &mut World) {
                         .get::<Name>(e)
                         .map(|n| n.to_string())
                         .unwrap_or_else(|| format!("{e:?}"));
-                    hits.push(format!("{name} {size} [{chain}]"));
+                    // 2026-09-30（§3.2cj）：`hits` 之前只有 `名字 尺寸 [归属窗]`，遇到
+                    // 「非 UI 实体的尺寸恒为 `?`」时完全看不出它是什么（本轮就是被 `66v0 ? []`
+                    // 卡住的）。补三样能一眼定性的字段：
+                    //   * `kind`：UI 节点（有 `Node`）/ 精灵（`Sprite`，带 `custom_size` 与 z）/
+                    //     其它；`Pickable` 的 `is_hoverable`（不 hoverable 的实体不会挡下层点击）；
+                    //   * `vis`：`InheritedVisibility`（隐藏的 UI 节点 picking 会跳过）；
+                    //   * `z`：`GlobalZIndex`（UI）/`Transform.translation.z`（精灵）——跨后端比较用的是深度，
+                    //     有了它才能判断"到底谁压在谁上面"。
+                    let kind = if let Ok(sprite) = world.query::<&Sprite>().get(world, e) {
+                        format!(
+                            "sprite{:?}",
+                            sprite.custom_size.map(|s| format!("{:.0}x{:.0}", s.x, s.y))
+                        )
+                    } else if world.get::<Node>(e).is_some() {
+                        "ui".to_string()
+                    } else {
+                        "other".to_string()
+                    };
+                    let vis = world
+                        .get::<InheritedVisibility>(e)
+                        .map(|v| if v.get() { "vis" } else { "hidden" })
+                        .unwrap_or("-");
+                    let z = world
+                        .get::<GlobalZIndex>(e)
+                        .map(|z| format!("gz={}", z.0))
+                        .or_else(|| {
+                            world
+                                .get::<Transform>(e)
+                                .map(|t| format!("tz={:.0}", t.translation.z))
+                        })
+                        .unwrap_or_else(|| "-".to_string());
+                    let pickable = world
+                        .get::<bevy::picking::Pickable>(e)
+                        .map(|p| {
+                            format!("pick={}", if p.is_hoverable { "hover" } else { "ignore" })
+                        })
+                        .unwrap_or_else(|| "pick=-".to_string());
+                    hits.push(format!(
+                        "{name} {size} [{chain}] {kind} {vis} {z} {pickable}"
+                    ));
                 }
             }
             world.write_message(MouseButtonInput {
