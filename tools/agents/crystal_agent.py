@@ -167,15 +167,28 @@ def board() -> dict:
     return obj if isinstance(obj, dict) else {}
 
 
+class BoardUnavailable(RuntimeError):
+    """看板读不出来——**必须与「卡不在看板上」区分开**。
+
+    实测事故：三个工人抢同一张卡。根因就是把两者混为一谈——读失败返回空，
+    调用方当"还没人认领"就抢了。读不到时正确的做法是**放弃这一轮**（fail-safe），
+    下次再看，而不是凭猜测去认领。
+    """
+
+
 def cards_in(column: str) -> list[dict]:
     b = board()
-    for c in b.get("columns", []):
+    cols = b.get("columns")
+    if not cols:
+        raise BoardUnavailable("collab board 无输出（walgit 调用失败或超时）")
+    for c in cols:
         if c.get("name") == column:
             return c.get("cards", [])
     return []
 
 
 def card_status(thread: str) -> str | None:
+    """返回所在列名；卡确定不在看板上返回 None；**读不出来抛 BoardUnavailable**。"""
     for col in ("待认领", "进行中", "待审", "已完成", "受阻"):
         for c in cards_in(col):
             if (c.get("thread") or c.get("id")) == thread:
@@ -213,7 +226,11 @@ def _claim_guard():
 def claim(agent: str, thread: str) -> bool:
     lock = _claim_guard()
     try:
-        cur = card_status(thread)
+        try:
+            cur = card_status(thread)
+        except BoardUnavailable as e:
+            print(f"[claim] {thread} 跳过：看板读不出来（{e}）——不凭猜测认领")
+            return False
         if cur not in ("待认领", None):
             print(f"[claim] {thread} 已在「{cur}」列，不重复认领")
             return cur == "进行中"
@@ -243,8 +260,35 @@ def claim(agent: str, thread: str) -> bool:
 # --------------------------------------------------------------------------- #
 # 干活：headless Claude Code
 # --------------------------------------------------------------------------- #
-def work(agent: str, thread: str, task: str, *, model: str | None = None, timeout: int = 3600) -> tuple[bool, str]:
-    """在检出里跑一次 headless Claude；返回 (是否成功, 摘要)。"""
+def worktree_for(agent: str, thread: str) -> tuple[Path, str]:
+    """给这个 (agent, thread) 一个**独占检出**，返回 (worktree 路径, 基线 commit)。
+
+    为什么必须独占：多个工人 + 人工会话若共用一个工作树，HEAD/分支会互相踩——
+    实测出现过工人干的活其实是别人的提交（`git rev-parse HEAD` 读到的是别人的 HEAD），
+    于是"成功"是假的。独占 worktree 之后，工人产出 = 它自己分支上比基线新的提交。
+    """
+    wt_root = AGENT_HOME / "wt"
+    wt_root.mkdir(parents=True, exist_ok=True)
+    wt = wt_root / f"{agent}-{thread}"
+    base = subprocess.run(
+        ["git", "rev-parse", "origin/master"], cwd=REPO, capture_output=True, text=True
+    ).stdout.strip()
+    if not wt.exists():
+        br = f"agent/{agent}/{thread}"
+        r = subprocess.run(["git", "worktree", "add", "-b", br, str(wt), "origin/master"],
+                           cwd=REPO, capture_output=True, text=True)
+        if r.returncode != 0:  # 分支已存在（重跑）→ 复用
+            subprocess.run(["git", "worktree", "add", str(wt), br],
+                           cwd=REPO, capture_output=True, text=True)
+    return wt, base
+
+
+def work(agent: str, thread: str, task: str, *, model: str | None = None, timeout: int = 3600) -> tuple[bool, str, str, str]:
+    """在**独占 worktree** 里跑一次 headless Claude。
+
+    返回 `(是否真的产出, 摘要, base, head)`。判据是**分支上有没有比基线新的提交**，
+    不是子进程退出码——退出码 0 也可能是"什么都没做"。
+    """
     prompt = (
         f"你是 Crystal 项目的 agent「{agent}」，正在处理工作单元 `{thread}`。\n\n"
         f"## 任务\n{task}\n\n"
@@ -256,30 +300,35 @@ def work(agent: str, thread: str, task: str, *, model: str | None = None, timeou
         "- 如果发现任务本身有问题，直接说明并停手，不要硬做。\n\n"
         "## 产出\n最后用一段话总结：做了什么、PR 链接、验证方式、还剩什么没做。"
     )
+    wt, base = worktree_for(agent, thread)
     argv = ["claude", "-p", prompt, "--dangerously-skip-permissions", "--output-format", "text"]
     if model:
         argv += ["--model", model]
-    print(f"[work] {thread} 开工（timeout={timeout}s）…")
+    print(f"[work] {thread} 在 {wt.name} 开工（基线 {base[:8]}，timeout={timeout}s）…")
     try:
-        r = _run(argv, timeout=timeout)
+        r = subprocess.run(argv, cwd=wt, capture_output=True, text=True,
+                           encoding="utf-8", errors="replace", timeout=timeout)
     except subprocess.TimeoutExpired:
-        return False, f"超时（{timeout}s）"
+        return False, f"超时（{timeout}s）", base, ""
     out = (r.stdout or "").strip()
-    if r.returncode != 0 and not out:
-        return False, (r.stderr or "").strip()[:2000]
-    return True, out[-4000:]
+    head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=wt,
+                          capture_output=True, text=True).stdout.strip()
+    # 真判据：分支上出现了**基线之外**的提交
+    ahead = subprocess.run(["git", "rev-list", "--count", f"{base}..HEAD"], cwd=wt,
+                           capture_output=True, text=True).stdout.strip()
+    produced = ahead.isdigit() and int(ahead) > 0
+    if not produced:
+        return False, (out or (r.stderr or "").strip())[-2000:] + chr(10) + "[未产生任何提交]", base, head
+    return True, out[-4000:], base, head
 
 
 def run_one(agent: str, thread: str, task: str, *, model: str | None = None) -> bool:
     if not claim(agent, thread):
         return False
-    ok, summary = work(agent, thread, task, model=model)
-    head = subprocess.run(
-        ["git", "rev-parse", "HEAD"], cwd=REPO, capture_output=True, text=True
-    ).stdout.strip()
+    ok, summary, base, head = work(agent, thread, task, model=model)
     set_status(
         agent, thread, "needs-review" if ok else "open",
-        ok=ok, summary=summary[:1500], head_commit=head,
+        ok=ok, summary=summary[:1500], base_commit=base, head_commit=head,
     )
     print(f"[run] {thread} → {'待审' if ok else '退回待认领'}")
     return ok
