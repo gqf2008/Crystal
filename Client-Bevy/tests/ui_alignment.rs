@@ -5135,3 +5135,23 @@ fn questlist_and_creature_use_true_size_batch5() {
         "  ✓ NPC 任务列表挂点 (485,0) + 宠物窗 (287,196) + 两条宠物条真宽 246/169（§3.2cp 批⑤）"
     );
 }
+
+/// §3.2cq：聊天设置面板（C# `ChatOptionDialog`）原点按 `Size` = `GetTrueSize(Title[466])` = 222x180
+/// ⇒ `((1024-222)/2, (768-180)/2)` = **(401,294)**（本端此前肉眼定 (400,300)）。
+///
+/// **画源**：本端面板仍是自绘 224x180 深色矩形（不是 `Title[466]` 美术）——属独立"画源对齐"批次，
+/// 本轮只对齐原点；`Title[466]` 真尺寸在下面一并钉住，免得画源批次再来查一遍。
+#[test]
+fn chat_option_origin_uses_true_size() {
+    require_assets!("chat_option_origin_uses_true_size");
+    use client_bevy::game::chat;
+    let mut libs = Libs::new();
+    assert_eq!(libs.size(LibraryName::Title, 466), (224.0, 180.0));
+    assert_eq!(
+        libs.true_size(LibraryName::Title, 466),
+        chat::CHAT_OPTION_TRUE_SIZE,
+        "GetTrueSize(Title[466]) = 222x180"
+    );
+    assert_eq!(chat::CHAT_OPTION_ORIGIN, (401.0, 294.0));
+    println!("  ✓ 聊天设置面板原点 (401,294)（真尺寸 222x180；§3.2cq）");
+}

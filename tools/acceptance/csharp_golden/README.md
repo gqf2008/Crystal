@@ -4239,6 +4239,36 @@ dbtool <沙箱>\Server setpos 333 384 99 100 ; dbtool <沙箱>\Server setpos gqf
 **未采集**：交易中的「双方都放物品/改金币/按确认锁定」这些**内容态**帧（本轮只做到"空窗"同状态对拍）；
 以及**原版鼠标点 YES 点不动**这条本身（是"控制被盖住"还是"点击语义"没查，如实记）。
 
+### 3.2cq 「真尺寸」批⑥：聊天设置面板原点（§3.2cl ③ 表最后一行）（2026-10-01）
+
+C# `ChatOptionDialog`（`ChatOptionDialog.cs:19-24`）：`Index = 466; Library = Libraries.Title;
+Size = new Size(224, 180); Location = ((SW - Size.Width)/2, (SH - Size.Height)/2)`。
+`Size` = `GetTrueSize(Title[466])` = **222x180** ⇒ `(441/2, 588/2)` = **(401,294)**（两项都整除）。
+
+本端此前是**肉眼定的 (400,300)** —— x 偏 1、**y 偏 6**。已改 `CHAT_OPTION_ORIGIN`。
+
+**画源偏差（已知，本批不修）**：本端这块面板画的是**自绘 224x180 深色矩形**，不是 C# 的 `Title[466]` 美术。
+换美术要按 466 的子控件坐标整体重排（`FilterTabButton` 等），属独立的「画源对齐」批次；
+本轮只对齐原点，并顺手把 `Title[466]` 的真尺寸钉在测试里（免得画源批次再来查一遍）。
+
+顺带：`Client-Bevy/src/game/dialogs/mod.rs` 里 `QuestListDialog` 的文档注释还写着 `@(487,0)`，
+已按 §3.2cp 改成 `@(485,0)`（代码早就改成真尺寸了，只有注释在漂）。
+
+#### 本端验证
+
+- `cargo test --lib` = **921 passed**（新增 `chat_option_origin_uses_get_true_size`）
+- `cargo test --test b0001_smoke --test ui_alignment` = **2 + 57 passed**（新增 `chat_option_origin_uses_true_size`）
+- `pwsh tools/acceptance/ui_interact_sweep.ps1 -ManageServer` = **pass=46 / total=47 / fail=0 / skip=0 / exit=0**
+  —— 注：**首跑红过 3 项**（`group`/`friend`/`ranking` 的关闭钮点击后窗口仍在，
+  `hits` 落在非 UI 实体 `66v0 ? [] other`）。这与 §3.2cj 记的「mock 下点击不稳」同型；
+  连跑两次均为 46/47/fail=0，且这三扇窗与本批改动无任何几何/接线关系 ⇒ 判为**门禁抖动**，不是本改回归。
+- `rustfmt --edition 2024 --check`：改动文件的告警**计数与 master 基线逐个相等**
+
+#### 未采集
+
+本扇窗的**原版帧**：C# 里它由聊天条右侧的「设置」钮开（`MainDialogs.cs:1301-1304`），
+归档帧里没有它打开的状态；而且本端面板是自绘占位，**像素 A/B 要等画源批次对齐后才有意义**。
+
 ### 3.2cp 「真尺寸」批⑤：NPC 任务列表挂点 + 新建角色窗 + 宠物窗与两条宠物条（2026-10-01）
 
 #### ① 任务列表挂点（**原版帧实锤**）
@@ -4548,6 +4578,11 @@ PY
 >
 > **又更正一条**（2026-10-01 §3.2co 批④）：本表 `ChatNoticeDialog` 行写「居中 x 182→182（差 1 会被整除吃掉）」
 > 是**错的**——659 是奇数，`512-329 = 183`，正好差 1px。同批还收了 Notice / HeroMenuPanel / HUD 三条 / 邮件四窗关闭钮。
+>
+> **本表已逐行收口**（2026-10-01，§3.2cm～§3.2cq）：BigMap / Buff / FishingStatus / Notice / ChatOption / ChatNotice /
+> Inventory / IntelligentCreature / NewCharacter / NPC 三窗 / NPCAwake / TrustMerchant / HeroMenuPanel / DuraStatus /
+> MainDialog / MiniMap 全部过了一遍；其中 **MiniMap 与 DuraStatus 复核为「无缺陷」**（MiniMap 构造字面就是真宽 126；
+> DuraStatus 自身 `Size` 不参与布局，只引用 `MiniMapDialog.Size.Height` = 154 未裁）。剩余未取帧的项在各自小节标了理由。
 
 **同时更正的历史结论**：§3.2cd/§3.2ce 表里把 Friend/Help/KeyboardLayout 的 Δ=(−1,0) 记成"居中窗口径"的那些行，
 按本条应读作"当时未修的真缺口"；本条目已把它们修掉。

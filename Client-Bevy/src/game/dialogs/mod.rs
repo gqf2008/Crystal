@@ -142,7 +142,8 @@ pub enum DialogKind {
     /// `QuestDialogs.cs:463-628`）。由任务日记行左键打开（`QuestSingleQuestItem._questLabel.Click`，
     /// `QuestDialogs.cs:1928-1935`）；`Movable = true` 独立拖动，故独立 kind 不复用 `QuestLog`
     QuestDetail,
-    /// #3368：C# `QuestListDialog`（**NPC 侧**任务列表窗，`Prguse[950]` 316x466 @(487,0)，
+    /// #3368：C# `QuestListDialog`（**NPC 侧**任务列表窗，`Prguse[950]` 316x466 @**(485,0)**
+    /// （= `NPCDialog.Size.Width(438) + 47`；2026-10-01 §3.2cp 批⑤ 按真尺寸更正，原写 487）
     /// `QuestDialogs.cs:15-36`）。与 `QuestLog`（热键开的任务日记 `Prguse[961]` @(192,60)）
     /// 是两扇不同的窗：面板/位置/内容/入口都不同（§3.2au 在案）。入口 = NPC 窗的 Quest 按钮
     /// （`NPCDialogs.cs:181`），故独立 kind——否则两扇窗会被 kind 级显隐/拖动连带。
