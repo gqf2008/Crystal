@@ -29,11 +29,16 @@ use crate::ui::theme::{
 pub const PANEL: (LibraryName, usize) = (LibraryName::Prguse, 961);
 
 // —— 布局常量（NoticeDialog.cs；Prguse[961] 实测 316x466）——
+/// 贴图用的**图头**尺寸（`Library.Draw` 原样 1:1 铺）
 pub const BG_W: f32 = 316.0;
 pub const BG_H: f32 = 466.0;
-/// Location = ((SW-W)/2, (SH-H)/3)（C# 整除）= (354, 100)——用整数除再转 f32
+/// `GetTrueSize(Prguse[961])` 真宽 = **314**（图头 316 的最右 2 列全透明，高不裁）。
+pub const BG_TRUE_W: f32 = 314.0;
+/// C# `NoticeDialog.cs:33` `Location = ((SW - Size.Width)/2, (SH - Size.Height)/3)`，
+/// `Size` = `GetTrueSize` ⇒ x = **(1024-314)/2 = 355**、y = (768-466)/3 = 100（逐项整除）。
+/// 本端此前按图头算成 354（§3.2co 批④）。注意 y 用的是 **/3** 不是 /2。
 pub const ORIGIN: (f32, f32) = (
-    ((1024.0 - BG_W) / 2.0).trunc(),
+    ((1024.0 - BG_TRUE_W) / 2.0).trunc(),
     ((768.0 - BG_H) / 3.0).trunc(),
 );
 pub const MAX_LINES: usize = 19;
@@ -550,6 +555,26 @@ fn find_char(chars: &[char], from: usize, target: char, max: usize) -> Option<us
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// §3.2co 批④：`NoticeDialog` 原点按 C# `Size` = `GetTrueSize(Prguse[961])` = **314x466** 算
+    /// （不是源码对面的图头 316x466）：`((1024-314)/2, (768-466)/3)` = **(355,100)**。
+    /// 注意 y 用的是 **`/3`**（C# 原样），不是 `/2`；两项都是整数除法。
+    #[test]
+    fn notice_origin_uses_get_true_size() {
+        assert_eq!((BG_W, BG_H), (316.0, 466.0), "图头（贴图 1:1 用）");
+        assert_eq!(BG_TRUE_W, 314.0, "GetTrueSize(961).Width");
+        assert_eq!(ORIGIN, (355.0, 100.0));
+        assert_ne!(
+            ((1024.0 - BG_W) / 2.0).trunc(),
+            ORIGIN.0,
+            "按图头会得 354（本轮修前的值）"
+        );
+        assert_eq!(
+            ((768.0 - BG_H) / 3.0).trunc(),
+            100.0,
+            "y 用 /3（C# `(SH - Size.Height) / 3`）"
+        );
+    }
 
     fn seg(text: &str, color: Option<Color>, link: Option<&str>) -> NoticeSeg {
         NoticeSeg {

@@ -29,6 +29,13 @@ use crate::ui::theme::{load_lib_image, spawn_panel};
 pub const PANEL: (LibraryName, usize) = (LibraryName::Prguse, 1361);
 pub const LAYOUT: (LibraryName, usize) = (LibraryName::Prguse, 1360);
 pub const PANEL_SIZE: (f32, f32) = (660.0, 25.0);
+/// `GetTrueSize(Prguse[1361])` = **659x25**（图头 660x25 的最右 1 列全透明）。
+///
+/// C# `ChatNoticeDialog.cs:19` `Location = (SW/2 - Size.Width/2, SH/6 - Size.Height/2)`
+/// ——**逐项整除**且 `Size` 是真尺寸 ⇒ x = `512 - 659/2` = `512 - 329` = **183**。
+/// 本端此前按图头 660 算成 182（`660/2 = 330`）。§3.2co 批④ 更正：
+/// §3.2cl ③ 表里写的"差 1 会被整除吃掉 ⇒ 182→182"是**错的**——659 是奇数，正好差 1px。
+pub const PANEL_TRUE_SIZE: (f32, f32) = (659.0, 25.0);
 
 /// C# `ChatNoticeDialog.ViewTime = 10000`（ms）——横幅显示时长
 pub const VIEW_TIME_SECS: f32 = 10.0;
@@ -121,7 +128,7 @@ fn spawn_chat_notice(
         return;
     };
     let bg_for_alpha = bg.clone();
-    let (px, py) = chat_notice_origin(PANEL_SIZE.0, PANEL_SIZE.1);
+    let (px, py) = chat_notice_origin(PANEL_TRUE_SIZE.0, PANEL_TRUE_SIZE.1);
     let panel = spawn_panel(&mut commands, bg, px, py, PANEL_SIZE.0, PANEL_SIZE.1, 50);
     commands
         .entity(panel)
@@ -198,6 +205,8 @@ mod tests {
 
     #[test]
     fn chat_notice_origin_matches_csharp() {
+        // §3.2co：真尺寸 659（奇数）⇒ 512 - 329 = 183（按图头 660 会得 182）
+        assert_eq!(super::chat_notice_origin(659.0, 25.0), (183.0, 116.0));
         assert_eq!(super::chat_notice_origin(660.0, 25.0), (182.0, 116.0));
     }
 
@@ -212,6 +221,11 @@ mod tests {
             "C# Layout.Index = 1360"
         );
         assert_eq!(PANEL_SIZE, (660.0, 25.0), "Prguse[1361] 图头 660x25");
+        assert_eq!(
+            PANEL_TRUE_SIZE,
+            (659.0, 25.0),
+            "Prguse[1361] 真尺寸 659x25（C# `Size` = GetTrueSize ⇒ 原点用 183）"
+        );
         assert_eq!(VIEW_TIME_SECS, 10.0, "C# ViewTime = 10000ms");
         assert_eq!(PANEL_OPACITY, 0.7, "C# Opacity = 0.7F");
         assert_eq!(LABEL_BOX, (0.0, -6.0, 660.0, 40.0), "C# TextLabel1");

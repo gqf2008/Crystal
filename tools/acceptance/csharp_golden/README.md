@@ -4239,6 +4239,48 @@ dbtool <沙箱>\Server setpos 333 384 99 100 ; dbtool <沙箱>\Server setpos gqf
 **未采集**：交易中的「双方都放物品/改金币/按确认锁定」这些**内容态**帧（本轮只做到"空窗"同状态对拍）；
 以及**原版鼠标点 YES 点不动**这条本身（是"控制被盖住"还是"点击语义"没查，如实记）。
 
+### 3.2co 「真尺寸」批④：Notice / ChatNotice / HeroMenuPanel / HUD 三条 / 邮件四窗关闭钮（2026-10-01）
+
+#### ① 这几处（**只有源码判据**，未采集原版帧 —— 理由见 ④）
+
+`Size` 一律指 `MirImageControl.Size` = `Library.GetTrueSize`；公式里的除法都是 C# **整数除法**。
+
+| 窗 / 控件 | C# 出处 | 公式 | 图头 → 真尺寸 | 修前 → 修后 |
+|---|---|---|---|---|
+| `NoticeDialog` | `NoticeDialog.cs:33` | `((SW - Size.Width)/2, (SH - Size.Height)/3)` | `Prguse[961]` 316x466 → **314x466** | x 354 → **355**（y 用 **/3** = 100 不变） |
+| `ChatNoticeDialog` | `ChatNoticeDialog.cs:19` | `(SW/2 - Size.Width/2, SH/6 - Size.Height/2)` | `Prguse[1361]` 660x25 → **659x25** | x 182 → **183** |
+| `HeroMenuPanel` | `HeroDialogs.cs:396` | `((SW/2) - (Size.Width/2)) + 362, SH - Size.Height - 77` | `Prguse[2179]` 24x61 → **22x61** | x 862 → **863** |
+| HUD 三条（HP/MP/EXP） | `HeroDialogs.cs:653/674/691` | `Bar.Size.Width * percent` | `Prguse[1951..1953]` 52x8 → **50x8** | 满值 52 → **50**（50% 由 26px → 25px） |
+| 邮件四窗关闭钮 | `MailDialogs.cs:615/717/1000/1131` | `Size.Width - 27` | `Title[671/674/672/675]` 236 → **233** | x 209 → **206** |
+
+**更正一条历史结论**：§3.2cl ③ 表里 `ChatNoticeDialog` 写「居中 x 182→182（差 1 会被整除吃掉）」是**错的**：
+659 是**奇数**，`659/2 = 329`（整除）、`512 - 329 = 183`，与图头的 `512 - 330 = 182` 正好差 1px。
+
+#### ② 顺带确认（**无**缺陷，别当待办）
+
+- `MiniMapDialog`：构造字面就是 `Location = new Point(Settings.ScreenWidth - 126, 0)`（**126 = 真宽**），
+  `MainDialogs.cs:2010` 里那处 `Size.Width` 同样 = 126 ⇒ 本端口径一致。
+- `StorageDialog`：`Prguse[586]` **无裁剪**（真尺寸 == 图头 388x346）⇒ 推背包 393 正确（见 §3.2cn）。
+
+#### ③ 本端验证
+
+- `cargo test --lib` = **920 passed**（新增 `notice_origin_uses_get_true_size`；HUD 条 50% 期望 26px → 25px）
+- `cargo test --test b0001_smoke --test ui_alignment` = **2 + 55 passed**
+  （新增 `centered_and_anchor_windows_use_true_size_batch4`：逐项钉 `Prguse[961/1361/2179/1951..1953]`、
+  `Title[671/674/672/675]` 的真尺寸与 355 / 183 / 863 / 50 / 206 五个值；两条按旧口径写死的断言已按真尺寸改）
+- `pwsh tools/acceptance/ui_interact_sweep.ps1 -ManageServer` = **pass=46 / total=47 / fail=0 / skip=0 / exit=0**
+- `rustfmt --edition 2024 --check`：5 个改动文件的告警**计数与 master 基线逐个相等**
+
+#### ④ 未采集（本批为什么只有源码判据）
+
+- `NoticeDialog` / `ChatNoticeDialog`：这两扇窗只由**服务端包**驱动（`S.Notice` / `S.ChatNotice`），
+  沙箱那台 C# 服务器登录后不发。本轮新取的登录帧里 `Prguse[961]`（`inv_batch4_base.png`，最佳落点不符率 0.43）
+  与 `Prguse[1361]`（0.53）**都不在位**。
+- `HeroMenuPanel` + 三条 HUD 条：**沙箱角色没有英雄** ⇒ `MainDialog.HeroMenuButton` 不出现、面板也不显示。
+  实测：按 `(874,693)`（= `MainDialog(0,618)` + `(1024-160, 65)` + 钮心 10px）点英雄钮后，
+  `Prguse[2179]`（0.88）与 `Prguse[11]`（0.35）仍不在位；归档 300+ 帧**全量扫 `Prguse[2179]` 零命中**。
+- 邮件四窗（写/读 × 信/包裹）：需要「邮件列表 → 写 / 读」两级交互状态，本轮没取。
+
 ### 3.2cn 「按面板真宽度算位置」一族：背包推位四档 + 背包/负重条真尺寸（2026-10-01）
 
 承接 §3.2cl ② / §3.2cm。§3.2cl ③ 表里 **`NPCAwakeDialog 710→309 差 51px`** 那行当时标了"最可疑、先确认 Index 解析"——
@@ -4453,6 +4495,9 @@ PY
 > **一条被更正**（2026-10-01 §3.2cn）：`NPCAwakeDialog 710→309 差 51px` 那行的**用处配错了**——错不在觉醒面板
 > 自身（子控件全是字面量），而在 `NPCAwakeDialog.Show()` 把**背包**推到 `Size.Width + 5`（309+5=314）。
 > 已修并留原版帧实锤。同族还收了 NPC/TM/交易三档推位与背包、负重条的真尺寸。
+>
+> **又更正一条**（2026-10-01 §3.2co 批④）：本表 `ChatNoticeDialog` 行写「居中 x 182→182（差 1 会被整除吃掉）」
+> 是**错的**——659 是奇数，`512-329 = 183`，正好差 1px。同批还收了 Notice / HeroMenuPanel / HUD 三条 / 邮件四窗关闭钮。
 
 **同时更正的历史结论**：§3.2cd/§3.2ce 表里把 Friend/Help/KeyboardLayout 的 Δ=(−1,0) 记成"居中窗口径"的那些行，
 按本条应读作"当时未修的真缺口"；本条目已把它们修掉。

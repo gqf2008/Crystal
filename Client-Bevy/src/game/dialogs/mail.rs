@@ -235,6 +235,12 @@ pub const LETTER_POS: (f32, f32) = (100.0, 100.0);
 /// 注意与邮件列表窗的 `-24` 不同）
 pub const COMPOSE_CLOSE_DX: f32 = 27.0;
 pub const COMPOSE_CLOSE_Y: f32 = 3.0;
+/// 邮件四窗面板 `Title[671/674/672/675]` 的**真宽** = **233**（图头 236，最右 3 列全透明）。
+///
+/// C# 四扇窗的关闭钮都是 `Location = new Point(Size.Width - 27, 3)`
+/// （`MailDialogs.cs:615/717/1000/1131`），`Size` = `GetTrueSize` ⇒ x = **206**；
+/// 本端此前用图头算成 209（§3.2co 批④，三窗一起偏右 3px）。
+pub const MAIL_PANEL_TRUE_W: f32 = 233.0;
 /// 收件人标签（C# `RecipientNameLabel`，`NotControl = true` 即不可编辑）
 pub const COMPOSE_RECIPIENT_POS: (f32, f32) = (70.0, 35.0);
 pub const COMPOSE_RECIPIENT_SIZE: (f32, f32) = (150.0, 15.0);
@@ -1354,7 +1360,7 @@ fn spawn_compose_windows(
                 p,
                 libs,
                 images,
-                LETTER_SIZE.0 - COMPOSE_CLOSE_DX,
+                MAIL_PANEL_TRUE_W - COMPOSE_CLOSE_DX,
                 COMPOSE_CLOSE_Y,
                 12,
             ) {
@@ -1470,7 +1476,7 @@ fn spawn_compose_windows(
                 p,
                 libs,
                 images,
-                PARCEL_SIZE.0 - COMPOSE_CLOSE_DX,
+                MAIL_PANEL_TRUE_W - COMPOSE_CLOSE_DX,
                 COMPOSE_CLOSE_Y,
                 13,
             ) {
@@ -1626,7 +1632,7 @@ fn spawn_read_windows(
                 p,
                 libs,
                 images,
-                READ_SIZE.0 - COMPOSE_CLOSE_DX,
+                MAIL_PANEL_TRUE_W - COMPOSE_CLOSE_DX,
                 COMPOSE_CLOSE_Y,
                 12,
             ) {
@@ -1744,7 +1750,7 @@ fn spawn_read_windows(
                 p,
                 libs,
                 images,
-                READ_PARCEL_SIZE.0 - COMPOSE_CLOSE_DX,
+                MAIL_PANEL_TRUE_W - COMPOSE_CLOSE_DX,
                 COMPOSE_CLOSE_Y,
                 12,
             ) {
@@ -3232,11 +3238,23 @@ mod tests {
         assert_eq!(PARCEL_CELL_SIZE, (35.0, 31.0));
         assert_eq!(PARCEL_SEND_POS, (30.0, 350.0));
         assert_eq!(PARCEL_CANCEL_POS, (135.0, 350.0));
-        // 两窗共用：关闭钮 `(W-27, 3)`、收件人 (70,35) 150x15、正文 202x165
+        // 两窗共用：关闭钮 `(Size.Width-27, 3)` = **(233-27, 3) = (206,3)**（§3.2co 批④：
+        // `Size` = `GetTrueSize(Title[674])` = 233，不是图头 236）、收件人 (70,35) 150x15、正文 202x165
         assert_eq!(COMPOSE_CLOSE_DX, 27.0);
         assert_eq!(COMPOSE_CLOSE_Y, 3.0);
-        assert_eq!(LETTER_SIZE.0 - COMPOSE_CLOSE_DX, 209.0);
-        assert_eq!(PARCEL_SIZE.0 - COMPOSE_CLOSE_DX, 209.0);
+        assert_eq!(MAIL_PANEL_TRUE_W - COMPOSE_CLOSE_DX, 206.0);
+        assert_ne!(LETTER_SIZE.0 - COMPOSE_CLOSE_DX, 206.0, "图头模型 = 209");
+        assert_eq!(LETTER_SIZE, (236.0, 300.0), "图头仍用于贴图");
+        // 四窗真宽一致（233）——写/读 × 信/包裹
+        assert_eq!(
+            (
+                LETTER_SIZE.0,
+                PARCEL_SIZE.0,
+                READ_SIZE.0,
+                READ_PARCEL_SIZE.0
+            ),
+            (236.0, 236.0, 236.0, 236.0)
+        );
         assert_eq!(COMPOSE_RECIPIENT_POS, (70.0, 35.0));
         assert_eq!(COMPOSE_RECIPIENT_SIZE, (150.0, 15.0));
         assert_eq!(COMPOSE_BODY_SIZE, (202.0, 165.0));
