@@ -3992,6 +3992,52 @@ pwsh tools\acceptance\rpc.ps1 -Method screenshot -Params '{"path":"<worktree>\ou
 `b0001_smoke` 2 + `ui_alignment` 53；**`ui_interact_sweep.ps1 -ManageServer` pass=46 total=47
 fail=0 skip=0 exit=0**；改动文件 `cargo fmt -- --check` 与 master 基线逐 hunk 一致。
 
+### 3.2bx 「零对拍」批次①续：**Buff 窗拿到原版帧**（`setadmin` + GM 登录即推 buff），外加锁屏期「聊天/GM 命令」为什么走不通（2026-09-30）
+
+**结论先行**：Buff 这行在 walgit `crystal-zero-ab-windows` 里原记为「判为不可比：测试角色无 buff」。
+现在**原版侧帧拿到了**，而且**不需要鼠标**——靠的是「GM 账号登录时服务端自己推 buff」。
+
+**配方（可复跑）**
+
+```powershell
+# ① 把沙箱账号改成 GM（只重写沙箱 Server.MirADB；与 setpw/setgold/setpos 同一条路径）
+dotnet run --project tools\acceptance\csharp_golden\dbtool\dbtool.csproj -c Release -- `
+    "$env:TEMP\golden_sandbox\Server" setadmin 333 1
+# ② 重启沙箱服务端 + 键盘登录（§2.1）
+Start-Process "$env:TEMP\golden_sandbox\Server\Server.exe" -WorkingDirectory "$env:TEMP\golden_sandbox\Server"
+pwsh tools\acceptance\csharp_golden\csharp_kbd_login.ps1 -SandboxRoot $env:TEMP\golden_sandbox -Account 333 -Password 333333
+# ③ 进图那一刻的帧（`orig_kbd_02_ingame.png`）右上角就有 buff 图标
+py -3.12 tools\acceptance\csharp_golden\shot_diff.py "$env:TEMP\golden_sandbox\shots\orig_kbd_02_ingame.png" ...
+```
+
+**判据与读数**
+
+| 证据 | 值 |
+|---|---|
+| 服务端日志 | `2026-09-30 08:25:09 INFO - 女道士 is now a GM`（`PlayerObject.cs:224-228` 只在 `Account.AdminAccount` 时打） |
+| 原版帧 | `shots/orig_kbd_02_ingame.png` 右上 **(≈846..890, 20..38)** 出现**两枚 buff 图标**（一枚 "GM"、一枚蓝白） |
+| 依据（源码） | `PlayerObject.cs:1341-1347`：登录收尾 `if (IsGM) UpdateGMBuff();` → `HumanObject.cs:833-844` `AddBuff(BuffType.GameMaster, …, values: options)` |
+
+⚠️ **`dbtool export` 的 `admin` 字段不可靠**：`setadmin` 回读 `admin=True`、服务端日志也证明生效，
+但同一份 `Server.MirADB` 用 `export` 读出来仍是 `admin:false`（账号 `333`）。判「改没改成功」请看
+**`setadmin` 的回读 + 服务端 `is now a GM` 日志**，别只看 export 的 JSON（工具口径问题，另记）。
+
+**顺带把「锁屏期能不能用 GM 命令」这条路走死了**（省得下一轮再试）：
+
+- GM 命令（`@SUPERMAN`/`@GAMEMASTER`/`@OBSERVER`，`PlayerObject.cs:2438-2462`）走**聊天框**；
+- 锁屏下聊天框**能开**（向客户端主窗口发 `WM_CHAR '@'` → `ChatPanel_KeyPress` → `ChatTextBox.SetFocus()`，
+  实测子窗口里出现 `WindowsForms10.Edit…` 且 `text='@'`），但**后续字符进不去**：
+  再往主窗口或该 Edit 子窗口发 `WM_CHAR` 都不生效（`text` 恒为 `'@'`），`WM_SETTEXT` 也会被
+  镜像同步覆盖——`MirTextBox.Text` 直接读 WinForms `TextBox.Text`，而字符流要经**真实消息泵**进焦点控件。
+  ⇒ **解锁前别押「打字发命令」**；`setadmin` 的价值是「登录即推的状态」（GM buff）这类**服务端主动**路径。
+- 另一条「不靠打字」的路子试过且**未采集**：`[Rested] Period=1`（`Setup.ini`）+ `setpos 0 288 616` +
+  原地 80s，`win_locate Prguse2[20]`（Buff 面板 44x34 @(854,0)）仍 0.52 不符 ⇒ 没抓到 buff 窗
+  （右上角常被角色窗/HUD 占位，且当时无法读原版客户端的 buff 列表，判不出「没下发」还是「没画出来」）。
+  这条留给下一轮：需要先有一个「读原版客户端 buff 列表」的探针，或解锁后用鼠标开窗。
+
+**下一步（写给下一轮）**：原版侧这帧已经有内容，本端要同状态就得有一条**注入 GM buff** 的夹具
+（`--mock` 现在只有 `--buff-test` 的 Mirroring ×3，与 GM buff 不同态），然后按 §3.2 系做窗内逐像素对表。
+
 ### 3.2bu 原版 C# 客户端连的是**原版 C# 服务端**，不是 `ServerRust`（2026-09-30 实测）
 
 **问题**：原版 `Client.exe` 到底连哪个服务端？——**本目录沙箱里连的是原版 `Server\Server.exe`**
