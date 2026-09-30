@@ -68,6 +68,7 @@ class Program
         if (mode == "export") { Export(arg2 ?? "db_export.json"); return; }
         if (mode == "setpw") { SetPassword(arg2, args.Length > 3 ? args[3] : null); return; }
         if (mode == "setgold") { SetGold(arg2, args.Length > 3 ? args[3] : null, args.Length > 4 ? args[4] : null); return; }
+        if (mode == "setadmin") { SetAdmin(arg2, args.Length > 3 ? args[3] : null); return; }
         if (mode == "npcs") { ListNpcs(arg2); return; }
         if (mode == "gameshop") { ListGameShop(arg2); return; }
         if (mode == "setpos")
@@ -85,6 +86,7 @@ class Program
         }
         Console.WriteLine("usage: dbtool <serverDir> list | dump <TypeFullName> | export <outfile> | " +
                           "setpw <accountId> <newPassword> | setgold <accountId> <gold> [credit] | " +
+                          "setadmin <accountId> <0|1> | " +
                           "npcs [mapIndex] | gameshop [outfile] | " +
                           "setpos <accountId> <mapIndex> <x> <y> [charName]");
     }
@@ -311,6 +313,42 @@ class Program
         goldField.SetValue(target, gold);
         creditField.SetValue(target, credit);
         CheckWalletSavePath(env, target, accountId);
+    }
+
+    // setadmin <accountId> <0|1>：把原版沙箱账号的 `AccountInfo.AdminAccount` 打开/关掉。
+    //
+    // 为什么需要它（2026-09-30，walgit `crystal-zero-ab-windows`）：
+    // 锁屏期原版侧**唯一能推窗的入口是「服务端自己发」**（§3.2bv 的公告窗就是靠
+    // `<Server>\Envir\Notice.txt` 在登录时推 `S.UpdateNotice` 拿到的）。像 Buff 这种状态只有
+    // `@SUPERMAN`/`@GAMEMASTER`/`@OBSERVER` 这类 **GM 命令**才推得动
+    // （`Server/MirObjects/PlayerObject.cs:2438-2462` → `UpdateGMBuff()` → `AddBuff(BuffType.GameMaster)`），
+    // 而命令的守卫是 `if (!IsGM && !Settings.TestServer) return;` —— 沙箱账号 `333` 实测
+    // `admin=False`（`export` 可查）⇒ 先要有「把沙箱账号改成 GM」这条口子。
+    //
+    // 与 `setpw`/`setgold`/`setpos` 同一条保存路径（只重写 `Server.MirADB`）；**只对沙箱副本**用。
+    static void SetAdmin(string accountId, string flagS)
+    {
+        if (string.IsNullOrEmpty(accountId) || string.IsNullOrEmpty(flagS))
+        {
+            Console.WriteLine("usage: setadmin <accountId> <0|1>");
+            return;
+        }
+        bool admin = flagS == "1" || flagS.Equals("true", StringComparison.OrdinalIgnoreCase);
+        var env = LoadEnvir(out var err);
+        if (err.Length > 0) { Console.WriteLine("accounts did not load: " + err); return; }
+        var target = Seq(F(env, "AccountList")).FirstOrDefault(a => S(F(a, "AccountID")) == accountId);
+        if (target == null) { Console.WriteLine("account not found: " + accountId); return; }
+        var field = target.GetType().GetField("AdminAccount", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+        if (field == null) { Console.WriteLine("AdminAccount field not found on " + target.GetType().FullName); return; }
+        Console.WriteLine($"account {accountId}: admin {F(target, "AdminAccount")} -> {admin}");
+        field.SetValue(target, admin);
+        var envirType = allTypes.First(t => t.FullName == "Server.MirEnvir.Envir");
+        var saveAcc = envirType.GetMethod("SaveAccounts", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance,
+                                          null, Type.EmptyTypes, null);
+        if (saveAcc == null) { Console.WriteLine("SaveAccounts() not found"); return; }
+        saveAcc.Invoke(env, null);
+        Console.WriteLine("saved Server.MirADB");
+        Console.WriteLine($"readback: {accountId} admin={F(target, "AdminAccount")}");
     }
 
     // 写 Server.MirADB（与 setpw/setpos 同一条路径），写完回读一遍确认落盘值。
