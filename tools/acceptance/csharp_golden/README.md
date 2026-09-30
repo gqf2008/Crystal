@@ -4107,6 +4107,55 @@ pwsh tools\acceptance\rpc.ps1 -Method screenshot -Params '{"path":"<worktree>\ou
 **仍未采集**：悬停**渐隐动画**本身（C# `Opacity ±= 0.2/帧`、`FadeDelay=55ms`）——本端是
 「悬停即显示 / 离开即隐藏」的直接显隐，不逐帧复刻补间；这一档要真鼠标悬停 + 连续取帧。
 
+### 3.2by **工作站解锁后**：原版鼠标路径全面可用 + 「零对拍」批次①最后一扇 **Roll** 拿到原版帧（2026-09-30）
+
+**前提变了**：本轮实测时工作站**已解锁**（判据见 §3.2ag：前台窗口不再是 `Windows.UI.Core.CoreWindow`、
+桌面 `CopyFromScreen` 不再是 `#005495`）。§3.1/§3.2b 那段「`Click-Image` 点不动原版」是**锁屏期**的结论
+——解锁后**真实鼠标/键盘全部可用**，本轮三条实测：
+
+| 判据 | 实测 |
+|---|---|
+| `Click-Image` 点背包关闭钮 (301,13) | 背包**关掉**（该区域逐像素变化 **72026/76800 = 93.8%**） |
+| `Click-Image` 点 NPC 精灵 | **NPC 对话窗打开**（读到 `Hello 女道士, my name is GM Mount.`） |
+| `Click-Image` 点对话里的**链接** | **换页**（`[@RollTest]` → `Roll the dice?` 页）✔ 链接点击也走真实鼠标 |
+
+⚠️ 三条操作坑（本轮各踩一次）：
+
+1. **F9/F10/F11 窗会盖住 NPC 对话窗**（都在左上角）：先按同键把背包/角色/技能窗**关掉**再点 NPC，
+   否则只看得到背包、以为"NPC 没开"。
+2. **点空地 = 走路**：每次落空都会把角色挪走，NPC 随即不在原屏幕位置 → 落空后要**重新取帧定位**，
+   别拿上一帧的坐标连点。
+3. 截图文件名会被驱动再加一次 `orig_` 前缀（`Shot-Cs 'x'` → `orig_x.png`），找帧时别找错。
+
+**Roll（`RollDialog`）原版帧配方**（沙箱夹具，可复跑）
+
+沙箱里**没有**任何 NPC 用 `ROLLDIE/ROLLYUT`（`Envir\NPCs` 全目录 grep 为空），所以要用它得先**造一个入口**。
+本轮的造法（只动**沙箱副本**）：
+
+```powershell
+# ① 给 GM 售货 NPC 的 [@Main] 加一条 ACT（GM 账号登录会被 Login 脚本送到 GM 地图 384，身边就是一排 GM 售货 NPC）
+#    形如： [@Main] / #IF / ISADMIN / #ACT / ROLLDIE Result false / #SAY …（grep `Envir\NPCs\GM\GM-*.txt`）
+#    `ROLLDIE <page> <autoRoll>`：autoRoll=false ⇒ 骰子停在 Idle（点一下才掷）——A/B 要的就是这个确定态
+# ② 重启沙箱服务端（NPC 脚本只在启动时读）→ 键盘登录 → 关掉 F9/F10/F11 → 点身边的 GM 售货 NPC
+```
+
+**两端读数**（`win_locate.py --lib Data\Prguse.Lib`，两端各取最优落点）
+
+| 相位 | 原版帧 | 本端帧 | 不符率 |
+|---|---|---|---|
+| Idle 骰子 `Prguse[282]`（64x61） | `orig_roll_mount_06.png` → **(474,344)** | `ours_roll.png`（`dialog open roll`） → **(474,344)** | 两端均 **0.0000** |
+| 转动帧 `Prguse[290..293]` | `ph1/ph2` → **291 @(474,344)**、**292 @(474,344)** | 由 `roll.rs` 的相位机给出同一组帧表（单测已钉） | 0.0000 |
+
+⇒ 骰子窗的**落点与帧表**两端一致（`roll.rs` 的 `DIE_ORIGIN=(474,344)`、`DIE_IDLE/ANIM/RESULT` 常量与实机帧对上）。
+
+**未采集（如实）**：**结果帧** `Prguse[281+result]`。实测本沙箱里点骰子开掷后，**约 1s 后骰子窗整窗消失**
+（0.4s 见 291、0.8s 见 292、1.2s 起 (474,344) 处再无任何 `Prguse[281..293]` 命中）；
+C# 源码里 `ReturnResult()` 会在动画结束后回 `CallNPC "[<page>]"`，本夹具给的 page 名（`Result`）在脚本里
+不存在——**"消失"是不是与这次回调有关，本轮没查清**，所以结果帧记未采集（不猜）。
+
+**清理**：GM 售货 NPC 的 `ROLLDIE` 注入与 `GM-Mount/Grocery` 的 Roll 页都是**沙箱副本**上的临时夹具，
+本轮用完已从脚本里**撤掉**（恢复成原样），配方留在上面供复跑。
+
 ### 3.2bu 原版 C# 客户端连的是**原版 C# 服务端**，不是 `ServerRust`（2026-09-30 实测）
 
 **问题**：原版 `Client.exe` 到底连哪个服务端？——**本目录沙箱里连的是原版 `Server\Server.exe`**
