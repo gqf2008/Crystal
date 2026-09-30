@@ -4239,6 +4239,26 @@ dbtool <沙箱>\Server setpos 333 384 99 100 ; dbtool <沙箱>\Server setpos gqf
 **未采集**：交易中的「双方都放物品/改金币/按确认锁定」这些**内容态**帧（本轮只做到"空窗"同状态对拍）；
 以及**原版鼠标点 YES 点不动**这条本身（是"控制被盖住"还是"点击语义"没查，如实记）。
 
+### 3.2cc 「零对拍」批次②开工：剩下 16 扇窗的**入口路径表**（2026-09-30）
+
+批次①（Notice/Buff/Roll/Trade）已在 walgit `crystal-zero-ab-windows` 收口。批次②接着做剩下 16 扇，
+本轮先把「**每一扇从哪进**」从源码里查清楚（这是前几轮最大的时间黑洞：知道要什么但不知道点哪）：
+
+| 窗 | 入口（C# 源码） | 控件 / 美术 | 备注（本轮实测） |
+|---|---|---|---|
+| **Menu** `MenuDialog` | `MainDialog.MenuButton.Click`（`MainDialogs.cs:165-178`，`MenuButton` 属于 **MainDialog** 13..562） | `Prguse[1960/1961/1962]` @ 面板内 `(W-55, 35)` → 1024 档 **(969,651)** | 模板匹配**命中**该美术 (969,653) 0.0000，但**点它没开窗**（`Title[567]` 36x282 全程 0.89 未现）——是"HUD 控件命中框≠美术落点"还是别的，留待下轮 |
+| **Mentor** `MentorDialog` | **Menu 里的菜单项**（`MainDialogs.cs:3198-3208`，类属 `MenuDialog` 3007..3269）；`Visible` 由 `ChatOptionDialog` 切换 | `Prguse[1985/1986/1987]` @ `(3, 202)` | 默认态**不在屏上**（1985 不符率 0.91）⇒ **必须先开 Menu** |
+| **Friend / Relationship / HeroMenu…** | 同上（都在 `MenuDialog` 里） | 各自 `Prguse[19xx]` | 与前两行同一条路 |
+| **Report** `ReportDialog` | `ReportButton.Click`（`:1440-1451`），按钮属 **ChatControlBar**（1255..1515） | `Prguse[2063..2065]` @ `(552,1)`，**`Visible = false`** | 只在"有可举报目标"时显示 ⇒ 要先把目标指到某玩家 |
+| **DuraStatus** `DuraStatusDialog` + `CharacterDuraPanel` | HUD 常驻小钮（`GameScene.cs:340` `Visible = true`）；位置跟随小地图 `(MiniMap.X + 86, MiniMap.Height)` | 钮 `Prguse[2110]`（关）/`2113`（开）20x19；面板 `Prguse[2105]` @ `(SW-61, 200)`；状态存 `[Game] DuraWindow` | 本轮把沙箱 `DuraWindow=True` 重启后，**2110/2113 都没在帧里命中**（0.73/0.68）⇒ 这扇 HUD 在本沙箱状态（无装备耐久？）下不画，需另找状态 |
+| **Inspect** `InspectDialog`（`MainDialogs.cs:2113`） | **服务端下发** `S.PlayerInspect`（`GameScene.cs:3149-3154`）——由"查看他人装备"触发 | 面板 art 见类定义 | 触发入口在玩家菜单/右键路径上（§3.2bz 里右键玩家菜单没弹出来，一并留给下轮） |
+| **Socket / Refine / ItemRental / GuildTerritory / Mail / HeroInventory / HeroEquipment** | 分别走 Ctrl+右键物品（Socket）、NPC 页（Refine/ItemRental/GuildTerritory）、热键或 NPC（Mail/Hero*） | —— | 这些**已有本端几何/常量对表**，缺的是原版帧；入口多依赖"物品/NPC 页状态"，按 §3.2bz/§3.2ca 的"先造状态再点"套路做 |
+
+**顺带记两条本轮实测**（避免下轮重复）：
+
+1. `MainDialog` 面板 `Prguse[1]`（1024x152）在帧里**模板匹配不到**（0.73）——HUD 面板被大量子控件覆盖，**别拿整块面板做定位**；要定位 HUD 控件就直接匹配**控件的 art**（如 1960）。
+2. 菜单类入口（Menu→Mentor/Friend/…）是"**两级点击**"：先开 Menu 再点菜单项；本轮只到第一级（且第一级点击未生效），下轮从 `MenuDialog` 的面板 art `Title[567]` 是否出现开始查。
+
 ### 3.2bu 原版 C# 客户端连的是**原版 C# 服务端**，不是 `ServerRust`（2026-09-30 实测）
 
 **问题**：原版 `Client.exe` 到底连哪个服务端？——**本目录沙箱里连的是原版 `Server\Server.exe`**
