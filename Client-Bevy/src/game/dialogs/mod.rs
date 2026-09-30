@@ -505,8 +505,9 @@ mod tests {
     }
 
     /// **饱和回归（2026-09-30，walgit 线程 `crystal-compact-z-saturation`）**：
-    /// `DialogKind` 有 **51** 个变体、全部在进图时 spawn，而带容量只有 **26** ⇒
-    /// 用 `compact_zs(n)` 会在顶端并列 55、`delta = 0` ⇒「点窗置前」静默失效。
+    /// `DialogKind` 有 **51** 个变体、其中 **47** 个有字面 `DialogRoot(DialogKind::X)` 实体，
+    /// 而带容量只有 **26** ⇒ 用 `compact_zs(n)` 会在顶端并列 55、`delta = 0`
+    /// ⇒「点窗置前」静默失效。
     ///
     /// 本用例钉住用户实际依赖的那一条不变式：**被点的那扇（恒在末尾）严格高于其余每一扇**。
     ///
@@ -1457,10 +1458,12 @@ pub fn compact_zs(n: usize) -> Vec<i32> {
 ///
 /// **为什么不能直接 `compact_zs(n)`**（2026-09-30 修饱和，walgit 线程
 /// `crystal-compact-z-saturation`）：`DialogKind` 有 **51** 个变体、全部在
-/// `OnEnter(AppState::Game)` 就 spawn，而带容量只有 `55 - 30 + 1 = 26` ⇒ `compact_zs` 在
-/// **顶端并列 55**，于是 `delta = 55 - 55 = 0`，**「点窗置前」静默失效**（点哪扇都不动）。
+/// 个有**字面 `DialogRoot(DialogKind::X)` 实体**（另 4 个 —— `NpcGoods` / `ChatNotice` /
+/// `MailCompose` / `MailRead` —— 走全路径常量或状态驱动，不产生字面 `DialogRoot`），
+/// 而带容量只有 `55 - 30 + 1 = 26` ⇒ 只要同时参与排名的 kind 超过 26 个（本仓稳态下必然如此）
+/// `compact_zs` 就在**顶端并列 55**，于是 `delta = 55 - 55 = 0`，**「点窗置前」静默失效**（点哪扇都不动）。
 ///
-/// 可用区间（高于 HUD chrome ≤ 25、低于全屏遮挡层 59）**放不下 51 个互不相同的 z**，
+/// 可用区间（高于 HUD chrome ≤ 25、低于全屏遮挡层 59）**放不下 47 个互不相同的 z**，
 /// 所以这里**不追求全序**，只保证用户真正依赖的那条：**最后被点的那扇严格在最上**。
 /// 其余并列者的先后由 `ui_stack_system` 的根序决定（稳定但任意）—— 这是该区间下的必然取舍。
 pub fn plan_dialog_zs(others_keep: &[i32]) -> Vec<i32> {
