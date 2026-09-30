@@ -4205,6 +4205,40 @@ Start-Process "$sb\Client\Client.exe" -WorkingDirectory "$sb\Client"; Start-Slee
 **清理**：`setpw gqf abbtest123` 只改**沙箱副本**的口令（原版 DB 未动；`make_sandbox -Force` 会拷回原版口令）；
 两个客户端与服务端进程本轮已停。
 
+### 3.2ca Trade/GuestTrade **已采集**：两扇窗原版帧 + 两端几何/美术 A/B（2026-09-30）
+
+§3.2bz 把卡点收敛成「发起方要面朝对方 + 对方要允许交易」两条。本轮补齐后**两扇窗都拿到了**：
+
+**配方（在 §3.2bz 双开夹具之上，三步）**
+
+```powershell
+# ① 两侧站相邻格，发起方朝东（99,100）→ 对方（100,100）
+dbtool <沙箱>\Server setpos 333 384 99 100 ; dbtool <沙箱>\Server setpos gqf 384 100 100
+# ② **对方**要先允许交易（`AllowTrade` 是 CharacterInfo 字段，默认 False；GM 命令 @ALLOWTRADE 切换）：
+#    对方客户端里开聊天框 → 输入 @ALLOWTRADE → 回车（本轮实测回显 "You are now allowing trade"）
+# ③ 发起方点对方所在格（转身）→ 按 T（`KeyBinds.ini [Trade] Key=T`）→ 对方弹 YesNo 框
+#    ⚠️ **鼠标点 YES 点不动**（NO 能点动：实测 Title[210]@(644,446) 命中 0.0000、点它框会关），
+#    但 **回车 = 接受**（MirMessageBox 默认钮）——本轮就是靠回车成交的。
+```
+
+**两端读数**（`win_locate.py --lib Data\Prguse.Lib`；两窗都是 204x152）
+
+| 窗 | 期望落点（C#） | 原版帧 `orig_T10_Benter.png` | 本端帧（`dialog open trade`） |
+|---|---|---|---|
+| 对方窗 `Prguse[390]`（GuestTrade） | (522,418) = `(SW/2+10, SH-350)` | **(522,418)**，不符率 **0.0160** | **(522,418)**，不符率 **0.0013** |
+| 我方窗 `Prguse[389]`（Trade） | (298,418) = `(SW/2-W-10, SH-350)` | 同位置在位（389 与 390 美术几乎同款，模板会互相命中到 (522,418)；单独量 (298,418) 处 389 = **0.058**） | 在位，但该帧被 mock 的**另一扇窗遮住上半**⇒ (298,418) 处 389 = 0.295（**夹具遮挡，不是几何差**） |
+
+⇒ 两扇窗的位置/尺寸与 C# 常量一致（与我们 `trade.rs` 里的 `TRADE_X/Y=298/418`、`GUEST_X/Y=522/418` 对齐）；
+`Prguse[389]`/`[390]` 两件美术太像，模板匹配**分不开谁是谁**（这条口径写在这里，免得后人拿"389 也命中 522"当缺陷）。
+
+**本端夹具补齐**：`control.rs` 的 `Dialog` 分支原先只对 HeroManage/InputBox/Roll/ChatNotice/Storage/MailCompose 切状态，
+**Trade 漏了**——而 `trade_ui_system` 每帧 `sync_dialog_state(mgr, Trade, trade.visible)`，只改 `mgr` 会被下一帧关回去
+（实测 `dialog open trade` 后 `dialogs` 仍只有 Minimap）。现补 Trade 分支：开/关时**连 `trade.visible` 与 `GuestTrade` 一起**切
+（C# 里这两扇窗由同一交易会话成对显隐）。
+
+**未采集**：交易中的「双方都放物品/改金币/按确认锁定」这些**内容态**帧（本轮只做到"空窗"同状态对拍）；
+以及**原版鼠标点 YES 点不动**这条本身（是"控制被盖住"还是"点击语义"没查，如实记）。
+
 ### 3.2bu 原版 C# 客户端连的是**原版 C# 服务端**，不是 `ServerRust`（2026-09-30 实测）
 
 **问题**：原版 `Client.exe` 到底连哪个服务端？——**本目录沙箱里连的是原版 `Server\Server.exe`**

@@ -865,6 +865,9 @@ struct ControlQueries<'w, 's> {
     notice: ResMut<'w, crate::game::dialogs::notice::NoticeState>,
     /// §3.2bx 夹具 `buff_set` 用：替换 Buff 列表（与 `notice` 同样的「并进 SystemParam」理由）
     buff: ResMut<'w, crate::game::dialogs::buff::BuffState>,
+    /// §3.2bz 夹具：交易窗是 `trade.visible` 驱动的（`trade_ui_system` 每帧
+    /// `sync_dialog_state(mgr, Trade, trade.visible)`）⇒ RPC 开窗必须连状态一起切
+    trade: ResMut<'w, crate::game::dialogs::trade::TradeState>,
     /// `state` 用：会话里的服务器权威位置留痕（`UserLocation`）——移动同步判据见
     /// `SessionState::last_server_position` 的注释。
     session: Res<'w, crate::network::SessionState>,
@@ -3058,6 +3061,33 @@ fn apply_control_commands(
                         }
                         DialogAction::Close => q.input_box.open = false,
                         DialogAction::Toggle => q.input_box.open = !q.input_box.open,
+                    }
+                } else if kind == DialogKind::Trade {
+                    // §3.2bz：交易窗是 `trade.visible` 驱动（`trade_ui_system` 每帧
+                    // `sync_dialog_state(mgr, Trade, trade.visible)`）——只改 `mgr` 会被下一帧关回去
+                    // （与 Roll/Storage 同款）。开/关时把 `GuestTrade` 一起带上：C# 里这两扇窗
+                    // 由**同一交易会话**成对显隐。没有这条，本端就没法把交易窗摆出来做 A/B。
+                    match action {
+                        DialogAction::Open => {
+                            q.trade.visible = true;
+                            mgr.open(kind);
+                            mgr.open(DialogKind::GuestTrade);
+                        }
+                        DialogAction::Close => {
+                            q.trade.visible = false;
+                            mgr.close(kind);
+                            mgr.close(DialogKind::GuestTrade);
+                        }
+                        DialogAction::Toggle => {
+                            q.trade.visible = !q.trade.visible;
+                            if q.trade.visible {
+                                mgr.open(kind);
+                                mgr.open(DialogKind::GuestTrade);
+                            } else {
+                                mgr.close(kind);
+                                mgr.close(DialogKind::GuestTrade);
+                            }
+                        }
                     }
                 } else if kind == DialogKind::Roll {
                     // #3265：掷骰窗状态驱动（`RollState.visible`）⇒ RPC 连状态一起切，
