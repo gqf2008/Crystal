@@ -1457,14 +1457,15 @@ pub fn compact_zs(n: usize) -> Vec<i32> {
 /// **末尾 = `DIALOG_Z_MAX`，其余每一项都严格小于它** ⇒ 被点的那扇**严格高于**其它每一扇。
 ///
 /// **为什么不能直接 `compact_zs(n)`**（2026-09-30 修饱和，walgit 线程
-/// `crystal-compact-z-saturation`）：`DialogKind` 有 **51** 个变体，其中 **50** 个会产生
-/// `DialogRoot` 实体并参与排名 —— **47** 个写字面 `DialogRoot(DialogKind::X)`，另 3 个
-/// （`NpcGoods` / `MailCompose` / `MailRead`）走全路径或常量；只剩 `ChatNotice` 没有
-/// `DialogRoot` 实体（状态驱动的顶部横幅），不参与排名。
+/// `crystal-compact-z-saturation`）：`DialogKind` 有 **51** 个变体 —— **47** 个写字面
+/// `DialogRoot(DialogKind::X)`，另 3 个（`NpcGoods` / `MailCompose` / `MailRead`）走全路径或常量，
+/// 合计 **50** 个有 `DialogRoot` 实体；`ChatNotice` 连实体都没有（状态驱动的顶部横幅）。
+/// 而这 50 个里 **`InputBox` 不参与带内排名** —— 它唯一的根恒在模态层（`MODAL_PANEL_Z` = 60），
+/// 建 `per_kind` 时被 `is_modal_layer_root` 跳过 ⇒ 实际**参与排名的是 49 个**。
 /// 而带容量只有 `55 - 30 + 1 = 26` ⇒ 只要同时参与排名的 kind 超过 26 个（本仓稳态下必然如此）
 /// `compact_zs` 就在**顶端并列 55**，于是 `delta = 55 - 55 = 0`，**「点窗置前」静默失效**（点哪扇都不动）。
 ///
-/// 可用区间（高于 HUD chrome ≤ 25、低于全屏遮挡层 59）**放不下 50 个互不相同的 z**，
+/// 可用区间（高于 HUD chrome ≤ 25、低于全屏遮挡层 59）**放不下 49 个互不相同的 z**，
 /// 所以这里**不追求全序**，只保证用户真正依赖的那条：**最后被点的那扇严格在最上**。
 /// 其余并列者的先后由 `ui_stack_system` 的根序决定（稳定但任意）—— 这是该区间下的必然取舍。
 pub fn plan_dialog_zs(others_keep: &[i32]) -> Vec<i32> {
