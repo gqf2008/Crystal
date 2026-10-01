@@ -4239,6 +4239,50 @@ dbtool <沙箱>\Server setpos 333 384 99 100 ; dbtool <沙箱>\Server setpos gqf
 **未采集**：交易中的「双方都放物品/改金币/按确认锁定」这些**内容态**帧（本轮只做到"空窗"同状态对拍）；
 以及**原版鼠标点 YES 点不动**这条本身（是"控制被盖住"还是"点击语义"没查，如实记）。
 
+### 3.2cw 批⑨：原点扫描扩到「**元组常量**」又抓出一处 —— 好友备注窗 (414,301)→**(415,301)**（2026-10-01）
+
+#### ① 工具的盲区：`const NAME: (f32, f32)` + `NAME.0` / `NAME.1`
+
+`rust_origin_audit.py`（§3.2cv）原先只认 `const NAME: f32 = N`。批⑤那几扇窗把尺寸写成**元组常量**——
+`pub const PANEL_SIZE: (f32, f32) = (196.0, 166.0);` 再用 `center_origin(PANEL_SIZE.0, PANEL_SIZE.1)`——
+整个落在扫描盲区里。本轮给它加 `TUPLE_CONST_RE`（`const NAME: (f32,f32) = (W,H);`）、`NUM` 允许 `NAME.0`/`NAME.1`、
+以及 `resolve(sym, consts, tuples)`。
+
+> ⚠️ **顺序坑**：`resolve()` 里元组分支必须排在 `float()` **之后**。`264.0` 这种小数也带 `.`，
+> 若先查元组就会把它当「常量名 `264`、下标 `0`」查空 ⇒ **全表 0 命中**（本轮踩过一次，已修）。
+
+#### ② 扩完立刻新命中：好友备注窗 `memo.rs`
+
+`Client-Bevy/src/game/dialogs/memo.rs:95` 用 `center_origin(PANEL_SIZE.0, PANEL_SIZE.1)`，而 `PANEL_SIZE = (196,166)` 是**图头**。
+C# `MemoDialog`（`Client/MirScenes/Dialogs/FriendDialog.cs:488-494`）`Index = 209; Library = Libraries.Title; Location = Center`；
+`MirImageControl` 构造函数 `_autoSize = true`（`Client/MirControls/MirImageControl.cs:165-171`）⇒ `Size` = `GetTrueSize(Title[209])`。
+
+`libtruesize.py`：`Title[209]` 图头 **196x166** → 真尺寸 **193x166**（最右 3 列 alpha=0；裁剪框 ltrb=(0,0,193,166)）。
+`Center = ((1024-193)/2, (768-166)/2)`，**整数除法** `831/2=415`、`602/2=301` ⇒ **(415,301)**。本端修前是 **414**（整窗偏左 1px）。
+
+#### ③ 修复
+
+- `memo.rs`：新增 `PANEL_TRUE_SIZE = (193,166)` / `PANEL_ORIGIN = (415,301)`，`spawn_memo` 改用它；
+  **贴图仍按图头 196x166 铺**（§3.2cl ② 口径：布局/命中/裁剪用真尺寸，贴图 1:1）。
+- 单测 `panel_sprites_batch_b18_match_memo_dialog`：按真尺寸断言原点 ＋ `assert_ne!` 钉住图头模型 (414,301)（防回归）。
+
+#### ④ 本端验证
+
+| 项 | 结果 |
+|---|---|
+| `rust_origin_audit.py --known …` | **命中 3 条（新命中 0）⇒ exit 0**（3 条 = `character.rs:30` / `hero_equipment.rs:30` / `hero_skills.rs:21` 的 `1024.0-264.0`，已进 known） |
+| `rust_origin_audit.py --selftest` | **exit 0**（负对照 0 新命中 / 正对照把商城改回图头 ⇒ 抓到 8 条） |
+| `cargo test --lib` | **921 passed / 0 failed** |
+| `cargo test --test b0001_smoke --test ui_alignment` | **2 + 58 passed** |
+| `ui_interact_sweep.ps1 -ManageServer` | **pass=46 / total=47 / fail=0 / skip=0 / exit=0** |
+| `rustfmt --edition 2024 --check` | 两改动文件告警计数与 master 基线**逐个相等**（`memo.rs` 2、`ui_alignment.rs` 14） |
+
+#### ⑤ 未采集
+
+好友备注窗的**原版帧**：本轮把 `Title[209]` 在沙箱 `shots` 的 **575 帧**归档上全量重扫——
+最好一档 **0.2319**（`orig_rustgate_00.png` @(547,313)），**≤0.20 的 0 帧** ⇒ 归档没拍到该窗打开的状态
+（它要在好友列表点「备注」才出）。本条**只有源码判据**（C# 公式 + `GetTrueSize`），不推像素结论。
+
 ### 3.2cv 批⑧：「写死字面量原点」的扫描**固化成工具** ＋ 新账号窗 (218,154)→**(219,155)**（2026-10-01）
 
 #### ① 为什么要把 §3.2cu 的手扫固化
