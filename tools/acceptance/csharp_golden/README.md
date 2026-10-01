@@ -100,6 +100,20 @@ pwsh -NoProfile -File .\csharp_kbd_login.ps1 -SandboxRoot <沙箱目录> -Accoun
 结论：**锁屏期间用键盘路径（§2.1）做 A/B；需要纯鼠标操作的窗口（商城买卖、NPC 菜单点行等）
 仍要解锁工作站/重连 console 会话**后再跑 `Click-Image`。
 
+### 3.0 **本端**侧像素取证的前提：`screenshot` 前先把光标移开（2026-10-01）
+
+对本端（`client_bevy --mock`）做"区域像素 vs 美术 / vs 基线"的判据时，如果取证脚本**刚点过某个 UI**
+（`click`），光标会**停在那个控件上**，`CursorSource` 就把该控件的 `UiHint` 写进 `TooltipState` ⇒
+提示面板（`Client-Bevy/src/ui/tooltip.rs` 的 **`GlobalZIndex(90)`** 置顶根，高于所有对话框的 60）
+按 **+16/+16** 画出来，**盖住被测区域**。
+
+实测（§3.2db ③）：小地图切到小档后，"点完切换钮就截图"读到三颗钮 **65.5% / 65.5% / 12.9%**、
+整块 **41.1%**；先 `cursor {x:500,y:400}` 再截 ⇒ **三颗钮全部 0.0%**、整块 **24.2%**（与各自大档同档）。
+
+⇒ 口径：`click` 之后、`screenshot` 之前必须发一次 `cursor {x,y}` 把光标移开（或断言 `ui_nodes_at`
+里那颗 `GlobalZIndex(90)` 的根是 `Hidden`）。`golden_ab_ours.ps1` 全部走 `dialog open` / `hud_toggle`
+（不点鼠标）⇒ A/B 表本身不受影响，受影响的只有"点一下再截图"的手工/探针取证。
+
 ### 3.1 补充实测（2026-09-26，**工作站未锁屏**）：原版客户端仍点不动背包页签/关闭钮
 
 解锁状态下重试两条注入路径，都没能驱动原版的点击语义：
@@ -4331,24 +4345,27 @@ C# `MiniMapDialog`：`LocationLabel.Location = new Point(46, y)` 在 **`SetBigMo
 | `ui_interact_sweep.ps1 -ManageServer` | **pass=45 / total=47 / fail=0 / skip=1 / exit=0**（skip = 既有的「big_map 未能锚到有大地图的地图」，与本改动无关） |
 | `rustfmt --edition 2024 --check minimap.rs` | **2 = master 基线** |
 
-#### ③ 小档残余（本轮**未修**，如实记，供下一轮）
+#### ③ **更正**：那不是"小档残余"，是探针把光标停在切换钮上引出的**悬停提示**（2026-10-01 复测）
 
-修完这一处后小档整块仍有差异：**本端 41.1% vs 原版 27.5%**（截断法，见 §3.2da ②）。逐钮量（小档位）：
+§3.2db 初稿在这里记过一条"小档仍有 41.1% vs 原版 27.5%、邮件/大地图钮被一层偏暖暗色盖住"的线索。
+本轮**同一 mock 实例**上做了一次对照，结论是**假缺陷**：
 
-| 钮 | 位置 | 原版不符 | 本端不符 |
-|---|---|---|---|
-| 切换钮 `Prguse[2102]` | (1007,3) | **0.0%** | 12.9% |
-| 邮件钮 `Prguse[2099]` | (902,22) | **0.0%** | **65.5%**（另两态 2100=80.7% / 2101=76.5% 也都不是） |
-| 大地图钮 `Prguse[2096]` | (923,22) | **0.0%** | 65.5%（2097=76.3% / 2098=74.7%） |
+| 取帧条件 | 迷你面板 `2091` | 邮件钮 `2099` | 大地图钮 `2096` | 切换钮 `2102` |
+|---|---|---|---|---|
+| 点完切换钮、**光标停在 (1017,13)** 就截图（初稿那张 `ours_minimap_small.png`） | 41.1% | 65.5% | 65.5% | 12.9% |
+| **先 `cursor {x:500,y:400}` 把光标移开**再截图（`ours_mm_small_nocursor.png`） | **24.2%** | **0.0%** | **0.0%** | **0.0%** |
 
-两钮的**位置与尺寸都对**（`ui_nodes_at(910,30)` 命中 `20x20 @(902,22)`、`visibility=Inherited`），
-但像素整体偏暗：同区域 **原版/美术 = 1.00 / 1.00**，**本端/美术 = 0.61 / 0.66 / 0.94**（R、G 被压暗、B 几乎不变）
-⇒ 是**一层偏暖的暗色**盖/混在上面，不是"画错状态"、也不是位移。
+根因：`ui_nodes_at(910,30)` 在第一种情况下多出一颗 `5630v0`、rect `(890,29,111,56)`、**`GlobalZIndex(90)`** ——
+查代码就是 **tooltip 置顶根**（`Client-Bevy/src/ui/tooltip.rs:268`；对话框最大 60），它按光标 **+16/+16** 偏移画出来，
+正好压在按钮行上；光标移开后该节点转 `Hidden`。⇒ 初稿那 16.9pp 差值**全部来自提示框**。
 
-覆盖范围与 `MAP_RECT (3,22,120,108)`（绝对 (901,22)）吻合；但 `minimap_probe` 报图区节点 `visible=Hidden`，
-`ui_nodes_at(960,35)` 也把它列为 `Hidden` —— **同一位置另有一颗 `5630v0`、rect `(890,29,111,56)`、`visibility=Visible`、
-祖先为空的节点**。⇒ **下一轮切口**：查 `5630v0` 是谁（疑似遮罩层），并核对小档下 `MiniMapMapArea` 的
-`BackgroundColor`（深绿 `0.12/0.16/0.12`）是否仍被画出来。
+**小档的真实读数**：**本端 24.2% vs 原版 27.5%**（截断法），与各自的**大档**（本端 21.8～24.1% / 原版 28.3%）同档；
+三颗钮（切换 / 邮件 / 大地图）与美术**逐像素一致（0.0%）** ⇒ 小档**没有**渲染缺陷。
+
+> **取证口径（新增，凡"点一下再截图"都适用）**：点完必须**先把光标移开**
+> （`rpc.ps1 -Method cursor -Params '{"x":500,"y":400}'`）或断言 `ui_nodes_at` 里那颗 `GlobalZIndex(90)`
+> 的根是 `Hidden`，再 `screenshot` —— 否则悬停提示会盖住被测区域，把"画对了"读成"少了一块/被压暗"。
+> `golden_ab_ours.ps1` 那批帧不走鼠标点击（全走 `dialog open`/`hud_toggle`），所以 A/B 表不受此坑影响。
 
 ### 3.2da §3.2cz 的「本端小档未采集」**已收口** ＋ 一个「贴边出屏面板」的量测口径坑（2026-10-01）
 
@@ -4364,6 +4381,9 @@ C# `MiniMapDialog`：`LocationLabel.Location = new Point(46, y)` 在 **`SetBigMo
 # mock 实例起来之后
 pwsh tools\acceptance\rpc.ps1 -Method click -Params '{"x":1017,"y":13}'
 pwsh tools\acceptance\rpc.ps1 -Method minimap_probe -Params '{}'   # mode_big 由 true → false
+# ⚠️ 截图前**必须**把光标移开（§3.2db ③：停在切换钮上会弹 tooltip，GlobalZIndex(90) 会盖住按钮行）
+pwsh tools\acceptance\rpc.ps1 -Method cursor -Params '{"x":500,"y":400}'
+pwsh tools\acceptance\rpc.ps1 -Method screenshot -Params '{"path":"...\ours_minimap_small.png"}'
 ```
 
 实测回执：`click` 命中 `["5731v0 16x15 [root=Minimap] ui vis - pick=-"]`，
