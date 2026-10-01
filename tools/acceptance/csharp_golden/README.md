@@ -4318,6 +4318,53 @@ spawn」配对，中间夹了个 `for` 循环体就串行了。
 `Prguse[2447]` 信用图标：本端数据里**没有这一帧**（越界）⇒ 无像素可比；原版帧也没拍到过该状态
 （要 `RewardCredit > 0` 的任务）。本条只到"确认它取不到帧、不生成节点"为止，不推像素结论。
 
+### 3.2dx 本轮 UI 对齐链在 master `e7fcdf956` 上的**验证收口**（2026-10-01）
+
+§3.2dk–§3.2dw 这十几笔 UI 对齐（字号口径 / 小地图标签 / 大地图标题 / Keybind 标题 / 角色窗名字·行会 /
+Help 标题与页码 / 标签默认不参与拾取 / 物品提示十二段 / 品阶行与品阶色 / 聊天链接统一提示源 …）
+全部落进 master 后，按老配方在**当前 master** 复跑一遍，确认没有把别处带坏：
+
+#### ① 20 窗 A/B（`golden_ab_ours.ps1` + `golden_ab_diff.py`，构建 `e7fcdf956 dirty=0`）
+
+| 窗 | 差异像素 | 占比 | 窗 | 差异像素 | 占比 |
+|---|---|---|---|---|---|
+| Inventory | 2181 | 2.9% | Keybind | 33076 | 15.0% |
+| Equipment(character) | 5992 | 6.0% | Creature | 85109 | 50.1%* |
+| Skills | 1369 | 1.4% | MountWindow | 115359 | 94.4%* |
+| Quests | 8965 | 6.1% | Fishing | 19758 | 34.4%* |
+| Options | 5727 | 6.2% | GameShop | 61658 | 18.6% |
+| Group | 0 | 0.0% | Bigmap | 221094 | 58.2% |
+| Friends | 1668 | 2.3% | Minimap | 17661 | 91.0%（不可比：大/小档） |
+| Relationship | 6685 | 12.1% | Belt / Skillbar | 671967 / 671909 | 85.4%（整帧参考） |
+| Guilds | 168622 | 66.2%* | Help | 29268 | 10.7% |
+| Ranking | 12755 | 8.9% |  |  |  |
+
+\* = 该窗我方走 `Show()` 守卫（无宠物/坐骑/鱼竿/不在公会），差异主要是"原版开窗 vs 我方弹提示"。
+
+**与上一轮逐值一致**（Equipment 5992 / Skills 1369 / Ranking 12755 / Help 29268 / Keybind 33076 /
+Inventory 2181 / Friends 1668 / Relationship 6685 / Group 0 / Options 5727）⇒ 这条链上的改动
+**没有引入 A/B 回归**。
+
+#### ② 三个源级审计（master 上现跑）
+
+| 审计 | 结果 |
+|---|---|
+| `control_size_audit.py` | **PASS：0 处写死尺寸 ≠ 美术原生尺寸**（已知 0 / 新增 0） |
+| `rust_origin_audit.py` | 命中 3 条，**全部在 known 表**（character/hero_equipment/hero_skills 的 264 图头） |
+| `dialog_trigger_audit.py` | **PASS：所有开语义字段都有 `= true` 写入方**（已知 0 / 新增 0） |
+
+#### ③ 这一链**没做完**的（下一轮接着推，按阻塞类型分类）
+
+- **数据/协议阻塞**（本端 `InvItem`/`ItemInfo` 没有对应字段）：物品提示的 `AwakeInfoLabel`（觉醒类型名）、
+  `SoulboundTo`（需绑定者名字）、`Cursed`（无诅咒位）、`CanBeUsedOn`（需可镶嵌类型清单）、
+  过期/封印/租借的**时间戳**、`OverlapInfoLabel`（Ctrl+点击交互提示）、`StoryInfoLabel`（`ItemInfo.ToolTip` 本端没有）、
+  `GMMadeLabel`。
+- **夹具阻塞**：Creature / Fishing / Mount 三扇要"造出宠物/鱼竿/坐骑"才能在 mock 里开窗；
+  20 窗清单里没有 **hover 行**，所以物品提示一直是"源码逐 key 可复核、像素未采集"。
+- **owner 待决**：大地图坐标条（C# 只在悬停时显示，本端非悬停回落显示玩家坐标）去留。
+- **环境**：`Client-Bevy/target/debug` 会随每次重建累积 1.5 GB 的 `client_bevy*.exe`（本轮清过 1117 GB），
+  建议加体积巡检或定期 `cargo clean -p client_bevy`。
+
 ### 3.2dw 物品提示补**绑定标位**一段（C# `BindInfoLabel`，13 个 `BindMode` 标位）（2026-10-01）
 
 C# `BindInfoLabel`（`GameScene.cs:8887-9165`）对每个 `BindMode` 标位输出一行，条件统一是
