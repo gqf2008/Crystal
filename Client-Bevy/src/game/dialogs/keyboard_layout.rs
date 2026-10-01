@@ -31,11 +31,22 @@ use crate::scenes::AppState;
 use crate::ui::sprite_ui::{shared_cjk_font, UiCjkFont, UiFont};
 use crate::ui::theme::{
     load_lib_image, spawn_close_button, spawn_container, spawn_icon_button, spawn_image,
-    spawn_label, spawn_panel,
+    spawn_label, spawn_label_center, spawn_panel,
 };
 
 /// #2892 批B：面板精灵与 C# 原生尺寸（C# `KeyboardLayoutDialog.Index = 119; Location = Center`）
 pub const PANEL: (LibraryName, usize) = (LibraryName::Title, 119);
+
+/// 标题盒（C# `PageLabel`：`Size=(242,30)`、`Location=(135,34)`、H+V 居中，
+/// `KeyboardLayoutDialog.cs:42-50`）。`MirLabel` 的文本盒 = `Location+(1,1)` 起同尺寸
+/// ⇒ 水平中心 `135+1+242/2 = 257`；垂直中心 `34+1+30/2 = 50`，本端 15px 档
+/// 墨迹顶 = 节点顶 + 2 ⇒ 节点顶取 43（§3.2do 帧证：原版墨迹面板内 45..57）。
+pub const KB_TITLE_CX: f32 = 257.0;
+pub const KB_TITLE_Y: f32 = 43.0;
+pub const KB_TITLE_W: f32 = 242.0;
+/// 标题文案 = C# `ClientTextKeys.KeyboardSettings` 的中文包取值
+/// （`Client/Localization/Chinese.json:506` = 「键盘设置」；本端菜单入口 `menu.rs:434` 同值）。
+pub const KB_TITLE_TEXT: &str = "键盘设置";
 pub const PANEL_SIZE: (f32, f32) = (512.0, 430.0);
 /// 关闭键 `Prguse2[360..362]` @(489,3)（`KeyboardLayoutDialog.cs:54-57`，无 `Size` → 原生 24x21）
 pub const CLOSE_POS: (f32, f32) = (489.0, 3.0);
@@ -584,8 +595,27 @@ fn spawn_keyboard_layout(
         .insert((DialogRoot(DialogKind::KeyboardLayout), KeyboardWidget));
 
     commands.entity(panel).with_children(|p| {
-        // 标题“键位设置”（C# PageLabel (135,34)）
-        spawn_label(p, &cjk, "键位设置", 135.0, 34.0, 15.0, Color::WHITE, 9);
+        // 标题（C# `PageLabel`：`Size=(242,30)`、`Location=(135,34)`、
+        // `DrawFormat = HorizontalCenter | VerticalCenter`、`Font = FontSize+2 = Bold10`
+        // ——`KeyboardLayoutDialog.cs:42-50`）
+        //
+        // §3.2do：① **文案**改用 C# 中文包的 `ClientTextKeys.KeyboardSettings`
+        // （`Client/Localization/Chinese.json:506` = 「键盘设置」；本端菜单入口
+        // `menu.rs` 也已用「键盘设置」，此前这里写「键位设置」自家不一致）；
+        // ② **居中**：文本盒 = `Location+(1,1)` 起 242x30 ⇒ 水平中心 `135+1+121 = 257`；
+        // ③ **垂直**：文本盒面板内 `[35,65]`、中心 50，本端 15px 档墨迹顶 = 节点顶 + 2
+        // ⇒ 节点顶取 43 时墨迹落在 45..57（原版帧实测绝对行 214..226 = 面板内 45..57）。
+        spawn_label_center(
+            p,
+            &cjk,
+            KB_TITLE_TEXT,
+            KB_TITLE_CX,
+            KB_TITLE_Y,
+            KB_TITLE_W,
+            15.0,
+            Color::WHITE,
+            9,
+        );
         // 关闭按钮 (489,3)
         if let Some(mut btn) =
             spawn_close_button(p, &mut libs, &mut images, CLOSE_POS.0, CLOSE_POS.1, 10)
@@ -1265,6 +1295,37 @@ fn secondary_hotkey_system(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// §3.2do：Keybind 标题按 C# `PageLabel` 的 242×30 **居中**盒落位，文案取中文包。
+    ///
+    /// C# 证据：`KeyboardLayoutDialog.cs:42-50`（`Location=(135,34)`、`Size=(242,30)`、
+    /// `HorizontalCenter | VerticalCenter`）、`Client/Localization/Chinese.json:506`。
+    /// 帧证：原版墨迹绝对行 214..226（面板内 45..57），本端修前 205..217 且**左对齐**。
+    ///
+    /// 阳性对照（实做）：把 `KB_TITLE_Y` 改回 34、或 `KB_TITLE_CX` 改回左沿 136 ⇒ 本测试红。
+    #[test]
+    fn keybind_title_is_centered_in_csharp_box() {
+        assert_eq!(
+            KB_TITLE_CX - KB_TITLE_W / 2.0,
+            136.0,
+            "文本盒左沿 = C# 135+1"
+        );
+        assert_eq!(
+            KB_TITLE_CX + KB_TITLE_W / 2.0,
+            378.0,
+            "文本盒右沿 = 135+1+242"
+        );
+        assert_eq!(
+            KB_TITLE_Y + 2.0 + 13.0 / 2.0,
+            51.5,
+            "本端 15px 档墨迹高 13、墨迹顶 = 节点顶 + 2 ⇒ 墨迹中心 51.5（C# 盒中心 50、原版实测 51）"
+        );
+        assert_eq!(
+            KB_TITLE_TEXT, "键盘设置",
+            "C# 中文包 ClientTextKeys.KeyboardSettings"
+        );
+        assert_ne!(KB_TITLE_Y, 34.0, "修前值（低 9px）不得复活");
+    }
 
     #[test]
     fn key_code_name_roundtrip() {
