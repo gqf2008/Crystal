@@ -4318,6 +4318,129 @@ spawn」配对，中间夹了个 `for` 循环体就串行了。
 `Prguse[2447]` 信用图标：本端数据里**没有这一帧**（越界）⇒ 无像素可比；原版帧也没拍到过该状态
 （要 `RewardCredit > 0` 的任务）。本条只到"确认它取不到帧、不生成节点"为止，不推像素结论。
 
+### 3.2dk 字号 pt-vs-px 逐窗核对（20 扇）：**名义换算不适用本端字体** ＋ 大地图标题条收口（2026-10-01）
+
+#### ① 起念（承接 §3.2dj 的 next_queue）
+
+§3.2dj 末尾留的待办：本端 `spawn_label*` 的字面量是**像素**，C# 的 `Font(..., XF)` 是**磅**，
+「Friends 我方字形带反而大于原版」说明偏差是**逐窗**的，需要按每扇窗读 C# 的 `Font(...,XF)`
+和我们的 px 逐个比。本轮把这一步机械化，并在**帧上做直接像素取证**（不是只看源码推算）。
+
+#### ② 工具：`font_pt_px_audit.py`（两端字面量对表）
+
+```powershell
+py -3.12 tools/acceptance/csharp_golden/font_pt_px_audit.py            # 全 20 扇
+py -3.12 tools/acceptance/csharp_golden/font_pt_px_audit.py --window Bigmap --json out.json
+```
+
+- **C# 侧**：解析 `Client/MirScenes/Dialogs/*.cs` 的 `new Font(Settings.FontName, ...)`，并把
+  `Settings.FontSize ± n` 折成磅值（`Client/Settings.cs:73` 的 `FontSize = 8F`）；
+  **同时补上默认档**——`MirLabel` 不显式设 `Font` 时用构造里的
+  `ScaleFont(new Font(Settings.FontName, 8F))`（`Client/MirControls/MirLabel.cs:180`），
+  这才是多数窗真正的生效字号。窗→C# 文件的映射内置在脚本里（`MainDialogs.cs` 一类大文件按类名切段）。
+- **本端侧**：解析 `spawn_label / spawn_label_plain / spawn_label_center / spawn_label_center_plain /
+  spawn_outlined_label(+_center/_block)` 的 size 实参，以及直写的 `TextFont { font_size: FontSize::Px(N) }`，
+  并解析同文件里的 `const X: f32 = N;` 常量。
+- **名义换算的出处**：`MirControl.ScaleFont`（`Client/MirControls/MirControl.cs:1035-1041`）用
+  `font.Size * 96f / FontDpiX` 归一化，最终渲染像素高 = **pt × 96/72 = pt × 4/3**（与显示器 DPI 无关）。
+  这条**只在名义上**成立——见 ④。
+
+#### ③ 20 扇窗名义对表（C# `MirLabel` 生效字号 vs 本端字面量）
+
+| 窗 | C# `MirLabel` 生效字号（pt→px 名义值） | 本端 `spawn_label*` 字面量 |
+|---|---|---|
+| Inventory | 8.0pt=10.67px×4 | 12.0px×3 |
+| Equipment | 8.0pt=10.67px×27 | 11.0px×2、12.0px×1、14.0px×1 |
+| Skills | 8.0pt=10.67px×27 | 8.0px×1、11.0px×1 |
+| Quests | 8.0pt=10.67px×12 | 11.0px×1、12.0px×7 |
+| Options | — | — |
+| Group | 8.0pt=10.67px×3 | 12.0px×6 |
+| Friends | 8.0pt=10.67px×2 | 12.0px×2 |
+| Relationship | 10.0pt=13.33px×4 | 12.0px×2、13.0px×1 |
+| Guilds | 7.0pt=9.33px×3、8.0pt=10.67px×21 | 9.0px×1、10.0px×1、11.0px×24、12.0px×4 |
+| Ranking | 8.0pt=10.67px×4、10.0pt=13.33px×1 | 12.0px×3 |
+| Help | 9.0pt=12.0px×3、10.0pt=13.33px×3 | 12.0px×3、13.0px×2 |
+| Keybind | 8.0pt=10.67px×3、9.0pt=12.0px×1、10.0pt=13.33px×1 | 12.0px×4、15.0px×1 |
+| Creature | 8.0pt=10.67px×10 | 12.0px×16 |
+| MountWindow | 8.0pt=10.67px×2 | 12.0px×1、15.0px×1 |
+| Fishing | 8.0pt=10.67px×2 | 10.0px×1、12.0px×1 |
+| GameShop | 7.0pt=9.33px×2、8.0pt=10.67px×3 | 9.333px×1、10.0px×4、12.0px×8 |
+| Bigmap | 8.0pt=10.67px×3、9.0pt=12.0px×1 | 10.0px×1、12.0px×3、14.0px×1 |
+| Minimap | 8.0pt=10.67px×4、9.0pt=12.0px×1 | 12.0px×2 |
+| Belt | 8.0pt=10.67px×13 | 10.0px×2 |
+| Skillbar | 8.0pt=10.67px×4 | 8.0px×1、11.0px×1、12.0px×1 |
+
+（`Options` 一栏为空：`MainDialogs.cs::OptionDialog` 里的行是 `MirCheckBox/滚动条` 自带字，
+本端同窗也没有 `spawn_label*`，没有可比的字面量对。）
+
+#### ④ 直接像素取证：**名义口径 ≠ 本端标定**（本轮的主要负结果）
+
+同一"字形类别"（数字/拉丁大写）在原版帧与本端帧上的**墨迹高度**实测：
+
+| 样本（同一字符串/同一字形） | C# 原版帧（`orig_win_*.png`） | 本端帧（`ours_win_*.png`） | 判读 |
+|---|---|---|---|
+| Inventory 金币数字（C# `GoldLabel` @(40,212)，MirLabel **默认 8F**） | 墨迹 `#` 行 216..223 = **8px 高** | 行 215..222 = **8px 高** | **同高** |
+| Inventory 负重 `0/0`（@(268,212)，默认 8F） | 8px 高 | 8px 高 | 同高 |
+| Bigmap 标题（C# **9F Bold**） | 88×9（见 ⑤/⑥） | 13px 后 90×9 | 同高、宽 +2px |
+| Friends 标题 `FRIEND` 与页签 `FRIEND`/`BLACKLIST` | — | 与原版**逐像素相同** | 这两处文字是**美术烘焙**，不参与字号比较 |
+
+量法：按 `sum(RGB) > 520` 取"亮像素"（历史脚本的口径：阈值取 110 会把暗底描边也吃进去），
+逐行打印 ASCII 图后读连续行数；脚本即 `font_pt_px_audit.py` 同一目录的临时输出（数值已抄进本表）。
+
+**结论**：C# 的 **8pt** 与本端的 **12px** 在同一字形上**墨迹同高** ⇒
+「1pt = 4/3px」这条**名义**换算**不能**直接拿来改本端 px；本端字体（CJK 主字体）实测更接近
+**px ≈ 1.5 × pt**（8pt↔12px、9pt↔13~13.5px、10pt↔15px 一档）。
+⇒ ③ 表里所有「12px vs 8pt」的"落差 ≥1px"**不构成缺陷**（Creature 16 处、Group 6 处、
+Quests 7 处、Inventory 3 处、Friends 2 处、Equipment/Skills/Mount/Fishing/Skillbar 零散几处）
+**一律不改**；§3.2dj 的 12→13px 方向（字号变大）与实测一致，但**不该**按 4/3 机械推。
+
+#### ⑤ 本轮改的：大地图标题条**整条空**（真缺陷，已修）
+
+- **C# 路径**：进图时 `GameScene.cs:2219` `BigMapDialog.SetTargetMap(info.MapIndex)` ⇒
+  `BigMapDialog.cs:304-320` 里 `CurrentRecord = GameScene.MapInfoList[MapIndex]` ⇒
+  `CurrentRecord` setter（`BigMapDialog.cs:79-88`）写 `TitleLabel.Text = currentRecord.MapInfo.Title`。
+  只有从世界地图点过图标才换成目标地图（`:527`）。标题标签的样式：`Location=(19,6)`、`Size=(699,20)`、
+  `Font = Font(Settings.FontName, 9F, FontStyle.Bold)`、`DrawFormat = HorizontalCenter`（`:225-235`）。
+- **本端**：`state.title` **只在点世界地图图标时**写入（`big_map.rs` 的 `state.title = icon.title`）
+  ⇒ 常规打开时标题条整条空白。**帧证**：原版 `orig_win_Bigmap.png` 标题条行 144..152 有 9px 高的字，
+  本端 `ours_win_Bigmap.png`（master 帧）整条无字。
+- **改法**：新增 `big_map_title(selected, current_map)`——未选目标地图时回落**当前地图名**
+  （`game_data.map_title`，与小地图同源，来自 `ServerEvent::MapInfo.title`，即 C# 的 `MapInfo.Title`）；
+  同时把标题改成**水平居中**（`spawn_outlined_label_center`，cx=19+699/2，width=699），
+  字号 14px→**13px**（按 ④ 的 9pt↔13.5px 标定）。回归测试 `title_falls_back_to_current_map`。
+
+#### ⑥ 复跑验证（构建 `a86b74ba3`，`--real-net`，`golden_ab_ours.ps1`）
+
+| 量 | 原版 | 本端（修前，master 帧） | 本端（修后） |
+|---|---|---|---|
+| 标题墨迹 bbox（阈值 `sum>520`） | (456,144)-(543,152)，**88×9**，中心 x=**499.5** | **空** | (455,143)-(544,151)，**90×9**，中心 x=**499.5** |
+| Bigmap 整窗差异占比（`golden_ab_diff.py`） | — | 58.4% | **58.2%** |
+
+整窗差异被"地图大图数据不同源"主导（§3.2h 已自证视口画源对齐 0.999），标题只占其中一小块。
+纵向 1px 差是**居中窗恒定 +1px 取帧口径**（§3.2cl），不当缺陷。
+
+#### ⑦ 两次复跑的同一环境差异（如实记，别把 1~2pp 记成回归）
+
+本轮两次 `golden_ab_ours` 都在 `@mapmove` 被拒后走 `walk_to`，最终 **`tile=(285,616)`、`aligned=False`**
+（目标 (278,609)，差 8 格）；Guilds / Creature / Mount / Fishing 四扇因测试角色状态回到
+"无公会 / 无宠物 / 无坐骑 / 无鱼竿"，被 C# `Show()` 守卫挡在 MirMessageBox 上（我方同样开门控提示）。
+本批数值只在**同一批内**可比：Group 0.0 / Skills 1.7 / Friends 2.3 / Inventory 2.9 / Options 6.2 /
+Equipment 6.3 / Quests 6.9 / Ranking 9.0 / Help 10.9 / Relationship 12.1 / Keybind 15.1 / GameShop 18.6。
+与 §3.2di 的 1~2pp 级差**不能**归因到本轮改动（本轮只动 `big_map.rs`）。
+
+#### ⑧ 未定 / 待决（不在本 PR 改）
+
+- **大地图坐标条**：C# 只在**鼠标悬停视口**时才有字
+  （`UpdateBigMapCoordinates` → `MouseLocation` setter → `MakeCoordinateLabel`，
+  `BigMapDialog.cs:38-48/257-270`，非悬停时 Text 保持空/被 `HideCoordinateLabel` 隐藏）；
+  本端在非悬停时回落显示**玩家坐标**（`big_map.rs:1153` 的注释自称"C# 鼠标悬停显示鼠标坐标，
+  **否则显示玩家坐标**"——**与 C# 源码不符，注释引错**）。
+  **帧证**：原版坐标位无字（bbox 2×2 噪声），本端 (653,570)-(789,589) 有字。
+  要不要保留我方这个"多给的信息"属**产品取舍**（`RULE_通用决策先自行用jev出结论不向owner求证.md` 第 3 条
+  "产品方向"）⇒ **记待决，等 owner**，不在本 PR 改。
+- 其余窗要不要按 ④ 的标定逐窗收紧：**判据只能是"同字形墨迹高度差 ≥2px"**，不是名义 px 差；
+  语种不同（如本端中文名 vs 原版拉丁名）的字形高度**不可比**。
+
 ### 3.2dj Relationship 四行信息：**字号（C# 10F→13px）与颜色（`LightGray`）**对齐 ＋ 一条**平台级**负结果（2026-10-01）
 
 #### ① 两处按 C# 源码对齐
