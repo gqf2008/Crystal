@@ -4304,6 +4304,80 @@ spawn」配对，中间夹了个 `for` 循环体就串行了。
 `Prguse[2447]` 信用图标：本端数据里**没有这一帧**（越界）⇒ 无像素可比；原版帧也没拍到过该状态
 （要 `RewardCredit > 0` 的任务）。本条只到"确认它取不到帧、不生成节点"为止，不推像素结论。
 
+### 3.2cy A/B 表「Belt / Skillbar」两行的可比口径**收口**：Belt 两侧同态可判、Skillbar 原版侧拿不到帧（2026-10-01）
+
+§3.2k/§3.2m/§3.2v 已经给这两行定过口径，但 §3.2cr ③ 复跑时又记了一句「Belt / Skillbar 这两行本轮我方**没开窗**
+（脚本的 `Z`/`R` 未生效）⇒ 98% 是'开 vs 没开'」。本轮把这条**逐帧量掉**，结论是：**那句注记是错的**，
+而且两行的可比性并不一样（Belt 双侧可判，Skillbar 原版侧无帧）。
+
+#### ① 先更正方法学：本端 HUD 两行的开窗路径是 **RPC**，不是按键
+
+`golden_ab_ours.ps1` 里 HUD 两行走的是 `hud_toggle {which,on}`（`control.rs` 的 `ControlCommand::HudToggle`）
+——它翻转/置位的**就是热键那一个状态位**（`belt → PotionBeltVisible`、`skillbar → OptionState.skill_bar`），
+根本不经 `Z`/`R` 注入。脚本第 117-121 行在基线态就 `hud_toggle {on:true}` 把两行摆上屏、第 153-159 行是
+`hud_belt/hud_skillbar → hud_toggle` 的映射表。所以"脚本按 Z/R 没生效"这个前提不成立。
+
+#### ② Belt：**两侧同态、可判**（`belt_art_check.py`，只比 `Prguse[1932]` 不透明像素，rect `(230,618,240,38)`）
+
+| 帧 | 来源 | 不符率 |
+|---|---|---|
+| 原版基线 | `shots/orig_baseline_none.png` | **0.033**（腰带在画） |
+| 本端基线 | `shots/ours_unc2_baseline.png` | **0.074**（在画；§3.2m 修前是 0.435） |
+| 原版按 Z 之后 | `shots/orig_win_Belt.png` | **0.763**（腰带消失 ✓） |
+| 本端 `hud_toggle belt` 之后 | `shots/ours_win_Belt.png` | **0.925**（腰带消失 ✓） |
+
+⇒ 两侧都能摆到同态、都能判；基线的 4.1pp 残差是 §3.2v 已定性的**槽位数字字形**。
+「翻 Z/R 后」那一列两侧都变成"区域里露世界"（世界不同源）⇒ 该列按设计**不比像素**，只作状态转换的旁证。
+
+#### ③ Skillbar：**原版侧拿不到帧**（沙箱 ini 已确认被读，仍不画）
+
+原版侧本轮试了五种状态，`Prguse[2190]`（216x28）**全屏模板匹配**最好的落点恒为 `(768,90)`、
+不符率恒为 **0.6381**（多帧完全相同 ⇒ 退化匹配，不是"画在别处"）：
+
+| 尝试 | 帧 | 全屏最佳 |
+|---|---|---|
+| 沙箱 ini `[Game] SkillBar=True` 后重启登录 | `orig_baseline_skillbar.png` | 0.6381 @(768,90)；`(0,0)` 处 0.784 |
+| 同上 + F9 关背包 | `orig_f9off.png` | 0.6381；`(0,0)` 处 **0.878** |
+| 同上 + 窗口置前后按 `R` | `orig_fg_afterR.png` | 0.6381 |
+| 同上 + `[Game] ModeView=True` | `orig_modeview_on.png` | 0.6381 |
+| 同上 + `Skillbar0X/Y=400/300` | `orig_sb_moved.png` | 0.6381；`(400,300)` 处 0.972 |
+
+**"客户端到底读没读我们改的 ini"这条已排除**：C# 客户端退出时会把 Settings **回写** ini
+（`Reader.Write("Game", …)`），而退出后 `ModeView=True` 与 `Skillbar0X=400` **都保留** ——
+这两项都**不是** `Settings.cs` 的代码默认值（默认 `ModeView=false`、`SkillbarLocation={{0,0},{216,0}}`）
+⇒ 只有"真的读了这份 ini"才可能留下它们。所以不是"改了没生效"，而是**这个沙箱 exe 在该状态下就是不画技能栏**
+（`Client.dll` 里 `SkillBarDialog`/`SkillbarLocation` 字面量都在，说明不是版本里没这功能，真因未定位）。
+
+#### ④ 本端侧：技能栏**画源与几何都对**（按 INI 的**实际栏位**判）
+
+⚠️ 量这块之前必须先读本机 `Mir2Config.ini`：本机存的是历史拖动值 `Skillbar0X=214` / `Skillbar1X=8`，
+**不是**默认的 `0 / 216`。按假定 (0,0) 去量会得到"右偏 8px"的假缺陷（本轮踩过）。
+
+| 栏（`Prguse[2190]`，只比不透明像素） | 实测最佳 | 不符率 |
+|---|---|---|
+| 栏 0 @**(214,0)** | `(dx,dy)=(0,0)` | **0.073** |
+| 栏 1 @**(8,0)** | `(dx,dy)=(0,0)` | **0.074** |
+
+（同帧对照：腰带 @(230,618) 0.099 @ (0,0)。取帧配方：`client_bevy.exe --mock --auto-enter --ui-scale 1
+--control-port 9000` → `dialog {kind:'inventory',action:'close'}` → `hud_toggle {which:'skillbar',on:true}`
+→ `screenshot {path:…}`。）
+
+⇒ **Skillbar 行的口径**：原版侧**未采集**（无帧，理由如上），本端侧用"vs 美术 + INI 实际栏位"单独判
+（0.073/0.074 属"画对"档）。下一轮若要补原版侧，切口是**换一个能出技能栏的原版状态**
+（候选：`BarIndex=1` 的第二栏、进图后等一次 `DialogProcess` 的显隐边沿、或直接查该 exe 的 `GameScene.DialogProcess` 反编译）。
+
+#### ⑤ 顺带记一个工具坑：`win_locate.py` 对"大片透明 + 细框线"的美术会**误报没画**
+
+技能栏这一刻**明明画在屏上**（`belt_art_check` 0.073），`win_locate.py --index 2190` 却报
+`最佳落点 (357,377) 不符率 0.6262 ⇒ FAIL 这一帧大概率没画在屏幕上`。原因是它取的最佳落点是
+`cv2.matchTemplate(TM_SQDIFF)` 的 **argmin —— 对整块 216x28（含透明像素）最小**，而"不符率"只统计
+**不透明**像素：透明区占 2/3 的框线类美术，argmin 会被透明区拖到别处。
+⇒ 这类美术（技能栏、空框、细边条）**只能用只比不透明像素的口径**（`belt_art_check.py`，或自己写带掩码的偏移扫描），
+别拿 `win_locate` 的"没画"当结论。
+
+**门禁**：本轮**无产品代码改动**（纯取证 + 文档）；沙箱已复位（`Mir2Config.ini` 还原为 `SkillBar=False`/`ModeView=False`/
+`Skillbar0=0,0`/`Skillbar1=216,0`，`Client` 进程已停）。
+
 ### 3.2cw 批⑨：原点扫描扩到「**元组常量**」又抓出一处 —— 好友备注窗 (414,301)→**(415,301)**（2026-10-01）
 
 #### ① 工具的盲区：`const NAME: (f32, f32)` + `NAME.0` / `NAME.1`
@@ -4598,6 +4672,9 @@ py -3.12 tools\acceptance\csharp_golden\golden_ab_diff.py --shots %TEMP%\golden_
   **对面板行无影响**（比的是绝对窗矩形内的像素）；但"露世界"的三行（Bigmap 视口 / Belt / Skillbar）与 Minimap
   **本来就不能用这个口径判**，本轮也不据此下结论。
 - Belt / Skillbar 这两行本轮我方**没开窗**（脚本的 `Z`/`R` 未生效）⇒ 98% 是"开 vs 没开"，不是回归。
+  > **已更正**（2026-10-01 §3.2cy）：脚本走的是 `hud_toggle` RPC（不是 Z/R 注入），我方两行**都在位**；
+  > Belt 两侧同态可判（原版 0.033 / 本端 0.074），Skillbar 是**原版侧拿不到帧**（沙箱 ini `SkillBar=True`
+  > 已确认被客户端读取，仍不画）。见 §3.2cy。
 - 本轮**无代码改动**（纯复跑取证）：`cargo test --lib` 不计入本条的交付面。
 
 ### 3.2cq 「真尺寸」批⑥：聊天设置面板原点（§3.2cl ③ 表最后一行）（2026-10-01）
