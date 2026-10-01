@@ -76,6 +76,19 @@ pub struct InvItem {
     pub awake_level: u8,
     /// 绑定标位（C# `ItemInfo.Bind` / `BindMode` bitflags，位值同 C#）——提示的 `BindInfoLabel` 段用。
     pub bind_mode: u16,
+    /// C# `UserItem.Cursed`——提示 `Cursed` 行（`BindInfoLabel` 的 CURSED 区）。
+    pub cursed: bool,
+    /// C# `UserItem.Identified` / `ItemInfo.NeedIdentify`——CURSED 行的前置条件。
+    pub identified: bool,
+    pub need_identify: bool,
+    /// C# `UserItem.GMMade`——提示末尾的「由游戏管理员创建」。
+    pub is_gm_made: bool,
+    /// C# `UserItem.RefineAdded`>0 时**物品名前缀 `(*)`**（`GameScene.cs:6873-6874`）。
+    pub refine_added: u8,
+    /// C# `ItemInfo.ToolTip`——提示的「物品描述」段正文（`StoryInfoLabel`）。
+    pub tool_tip: Option<String>,
+    /// C# `UserItem.WeddingRing != -1`——类型行后**直接拼接**「结婚戒指」（原文无分隔符，见 §3.2dy）。
+    pub wedding_ring: i32,
 }
 
 impl InvItem {
@@ -1542,7 +1555,7 @@ fn inv_tooltip_system(
     tooltip.update_colored(
         2,
         true,
-        item.name.clone(),
+        item_display_name(&item),
         item_grade_color(item.grade),
         lines,
         cursor.x,
@@ -1564,7 +1577,13 @@ pub fn item_tooltip_lines(item: &InvItem) -> Vec<String> {
     if let Some(grade) = item_grade_name(item.grade) {
         lines.push(grade.to_string());
     }
-    lines.push(item_type_name(item.item_type).to_string());
+    // C# `baseText`：类型名，**结婚戒指时直接在后面拼接**「结婚戒指」（原文无分隔符，
+    // `GameScene.cs:7049-7052` ⇒ 如「戒指结婚戒指」）。本端复刻该拼接（§3.2dy）。
+    let mut type_line = item_type_name(item.item_type).to_string();
+    if item.wedding_ring != -1 {
+        type_line.push_str("结婚戒指"); // C# Text.WeddingRing
+    }
+    lines.push(type_line);
     let mut tail: Vec<String> = Vec::new();
     if item.weight > 0 {
         tail.push(format!("重量: {}", item.weight)); // C# `Weight` = 「重量:」
@@ -1699,7 +1718,40 @@ pub fn item_tooltip_lines(item: &InvItem) -> Vec<String> {
             }
         }
     }
+    // C# `BindInfoLabel` 的 CURSED 区（`:9191-9204`）：`(!hideAdded && (!NeedIdentify || Identified))
+    // && Cursed`（本端没有 Inspect 的 hideAdded 变体 ⇒ 取 !hideAdded = true）
+    if (!item.need_identify || item.identified) && item.cursed {
+        lines.push("被诅咒".to_string()); // Text.Cursed
+    }
+    // C# `StoryInfoLabel`（`:9692-9737`）：`ItemInfo.ToolTip` 非空时先一行「物品描述」再一行正文；
+    // **Credit Scroll 特例**（`Type==Scroll && Shape==7`）把正文替换为「已向您的账号添加 {price} 点数。」
+    let story = if item.item_type == mir2_shared::enums::ItemType::Scroll as u8 && item.shape == 7 {
+        Some(format!("已向您的账号添加 {} 点数。", item.price))
+    } else {
+        item.tool_tip.clone().filter(|s| !s.is_empty())
+    };
+    if let Some(text) = story {
+        lines.push("物品描述".to_string()); // Text.ItemDescription
+        lines.push(text);
+    }
+    // C# `GMMadeLabel`（`:9770-9805`）：`item.GMMade` 时为最后一段
+    if item.is_gm_made {
+        lines.push("由游戏管理员创建".to_string()); // Text.CreatedByGameMaster
+    }
     lines
+}
+
+/// C# `nameLabel.Text`（`GameScene.cs:6863-6874`）：`RefineAdded > 0` 时**物品名前缀 `(*)`**
+/// （品阶行由提示正文承载，见 [`item_tooltip_lines`]）。tooltip 标题取本函数而不是裸 `item.name`。
+#[must_use]
+pub fn item_display_name(item: &InvItem) -> String {
+    if item.refine_added > 0 {
+        let mut s = String::from("(*)");
+        s.push_str(&item.name);
+        s
+    } else {
+        item.name.clone()
+    }
 }
 
 /// C# 品阶文案（`Text.ItemGradeCommon/Rare/Legendary/Mythical/Heroic`，
@@ -4051,6 +4103,13 @@ mod tests {
             rental: false,
             awake_level: 0,
             bind_mode: 0,
+            cursed: false,
+            identified: false,
+            need_identify: false,
+            is_gm_made: false,
+            refine_added: 0,
+            tool_tip: None,
+            wedding_ring: -1,
         }
     }
 
@@ -4187,6 +4246,61 @@ mod tests {
         for s in ["不可丢弃", "不可交易", "丢弃时销毁", "装备时绑定灵魂"] {
             assert!(!lines.iter().any(|l| l == s), "{s} 不该出现: {lines:?}");
         }
+    }
+
+    /// §3.2dy：描述段 / GM 段 / 诅咒行 / 结婚戒指拼接 / `(*)` 精炼前缀（都按 C# 出处逐条对齐）。
+    #[test]
+    fn tooltip_story_gm_cursed_wedding_refine() {
+        // ① `StoryInfoLabel`：`ItemInfo.ToolTip` 非空 ⇒「物品描述」+ 正文（GameScene.cs:9692-9737）
+        let mut it = item_with_type(ItemType::Weapon);
+        it.tool_tip = Some("传说中的剑".into());
+        let lines = item_tooltip_lines(&it);
+        let i = lines
+            .iter()
+            .position(|l| l == "物品描述")
+            .expect("有描述段");
+        assert_eq!(lines.get(i + 1).map(String::as_str), Some("传说中的剑"));
+        // ①b Credit Scroll 特例：正文换成「已向您的账号添加 {price} 点数。」
+        let mut cs = item_with_type(ItemType::Scroll);
+        cs.shape = 7;
+        cs.price = 500;
+        let lines = item_tooltip_lines(&cs);
+        assert!(
+            lines.iter().any(|l| l == "已向您的账号添加 500 点数。"),
+            "{lines:?}"
+        );
+        // ② 诅咒行：`(!NeedIdentify || Identified) && Cursed`
+        let mut cu = item_with_type(ItemType::Weapon);
+        cu.cursed = true;
+        cu.need_identify = true;
+        cu.identified = false;
+        assert!(
+            !item_tooltip_lines(&cu).iter().any(|l| l == "被诅咒"),
+            "未鉴定时不显示"
+        );
+        cu.identified = true;
+        assert!(item_tooltip_lines(&cu).iter().any(|l| l == "被诅咒"));
+        // ③ GM 段（GMMadeLabel）
+        let mut gm = item_with_type(ItemType::Weapon);
+        gm.is_gm_made = true;
+        assert!(
+            item_tooltip_lines(&gm)
+                .iter()
+                .any(|l| l == "由游戏管理员创建")
+        );
+        // ④ 结婚戒指：C# 是**直接拼接**（无分隔符）到类型行
+        let mut wr = item_with_type(ItemType::Ring);
+        wr.wedding_ring = 3;
+        assert_eq!(
+            item_tooltip_lines(&wr).first().map(String::as_str),
+            Some("戒指结婚戒指")
+        );
+        // ⑤ `RefineAdded > 0` ⇒ 名字前缀 `(*)`（tooltip 标题用 `item_display_name`）
+        let mut rf = item_with_type(ItemType::Weapon);
+        rf.name = "木剑".into();
+        rf.refine_added = 1;
+        assert_eq!(item_display_name(&rf), "(*)木剑");
+        assert_eq!(item_display_name(&item_with_type(ItemType::Weapon)), "test");
     }
 
     #[test]

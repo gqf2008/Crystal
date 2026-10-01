@@ -2684,7 +2684,7 @@ fn chat_item_click_system(
         tooltip.update_colored(
             2,
             true,
-            item.name.clone(),
+            crate::game::dialogs::inventory::item_display_name(item),
             crate::game::dialogs::inventory::item_grade_color(item.grade),
             lines,
             cursor.x,
