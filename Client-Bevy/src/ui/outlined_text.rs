@@ -28,6 +28,8 @@
 
 use bevy::prelude::*;
 use bevy::sprite::Anchor;
+// C# `MirLabel` 默认 `NotControl = true`（不吃鼠标）⇒ 本端标签一律不参与拾取（见 §3.2dq）
+use bevy::picking::Pickable;
 
 /// 描边颜色（C# OutLineColour 全部使用点为 Color.Black）
 pub const OUTLINE_COLOR: Color = Color::BLACK;
@@ -169,6 +171,12 @@ pub struct OutlineUiShadows(pub Vec<Entity>);
 ///
 /// 销毁语义：副本是正文的兄弟而非子实体 → 正文被单独 despawn 时副本不随之
 /// 销毁（同根面板 despawn 时一并回收）；sync 对失效 id 取不到即跳过，不崩溃。
+///
+/// **拾取（§3.2dq）**：正文与 4 个副本都挂 `Pickable::IGNORE`——C# `MirLabel` 构造器
+/// 默认 `NotControl = true`（`MirLabel.cs:175-183`，不吃鼠标），而 Bevy 的 UI 文本节点
+/// **默认参与 picking**、会挡下层按钮；不显式忽略时，标签一变宽盖到按钮那一角就把点击吃掉
+/// （2026-10-01 实测：角色窗名字标签 200→264 后 40 窗交互巡回连挂 4 次、每次不同窗）。
+/// 需要「文字本身当按钮」的站点请显式 `.insert(Pickable::default())` 恢复。
 pub fn spawn_outlined_label<'a>(
     parent: &'a mut ChildSpawnerCommands,
     font: Handle<Font>,
@@ -184,6 +192,7 @@ pub fn spawn_outlined_label<'a>(
         let e = parent
             .spawn((
                 OutlineUiShadow,
+                Pickable::IGNORE,
                 Node {
                     position_type: PositionType::Absolute,
                     left: Val::Px(x + dx),
@@ -204,6 +213,7 @@ pub fn spawn_outlined_label<'a>(
     }
     parent.spawn((
         OutlinedUiText,
+        Pickable::IGNORE,
         OutlineUiShadows(shadows),
         Node {
             position_type: PositionType::Absolute,
@@ -241,6 +251,7 @@ pub fn spawn_outlined_label_center<'a>(
         let e = parent
             .spawn((
                 OutlineUiShadow,
+                Pickable::IGNORE,
                 Node {
                     position_type: PositionType::Absolute,
                     left: Val::Px(cx - width / 2.0 + dx),
@@ -263,6 +274,7 @@ pub fn spawn_outlined_label_center<'a>(
     }
     parent.spawn((
         OutlinedUiText,
+        Pickable::IGNORE,
         OutlineUiShadows(shadows),
         Node {
             position_type: PositionType::Absolute,
@@ -306,6 +318,7 @@ pub fn spawn_outlined_label_block<'a>(
         let e = parent
             .spawn((
                 OutlineUiShadow,
+                Pickable::IGNORE,
                 Node {
                     position_type: PositionType::Absolute,
                     left: Val::Px(x + dx),
@@ -328,6 +341,7 @@ pub fn spawn_outlined_label_block<'a>(
     }
     parent.spawn((
         OutlinedUiText,
+        Pickable::IGNORE,
         OutlineUiShadows(shadows),
         Node {
             position_type: PositionType::Absolute,

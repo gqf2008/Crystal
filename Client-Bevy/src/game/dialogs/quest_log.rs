@@ -832,7 +832,8 @@ fn spawn_quest_log(
                 Color::srgb(0.6, 0.9, 1.0),
                 10,
             )
-            .insert((Button, QuestLogTrack(i)));
+            // 文字当按钮（C# `QuestRow` 的追踪钮）：显式恢复拾取（标签默认 `Pickable::IGNORE`）
+            .insert((Button, QuestLogTrack(i), bevy::picking::Pickable::default()));
         }
         // 2026-09-28（README §3.2j）：这里原本有一枚**自造**的「放弃」钮
         // （`Title[206..208]` @(200,285) 76x25，常显）——C# `QuestDiaryDialog` 的构造里

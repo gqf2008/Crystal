@@ -1444,7 +1444,8 @@ fn spawn_compose_windows(
                 Color::WHITE,
                 10,
             )
-            .insert((MailGoldLabel, Button));
+            // C# `GoldLabel.Click`（点金币拾取）⇒ 这枚标签本身可点，显式恢复拾取
+            .insert((MailGoldLabel, Button, bevy::picking::Pickable::default()));
             // 5 个附件格 35x31 @ (27+36i, 311)，遮罩 `ItemCover Title[676]` @ (63,310) 144x33
             for i in 0..5usize {
                 spawn_item_cell_ui(

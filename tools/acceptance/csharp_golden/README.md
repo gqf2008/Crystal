@@ -4318,6 +4318,45 @@ spawn」配对，中间夹了个 `for` 循环体就串行了。
 `Prguse[2447]` 信用图标：本端数据里**没有这一帧**（越界）⇒ 无像素可比；原版帧也没拍到过该状态
 （要 `RewardCredit > 0` 的任务）。本条只到"确认它取不到帧、不生成节点"为止，不推像素结论。
 
+### 3.2dq 标签**默认不参与拾取**（对齐 C# `MirLabel.NotControl`）——把 §3.2dp 的单点修补做成系统化（2026-10-01）
+
+#### ① 起因
+
+§3.2dp 里"角色窗名字标签 200→264 就把 40 窗交互巡回挂成 4 连红"这件事说明：
+**Bevy 的 UI 文本节点默认可拾取**，而 C# `MirLabel` 构造器默认 `NotControl = true`
+（`MirLabel.cs:175-183`，不吃鼠标）。本端 `spawn_label*` / `spawn_outlined_label*`
+此前**从未设置 `Pickable`**（全仓 `Pickable::IGNORE` 命中 0 处）⇒ 任何标签只要和按钮
+有重叠，就会吃掉点击，症状是"巡回随机挂不同窗"。
+
+#### ② 改法
+
+- `Client-Bevy/src/ui/outlined_text.rs`：`spawn_outlined_label` / `spawn_outlined_label_center` /
+  `spawn_outlined_label_block` 的**正文与 4 个描边副本**都挂 `Pickable::IGNORE`；
+- `Client-Bevy/src/ui/theme.rs`：`spawn_label_plain` / `spawn_label_center_plain` 同办；
+- **文字当按钮**的 4 处显式恢复拾取（`.insert(Pickable::default())`）：`group.rs` 的两枚「确认」、
+  `quest_log.rs` 每行的「追踪」、`mail.rs` 的可点金币标签（C# `GoldLabel.Click`）。
+- 两个 helper 的文档注释里写明口径：**新加"文字当按钮"的站点必须自己恢复拾取**。
+
+`spawn_label` / `spawn_label_center` 是 `outlined_text` 的包装（C# 文本默认带描边），自动跟着生效。
+
+#### ③ 验证：行为中性（渲染完全没变）
+
+改动只影响"谁能被点到"，所以判据是**两只脚**：
+
+| 门禁 | 结果 |
+|---|---|
+| `ui_interact_sweep.ps1` | **pass=46 / total=47 / fail=0 / skip=0 / exit=0** |
+| `cargo test --lib` | **930 passed / 0 failed** |
+| `cargo test --test b0001_smoke --test ui_alignment` | **2 + 58 passed** |
+| 实机 A/B 复跑 | 20 窗像素占比与上一轮**逐值一致**：Equipment 5994 / Skills 1371 / Quests 8967 / Ranking 12755 / Help 29266 / Keybind 33077 / Inventory 2188 / Friends 1669 / Relationship 6685 / Group 0 —— 即**渲染零变化**（该批帧取自工作树构建 `136b36fd3 dirty=1`，与提交内容仅差一次 rustfmt 重排；提交后重建 `2122c5cc0 dirty=0` 又复跑了一次交互巡回，仍是 46/47 exit=0） |
+
+#### ④ 残留口径
+
+- 本改动**不改变** `UiHint`（悬停提示）——实测全仓没有任何 `UiHint` 挂在标签上（提示都挂按钮/图标）。
+- 以后新增"文字当按钮"或"标签需要 hover"的站点，**必须显式** `.insert(Pickable::default())`；
+  helper 文档已写明，review 时按这条查。
+- 与世界空间 `Text2d`（头顶名字等）无关：那条走 sprite/Transform，不走 bevy_ui picking。
+
 ### 3.2dp 角色窗名字/行会落位（高 14px）＋ 一条**工具级**发现：Bevy 文本节点会**吞点击**（2026-10-01）
 
 #### ① 名字/行会两处没按 C# 的居中盒落位
