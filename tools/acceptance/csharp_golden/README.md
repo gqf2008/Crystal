@@ -4318,6 +4318,40 @@ spawn」配对，中间夹了个 `for` 循环体就串行了。
 `Prguse[2447]` 信用图标：本端数据里**没有这一帧**（越界）⇒ 无像素可比；原版帧也没拍到过该状态
 （要 `RewardCredit > 0` 的任务）。本条只到"确认它取不到帧、不生成节点"为止，不推像素结论。
 
+### 3.2ec 物品提示补**交互提示段**（C# `OverlapInfoLabel`）——工具提示这条线收口（2026-10-01）
+
+C# `OverlapInfoLabel`（`GameScene.cs:9586-9648`）两处都是**数据驱动**的，本轮补齐：
+
+| 分支 | 条件 | 文案（中文包原文，含换行） |
+|---|---|---|
+| 宝石按 `Shape` | `Type == Gem` | `1`→「按住 CTRL 并左键点击以部分修理\n武器和饰品。」；`2`→…盔甲和布料；`3`→…合成。\n有几率销毁合成物品。；`4`→…合成。\n不会销毁合成物品。；`5`→…完全修理\n武器和饰品。；`6`→…完全修理\n盔甲和布料。；`8`→「按住 CTRL 并左键点击以封印物品。」 |
+| 可分离堆叠 | `StackSize > 1 && Type != Gem` | `MaxCombine` = 「最大合并数量：{StackSize}\n按住 Shift + 左键点击以分离堆叠」 |
+
+两处 C# 细节都照抄：① Shape 没有对应文案时 C# 会加一个**空串标签**，本端直接不出行；
+② 宝石即使 `StackSize > 1` 也走 Shape 分支（`Type != Gem` 条件）。
+位置按 C# 拼装次序放在**时间三段之后、物品描述之前**。`InvItem` 增 `stack_size`。
+
+#### 门禁
+
+| 门禁 | 结果 |
+|---|---|
+| `cargo test --lib` | **937 passed / 0 failed**（新增 `tooltip_overlap_hints_match_csharp`：Shape 5/8 文案、无文案 Shape 不出行、可堆叠提示、不可堆叠不出行、宝石不走堆叠分支） |
+| `cargo test --test b0001_smoke --test ui_alignment` | **2 + 58 passed** |
+| `ui_interact_sweep.ps1` | **46/47、fail=0、exit=0** |
+| `rustfmt --check` | `inventory.rs` 6 / `packets/mod.rs` 0 = master 既有基线（未新增） |
+
+#### 物品提示这条线的**收口状态**（§3.2dr → §3.2ec，共 10 轮）
+
+已对齐：头部两行（类型名 + 重量·耐久同行）／成对与单项属性／需求 12 种 `RequiredType`／职业／出售价格／
+品阶行与品阶色／物品描述（含 Credit Scroll 特例）／GM／诅咒／结婚戒指拼接／`(*)` 精炼前缀／
+觉醒三段／镶嵌孔／过期·封印·租借（含 `PrintTimeSpanFromSeconds` 复刻）／绑定标位 13 条／交互提示。
+
+**只剩两处**：① `SoulboundTo`（「灵魂绑定于:」+ **绑定者名字**）——本端 `soul_bound_id` 是我们的
+自定义哨兵（`1`=本人、`0/-1`=未绑定、`>1`=C# 迁移数据绑定他人，见 `inventory.rs:2682` 注释），
+要显示名字得把**本地角色名**透传进提示构建（`item_tooltip_lines` 目前是纯函数）；
+② C# 的 tooltip **行级配色**（觉醒名行按品阶色、需求未达标为红、宝石/绑定为黄、描述为 Khaki…），
+本端 tooltip 行统一一色 ⇒ 需要给 `TooltipState` 的行加颜色（另一条线）。
+
 ### 3.2eb 物品提示 `AwakeInfoLabel` 的**后两段**（英文字面量行）（2026-10-01）
 
 §3.2dz 只做了 `AwakeInfoLabel` 的第一段（本地化的「{类型名} 觉醒({等级})」）。本轮补后两段

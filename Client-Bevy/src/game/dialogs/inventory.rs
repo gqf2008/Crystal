@@ -106,6 +106,8 @@ pub struct InvItem {
     /// C# `UserItem.Awake.listAwake`（逐级觉醒值）——`AwakeInfoLabel` 的总值行与逐级行用
     /// （`GetAwakeLevel()` = 个数、`GetAwakeValue()` = 求和、`GetAwakeLevelValue(i)` = 第 i 项）。
     pub awake_levels: Vec<u8>,
+    /// C# `ItemInfo.StackSize`——`OverlapInfoLabel` 的"可分离堆叠"行用。
+    pub stack_size: u16,
 }
 
 impl InvItem {
@@ -1802,6 +1804,31 @@ pub fn item_tooltip_lines(item: &InvItem) -> Vec<String> {
     // 过期/封印/租借三段（C# 的 EXPIRE / SEALED / RentalInformation 三处，`:9464-9558`）——
     // 依赖"当前时间"，独立成 [`item_time_lines`] 以便用固定 now 做确定性单测。
     lines.extend(item_time_lines(item, now_unix_secs()));
+    // 交互提示：C# `OverlapInfoLabel`（`:9586-9648`）——两处都是数据驱动：
+    // ① `Type == Gem` 时按 `Shape` 给 Ctrl+左键的修理/合成/封印提示（1/2/3/4/5/6/8 有文案，
+    //    其余 Shape 在 C# 里是空串标签，本端直接不出行）；
+    // ② `StackSize > 1 && Type != Gem` 时给可分离堆叠提示
+    //    （`MaxCombine` = 「最大合并数量：{0}{1}按住 Shift + 左键点击以分离堆叠」，{1} 传 "\n"）。
+    if item.item_type == mir2_shared::enums::ItemType::Gem as u8 {
+        let hint = match item.shape {
+            1 => Some("按住 CTRL 并左键点击以部分修理\n武器和饰品。"), // HoldCtrlPartialRepairWeaponsAccessories
+            2 => Some("按住 CTRL 并左键点击以部分修理\n盔甲和布料。"), // HoldCtrlPartialRepairArmourDrapery
+            3 => Some("按住 CTRL 并左键点击以与物品合成。\n有几率销毁合成物品。"), // HoldCtrlCombineDestroyChance
+            4 => Some("按住 CTRL 并左键点击以与物品合成。\n不会销毁合成物品。"), // HoldCtrlCombineNoDestroy
+            5 => Some("按住 CTRL 并左键点击以完全修理\n武器和饰品。"), // HoldCtrlFullRepairWeaponsAccessories
+            6 => Some("按住 CTRL 并左键点击以完全修理\n盔甲和布料。"), // HoldCtrlFullRepairArmourDrapery
+            8 => Some("按住 CTRL 并左键点击以封印物品。"),             // HoldCtrlSealItem
+            _ => None,
+        };
+        if let Some(h) = hint {
+            lines.push(h.to_string());
+        }
+    } else if item.stack_size > 1 {
+        lines.push(format!(
+            "最大合并数量：{}\n按住 Shift + 左键点击以分离堆叠", // Text.MaxCombine
+            item.stack_size
+        ));
+    }
     // C# `StoryInfoLabel`（`:9692-9737`）：`ItemInfo.ToolTip` 非空时先一行「物品描述」再一行正文；
     // **Credit Scroll 特例**（`Type==Scroll && Shape==7`）把正文替换为「已向您的账号添加 {price} 点数。」
     let story = if item.item_type == mir2_shared::enums::ItemType::Scroll as u8 && item.shape == 7 {
@@ -4301,6 +4328,7 @@ mod tests {
             rental_binary: None,
             rental_locked: false,
             awake_levels: Vec::new(),
+            stack_size: 1,
         }
     }
 
@@ -4621,6 +4649,64 @@ mod tests {
         );
         it.rental_binary = Some(binary_of(now - 1));
         assert!(item_time_lines(&it, now).is_empty(), "锁已到期不出行");
+    }
+
+    /// §3.2ec：`OverlapInfoLabel` 的两类交互提示（宝石按 Shape、可堆叠按 StackSize）。
+    #[test]
+    fn tooltip_overlap_hints_match_csharp() {
+        // ① 宝石按 Shape 给 Ctrl+左键提示（含换行，与中文包一致）
+        let mut gem = item_with_type(ItemType::Gem);
+        gem.shape = 5;
+        let lines = item_tooltip_lines(&gem);
+        assert!(
+            lines
+                .iter()
+                .any(|l| l == "按住 CTRL 并左键点击以完全修理\n武器和饰品。"),
+            "{lines:?}"
+        );
+        gem.shape = 8;
+        let lines = item_tooltip_lines(&gem);
+        assert!(
+            lines
+                .iter()
+                .any(|l| l == "按住 CTRL 并左键点击以封印物品。"),
+            "{lines:?}"
+        );
+        // Shape 无对应文案（C# 是空串标签）⇒ 本端不出行
+        gem.shape = 7;
+        assert!(
+            !item_tooltip_lines(&gem)
+                .iter()
+                .any(|l| l.contains("按住 CTRL")),
+            "无文案的 Shape 不出行"
+        );
+        // ② 可堆叠（非宝石）⇒ 最大合并数量 + Shift 分离提示
+        let mut stack = item_with_type(ItemType::Potion);
+        stack.stack_size = 5;
+        let lines = item_tooltip_lines(&stack);
+        assert!(
+            lines
+                .iter()
+                .any(|l| l == "最大合并数量：5\n按住 Shift + 左键点击以分离堆叠"),
+            "{lines:?}"
+        );
+        // 不可堆叠（StackSize<=1）不出行
+        let plain = item_with_type(ItemType::Potion);
+        assert!(
+            !item_tooltip_lines(&plain)
+                .iter()
+                .any(|l| l.contains("最大合并数量")),
+            "不可堆叠不出行"
+        );
+        // 宝石即使 StackSize>1 也走 Shape 分支（C# 的 `Type != Gem` 条件）
+        let mut g2 = item_with_type(ItemType::Gem);
+        g2.shape = 1;
+        g2.stack_size = 9;
+        let lines = item_tooltip_lines(&g2);
+        assert!(
+            !lines.iter().any(|l| l.contains("最大合并数量")),
+            "宝石不走堆叠提示"
+        );
     }
 
     #[test]
