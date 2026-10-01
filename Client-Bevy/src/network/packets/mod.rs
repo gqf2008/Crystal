@@ -234,6 +234,7 @@ pub(crate) fn to_inv_item(item: &mir2_shared::data::item::UserItem) -> InvItem {
             .map(|r| r.rental_locked)
             .unwrap_or(false),
         awake_levels: item.awake.levels.clone(),
+        stack_size: item.info.as_ref().map(|i| i.stack_size).unwrap_or(1),
     }
 }
 
