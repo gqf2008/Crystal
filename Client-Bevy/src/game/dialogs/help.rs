@@ -138,6 +138,17 @@ pub struct HelpNext;
 #[derive(Component)]
 pub struct HelpTitleText;
 
+/// 页标题的**节点顶**（面板内）。C# `PageTitleLabel`：`Size=(242,30)` +
+/// `HorizontalCenter | VerticalCenter`（`HelpDialog.cs:385-393`），`HelpPage` 内在 `(135,4)`
+/// ⇒ 文本盒面板内 `[39.5,69.5]`、中心 **54.5**。本端 13px 档墨迹顶 = 节点顶 + 1
+/// ⇒ 取 48 时墨迹 49..60（中心 54.5）。
+pub const HELP_TITLE_Y: f32 = 48.0;
+
+/// 页码的**节点顶**（面板内）。C# `PageLabel`：`Size=(80,20)` + 同样 H+V 居中
+/// （`HelpDialog.cs:74-83`，`Location=(230,480)`）⇒ 文本盒 `[481,501]`、中心 **491**。
+/// 本端 12px 档墨迹顶 = 节点顶 + 3 ⇒ 取 484 时墨迹 487..495。
+pub const HELP_PAGE_Y: f32 = 484.0;
+
 /// 页码（C# PageLabel，"x / N" 居中 80x20 @(270,490)）
 #[derive(Component)]
 pub struct HelpPageLabelText;
@@ -367,10 +378,29 @@ fn spawn_help(
         // §3.2de：字号口径 —— C# 是 **pt**（`new Font(Settings.FontName, 10F, Bold)`），
         // 本端 `spawn_label*` 的 size 是 **px**，96 DPI 下 1pt = 4/3 px ⇒ 10F≈13px、9F≈12px。
         // 此前直接照抄 pt 数值（10/9），实机帧里字形带只有原版的一半高（Help 行 6px vs 原版 9px）。
-        spawn_label_center(p, &cjk, "", 268.0, 54.0, 242.0, 13.0, Color::WHITE, 9)
-            .insert(HelpTitleText);
+        //
+        // §3.2dn：**垂直居中**——C# `PageTitleLabel` 是 `Size=(242,30)` + `VerticalCenter`
+        // （`HelpDialog.cs:385-393`，`HelpPage` 内 `Location=(135,4)`），文本盒面板内
+        // `[39.5,69.5]`、中心 54.5；本端 13px 档墨迹顶 = 节点顶 + 1 ⇒ 节点顶取 48 时墨迹
+        // 落在 49..60（中心 54.5）。帧证：原版墨迹绝对行 179..188（中心 183.5），
+        // 本端修前 184..195（中心 189.5）——**低 6px**。
+        spawn_label_center(
+            p,
+            &cjk,
+            "",
+            268.0,
+            HELP_TITLE_Y,
+            242.0,
+            13.0,
+            Color::WHITE,
+            9,
+        )
+        .insert(HelpTitleText);
         // 页码（居中 @(270,490) 80x20）
-        spawn_label_center(p, &cjk, "", 270.0, 490.0, 80.0, 12.0, Color::WHITE, 9)
+        // §3.2dn：C# `PageLabel` 是 `Size=(80,20)` + `VerticalCenter`（`HelpDialog.cs:74-83`）
+        // ⇒ 文本盒面板内 `[481,501]`、中心 491；本端 12px 档墨迹顶 = 节点顶 + 3 ⇒ 节点顶 484
+        // 时墨迹落在 487..495（帧证：原版绝对 616..624，本端修前 622..630——**低 6px**）。
+        spawn_label_center(p, &cjk, "", 270.0, HELP_PAGE_Y, 80.0, 12.0, Color::WHITE, 9)
             .insert(HelpPageLabelText);
         // 图文页图像（@(12,75)，Auto 尺寸）
         let white = images.add(crate::map_renderer::make_image(
@@ -558,6 +588,29 @@ fn help_ui_system(
 
 #[cfg(test)]
 mod tests {
+    /// §3.2dn：Help 两处标签都按 C# 的 `VerticalCenter` 盒落位
+    /// （`PageTitleLabel` 242x30、`PageLabel` 80x20，`HelpDialog.cs:74-83/385-393`）。
+    ///
+    /// 判据：本端节点顶 + 墨迹偏移 + 墨迹高/2 = C# 盒中心。
+    /// 阳性对照（实做）：把任一常量改回修前的 54 / 490 ⇒ 本测试红。
+    #[test]
+    fn help_labels_are_vertically_centered_in_csharp_boxes() {
+        // 标题：盒中心 54.5，本端 13px 墨迹高 12、墨迹顶 = 节点顶 + 1
+        assert_eq!(
+            HELP_TITLE_Y + 1.0 + 12.0 / 2.0,
+            55.0,
+            "标题墨迹中心 = 54.5±0.5"
+        );
+        // 页码：盒中心 491，本端 12px 墨迹高 9、墨迹顶 = 节点顶 + 3
+        assert_eq!(
+            HELP_PAGE_Y + 3.0 + 9.0 / 2.0,
+            491.5,
+            "页码墨迹中心 = 491±0.5"
+        );
+        assert_ne!(HELP_TITLE_Y, 54.0, "修前值（低 6px）不得复活");
+        assert_ne!(HELP_PAGE_Y, 490.0, "修前值（低 6px）不得复活");
+    }
+
     use super::*;
 
     /// #2985 A2：帮助面板**页标题/页码/表头**必须用自带 CJK 字形的主字体。此前这三处
