@@ -4318,6 +4318,43 @@ spawn」配对，中间夹了个 `for` 循环体就串行了。
 `Prguse[2447]` 信用图标：本端数据里**没有这一帧**（越界）⇒ 无像素可比；原版帧也没拍到过该状态
 （要 `RewardCredit > 0` 的任务）。本条只到"确认它取不到帧、不生成节点"为止，不推像素结论。
 
+### 3.2dv 物品提示补**镶嵌孔**一段（C# `SocketInfoLabel`）（2026-10-01）
+
+C# `SocketInfoLabel`（`GameScene.cs:8622-8670`）逐孔输出：
+
+```csharp
+for (int i = 0; i < item.Slots.Length; i++)
+    Text = GetLocalization(ClientTextKeys.SocketWithValue,      // 「镶嵌孔 : {0}」
+               item.Slots[i] == null ? GetLocalization(Empty)   // 「空」
+                                     : item.Slots[i].FriendlyName);
+// 只要有孔（count > 0）再补一行：
+Text = GetLocalization(ClientTextKeys.OpenSocketsTips);          // 「按 Ctrl + 右键 打开镶嵌孔」
+```
+
+本端 `InvItem.slots` **早就是** `Vec<Option<InvItem>>`（每个孔存的是宝石条目，M56 镶嵌窗在用），
+但提示里从来没画过 ⇒ 本轮按上面的口径补：
+
+| | 修前 | 修后（`slots = [空, 红宝石]` 的武器） |
+|---|---|---|
+| 提示内容 | `武器` / `重量: …` / 属性 / 需求 / 职业 / 价格 | `武器` / `重量: …` / 属性 / **`镶嵌孔 : 空`** / **`镶嵌孔 : 红宝石`** / **`按 Ctrl + 右键 打开镶嵌孔`** / 需求 / 职业 / 价格 |
+
+顺序按 C# 的拼装次序（`AttackInfoLabel` → `DefenceInfoLabel` → `WeightInfoLabel` →
+**`AwakeInfoLabel` → `SocketInfoLabel`** → `NeedInfoLabel` → …），故孔行落在**需求之前**；
+没有孔的物品不出现任何孔行（同 C# 的 `for i < Slots.Length`）。
+
+#### 门禁
+
+| 门禁 | 结果 |
+|---|---|
+| `cargo test --lib` | **932 passed / 0 failed**（新增 `tooltip_socket_lines_match_csharp`：空孔/有孔/操作提示 + 「无孔不出行」负对照） |
+| `cargo test --test b0001_smoke --test ui_alignment` | **2 + 58 passed** |
+| `ui_interact_sweep.ps1` | **46/47、fail=0、exit=0** |
+| `rustfmt --check inventory.rs` | 6 处 = master 既有基线（未新增） |
+
+> 仍未对齐：`AwakeInfoLabel`（需要觉醒类型名）、`BindInfoLabel`（需要持久化布尔标位：
+> 不可丢弃/交易/存放/修理…，本端 `InvItem` 目前只有 `soul_bound_id`/`rental`）、
+> `OverlapInfoLabel`（Ctrl+点击的交互提示）、`StoryInfoLabel`（物品描述）、`GMMadeLabel`。
+
 ### 3.2du 物品提示：**标题按品阶上色** ＋ 聊天物品链接不再自己拼一份提示（2026-10-01）
 
 #### ① 标题色（承 §3.2dt 的品阶行）

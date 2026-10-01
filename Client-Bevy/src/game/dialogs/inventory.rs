@@ -1625,6 +1625,19 @@ pub fn item_tooltip_lines(item: &InvItem) -> Vec<String> {
             lines.push(format!("{}{}{}", label, v, suffix));
         }
     }
+    // 镶嵌孔：C# `SocketInfoLabel`（`GameScene.cs:8622-8670`）——每个孔一行
+    // `SocketWithValue` = 「镶嵌孔 : {0}」（{0} = 孔内宝石名，空孔用 `Empty` = 「空」），
+    // 只要有孔就再追加一行 `OpenSocketsTips` = 「按 Ctrl + 右键 打开镶嵌孔」。
+    for slot in &item.slots {
+        let gem = slot
+            .as_ref()
+            .map_or_else(|| "空".to_string(), |g| g.name.clone());
+        lines.push(format!("镶嵌孔 : {}", gem));
+    }
+    if !item.slots.is_empty() {
+        lines.push("按 Ctrl + 右键 打开镶嵌孔".to_string());
+    }
+
     // 需求：C# `NeedInfoLabel` 的 `#region LEVEL`——`RequiredType` → `ClientTextKeys.*`
     // （本端 `required_type` 是**本端枚举值** = C# 值 + 3，见 `enums::RequiredType`）
     if item.required_amount > 0 {
@@ -4104,6 +4117,28 @@ mod tests {
             Color::srgb(1.0, 1.0, 0.0),
             "未知档回退 Yellow"
         );
+    }
+
+    /// §3.2dv：镶嵌孔行对齐 C# `SocketInfoLabel`（`GameScene.cs:8622-8670`）——
+    /// 每个孔一行「镶嵌孔 : {宝石名|空}」，有孔再追加「按 Ctrl + 右键 打开镶嵌孔」。
+    #[test]
+    fn tooltip_socket_lines_match_csharp() {
+        let mut it = item_with_type(ItemType::Weapon);
+        let mut gem = item_with_type(ItemType::Gem);
+        gem.name = "红宝石".into();
+        it.slots = vec![None, Some(gem)];
+        let lines = item_tooltip_lines(&it);
+        assert!(lines.iter().any(|l| l == "镶嵌孔 : 空"), "{lines:?}");
+        assert!(lines.iter().any(|l| l == "镶嵌孔 : 红宝石"), "{lines:?}");
+        assert!(
+            lines.iter().any(|l| l == "按 Ctrl + 右键 打开镶嵌孔"),
+            "{lines:?}"
+        );
+        // 没有孔的物品**不出现**任何孔行（C# 的 `for i < item.Slots.Length` 自然为空）
+        let plain = item_with_type(ItemType::Weapon);
+        let lines = item_tooltip_lines(&plain);
+        assert!(!lines.iter().any(|l| l.starts_with("镶嵌孔")), "{lines:?}");
+        assert!(!lines.iter().any(|l| l.contains("打开镶嵌孔")), "{lines:?}");
     }
 
     #[test]
