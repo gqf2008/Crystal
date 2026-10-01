@@ -21,7 +21,7 @@ use crate::map_renderer::{GameData, GameLibraries};
 use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
-use crate::ui::outlined_text::spawn_outlined_label;
+use crate::ui::outlined_text::{spawn_outlined_label, spawn_outlined_label_center};
 use crate::ui::sprite_ui::{shared_cjk_font, UiCjkFont, UiFont};
 use crate::ui::theme::{
     load_lib_image, spawn_container, spawn_icon_button, spawn_image, spawn_label, spawn_panel,
@@ -277,9 +277,20 @@ fn spawn_big_map(
         .insert((DialogRoot(DialogKind::BigMap), BigMapWidget));
 
     commands.entity(panel).with_children(|p| {
-        // 标题（C# TitleLabel (19,6) 699x20）
-        spawn_outlined_label(p, cjk.clone(), "", 19.0, 6.0, 14.0, Color::WHITE, 4)
-            .insert(BigMapTitleText);
+        // 标题（C# `TitleLabel`：`Location=(19,6)`、`Size=(699,20)`、
+        // `DrawFormat = HorizontalCenter` ⇒ 在 699 宽里居中，见 `BigMapDialog.cs:225-235`）
+        spawn_outlined_label_center(
+            p,
+            &cjk,
+            "",
+            19.0 + 699.0 / 2.0,
+            6.0,
+            699.0,
+            13.0,
+            Color::WHITE,
+            4,
+        )
+        .insert(BigMapTitleText);
         // 关闭 (W-25,3)
         if let (Some(n), Some(h), Some(pr)) = (
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 360),
