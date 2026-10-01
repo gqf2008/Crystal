@@ -4318,6 +4318,61 @@ spawn」配对，中间夹了个 `for` 循环体就串行了。
 `Prguse[2447]` 信用图标：本端数据里**没有这一帧**（越界）⇒ 无像素可比；原版帧也没拍到过该状态
 （要 `RewardCredit > 0` 的任务）。本条只到"确认它取不到帧、不生成节点"为止，不推像素结论。
 
+### 3.2dp 角色窗名字/行会落位（高 14px）＋ 一条**工具级**发现：Bevy 文本节点会**吞点击**（2026-10-01）
+
+#### ① 名字/行会两处没按 C# 的居中盒落位
+
+C# `CharacterDialog`（`:202-217`）：
+
+| 标签 | C# `Location` / `Size` | 文本盒（面板内） | 盒中心 |
+|---|---|---|---|
+| `NameLabel` | `(0,12)` `264x20` | `[1,265] × [13,33]` | (133, **22**) |
+| `GuildLabel` | `(0,33)` `264x30` | `[1,265] × [34,64]` | (133, **48**) |
+
+两者 `DrawFormat = HorizontalCenter | VerticalCenter`，且都是 `NotControl = true`（不吃鼠标）。
+本端 `character.rs` 里 `NAME_CY` / `GUILD_CY` 这两个**中心**常量算了却**没人用**，
+spawn 直接写了 `2.0` / `28.0`（盒顶附近）⇒ 帧实测（Equipment 窗原点 (760,0)，阈值 `sum>520`）：
+
+| | 名字墨迹 | 中心 |
+|---|---|---|
+| 原版 | x 874..908、**行 17..28** | 22.5 |
+| 本端修前 | 行 **3..15**（压在上边框上） | 9.5 |
+| 本端修后 | x 875..911、**行 17..28** | **22.5** |
+
+改法：`节点顶 = 盒中心 − LABEL_CENTER_DY(7)`（本端 14px 档实测"墨迹中心 = 节点顶 + 7"），
+宽度同时从 200 改回 C# 的 264。复跑：**Equipment 6.3% → 6.0%**（6311 → 5992 像素）、
+**Skills 1.7% → 1.4%**（同一扇 `CharacterDialog` 的技能页跟着变好）。
+
+#### ② 顺带抓到的**工具级**发现：264 宽的文本节点**吞掉了点击**
+
+只改宽度（`200 → 264`，不加别的）后，**40 窗交互巡回**变成这样：
+
+| 构建 | 巡回结果 |
+|---|---|
+| master `a8782a231`（未含本改动） | **46/47，exit=0** |
+| 本改动（宽度 264、节点仍可拾取） | 连跑 4 次全挂：**44/47、45/47、45/47、45/47**，每次挂**不同**的窗（settings / guild_territory / input_box / item_rental_browse / big_map） |
+| 宽度改回 200（仅做二分） | **46/47，exit=0** |
+| 宽度 264 **＋ `Pickable::IGNORE`** | **46/47，exit=0** |
+
+根因：Bevy 的 UI 文本节点**默认参与拾取**，能挡下层按钮；而 C# 里这些标签都是
+`NotControl = true`（不吃鼠标）。本端 `spawn_label_*` **没有设置任何 `Pickable`**
+（全仓 `Pickable::IGNORE` 出现次数 = 0）⇒ 标签一旦变宽盖到按钮那一角，点击就被吃掉，
+症状是"巡回在不同窗口上随机挂、但每个窗口自己看都没问题"。
+
+改法：这两处显式 `.insert(bevy::picking::Pickable::IGNORE)`（注释里写 C# 的
+`NotControl = true` 出处）。**这条不限于本窗**——凡是对齐 C# `NotControl` 的标签、
+或标签与按钮有重叠时，都要显式不参与拾取。
+
+#### ③ 门禁
+
+| 门禁 | 结果 |
+|---|---|
+| `cargo test --lib` | **930 passed / 0 failed**（新增 `char_name_and_guild_sit_at_csharp_box_centers`） |
+| `cargo test --test b0001_smoke --test ui_alignment` | **2 + 58 passed** |
+| `ui_interact_sweep.ps1` | **pass=46 / total=47 / fail=0 / skip=0 / exit=0**（另见 ② 的 4 次失败记录） |
+| `rustfmt --check character.rs` | 2 处 = master 既有 import 排序基线（未新增） |
+| 实机 A/B 复跑 | 构建 `f98bf2251` dirty=0；数值见 ①② |
+
 ### 3.2do Keybind 标题：**左对齐 + 低 9px** ⇒ 改 C# 居中盒，并把文案对齐中文包（2026-10-01）
 
 C# `KeyboardLayoutDialog.PageLabel`（`:42-50`）：`Size=(242,30)`、`Location=(135,34)`、
