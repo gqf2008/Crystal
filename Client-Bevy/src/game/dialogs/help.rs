@@ -9,15 +9,19 @@
 //   - 图文页：Help[id] 绘制于页 (12, 35+40)；页标题 Bold10 居中 242x30 @(147,39)
 //   - 页码 "n / 45" 9F 居中 80x20 @(230,480)；Previous [240-242] @(210,485) /
 //     Next [243-245] @(310,485) 循环；Close [360-362] @(509,3)
-//   有意偏差：快捷键页沿用本端口 KeyboardState 动态生成（C# 是固定清单 +
-//     本地化描述，动作集略有出入）；标题"技能 ({0})"类带占位符的本地化值
-//     取其干净前缀
+//   §3.2de（2026-10-01）：快捷键三页**改成 C# 的固定清单**（`ShortcutPage1/2/3` 的顺序 +
+//     `ClientTextKeys` 的中文描述原串），键位列仍按本端**当前绑定**渲染。
+//     此前是"按 KeyBinds 分组（移动/交互/界面/系统/技能）动态生成"，与 C# 首行就不同
+//     （本端首行「W 向上移动」 vs C# 首行「Alt + Q 退出游戏」）——中文原版帧对表时被抓出来
+//     （§3.2dd：Help 行 en-vs-cn 8.68%，是全表唯一两行真·语言差之一）。
+//     只列**本端已实现**的动作（C# Page1 的 19 条里本端有 18 条，缺 `TargetSpellLockOn`）；
+//     标题"技能 ({0})"类带占位符的本地化值取其干净前缀
 // ============================================================================
 
 use bevy::prelude::*;
 use bevy::sprite::Anchor;
 
-use crate::game::dialogs::keyboard_layout::{key_name, KeyboardState};
+use crate::game::dialogs::keyboard_layout::{KeyboardState, binding_text_for};
 use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
 use crate::map_renderer::GameLibraries;
 use crate::resources::libraries::LibraryName;
@@ -142,9 +146,13 @@ pub struct HelpPageLabelText;
 #[derive(Component)]
 pub struct HelpPageImage;
 
-/// 快捷键页两列表头（C# shortcutTitleLabel/infoTitleLabel，对话框坐标
-/// 中心 (75,125)/(328,125)——C# 页内 (13,75)/(114,75) + 页偏移 (12,35)；
-/// 携带自身文案，图文页清空/快捷键页还原）
+/// 快捷键页两列表头（C# `shortcutTitleLabel/infoTitleLabel`：
+/// `ShortcutInfoPage` 里 `Location=(13,75)/(114,75)`、`Size=(100,30)/(400,30)` 且居中绘制
+/// ⇒ **对话框坐标**中心 `(63,90)/(314,90)`）。
+///
+/// §3.2de：`ShortcutInfoPage` 的 `Parent` 是 `HelpDialog`（`HelpDialog.cs:109-111`）、自身 `Location` 为默认
+/// `(0,0)` —— 那个 `(12,35)` 只是 `HelpPage` **包装层**（图文页用）的位置，**快捷键页内容不加它**。
+/// 本端此前把表头/行都按 +12/+35 平移，实机帧里表头低 45px、行低 29px（对中文原版量得）。
 #[derive(Component)]
 pub struct HelpShortcutHeader(pub &'static str);
 
@@ -156,13 +164,88 @@ pub struct HelpShortcutKey(usize);
 #[derive(Component)]
 pub struct HelpShortcutInfo(usize);
 
-/// 生成快捷键页行（本端口 KeyboardState 动态分组——有意偏差见文件头）
-fn shortcut_rows(state: &KeyboardState, groups: &[&str]) -> Vec<(String, String)> {
-    state
-        .bindings
+/// C# 三页快捷键清单的**一条** = `(本端键位动作名, C# 的 `ClientTextKeys` 名, 描述原串)`。
+///
+/// 键位列由 [`crate::game::dialogs::keyboard_layout::binding_text_for`] 按**当前绑定**渲染
+/// （与 C# `CMain.InputKeys.GetKey(KeybindOptions.X)` 同口径，含修饰键）；描述列用
+/// `Client/Localization/Chinese.json` 里 `ClientTextKeys.<名>` 的**原串**（逐字复制）；
+/// 中间那项只作溯源（运行期不读）。
+type ShortcutRow = (&'static str, &'static str, &'static str);
+
+/// C# `ShortcutPage1`（`HelpDialog.cs:211-240`）的 **18 条**，**按 C# 顺序**。
+///
+/// §3.2de：只保留**本端已实现**的动作（缺 `TargetSpellLockOn`：本端没有"把法术锁定在目标"的键位）⇒ 17 条。
+/// 描述串逐字取自 `Client/Localization/Chinese.json`。
+const SHORTCUT_PAGE1: &[ShortcutRow] = &[
+    ("退出", "ExitGame", "退出游戏"),
+    ("下线", "LogOut", "登出"),
+    ("技能栏1", "SkillButtons", "技能按钮"),
+    ("背包", "InventoryWindowOpenClose", "背包（打开/关闭）"),
+    ("角色", "StatusWindowOpenClose", "状态（打开/关闭）"),
+    ("技能", "SkillWindowOpenClose", "技能（打开/关闭）"),
+    ("队伍", "GroupWindowOpenClose", "队伍（打开/关闭）"),
+    ("请求交易", "TradeWindowOpenClose", "交易（打开/关闭）"),
+    ("好友", "FriendWindowOpenClose", "好友（打开/关闭）"),
+    ("小地图", "MinimapWindowOpenClose", "小地图（打开/关闭）"),
+    ("行会", "GuildWindowOpenClose", "公会（打开/关闭）"),
+    ("商城", "GameshopWindowOpenClose", "商城（打开/关闭）"),
+    ("夫妻", "EngagementWindowOpenClose", "婚姻（打开/关闭）"),
+    ("腰带", "BeltWindowOpenClose", "快捷栏（打开/关闭）"),
+    ("设置", "OptionWindowOpenClose", "选项（打开 / 关闭）"),
+    ("帮助", "HelpWindowOpenClose", "帮助（打开 / 关闭）"),
+    ("坐骑切换", "MountDismountRide", "骑乘 / 下马"),
+];
+
+/// C# `ShortcutPage2`（`HelpDialog.cs:241-271`）的 **18 条**，**按 C# 顺序**，同样只留本端已实现的动作（7 条）。
+///
+/// 未实现（故不列）：`ChangeAttackmode`（攻击模式切换，本端在 `combat.rs` 里硬编码，不在键位表）、
+/// 四个 `Attackmode*`（和平/组队/公会/善恶/全体）、`Autorun`、`Cameramode`、`Screenshot`、
+/// `Mentor`、`CtrlRightClick`。
+const SHORTCUT_PAGE2: &[ShortcutRow] = &[
+    ("宠物模式切换", "TogglePetAttackPet", "切换宠物攻击宠物"),
+    ("大地图", "ShowFieldMap", "显示区域地图"),
+    ("技能栏显隐", "ShowSkillBar", "显示技能栏"),
+    ("拾取", "HighlightPickupItems", "高亮 / 捡取物品"),
+    ("钓鱼", "OpenCloseFishingWindow", "钓鱼（打开 / 关闭）"),
+    (
+        "宠物拾取",
+        "CreaturePickupMultiMouseTarget",
+        "宠物拾取（多鼠标目标）",
+    ),
+    (
+        "宠物半自动拾取",
+        "CreaturePickupSingleMouseTarget",
+        "宠物拾取（单鼠标目标）",
+    ),
+];
+
+/// C# `ShortcutPage3`（`HelpDialog.cs:272-286`）：三行**聊天命令**（键位列 C# 是固定串，不是绑定）。
+const CHAT_COMMAND_ROWS: &[(&str, &str)] = &[
+    ("/(username)", "私聊命令"),
+    ("!(text)", "附近喊话命令"),
+    ("!~(text)", "公会聊天命令"),
+];
+
+/// 把 C# 清单渲染成本端行：键位列取**当前绑定**（`技能栏1..8` 特判成 `F1-F8` 这种跨度写法，
+/// 与 C# `GetKey(Bar1Skill1) + "-" + GetKey(Bar1Skill8)` 同构）。
+fn shortcut_rows(state: &KeyboardState, rows_list: &[ShortcutRow]) -> Vec<(String, String)> {
+    rows_list
         .iter()
-        .filter(|b| groups.contains(&b.group))
-        .map(|b| (key_name(b.key).to_string(), b.action.to_string()))
+        .map(|r| {
+            let action = r.0;
+            let key = if action == "技能栏1" {
+                let first = binding_text_for(&state.bindings, "技能栏1");
+                let last = binding_text_for(&state.bindings, "技能栏8");
+                if first.is_empty() || last.is_empty() {
+                    first
+                } else {
+                    format!("{first}-{last}")
+                }
+            } else {
+                binding_text_for(&state.bindings, action)
+            };
+            (key, r.2.to_string())
+        })
         .collect()
 }
 
@@ -171,19 +254,20 @@ fn build_pages(state: &KeyboardState) -> Vec<(String, PageDef)> {
     vec![
         (
             "快捷方式信息".to_string(),
-            PageDef::Shortcut(shortcut_rows(state, &["移动", "交互", "界面"])),
+            PageDef::Shortcut(shortcut_rows(state, SHORTCUT_PAGE1)),
         ),
         (
             "快捷方式信息".to_string(),
-            PageDef::Shortcut(shortcut_rows(state, &["系统", "技能"])),
+            PageDef::Shortcut(shortcut_rows(state, SHORTCUT_PAGE2)),
         ),
         (
             "聊天快捷键".to_string(),
-            PageDef::Shortcut(vec![
-                ("/w 名字".to_string(), "私聊对方".to_string()),
-                ("!文字".to_string(), "附近喊话".to_string()),
-                ("!~文字".to_string(), "行会频道".to_string()),
-            ]),
+            PageDef::Shortcut(
+                CHAT_COMMAND_ROWS
+                    .iter()
+                    .map(|(k, v)| (k.to_string(), v.to_string()))
+                    .collect(),
+            ),
         ),
     ]
     .into_iter()
@@ -280,10 +364,13 @@ fn spawn_help(
             }
         }
         // 页标题（居中 @(268,54) 242x30）
-        spawn_label_center(p, &cjk, "", 268.0, 54.0, 242.0, 10.0, Color::WHITE, 9)
+        // §3.2de：字号口径 —— C# 是 **pt**（`new Font(Settings.FontName, 10F, Bold)`），
+        // 本端 `spawn_label*` 的 size 是 **px**，96 DPI 下 1pt = 4/3 px ⇒ 10F≈13px、9F≈12px。
+        // 此前直接照抄 pt 数值（10/9），实机帧里字形带只有原版的一半高（Help 行 6px vs 原版 9px）。
+        spawn_label_center(p, &cjk, "", 268.0, 54.0, 242.0, 13.0, Color::WHITE, 9)
             .insert(HelpTitleText);
         // 页码（居中 @(270,490) 80x20）
-        spawn_label_center(p, &cjk, "", 270.0, 490.0, 80.0, 9.0, Color::WHITE, 9)
+        spawn_label_center(p, &cjk, "", 270.0, 490.0, 80.0, 12.0, Color::WHITE, 9)
             .insert(HelpPageLabelText);
         // 图文页图像（@(12,75)，Auto 尺寸）
         let white = images.add(crate::map_renderer::make_image(
@@ -303,17 +390,22 @@ fn spawn_help(
             Visibility::Hidden,
             ZIndex(8),
         ));
-        // 快捷键页两列表头（居中）
-        for (text, cx, ry) in [("快捷键", 75.0, 125.0), ("信息", 328.0, 125.0)] {
-            spawn_label_center(p, &cjk, text, cx, ry, 100.0, 10.0, Color::WHITE, 9)
+        // 快捷键页两列表头（居中；C# 对话框坐标中心 (63,90)/(314,90)，见 `HelpShortcutHeader` 注释）
+        // `spawn_label_center` 的 y 是**顶**；C# 表头是 `Size=(100,30)` + `VerticalCenter`
+        // ⇒ 文字中心落在盒中心 90 ⇒ 本端顶 = 90 - 字形高/2 ≈ 83（实机帧里表头带 212-225）。
+        for (text, cx, ry) in [("快捷键", 63.0, 83.0), ("信息", 314.0, 83.0)] {
+            spawn_label_center(p, &cjk, text, cx, ry, 100.0, 13.0, Color::WHITE, 9)
                 .insert(HelpShortcutHeader(text));
         }
-        // 快捷键页行（黄键名/白说明）
+        // 快捷键页行（黄键名/白说明）：C# `ShortcutInfoPage.LoadKeyBinds` 的
+        // `Location = (18, 107 + 20*i)` / `(119, 107 + 20*i)`（`HelpDialog.cs:347/359`，对话框坐标）
+        // C# 行标签 `Size=(95,23)` + `VerticalCenter` ⇒ 文字中心 = 107 + 11.5 = 118.5；
+        // 本端 `spawn_label` 是顶对齐 ⇒ 顶 = 118.5 - 9/2 ≈ 114（实机帧里黄字带 244-252）。
         for i in 0..SHORTCUT_ROWS {
-            let y = 142.0 + i as f32 * 20.0;
-            spawn_label(p, &cjk, "", 30.0, y, 9.0, Color::srgb(1.0, 1.0, 0.0), 9)
+            let y = 114.0 + i as f32 * 20.0;
+            spawn_label(p, &cjk, "", 18.0, y, 12.0, Color::srgb(1.0, 1.0, 0.0), 9)
                 .insert(HelpShortcutKey(i));
-            spawn_label(p, &cjk, "", 131.0, y, 9.0, Color::WHITE, 9).insert(HelpShortcutInfo(i));
+            spawn_label(p, &cjk, "", 119.0, y, 12.0, Color::WHITE, 9).insert(HelpShortcutInfo(i));
         }
     });
 }
@@ -546,7 +638,7 @@ mod tests {
         assert_eq!(ids, (0..42).collect::<Vec<_>>());
     }
 
-    /// 快捷键页动态行有内容（键盘默认绑定）
+    /// 快捷键页行有内容（键盘默认绑定）
     #[test]
     fn shortcut_pages_have_rows() {
         let kb = KeyboardState::default();
@@ -556,5 +648,58 @@ mod tests {
                 assert!(!rows.is_empty() || i == 2, "页 {i} 行非空");
             }
         }
+    }
+
+    /// §3.2de：快捷键三页改成 **C# `ShortcutPage1/2/3` 的固定清单**（顺序 + 中文描述原串）。
+    ///
+    /// 阳性对照（实做）：把 `SHORTCUT_PAGE1` 的第一条换回"按分组动态生成"的产物
+    /// （首行会是「W / 向上移动」）⇒ 本测试红。
+    #[test]
+    fn shortcut_pages_match_csharp_fixed_lists() {
+        let kb = KeyboardState::default();
+        let pages = build_pages(&kb);
+        let rows_of = |i: usize| match &pages[i].1 {
+            PageDef::Shortcut(r) => r.clone(),
+            _ => panic!("页 {i} 应为 Shortcut"),
+        };
+        let p1 = rows_of(0);
+        let p2 = rows_of(1);
+        let p3 = rows_of(2);
+        // ① 条数：C# Page1 18 条里本端实现 17（缺 TargetSpellLockOn）；Page2 实现 7；Page3 = 3 条命令
+        assert_eq!(p1.len(), 17, "Page1 行数（C# 18 - 本端未实现的 1）");
+        assert_eq!(p2.len(), 7, "Page2 行数（只列本端已实现的动作）");
+        assert_eq!(p3.len(), 3, "Page3 = C# 三条聊天命令");
+        // ② 首/末行与 C# 同序（C# Page1 首行 Exit、末行 TargetSpellLockOn；本端去掉后者）
+        assert_eq!(
+            p1[0].1, "退出游戏",
+            "Page1 首行文案 = ClientTextKeys.ExitGame"
+        );
+        assert_eq!(
+            p1[0].0, "Alt + Q",
+            "Page1 首行键位 = C# GetKey(Exit)（Alt+Q）"
+        );
+        assert_eq!(
+            p1.last().unwrap().1,
+            "骑乘 / 下马",
+            "Page1 末行 = MountDismountRide（本端去掉其后的 TargetSpellLockOn）"
+        );
+        // ③ 技能栏跨度写法（C# `GetKey(Bar1Skill1) + "-" + GetKey(Bar1Skill8)`）
+        let skill_span = p1.iter().find(|(_, info)| info == "技能按钮").unwrap();
+        assert_eq!(skill_span.0, "F1-F8", "技能按钮键位列 = F1-F8");
+        // ③b Page2 首行 = C# `TogglePetAttackPet`；键位是本端绑定（`宠物模式切换` 本端有意从
+        //     Ctrl+A 改到 Ctrl+T，见 keyboard_layout.rs 的 #1562 注释）
+        assert_eq!(
+            p2[0].1, "切换宠物攻击宠物",
+            "Page2 首行 = ClientTextKeys.TogglePetAttackPet"
+        );
+        assert_eq!(
+            p2[0].0, "Ctrl + T",
+            "Page2 首行键位取本端绑定（Ctrl+T 为有意偏离）"
+        );
+        // ④ Page3 三条命令（C# 的固定串，不是绑定）
+        assert_eq!(p3[0], ("/(username)".to_string(), "私聊命令".to_string()));
+        assert_eq!(p3[2], ("!~(text)".to_string(), "公会聊天命令".to_string()));
+        // ⑤ 旧口径不得回归：Page1 首行不能再是"按分组动态生成"的移动类动作
+        assert_ne!(p1[0].1, "向上移动", "旧口径（按分组动态生成）已废");
     }
 }
