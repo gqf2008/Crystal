@@ -2676,18 +2676,20 @@ fn chat_item_click_system(
         return;
     };
     if let Some(item) = cache.items.get(&uid) {
-        let mut lines = Vec::new();
-        if item.count > 1 {
-            lines.push(format!("数量: {}", item.count));
-        }
-        lines.push(format!(
-            "类型: {}",
-            crate::game::dialogs::inventory::item_type_name(item.item_type)
-        ));
-        if item.is_equipment() {
-            lines.push(format!("耐久: {}/{}", item.current_dura, item.max_dura));
-        }
-        tooltip.update(2, true, item.name.clone(), lines, cursor.x, cursor.y);
+        // §3.2du：**不要再在这里自己拼**——C# 的聊天物品链接与背包悬停走的是同一份
+        // 提示（`GameScene.CreateItemLabel` → 11 个子标签），本端也必须单一真源：
+        // 直接复用 `inventory::item_tooltip_lines`（此前这里是第二份旧格式副本：
+        // 「数量/类型:/耐久:」，与 §3.2dr–§3.2dt 对齐过的口径不一致）。
+        let lines = crate::game::dialogs::inventory::item_tooltip_lines(item);
+        tooltip.update_colored(
+            2,
+            true,
+            item.name.clone(),
+            crate::game::dialogs::inventory::item_grade_color(item.grade),
+            lines,
+            cursor.x,
+            cursor.y,
+        );
         tracing::info!("💬 点击聊天物品: {} (uid={})", item.name, uid);
     } else {
         net.send_packet(&mir2_shared::packets::client::misc::RequestChatItem { chat_item_id: uid });

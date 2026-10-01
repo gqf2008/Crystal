@@ -4318,6 +4318,49 @@ spawn」配对，中间夹了个 `for` 循环体就串行了。
 `Prguse[2447]` 信用图标：本端数据里**没有这一帧**（越界）⇒ 无像素可比；原版帧也没拍到过该状态
 （要 `RewardCredit > 0` 的任务）。本条只到"确认它取不到帧、不生成节点"为止，不推像素结论。
 
+### 3.2du 物品提示：**标题按品阶上色** ＋ 聊天物品链接不再自己拼一份提示（2026-10-01）
+
+#### ① 标题色（承 §3.2dt 的品阶行）
+
+C# `NameInfoLabel` 的标题标签同时按品阶上色（`GameScene.cs:6791-6808/6863-6871`）：
+
+| 品阶 | C# `GradeNameColor` |
+|---|---|
+| `Common`(本端 4) | `Color.Yellow` = (255,255,0) |
+| `Rare`(5) | `Color.DeepSkyBlue` = (0,191,255) |
+| `Legendary`(6) | `Color.DarkOrange` = (255,140,0) |
+| `Mythical`(7) | `Color.Plum` = (221,160,221) |
+| `Heroic`(8) | `Color.Red` = (255,0,0) |
+| `None`/未知 | 回退 `Yellow`（C# 的 `default` 分支） |
+
+本端此前 tooltip 标题**恒为** `srgb(1.0, 0.9, 0.3)`（≈ Yellow，只对 `Common` 正确）。本轮：
+
+- `TooltipState` 增 `title_color` 字段 + `update_colored(..., title_color, ...)`；
+  `update(...)` 保持原签名、默认色提到常量 `TOOLTIP_TITLE_COLOR`（面板标题实体也用同一常量，
+  两处同源）——其余 10 处调用点**零改动**；
+- `tooltip_panel_system` 的标题查询加 `&mut TextColor`，随写入方的值刷新；
+- 新增 `inventory::item_grade_color(grade)`（上表逐值），**背包格悬停**与**聊天物品链接**两处
+  物品提示都改用它。
+
+#### ② 顺手修掉一处**重复实现**
+
+`chat.rs` 里点聊天物品链接时**自己拼了一份提示**（「数量: N」/「类型: 武器」/「耐久: c/m」）——
+那是 §3.2dr–§3.2dt 对齐之前的旧格式，等于同一条提示有两份实现。本轮删掉那份，
+统一走 `inventory::item_tooltip_lines`（C# 侧聊天链接与背包悬停本来就是同一个
+`GameScene.CreateItemLabel` → 11 个子标签）。
+
+#### ③ 门禁
+
+| 门禁 | 结果 |
+|---|---|
+| `cargo test --lib` | **931 passed / 0 failed**（`tooltip_grade_line_matches_csharp` 增补五档颜色与未知档回退断言） |
+| `cargo test --test b0001_smoke --test ui_alignment` | **2 + 58 passed** |
+| `ui_interact_sweep.ps1` | **46/47、fail=0、exit=0** |
+| `rustfmt --check` | `tooltip.rs` 1 / `inventory.rs` 6 / `chat.rs` 8 处 = master 既有基线（未新增） |
+
+> 仍未对齐：`AwakeInfoLabel` / `SocketInfoLabel` / `BindInfoLabel` / `OverlapInfoLabel` /
+> `StoryInfoLabel` / `GMMadeLabel` 六段本端仍无对应行；提示的像素对照仍未做（A/B 清单无 hover 行）。
+
 ### 3.2dt 物品提示的**品阶行**：本端 `grade` 有字段却一直没画（2026-10-01）
 
 C# `NameInfoLabel` 的标题标签是（`GameScene.cs:6863-6871`）：
