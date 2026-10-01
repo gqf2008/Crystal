@@ -4239,6 +4239,50 @@ dbtool <沙箱>\Server setpos 333 384 99 100 ; dbtool <沙箱>\Server setpos gqf
 **未采集**：交易中的「双方都放物品/改金币/按确认锁定」这些**内容态**帧（本轮只做到"空窗"同状态对拍）；
 以及**原版鼠标点 YES 点不动**这条本身（是"控制被盖住"还是"点击语义"没查，如实记）。
 
+### 3.2cu 「真尺寸」批⑦：**写死字面量的原点**盲区——商城 (164→165) ＋ 输入框 (368→369)（2026-10-01）
+
+#### ① 为什么这批还会漏
+
+§3.2cl ③ 的全仓扫描只认 `center_origin(PANEL…)` 这种形式；**把数字直接写进公式**的原点它扫不到。
+本轮手工全仓扫 `(1024.0 - N)/2.0` / `(768.0 - N)/2.0` / `1024.0 - N` / `768.0 - N` 四类字面量，逐个回 C# 对公式。
+
+#### ② 查实两处（都是"拿图头当 `Size`"）
+
+| 窗 | C# 出处 | `Size` = `GetTrueSize` | 正确原点 | 本端修前 |
+|---|---|---|---|---|
+| 商城 `GameshopDialog` | `GameshopDialog.cs:41` `Location = Center` | `Title[749]` 696x476 → **694x475** | **(165,146)** | (164,146) |
+| 输入框 `MirInputBox`（**两处实现**：`game/dialogs/input_box.rs` 与 `ui/modal_box.rs`） | `MirInputBox.cs:20` `((SW-W)/2,(SH-H)/2)` | `Prguse[660]` 288x156 → **286x156** | **(369,306)** | (368,306) |
+
+**原版帧**：
+
+- 商城那条**实锤** —— `orig_win_GameShop.png` 里 `Title[749]` 最佳落点 **(165,146)**（`win_locate` 不符率 **0.1174**；
+  面板被大量子控件覆盖所以不是 0，但明显低于"没画"那一档）。
+- 输入框那条**未采集** —— `Prguse[660]` **全量扫 350+ 归档帧零命中**（最好的一档也在 0.28+ = 这扇弹窗压根没被拍过）。
+
+#### ③ 同族**复核为无缺陷**（别当待办）
+
+- `MirMessageBox`：`Prguse[360]` 456x190 **无裁剪** ⇒ (284,289) 正确（§3.2az/§3.2bi 也量过）。
+- `MirAmountBox`：`Prguse[238]` 204x109 **无裁剪** ⇒ (410,329) 正确。
+- `MountDialog`：`Location = new Point(10, 30)` 是**字面量**，与 `Size` 无关。
+- `CharacterDialog`：`Location = new Point(ScreenWidth - 264, 0)` 同样是字面量。
+- `MiniMapDialog`：`ScreenWidth - 126` 用的就是真宽 126（§3.2co 已记）。
+
+#### ④ 本端验证
+
+- `cargo test --lib` = **921 passed**
+- `cargo test --test b0001_smoke --test ui_alignment` = **2 + 58 passed**
+  （新增 `literal_origins_use_true_size_batch7`，把两处真尺寸→原点的推导逐项钉住；`delete_dialogs_aligned` 与
+  `input_box_aligned` 里两条按图头算的 `assert_centered` 旧断言改成按真尺寸代入）
+- `pwsh tools/acceptance/ui_interact_sweep.ps1 -ManageServer` = **pass=46 / total=47 / fail=0 / skip=0 / exit=0**
+  （商城/输入框各移 +1px 后，两窗仍正常开/关）
+- `rustfmt --edition 2024 --check`：4 个改动文件的告警**计数与 master 基线逐个相等**
+
+#### ⑤ 下一步：把这批的**扫描面**补上（别再靠手扫）
+
+本轮的手扫可以固化成脚本：扫 `Client-Bevy/src/**/*.rs` 里 `(1024.0 - <num>)/2.0`、`(768.0 - <num>)/2.0`、
+`1024.0 - <num>`、`768.0 - <num>` 四类字面量 → 在**同文件**里找对应的 `(LibraryName::X, idx)` 面板声明 →
+用 `libtruesize.py` 比图头/真尺寸，真尺寸≠图头且会被当 `Size` 用的就报一行。写工具之前先手工做完这一轮（本轮已做完）。
+
 ### 3.2ct 详情窗「位置条拖动」**本端可用**（§3.2bj 的"点不动"作废）＋ §3.2cj「mock 只能点一次」本次未复现（2026-10-01）
 
 #### ① 为什么再动它
