@@ -1,6 +1,7 @@
 // ============================================================================
 // 好友备注窗（C# `MemoDialog`，`Client/MirScenes/Dialogs/FriendDialog.cs:480-568`）
-//   - 面板 `Title[209]`（实测 196x166），`Movable = true`、`Location = Center` → (414,301)
+//   - 面板 `Title[209]`（**图头** 196x166、真尺寸 193x166），`Movable = true`、`Location = Center`
+//     → C# `Size` 取真尺寸 ⇒ **(415,301)**（见 `PANEL_ORIGIN`；§3.2cw 批⑨ 更正，原写 414）
 //   - `MemoTextBox` @(15,30) 165x100（C# `MultiLine()`）
 //   - OK `Title[382/383/384]` @(30,133) 48x25 → `C.AddMemo{CharacterIndex, Memo}` → `Hide()`
 //   - Cancel `Title[385/386/387]` @(115,133) 48x25 → `Hide()`
@@ -29,6 +30,14 @@ use crate::ui::theme::{
 /// 面板（C# `MemoDialog.Index = 209; Library = Libraries.Title`，实测 196x166）
 pub const PANEL: (LibraryName, usize) = (LibraryName::Title, 209);
 pub const PANEL_SIZE: (f32, f32) = (196.0, 166.0);
+/// `GetTrueSize(Title[209])` = **193x166**（图头 196x166，最右 3 列 alpha=0）。
+pub const PANEL_TRUE_SIZE: (f32, f32) = (193.0, 166.0);
+/// 窗原点：C# `MemoDialog`（`FriendDialog.cs:494`）`Location = Center`，`Size` = `GetTrueSize(209)`
+/// ⇒ `((1024-193)/2, (768-166)/2)` = **(415,301)**（逐项整数除法：`831/2=415`、`602/2=301`）。
+///
+/// §3.2cw 批⑨：本端此前用 `center_origin(PANEL_SIZE…)`（图头）算成 414，**整窗偏左 1px**；这条是
+/// `rust_origin_audit.py` 扩到「`const NAME: (f32,f32)` 的 `NAME.0/.1`」后新抓出来的。
+pub const PANEL_ORIGIN: (f32, f32) = (415.0, 301.0);
 /// 文本区（C# `MemoTextBox` @(15,30) 165x100）
 pub const FIELD_POS: (f32, f32) = (15.0, 30.0);
 pub const FIELD_SIZE: (f32, f32) = (165.0, 100.0);
@@ -92,7 +101,7 @@ fn spawn_memo(
         return;
     };
     // C# `Location = Center`
-    let (ox, oy) = crate::game::dialogs::center_origin(PANEL_SIZE.0, PANEL_SIZE.1);
+    let (ox, oy) = PANEL_ORIGIN;
     let panel = spawn_panel(&mut commands, bg, ox, oy, PANEL_SIZE.0, PANEL_SIZE.1, 45);
     // C# `Movable = true` → 挂 `DialogRoot` 即可拖（通用 `dialog_drag_system`），不加 `NotDraggable`
     commands

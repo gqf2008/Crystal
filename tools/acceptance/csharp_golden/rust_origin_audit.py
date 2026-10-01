@@ -28,7 +28,11 @@ from libtruesize import frame, load, resolve_lib, true_size  # noqa: E402
 
 ART_RE = re.compile(r"LibraryName::(\w+)\s*,\s*(\d+)")
 CONST_RE = re.compile(r"(?:pub )?const (\w+)\s*:\s*f32\s*=\s*([\d.]+)\s*;")
-NUM = r"(?:[A-Za-z_][A-Za-z0-9_]*|\d+(?:\.\d+)?)"
+# 常量也支持 `const NAME: (f32, f32) = (W, H);` 里的 `NAME.0` / `NAME.1`（§3.2cp 那批就是这么写的）
+TUPLE_CONST_RE = re.compile(
+    r"(?:pub )?const (\w+)\s*:\s*\(\s*f32\s*,\s*f32\s*\)\s*=\s*\(\s*([\d.]+)\s*,\s*([\d.]+)\s*\)\s*;"
+)
+NUM = r"(?:[A-Za-z_][A-Za-z0-9_]*(?:\.\d)?|\d+(?:\.\d+)?)"
 CENTER_RE = re.compile(r"1024(?:\.0)?\s*-\s*(" + NUM + r")\s*\)\s*/\s*2(?:\.0)?")
 CENTER_Y_RE = re.compile(r"768(?:\.0)?\s*-\s*(" + NUM + r")\s*\)\s*/\s*2(?:\.0)?")
 ANCHOR_RE = re.compile(r"1024(?:\.0)?\s*-\s*(" + NUM + r")")
@@ -65,13 +69,19 @@ def art_size(data_dir, cache, lib, idx):
     return out
 
 
-def resolve(sym, consts):
-    if sym in consts:
-        return consts[sym]
+def resolve(sym, consts, tuples=None):
+    # ⚠️ 顺序要紧：先试**数字**（`264.0` 也带点，不能先走 `NAME.0` 那条）
     try:
         return float(sym)
     except ValueError:
-        return None
+        pass
+    if sym in consts:
+        return consts[sym]
+    if tuples and "." in sym:
+        name, _, idx = sym.partition(".")
+        if name in tuples and idx in ("0", "1"):
+            return tuples[name][int(idx)]
+    return None
 
 
 def scan_file(path, data_dir, cache, base=None):
@@ -84,6 +94,10 @@ def scan_file(path, data_dir, cache, base=None):
     if cut >= 0:
         src = src[:cut]
     consts = {m.group(1): float(m.group(2)) for m in CONST_RE.finditer(src)}
+    tuples = {
+        m.group(1): (float(m.group(2)), float(m.group(3)))
+        for m in TUPLE_CONST_RE.finditer(src)
+    }
     arts = []
     for m in ART_RE.finditer(src):
         a = art_size(data_dir, cache, m.group(1), int(m.group(2)))
@@ -100,8 +114,8 @@ def scan_file(path, data_dir, cache, base=None):
             continue
         checks = []
         for m in CENTER_FN_RE.finditer(line):
-            checks.append((resolve(m.group(1), consts), "w"))
-            checks.append((resolve(m.group(2), consts), "h"))
+            checks.append((resolve(m.group(1), consts, tuples), "w"))
+            checks.append((resolve(m.group(2), consts, tuples), "h"))
         for rx, axis in (
             (CENTER_RE, "w"),
             (CENTER_Y_RE, "h"),
@@ -109,7 +123,7 @@ def scan_file(path, data_dir, cache, base=None):
             (ANCHOR_Y_RE, "h"),
         ):
             for m in rx.finditer(line):
-                v = resolve(m.group(1), consts)
+                v = resolve(m.group(1), consts, tuples)
                 if v is not None:
                     checks.append((v, axis))
         for value, axis in checks:

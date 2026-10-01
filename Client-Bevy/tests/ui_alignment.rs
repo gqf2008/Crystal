@@ -3895,7 +3895,8 @@ fn panel_sprites_batch_b9_match_csharp() {
 
 /// #2892 批D 单元①：好友备注窗（C# `MemoDialog`，`FriendDialog.cs:480-568`）。
 ///
-/// 面板 `Title[209]` 实测 196x166 + `Location = Center` → (414,301)（`Movable = true` → 本端
+/// 面板 `Title[209]` 图头 196x166 / **真尺寸 193x166** + `Location = Center` → **(415,301)**
+/// （§3.2cw 批⑨ 更正：C# `Size` 取 `GetTrueSize`，本端原按图头算成 414）（`Movable = true` → 本端
 /// `DialogRoot(DialogKind::Memo)` 吃通用拖动）；`MemoTextBox` @(15,30) 165x100；
 /// OK `Title[382/383/384]` @(30,133) 48x25、Cancel `Title[385/386/387]` @(115,133) 48x25、
 /// Close `Prguse2[360/361/362]` @(168,3) 24x21。
@@ -3907,12 +3908,23 @@ fn panel_sprites_batch_b18_match_memo_dialog() {
 
     let (pw, ph) = libs.size(m::PANEL.0, m::PANEL.1);
     assert_eq!((pw, ph), m::PANEL_SIZE, "[尺寸] Title[209] 196x166");
+    let (tw, th) = libs.true_size(m::PANEL.0, m::PANEL.1);
     assert_eq!(
-        client_bevy::game::dialogs::center_origin(pw, ph),
-        ((SW - pw) / 2.0, (SH - ph) / 2.0),
-        "[坐标] C# `Location = Center`"
+        (tw, th),
+        m::PANEL_TRUE_SIZE,
+        "[尺寸] Title[209] 真尺寸 193x166"
     );
-    assert_in_canvas("备注窗", (SW - pw) / 2.0, (SH - ph) / 2.0, pw, ph);
+    assert_eq!(
+        m::PANEL_ORIGIN,
+        (((SW - tw) / 2.0).floor(), ((SH - th) / 2.0).floor()),
+        "[坐标] C# `Location = Center`（用真尺寸；整数除法）"
+    );
+    assert_ne!(
+        (((SW - pw) / 2.0).floor(), ((SH - ph) / 2.0).floor()),
+        m::PANEL_ORIGIN,
+        "图头模型 =(414,301)（本轮修前的值）"
+    );
+    assert_in_canvas("备注窗", m::PANEL_ORIGIN.0, m::PANEL_ORIGIN.1, pw, ph);
     // 文本区（C# `MemoTextBox` @(15,30) 165x100）
     assert_inside(
         "备注文本区",
