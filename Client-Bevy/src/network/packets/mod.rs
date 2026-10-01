@@ -216,6 +216,8 @@ pub(crate) fn to_inv_item(item: &mir2_shared::data::item::UserItem) -> InvItem {
         refine_added: item.refine_added,
         tool_tip: item.info.as_ref().and_then(|i| i.tool_tip.clone()),
         wedding_ring: item.wedding_ring,
+        awake_type: item.awake.awake_type as u8,
+        unique_flags: item.info.as_ref().map(|i| i.unique.bits()).unwrap_or(0),
     }
 }
 

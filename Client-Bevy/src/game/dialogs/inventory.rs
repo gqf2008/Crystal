@@ -89,6 +89,10 @@ pub struct InvItem {
     pub tool_tip: Option<String>,
     /// C# `UserItem.WeddingRing != -1`——类型行后**直接拼接**「结婚戒指」（原文无分隔符，见 §3.2dy）。
     pub wedding_ring: i32,
+    /// 觉醒类型（本端 `AwakeType` 值 = C# + 3：None=3/Dc=4/Mc=5/Sc=6/Ac=7/Mac=8/HpMp=9）。
+    pub awake_type: u8,
+    /// C# `ItemInfo.Unique`（`SpecialItemMode` bitflags，位值同 C#）——宝石"可用于"清单。
+    pub unique_flags: u16,
 }
 
 impl InvItem {
@@ -1646,6 +1650,16 @@ pub fn item_tooltip_lines(item: &InvItem) -> Vec<String> {
             lines.push(format!("{}{}{}", label, v, suffix));
         }
     }
+    // 觉醒：C# `AwakeInfoLabel`（`GameScene.cs:8523-8536`）——`Awake.GetAwakeLevel() > 0` 时输出
+    // `AwakeningWithValue` = 「{类型名} 觉醒({等级})」，类型名取 `AwakeType_X` 的中文包值。
+    // （C# 之后还有两段**英文**字面量行 `"{0} + {1}~{2}"` / `"Level {i} : …"`，本端暂未复刻，见 §3.2dz。）
+    if item.awake_level > 0 {
+        lines.push(format!(
+            "{} 觉醒({})",
+            awake_type_name(item.awake_type),
+            item.awake_level
+        ));
+    }
     // 镶嵌孔：C# `SocketInfoLabel`（`GameScene.cs:8622-8670`）——每个孔一行
     // `SocketWithValue` = 「镶嵌孔 : {0}」（{0} = 孔内宝石名，空孔用 `Empty` = 「空」），
     // 只要有孔就再追加一行 `OpenSocketsTips` = 「按 Ctrl + 右键 打开镶嵌孔」。
@@ -1723,6 +1737,33 @@ pub fn item_tooltip_lines(item: &InvItem) -> Vec<String> {
     if (!item.need_identify || item.identified) && item.cursed {
         lines.push("被诅咒".to_string()); // Text.Cursed
     }
+    // 宝石"可用于"段：C# `BindInfoLabel` 的 Gems 区（`GameScene.cs:9207-9330`）——
+    // `Info.Unique == None` ⇒ 「不能用于任何物品。」，否则先「可用于:」再按 `SpecialItemMode`
+    // 逐标位输出 `After*` 文案（标位→文案见下；`Blink(0x0800)` 在 C# 里没有对应行）。
+    if item.item_type == mir2_shared::enums::ItemType::Gem as u8 {
+        if item.unique_flags == 0 {
+            lines.push("不能用于任何物品。".to_string()); // Text.CannotBeUsedOnAnyItem
+        } else {
+            lines.push("可用于:".to_string()); // Text.CanBeUsedOn
+            for (bit, text) in [
+                (0x0001u16, "-武器"),  // Paralize  → AfterWeapon
+                (0x0002, "-护甲"),     // Teleport  → AfterArmour
+                (0x0004, "-头盔"),     // ClearRing → AfterHelmet
+                (0x0008, "-项链"),     // Protection→ AfterNecklace
+                (0x0010, "-手镯"),     // Revival   → AfterBracelet
+                (0x0020, "-戒指"),     // Muscle    → AfterRing
+                (0x0040, "-护身符"),   // Flame     → AfterAmulet
+                (0x0080, "-腰带"),     // Healing   → AfterBelt
+                (0x0100, "-靴子"),     // Probe     → AfterBoots
+                (0x0200, "宝石/石头"), // Skill     → Stone
+                (0x0400, "-蜡烛"),     // NoDuraLoss→ AfterCandle
+            ] {
+                if item.unique_flags & bit != 0 {
+                    lines.push(text.to_string());
+                }
+            }
+        }
+    }
     // C# `StoryInfoLabel`（`:9692-9737`）：`ItemInfo.ToolTip` 非空时先一行「物品描述」再一行正文；
     // **Credit Scroll 特例**（`Type==Scroll && Shape==7`）把正文替换为「已向您的账号添加 {price} 点数。」
     let story = if item.item_type == mir2_shared::enums::ItemType::Scroll as u8 && item.shape == 7 {
@@ -1739,6 +1780,21 @@ pub fn item_tooltip_lines(item: &InvItem) -> Vec<String> {
         lines.push("由游戏管理员创建".to_string()); // Text.CreatedByGameMaster
     }
     lines
+}
+
+/// C# `Awake.Type.ToLocalizedString()`（`Enum.AwakeType_*` 中文包）：本端枚举值 = C# + 3
+/// （None=3/Dc=4/Mc=5/Sc=6/Ac=7/Mac=8/HpMp=9）。
+#[must_use]
+pub fn awake_type_name(t: u8) -> &'static str {
+    match t {
+        4 => "攻击",         // AwakeType_DC
+        5 => "魔法",         // AwakeType_MC
+        6 => "道术",         // AwakeType_SC
+        7 => "物防",         // AwakeType_AC
+        8 => "魔防",         // AwakeType_MAC
+        9 => "生命值法力值", // AwakeType_HPMP
+        _ => "无",           // AwakeType_None
+    }
 }
 
 /// C# `nameLabel.Text`（`GameScene.cs:6863-6874`）：`RefineAdded > 0` 时**物品名前缀 `(*)`**
@@ -4110,6 +4166,8 @@ mod tests {
             refine_added: 0,
             tool_tip: None,
             wedding_ring: -1,
+            awake_type: 3,
+            unique_flags: 0,
         }
     }
 
@@ -4301,6 +4359,51 @@ mod tests {
         rf.refine_added = 1;
         assert_eq!(item_display_name(&rf), "(*)木剑");
         assert_eq!(item_display_name(&item_with_type(ItemType::Weapon)), "test");
+    }
+
+    /// §3.2dz：觉醒段（`AwakeInfoLabel`）与宝石"可用于"段（Gems 区）。
+    #[test]
+    fn tooltip_awake_and_gem_useon() {
+        // ① 觉醒：Awake.GetAwakeLevel() > 0 ⇒「{类型名} 觉醒({等级})」
+        let mut aw = item_with_type(ItemType::Weapon);
+        aw.awake_level = 3;
+        aw.awake_type = 4; // DC → 攻击
+        let lines = item_tooltip_lines(&aw);
+        assert!(lines.iter().any(|l| l == "攻击 觉醒(3)"), "{lines:?}");
+        // 等级 0（未觉醒）不出现该行
+        let plain = item_with_type(ItemType::Weapon);
+        assert!(
+            !item_tooltip_lines(&plain)
+                .iter()
+                .any(|l| l.contains("觉醒(")),
+            "未觉醒不出行"
+        );
+        // 类型名逐档（中文包 Enum.AwakeType_*）
+        assert_eq!(awake_type_name(4), "攻击");
+        assert_eq!(awake_type_name(5), "魔法");
+        assert_eq!(awake_type_name(6), "道术");
+        assert_eq!(awake_type_name(7), "物防");
+        assert_eq!(awake_type_name(8), "魔防");
+        assert_eq!(awake_type_name(9), "生命值法力值");
+        assert_eq!(awake_type_name(3), "无");
+        // ② 宝石：Unique == 0 ⇒「不能用于任何物品。」；否则「可用于:」+ After* 逐条
+        let gem = item_with_type(ItemType::Gem);
+        let lines = item_tooltip_lines(&gem);
+        assert!(lines.iter().any(|l| l == "不能用于任何物品。"), "{lines:?}");
+        let mut g2 = item_with_type(ItemType::Gem);
+        g2.unique_flags = 0x0001 | 0x0002 | 0x0200; // 武器 + 护甲 + 宝石/石头
+        let lines = item_tooltip_lines(&g2);
+        assert!(lines.iter().any(|l| l == "可用于:"), "{lines:?}");
+        assert!(lines.iter().any(|l| l == "-武器"), "{lines:?}");
+        assert!(lines.iter().any(|l| l == "-护甲"), "{lines:?}");
+        assert!(lines.iter().any(|l| l == "宝石/石头"), "{lines:?}");
+        // 非宝石物品不带这段
+        assert!(
+            !item_tooltip_lines(&plain)
+                .iter()
+                .any(|l| l == "可用于:" || l == "不能用于任何物品。"),
+            "非宝石不出行"
+        );
     }
 
     #[test]
