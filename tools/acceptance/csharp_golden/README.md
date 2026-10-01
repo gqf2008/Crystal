@@ -4318,6 +4318,49 @@ spawn」配对，中间夹了个 `for` 循环体就串行了。
 `Prguse[2447]` 信用图标：本端数据里**没有这一帧**（越界）⇒ 无像素可比；原版帧也没拍到过该状态
 （要 `RewardCredit > 0` 的任务）。本条只到"确认它取不到帧、不生成节点"为止，不推像素结论。
 
+### 3.2dn Help 页标题与页码补 C# 的 `VerticalCenter`（两处都低 6px）（2026-10-01）
+
+承 §3.2dm 的同一类：C# 用 `Size + VerticalCenter` 的标签，本端 `spawn_label_center` 只做**水平**
+居中，节点顶就是文本顶 ⇒ 必须补下沉量。本轮把 Help 那两处量了。
+
+#### ① 页标题 `PageTitleLabel`
+
+C#（`HelpDialog.cs:385-393`）：`Size=(242,30)`、`DrawFormat = HorizontalCenter | VerticalCenter`，
+挂在 `HelpPage` 内 `Location=(135,4)`；`HelpPage` 面板内 y=34.5（与同页图像 `HelpPage_BeforeDraw`
+的 `+40` ⇒ 本端图像常量 y=75 互为佐证）⇒ 文本盒面板内 `[39.5,69.5]`、中心 **54.5**。
+
+| | 墨迹绝对行 | 中心 |
+|---|---|---|
+| 原版「1. xxx」 | 179..188 | **183.5** |
+| 本端修前 | 184..195 | 189.5（低 6px） |
+| 本端修后（`HELP_TITLE_Y = 48`） | 178..189 | **183.5** |
+
+（本端 12 行 vs 原版 10 行是 CJK 字形比拉丁帽高，§3.2dk 同款字体度量差；**中心已对齐**。）
+
+#### ② 页码 `PageLabel`
+
+C#（`HelpDialog.cs:74-83`）：`Size=(80,20)`、同样 H+V 居中、`Location=(230,480)` ⇒ 文本盒
+面板内 `[481,501]`、中心 **491**。
+
+| | 墨迹绝对行 |
+|---|---|
+| 原版 | **616..624** |
+| 本端修前 | 622..630（低 6px） |
+| 本端修后（`HELP_PAGE_Y = 484`） | **616..624**（逐行一致） |
+
+#### ③ 复跑
+
+`golden_ab_diff.py`：Help **10.9% → 10.7%**（29617 → 29268 像素）；同批其余窗无变化
+（Ranking 8.9 / Friends 2.3 / Group 0.0 / Skills 1.7）。
+
+| 门禁 | 结果 |
+|---|---|
+| `cargo test --lib` | **928 passed / 0 failed**（新增 `help_labels_are_vertically_centered_in_csharp_boxes`） |
+| `cargo test --test b0001_smoke --test ui_alignment` | **2 + 58 passed** |
+| `ui_interact_sweep.ps1 -ManageServer` | **pass=46 / total=47 / fail=0 / skip=0 / exit=0** |
+| `rustfmt --check help.rs` | 1 处 = master 既有 import 排序基线（未新增） |
+| 实机 A/B | 构建 `02e93c221` dirty=0 |
+
 ### 3.2dm 两处「C# `VerticalCenter` 没补」的标签：Ranking 我的排名（高 6px）＋ Friends 页码（高 3px）（2026-10-01）
 
 #### ① 判据：`Size + VerticalCenter` 的标签，本端必须补一个 `DY`
