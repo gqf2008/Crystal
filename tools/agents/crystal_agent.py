@@ -223,6 +223,21 @@ def _claim_guard():
             time.sleep(0.5)
 
 
+def in_progress_holder(thread: str) -> str | None:
+    """该线程最早那条 in-progress 条目的认领人（claimed_by，回退 actor）。
+
+    读失败返回 None —— 调用方必须把 None 当「不能证明是我的」处理（fail-safe），
+    与 BoardUnavailable 同一哲学：读不出来就不动，不凭猜测。
+    """
+    obj = _json_from(walgit("collab", "thread", thread))
+    entries = (obj or {}).get("entries", []) if isinstance(obj, dict) else []
+    for e in entries:
+        body = e.get("body") or {}
+        if isinstance(body, dict) and body.get("status") == "in-progress":
+            return body.get("claimed_by") or e.get("actor")
+    return None
+
+
 def claim(agent: str, thread: str) -> bool:
     lock = _claim_guard()
     try:
@@ -232,21 +247,29 @@ def claim(agent: str, thread: str) -> bool:
             print(f"[claim] {thread} 跳过：看板读不出来（{e}）——不凭猜测认领")
             return False
         if cur not in ("待认领", None):
-            print(f"[claim] {thread} 已在「{cur}」列，不重复认领")
-            return cur == "进行中"
+            if cur != "进行中":
+                print(f"[claim] {thread} 已在「{cur}」列，不重复认领")
+                return False
+            # 「卡在进行中」不等于「是我认领的」：watch 扫「待认领」到 claim 之间，
+            # 别的工人可能已经认领走了。只有 status 里写着 claimed_by 是我，才算续跑。
+            holder = in_progress_holder(thread)
+            if holder == agent:
+                print(f"[claim] {thread} 已由 {agent} 认领（续跑）")
+                return True
+            print(f"[claim] {thread} 在进行中、认领人是 {holder or 读不出来}，不重复认领")
+            return False
         if not set_status(agent, thread, "in-progress", claimed_by=agent):
             return False
         # 跨机竞态收敛：回读，若最早那条 in-progress 不是自己就让出
         time.sleep(1.5)
-        r = walgit("collab", "thread", thread)
-        obj = _json_from(r)
-        entries = (obj or {}).get("entries", []) if isinstance(obj, dict) else []
-        claimants = [
-            e.get("actor") for e in entries
-            if isinstance(e.get("body"), dict) and e["body"].get("status") == "in-progress"
-        ]
-        if claimants and claimants[0] != agent:
-            print(f"[claim] {thread} 已被 {claimants[0]} 先认领，让出")
+        first = in_progress_holder(thread)
+        if first is None:
+            # 回读读不出来：原实现把它当成「我赢了竞态」（fail-open），与 BoardUnavailable
+            # 的 fail-safe 相反 —— 读不出来就让出，下次再看。
+            print(f"[claim] {thread} 竞态回读读不出来：不猜，让出")
+            return False
+        if first != agent:
+            print(f"[claim] {thread} 已被 {first} 先认领，让出")
             return False
         print(f"[claim] {agent} 认领 {thread}")
         return True
@@ -260,7 +283,7 @@ def claim(agent: str, thread: str) -> bool:
 # --------------------------------------------------------------------------- #
 # 干活：headless Claude Code
 # --------------------------------------------------------------------------- #
-def worktree_for(agent: str, thread: str) -> tuple[Path, str]:
+def worktree_for(agent: str, thread: str) -> tuple[Path, str, str]:
     """给这个 (agent, thread) 一个**独占检出**，返回 (worktree 路径, 基线 commit)。
 
     为什么必须独占：多个工人 + 人工会话若共用一个工作树，HEAD/分支会互相踩——
@@ -273,14 +296,31 @@ def worktree_for(agent: str, thread: str) -> tuple[Path, str]:
     base = subprocess.run(
         ["git", "rev-parse", "origin/master"], cwd=REPO, capture_output=True, text=True
     ).stdout.strip()
+    br = f"agent/{agent}/{thread}"
     if not wt.exists():
-        br = f"agent/{agent}/{thread}"
         r = subprocess.run(["git", "worktree", "add", "-b", br, str(wt), "origin/master"],
                            cwd=REPO, capture_output=True, text=True)
-        if r.returncode != 0:  # 分支已存在（重跑）→ 复用
-            subprocess.run(["git", "worktree", "add", str(wt), br],
-                           cwd=REPO, capture_output=True, text=True)
-    return wt, base
+        if r.returncode != 0:  # 分支已存在（重跑）→ 复用同一个 worktree
+            r2 = subprocess.run(["git", "worktree", "add", str(wt), br],
+                                cwd=REPO, capture_output=True, text=True)
+            if r2.returncode != 0:
+                # 分支被别的 worktree 占用之类：不能静默继续 —— wt 目录根本不存在，
+                # 后面 subprocess.run(cwd=wt) 会以 FileNotFoundError 崩在 run 单卡模式里。
+                raise RuntimeError(
+                    f"worktree add 失败：{br} -> {wt}：{(r2.stderr or r.stderr).strip()[:200]}"
+                )
+            # 复用分支时它上面可能残留上一轮的提交（上一轮先 commit 再超时被杀）。
+            # 不清掉的话，产出判据会把上轮残留当成本轮产出 —— 成功又一次是假的。
+            stale = subprocess.run(["git", "rev-parse", "HEAD"], cwd=wt,
+                                   capture_output=True, text=True).stdout.strip()
+            if stale and stale != base:
+                subprocess.run(["git", "-C", str(wt), "reset", "--hard", "origin/master"],
+                               capture_output=True, text=True)
+                print(f"[worktree] 复用 {br}：丢弃上一轮残留 HEAD {stale[:8]}（回到基线 {base[:8]}）")
+    # 本轮开工前的 HEAD：产出判据以它为基准（不是 base —— 分支可能带着上轮残留）。
+    pre_head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=wt,
+                              capture_output=True, text=True).stdout.strip()
+    return wt, base, pre_head
 
 
 def work(agent: str, thread: str, task: str, *, model: str | None = None, timeout: int = 3600) -> tuple[bool, str, str, str]:
@@ -300,7 +340,7 @@ def work(agent: str, thread: str, task: str, *, model: str | None = None, timeou
         "- 如果发现任务本身有问题，直接说明并停手，不要硬做。\n\n"
         "## 产出\n最后用一段话总结：做了什么、PR 链接、验证方式、还剩什么没做。"
     )
-    wt, base = worktree_for(agent, thread)
+    wt, base, pre_head = worktree_for(agent, thread)
     argv = ["claude", "-p", prompt, "--dangerously-skip-permissions", "--output-format", "text"]
     if model:
         argv += ["--model", model]
@@ -313,8 +353,9 @@ def work(agent: str, thread: str, task: str, *, model: str | None = None, timeou
     out = (r.stdout or "").strip()
     head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=wt,
                           capture_output=True, text=True).stdout.strip()
-    # 真判据：分支上出现了**基线之外**的提交
-    ahead = subprocess.run(["git", "rev-list", "--count", f"{base}..HEAD"], cwd=wt,
+    # 真判据：**本轮**出现了提交（开工前 HEAD → 现在）。用 base..HEAD 会把上一轮
+    # 残留在复用分支上的提交算进来，于是「什么都没做」也判成成功。
+    ahead = subprocess.run(["git", "rev-list", "--count", f"{pre_head}..HEAD"], cwd=wt,
                            capture_output=True, text=True).stdout.strip()
     produced = ahead.isdigit() and int(ahead) > 0
     if not produced:
@@ -325,7 +366,14 @@ def work(agent: str, thread: str, task: str, *, model: str | None = None, timeou
 def run_one(agent: str, thread: str, task: str, *, model: str | None = None) -> bool:
     if not claim(agent, thread):
         return False
-    ok, summary, base, head = work(agent, thread, task, model=model)
+    try:
+        ok, summary, base, head = work(agent, thread, task, model=model)
+    except RuntimeError as e:
+        # 开工就失败（例如 worktree 建不起来）：把卡退回「待认领」并留下原因，
+        # 不要让 run 单卡模式直接 traceback。
+        print(f"[run] {thread} 开工失败：{e}")
+        set_status(agent, thread, "open", ok=False, summary=str(e)[:500])
+        return False
     set_status(
         agent, thread, "needs-review" if ok else "open",
         ok=ok, summary=summary[:1500], base_commit=base, head_commit=head,
