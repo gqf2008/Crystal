@@ -209,6 +209,13 @@ pub(crate) fn to_inv_item(item: &mir2_shared::data::item::UserItem) -> InvItem {
         rental: item.rental_information.is_some(),
         awake_level: item.awake.awake_level() as u8,
         bind_mode: item.info.as_ref().map(|i| i.bind.bits()).unwrap_or(0),
+        cursed: item.cursed,
+        identified: item.identified,
+        need_identify: item.info.as_ref().map(|i| i.need_identify).unwrap_or(false),
+        is_gm_made: item.is_gm_made,
+        refine_added: item.refine_added,
+        tool_tip: item.info.as_ref().and_then(|i| i.tool_tip.clone()),
+        wedding_ring: item.wedding_ring,
     }
 }
 

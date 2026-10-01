@@ -4318,6 +4318,37 @@ spawn」配对，中间夹了个 `for` 循环体就串行了。
 `Prguse[2447]` 信用图标：本端数据里**没有这一帧**（越界）⇒ 无像素可比；原版帧也没拍到过该状态
 （要 `RewardCredit > 0` 的任务）。本条只到"确认它取不到帧、不生成节点"为止，不推像素结论。
 
+### 3.2dy 物品提示再补四段：**物品描述 / GM / 诅咒 / 结婚戒指** ＋ 名字 `(*)` 前缀（2026-10-01）
+
+> **先纠正 §3.2dx 的一句**：上一轮把剩下的提示段判成"数据阻塞"，**判早了**。把
+> `SharedRust` 的 `ItemInfo`（33 字段）与 `UserItem`（24 字段）全列出来对了一遍，
+> `tool_tip` / `cursed` / `identified` / `need_identify` / `is_gm_made` / `refine_added` /
+> `wedding_ring` **都在**，只是没被 `InvItem` 带过来。本轮补上这七个字段并落地四段：
+
+| 段 | C# 出处与口径 | 本端修后 |
+|---|---|---|
+| **物品描述** | `StoryInfoLabel`（`:9692-9737`）：`ItemInfo.ToolTip` 非空 ⇒ 先一行「物品描述」(`ItemDescription`) 再一行正文；**Credit Scroll 特例**（`Type==Scroll && Shape==7`）正文换成「已向您的账号添加 {price} 点数。」 | 同左（含特例） |
+| **GM** | `GMMadeLabel`（`:9770-9805`）：`item.GMMade` ⇒ 「由游戏管理员创建」(`CreatedByGameMaster`)，是提示最后一段 | 同左 |
+| **诅咒** | `BindInfoLabel` 的 CURSED 区（`:9191-9204`）：`(!hideAdded && (!NeedIdentify \|\| Identified)) && Cursed` ⇒ 「被诅咒」(`Cursed`)，位置紧跟绑定标位之后 | 同左（本端无 Inspect 的 `hideAdded` 变体 ⇒ 取 `true`） |
+| **结婚戒指** | `NameInfoLabel`（`:7049-7052`）：`WeddingRing != -1` 时把「结婚戒指」(`WeddingRing`) **直接拼在类型名后面**（原文无分隔符 ⇒ 如「戒指结婚戒指」） | **照抄这个拼接怪癖**（§3.2dy 注释里标了出处） |
+| **名字 `(*)`** | `nameLabel.Text = "(*)" + …` 当 `RefineAdded > 0`（`:6873-6874`） | 新增 `item_display_name()`，背包悬停与聊天链接两处 tooltip 标题都改用它 |
+
+顺带修了一处**哨兵值**：`quest_log` 用 `ItemInfo` 构造 `InvItem` 时 `..Default::default()` 会把
+`wedding_ring` 留成 `0`（C# 的"不是结婚戒指"是 **-1**）⇒ 那个路径会误显示「结婚戒指」，已在构造处显式给 `-1`
+（`ItemInfo` 构造的奖励物本来就与 `UserItem` 状态无关）。
+
+#### 门禁
+
+| 门禁 | 结果 |
+|---|---|
+| `cargo test --lib` | **934 passed / 0 failed**（新增 `tooltip_story_gm_cursed_wedding_refine`：描述段/Credit Scroll 特例/诅咒的 `need_identify` 门/ GM 段 / 结婚戒指拼接 / `(*)` 前缀 六组断言） |
+| `cargo test --test b0001_smoke --test ui_alignment` | **2 + 58 passed** |
+| `ui_interact_sweep.ps1` | **46/47、fail=0、exit=0** |
+| `rustfmt --check` | `inventory.rs` 6 / `chat.rs` 8 / `quest_log.rs` 4 / `packets/mod.rs` 0 = master 既有基线（未新增） |
+
+> 仍缺：`AwakeInfoLabel`（需觉醒**类型名**，本端只有等级）、`SoulboundTo`（需绑定者名字，本端只有 id）、
+> `CanBeUsedOn`（宝石的可镶嵌类型清单）、过期/封印/租借的**时间格式化**、`OverlapInfoLabel`（Ctrl+点击交互提示）。
+
 ### 3.2dx 本轮 UI 对齐链在 master `e7fcdf956` 上的**验证收口**（2026-10-01）
 
 §3.2dk–§3.2dw 这十几笔 UI 对齐（字号口径 / 小地图标签 / 大地图标题 / Keybind 标题 / 角色窗名字·行会 /

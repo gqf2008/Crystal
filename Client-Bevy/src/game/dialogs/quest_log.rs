@@ -562,6 +562,11 @@ pub fn quest_reward_item_tooltip_lines(item: &mir2_shared::data::item::ItemInfo)
         required_class: item.required_class.bits(),
         required_gender: item.required_gender.bits(),
         soul_bound_id: -1,
+        // C# `UserItem.WeddingRing` 的「不是结婚戒指」哨兵是 **-1**（`!= -1` 才拼「结婚戒指」）；
+        // 这里由 `ItemInfo` 构造、没有 user-item 状态 ⇒ 必须显式给 -1（否则默认 0 会被当成戒指）。
+        wedding_ring: -1,
+        tool_tip: item.tool_tip.clone(),
+        need_identify: item.need_identify,
         weight: item.weight as u16,
         price: item.price,
         ..Default::default()
