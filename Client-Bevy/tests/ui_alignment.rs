@@ -1011,6 +1011,14 @@ fn inventory_bigmap_constants() {
         assert_eq!(ql::LIST_AVAILABLE_POS, (210.0, 8.0));
         assert_eq!(ql::LIST_UP_POS, (291.0, 35.0));
         assert_eq!(ql::LIST_DOWN_POS, (291.0, 83.0));
+        // 翻页/离开钮的**节点尺寸**：C# 三颗钮都不设 `Size` ⇒ `AutoSize` 取帧图头
+        // （§3.2cx 批⑩：本端曾写死 16x16 / 76x25 —— `Prguse[951]` 图头是 16x48、
+        //  `Title[276]` 是 68x25；原版帧 `orig_questlist.png` 同模板不符率 0.0000）
+        assert_eq!(ql::LIST_UP_SIZE, (16.0, 48.0), "Prguse[951] 图头 16x48");
+        assert_eq!(ql::LIST_DOWN_SIZE, (16.0, 48.0), "Prguse[957] 图头 16x48");
+        assert_eq!(ql::LIST_LEAVE_SIZE, (68.0, 25.0), "Title[276] 图头 68x25");
+        assert_ne!(ql::LIST_UP_SIZE, (16.0, 16.0), "16x16 会把 48 高的箭头压扁");
+        assert_ne!(ql::LIST_LEAVE_SIZE, (76.0, 25.0), "76x25 比原版宽 8px");
         // 标题/关闭/帮助/离开
         assert_eq!(ql::LIST_TITLE_INDEX, 14);
         assert_eq!(ql::LIST_HELP_POS, (266.0, 3.0), "Prguse2[257..259]");
@@ -3118,6 +3126,34 @@ fn panel_sprites_batch_b3_match_csharp() {
         "[坐标] C# `Location = (NPCDialog.Size.Width + 47, 0)`；`Size` = GetTrueSize(995) = 438 ⇒ (485,0)"
     );
     assert_eq!(quest_list::LIST_POS, (485.0, 0.0));
+
+    // ④ 任务列表窗的翻页/离开钮：C# 不设 `Size` ⇒ 节点尺寸 = 该帧**图头**（§3.2cx 批⑩）
+    assert_eq!(
+        libs.size(LibraryName::Prguse, 951),
+        quest_list::LIST_UP_SIZE,
+        "[尺寸] 上翻钮 Prguse[951] 图头 16x48（真尺寸 14x48）"
+    );
+    assert_eq!(
+        libs.size(LibraryName::Prguse, 957),
+        quest_list::LIST_DOWN_SIZE,
+        "[尺寸] 下翻钮 Prguse[957] 图头 16x48"
+    );
+    assert_eq!(
+        libs.size(LibraryName::Title, 276),
+        quest_list::LIST_LEAVE_SIZE,
+        "[尺寸] 离开钮 Title[276] 图头 68x25"
+    );
+    // 奖励区三枚图标：C# 用 `Prguse.Draw(idx, …)` 1:1 ⇒ 节点尺寸随帧图头（≠ 统一 16x14）
+    assert_eq!(
+        libs.size(LibraryName::Prguse, 966),
+        (28.0, 13.0),
+        "经验 Prguse[966]"
+    );
+    assert_eq!(
+        libs.size(LibraryName::Prguse, 965),
+        (16.0, 12.0),
+        "金币 Prguse[965]"
+    );
 
     // Buff：`Prguse2[20..30]` 11 档 art 尺寸逐一核对。
     // §3.2cm：贴图用**图头** `PANEL_SIZES`，布局/锚点用**真尺寸** `PANEL_TRUE_SIZES`（= `GetTrueSize`）。
