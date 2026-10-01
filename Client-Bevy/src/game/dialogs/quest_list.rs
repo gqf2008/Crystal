@@ -80,8 +80,19 @@ pub const LIST_AVAILABLE_POS: (f32, f32) = (210.0, 8.0);
 /// C# 上/下翻页钮（`:47-70`）
 pub const LIST_UP_POS: (f32, f32) = (291.0, 35.0);
 pub const LIST_DOWN_POS: (f32, f32) = (291.0, 83.0);
+/// 上/下翻页钮的节点尺寸：C# **不设 `Size`** ⇒ `MirButton : MirImageControl` 走构造器的
+/// `_autoSize = true`（`MirImageControl.cs:165-171`），贴图按帧**图头** 1:1 铺，
+/// 而 `Prguse[951]/[957]` 的图头是 **16x48**（真尺寸 14x48）。
+///
+/// §3.2cx 批⑩：本端曾写死 16x16 ⇒ `abs_node` 把 48 高的箭头压进 16x16 节点（压扁）。
+/// 实锤：原版帧 `orig_questlist.png` 里 16x48 模板最佳落点 **(776,35)**，不符率 **0.0000**。
+pub const LIST_UP_SIZE: (f32, f32) = (16.0, 48.0);
+pub const LIST_DOWN_SIZE: (f32, f32) = (16.0, 48.0);
 /// C# `leaveButton = Title[276..278] @ (205, 436)`（`:144-154`）
 pub const LIST_LEAVE_POS: (f32, f32) = (205.0, 436.0);
+/// 离开钮尺寸：C# 同样不设 `Size` ⇒ 图头 `Title[276]` = **68x25**（本端曾写死 76x25，
+/// 命中区比原版宽 8px）。原版帧同模板不符率 **0.0000** @(690,436)。
+pub const LIST_LEAVE_SIZE: (f32, f32) = (68.0, 25.0);
 /// C# `helpButton = Prguse2[257..259] @ (266, 3)`（`:243-...`）
 pub const LIST_HELP_POS: (f32, f32) = (266.0, 3.0);
 /// C# `Title[530]` NPC 窗任务钮在面板内的位置——本端 `npc.rs` 同值（(172,194)）
@@ -582,8 +593,18 @@ fn spawn_quest_list(
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 952),
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 953),
         ) {
-            spawn_icon_button(p, n, h, pr, LIST_UP_POS.0, LIST_UP_POS.1, 16.0, 16.0, 12)
-                .insert(QuestListUp);
+            spawn_icon_button(
+                p,
+                n,
+                h,
+                pr,
+                LIST_UP_POS.0,
+                LIST_UP_POS.1,
+                LIST_UP_SIZE.0,
+                LIST_UP_SIZE.1,
+                12,
+            )
+            .insert(QuestListUp);
         }
         // 下翻 Prguse[957..959] @(291,83)
         if let (Some(n), Some(h), Some(pr)) = (
@@ -591,8 +612,18 @@ fn spawn_quest_list(
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 958),
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 959),
         ) {
-            spawn_icon_button(p, n, h, pr, LIST_DOWN_POS.0, LIST_DOWN_POS.1, 16.0, 16.0, 12)
-                .insert(QuestListDown);
+            spawn_icon_button(
+                p,
+                n,
+                h,
+                pr,
+                LIST_DOWN_POS.0,
+                LIST_DOWN_POS.1,
+                LIST_DOWN_SIZE.0,
+                LIST_DOWN_SIZE.1,
+                12,
+            )
+            .insert(QuestListDown);
         }
         // 离开 Title[276..278] @(205,436)
         if let (Some(n), Some(h), Some(pr)) = (
@@ -600,8 +631,18 @@ fn spawn_quest_list(
             load_lib_image(&mut libs, &mut images, LibraryName::Title, 277),
             load_lib_image(&mut libs, &mut images, LibraryName::Title, 278),
         ) {
-            spawn_icon_button(p, n, h, pr, LIST_LEAVE_POS.0, LIST_LEAVE_POS.1, 76.0, 25.0, 12)
-                .insert(QuestListLeave);
+            spawn_icon_button(
+                p,
+                n,
+                h,
+                pr,
+                LIST_LEAVE_POS.0,
+                LIST_LEAVE_POS.1,
+                LIST_LEAVE_SIZE.0,
+                LIST_LEAVE_SIZE.1,
+                12,
+            )
+            .insert(QuestListLeave);
         }
         // 五行（C# `Rows[i]`：选中高亮 + 名称）
         for i in 0..LIST_ROW_COUNT {
@@ -735,9 +776,15 @@ fn spawn_quest_list(
             spawn_image(p, h, rx + LIST_REWARD_TITLE_POS.0, ry + LIST_REWARD_TITLE_POS.1, 68.0, 16.0, 8);
         }
         // 经验/金币/信用 图标与数值（C# `QuestReward_BeforeDraw` 的 x 偏移链，`:1445-1459`）
+        // 尺寸：C# 是 `Libraries.Prguse.Draw(idx, …)` —— **不设 `Size`、按帧原尺寸 1:1 画**，
+        // 所以节点尺寸逐个取该帧图头（966=28x13、965=16x12），不再统一写死 16x14（会把图标压扁）。
+        // `2447` 在本端 `Prguse.Lib`（count=2447）**越界** ⇒ `load_lib_image` 直接 None，不生成节点
+        // （C# 走到 `RewardCredit > 0` 时亦然；本端沙箱数据里没有这帧，如实记在 §3.2cx 未采集）。
         for (idx, kind) in [(966usize, 0u8), (965, 1), (2447, 2)] {
             if let Some(h) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, idx) {
-                spawn_image(p, h, rx, ry, 16.0, 14.0, 8)
+                let (iw, ih) = crate::ui::theme::native_size(&mut libs, LibraryName::Prguse, idx)
+                    .unwrap_or((16.0, 14.0));
+                spawn_image(p, h, rx, ry, iw, ih, 8)
                     .insert((QuestListPart::RewardIcon(kind), Visibility::Hidden));
             }
         }
