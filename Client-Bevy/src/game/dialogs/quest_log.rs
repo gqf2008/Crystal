@@ -3210,7 +3210,9 @@ mod tests {
             ..Default::default()
         };
         let lines = quest_reward_item_tooltip_lines(&item);
-        assert!(lines.iter().any(|l| l == "类型: 武器"), "{lines:?}");
+        // §3.2ds：头部两行对齐 C#（`NameInfoLabel`）——第一行是**裸类型名**（无「类型:」前缀），
+        // 重量/耐久拼在同一行（两个空格分隔，重量在前）
+        assert!(lines.iter().any(|l| l == "武器"), "{lines:?}");
         assert!(lines.iter().any(|l| l == "耐久: 30/30"), "{lines:?}");
         // §3.2dr：文案对齐 C#（`AttackInfoLabel.DC` = 「攻击 + {0}~{1}」）
         assert!(lines.iter().any(|l| l == "攻击 + 5~12"), "{lines:?}");
