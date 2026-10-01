@@ -368,8 +368,12 @@ fn spawn_group(
                     crate::game::dialogs::text_input::TextInputDisplay(32),
                 ));
             });
-        spawn_label(p, &cjk, "确认", 150.0, 180.0, 12.0, Color::WHITE, 10)
-            .insert((Button, GroupDelOk));
+        // 文字当按钮：C# 这枚「确认」是可点控件 ⇒ 显式恢复拾取（标签默认 `Pickable::IGNORE`）
+        spawn_label(p, &cjk, "确认", 150.0, 180.0, 12.0, Color::WHITE, 10).insert((
+            Button,
+            GroupDelOk,
+            bevy::picking::Pickable::default(),
+        ));
         // 邀请输入框（TextInput id 33）+ 确认
         spawn_container(p, 25.0, 180.0, 120.0, 20.0, 10)
             .insert((
@@ -397,8 +401,11 @@ fn spawn_group(
                     crate::game::dialogs::text_input::TextInputDisplay(33),
                 ));
             });
-        spawn_label(p, &cjk, "确认", 150.0, 180.0, 12.0, Color::WHITE, 10)
-            .insert((Button, GroupAddOk));
+        spawn_label(p, &cjk, "确认", 150.0, 180.0, 12.0, Color::WHITE, 10).insert((
+            Button,
+            GroupAddOk,
+            bevy::picking::Pickable::default(),
+        ));
     });
 
     // 邀请提示（C# MirMessageBox：Prguse[360] 原生 456x190 居中 @(284,289)，

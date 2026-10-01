@@ -4,6 +4,8 @@
 
 use bevy::input::mouse::{MouseScrollUnit, MouseWheel};
 use bevy::prelude::*;
+// C# `MirLabel` 默认 `NotControl = true`（不吃鼠标）⇒ 本端标签一律不参与拾取（见 §3.2dq）
+use bevy::picking::Pickable;
 
 use crate::map_renderer::GameLibraries;
 use crate::resources::libraries::LibraryName;
@@ -275,6 +277,7 @@ pub fn spawn_label_plain<'a>(
 ) -> EntityCommands<'a> {
     parent.spawn((
         abs_node(x, y, None, None),
+        Pickable::IGNORE,
         Text::new(text),
         TextFont {
             font: FontSource::Handle(font.clone()),
@@ -384,6 +387,7 @@ pub fn spawn_label_center_plain<'a>(
 ) -> EntityCommands<'a> {
     parent.spawn((
         abs_node(cx - width / 2.0, y, Some(width), None),
+        Pickable::IGNORE,
         Text::new(text),
         TextFont {
             font: FontSource::Handle(font.clone()),
