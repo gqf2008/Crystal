@@ -21,7 +21,7 @@ use crate::map_renderer::{GameData, GameLibraries};
 use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
-use crate::ui::outlined_text::spawn_outlined_label;
+use crate::ui::outlined_text::{spawn_outlined_label, spawn_outlined_label_center};
 use crate::ui::sprite_ui::{shared_cjk_font, UiCjkFont, UiFont};
 use crate::ui::theme::{
     load_lib_image, spawn_container, spawn_icon_button, spawn_image, spawn_label, spawn_panel,
@@ -158,6 +158,25 @@ pub struct BigMapRow(pub usize);
 #[derive(Component)]
 pub struct BigMapTitleText;
 
+/// 大地图标题：**未选目标地图时回落到当前地图名**。
+///
+/// C# `BigMapDialog.CurrentRecord` 的初值是**当前地图**的记录——进图时
+/// `GameScene.cs:2219` 会 `BigMapDialog.SetTargetMap(info.MapIndex)`，而 `SetTargetMap`
+/// 里 `CurrentRecord = GameScene.MapInfoList[MapIndex]`（`BigMapDialog.cs:304-320`），
+/// `CurrentRecord` 的 setter 再把它写进 `TitleLabel.Text`（`BigMapDialog.cs:79-88`）；
+/// 只有从世界地图点过地图图标后才换成目标地图（`BigMapDialog.cs:527`）。
+///
+/// 本端 `state.title` 只在点图标时写入（`update_big_map` 里 `state.title = icon.title`），
+/// 所以常规打开时标题条是空的——A/B 帧实测（`ours_win_Bigmap.png` vs `orig_win_Bigmap.png`）：
+/// 原版标题条有 9px 高的字，本端整条空白。这里补上 C# 的默认语义。
+pub fn big_map_title(selected: &str, current_map: &str) -> String {
+    if selected.is_empty() {
+        current_map.to_string()
+    } else {
+        selected.to_string()
+    }
+}
+
 #[derive(Component)]
 pub struct BigMapCoordText;
 
@@ -258,9 +277,20 @@ fn spawn_big_map(
         .insert((DialogRoot(DialogKind::BigMap), BigMapWidget));
 
     commands.entity(panel).with_children(|p| {
-        // 标题（C# TitleLabel (19,6) 699x20）
-        spawn_outlined_label(p, cjk.clone(), "", 19.0, 6.0, 14.0, Color::WHITE, 4)
-            .insert(BigMapTitleText);
+        // 标题（C# `TitleLabel`：`Location=(19,6)`、`Size=(699,20)`、
+        // `DrawFormat = HorizontalCenter` ⇒ 在 699 宽里居中，见 `BigMapDialog.cs:225-235`）
+        spawn_outlined_label_center(
+            p,
+            &cjk,
+            "",
+            19.0 + 699.0 / 2.0,
+            6.0,
+            699.0,
+            13.0,
+            Color::WHITE,
+            4,
+        )
+        .insert(BigMapTitleText);
         // 关闭 (W-25,3)
         if let (Some(n), Some(h), Some(pr)) = (
             load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 360),
@@ -1126,9 +1156,10 @@ fn big_map_viewport_system(
     }
 
     // 标题/坐标
+    let current_map_title = game_data.map_title.clone();
     for (mut text, title, coord) in &mut texts {
         if title.is_some() {
-            text.0 = state.title.clone();
+            text.0 = big_map_title(&state.title, &current_map_title);
         } else if coord.is_some() {
             // #122 C# MakeCoordinateLabel：鼠标悬停视口显示鼠标坐标，否则显示玩家坐标
             let mut s = None;
@@ -1220,6 +1251,18 @@ mod tests {
         assert_eq!(
             big_map_member_pos(200, 400, 200.0, 400.0, 400.0, 800.0, 0.0, 0.0),
             (400.0, 800.0)
+        );
+    }
+
+    /// C# `CurrentRecord` 默认是当前地图 ⇒ 未选目标地图时标题回落当前地图名
+    /// （`BigMapDialog.cs:79-88/304-320`）。回归点：此前 `state.title` 为空时标题条整条空白。
+    #[test]
+    fn title_falls_back_to_current_map() {
+        assert_eq!(big_map_title("", "BichonProvince"), "BichonProvince");
+        assert_eq!(big_map_title("", ""), "");
+        assert_eq!(
+            big_map_title("WoomaTemple", "BichonProvince"),
+            "WoomaTemple"
         );
     }
 
