@@ -4318,6 +4318,46 @@ spawn」配对，中间夹了个 `for` 循环体就串行了。
 `Prguse[2447]` 信用图标：本端数据里**没有这一帧**（越界）⇒ 无像素可比；原版帧也没拍到过该状态
 （要 `RewardCredit > 0` 的任务）。本条只到"确认它取不到帧、不生成节点"为止，不推像素结论。
 
+### 3.2do Keybind 标题：**左对齐 + 低 9px** ⇒ 改 C# 居中盒，并把文案对齐中文包（2026-10-01）
+
+C# `KeyboardLayoutDialog.PageLabel`（`:42-50`）：`Size=(242,30)`、`Location=(135,34)`、
+`Font=Font(Settings.FontName, Settings.FontSize + 2, Bold)`（= **Bold10**）、
+`DrawFormat = HorizontalCenter | VerticalCenter`。`MirLabel` 的文本盒 = `Location+(1,1)` 起同尺寸
+⇒ 面板内 `[136,378] × [35,65]`，中心 **(257, 50)**。
+
+本端此前写的是 `spawn_label(p, &cjk, "键位设置", 135.0, 34.0, 15.0, ...)`——**左对齐**锚在盒子左上角。
+
+#### 帧证（Keybind 窗口原点 (256,169)，阈值 `sum(RGB)>520`）
+
+| | 墨迹 x 区间 | 中心 x | 墨迹行 |
+|---|---|---|---|
+| 原版（`orig_win_Keybind.png`） | 450..576 | **513.0** | 214..226 |
+| 本端修前 | 394..(左对齐) | — | 205..217（**低 9px**） |
+| 本端修后 | 485..542 | **513.5** | **214..226** |
+
+`513 = 256 + 135 + 1 + 121` 正是 C# 文本盒中心（实测 513.0，本端 513.5，差 0.5px）；
+纵向墨迹行与原版**逐行相同**（15px 档与原版 Bold10 的墨迹高都是 13 行）。
+
+#### 文案：改用 C# 中文包
+
+`ClientTextKeys.KeyboardSettings` 的中文包取值是 **「键盘设置」**
+（`Client/Localization/Chinese.json:506`），本端此前写「键位设置」，而**本端自己的菜单入口**
+`menu.rs:434` 用的就是「键盘设置」⇒ 顺手统一（这是唯一一处本端自家文案不一致）。
+
+#### 门禁
+
+| 门禁 | 结果 |
+|---|---|
+| `cargo test --lib` | **929 passed / 0 failed**（新增 `keybind_title_is_centered_in_csharp_box`） |
+| `cargo test --test b0001_smoke --test ui_alignment` | **2 + 58 passed** |
+| `ui_interact_sweep.ps1 -ManageServer` | **pass=46 / total=47 / fail=0 / skip=0 / exit=0** |
+| `rustfmt --check keyboard_layout.rs` | 2 处 = master 既有 import 排序基线（未新增） |
+| 实机 A/B | 构建 `98aa97f27` dirty=0；Keybind 15.1% → **15.0%**（33325 → 33074 像素），其余窗无变化 |
+
+> 同批扫过但**未改**的一处：GameShop 页码（C# `PageNumberLabel` 83×17 @(597,446) V-center，
+> `GameshopDialog.cs:378-386`）——本端 `spawn_label_center(638.5, 446, 83, 10px)` 的墨迹中心
+> 600 vs 原版 601.5，**只差 1.5px**，落在取帧口径噪声里，按"不改、只记"处理。
+
 ### 3.2dn Help 页标题与页码补 C# 的 `VerticalCenter`（两处都低 6px）（2026-10-01）
 
 承 §3.2dm 的同一类：C# 用 `Size + VerticalCenter` 的标签，本端 `spawn_label_center` 只做**水平**
