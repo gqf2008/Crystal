@@ -93,6 +93,16 @@ pub struct InvItem {
     pub awake_type: u8,
     /// C# `ItemInfo.Unique`（`SpecialItemMode` bitflags，位值同 C#）——宝石"可用于"清单。
     pub unique_flags: u16,
+    /// C# `UserItem.ExpireInfo.ExpiryDate`（.NET `DateTime.ToBinary`）——提示的过期段。
+    pub expire_binary: Option<i64>,
+    /// C# `UserItem.SealedInfo.ExpiryDate`——提示的封印段。
+    pub sealed_binary: Option<i64>,
+    /// C# `UserItem.RentalInformation.OwnerName`——租借来源行。
+    pub rental_owner: Option<String>,
+    /// C# `UserItem.RentalInformation.ExpiryDate`——租借到期/租借锁到期。
+    pub rental_binary: Option<i64>,
+    /// C# `UserItem.RentalInformation.RentalLocked`。
+    pub rental_locked: bool,
 }
 
 impl InvItem {
@@ -1764,6 +1774,9 @@ pub fn item_tooltip_lines(item: &InvItem) -> Vec<String> {
             }
         }
     }
+    // 过期/封印/租借三段（C# 的 EXPIRE / SEALED / RentalInformation 三处，`:9464-9558`）——
+    // 依赖"当前时间"，独立成 [`item_time_lines`] 以便用固定 now 做确定性单测。
+    lines.extend(item_time_lines(item, now_unix_secs()));
     // C# `StoryInfoLabel`（`:9692-9737`）：`ItemInfo.ToolTip` 非空时先一行「物品描述」再一行正文；
     // **Credit Scroll 特例**（`Type==Scroll && Shape==7`）把正文替换为「已向您的账号添加 {price} 点数。」
     let story = if item.item_type == mir2_shared::enums::ItemType::Scroll as u8 && item.shape == 7 {
@@ -1780,6 +1793,95 @@ pub fn item_tooltip_lines(item: &InvItem) -> Vec<String> {
         lines.push("由游戏管理员创建".to_string()); // Text.CreatedByGameMaster
     }
     lines
+}
+
+/// 当前 Unix 秒（提示里"剩余时间"用；系统时钟失败时取 0）。
+fn now_unix_secs() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
+}
+
+/// .NET `DateTime.ToBinary()` → Unix 秒。
+///
+/// `ToBinary` = 低 62 位是 ticks（100ns，从 0001-01-01 起）+ 高 2 位存 `Kind`
+/// （`DateTime.FromBinary` 同款掩码）；`unix = ticks/10^7 - 62135596800`
+/// （后者是 0001-01-01 到 1970-01-01 的秒数，`SharedRust/src/data/client_data.rs:41` 有同款常量）。
+#[must_use]
+pub fn binary_to_unix_secs(binary: i64) -> i64 {
+    const TICKS_MASK: i64 = 0x3FFF_FFFF_FFFF_FFFF;
+    const UNIX_EPOCH_SECS: i64 = 62_135_596_800;
+    (binary & TICKS_MASK) / 10_000_000 - UNIX_EPOCH_SECS
+}
+
+/// C# `Functions.PrintTimeSpanFromSeconds(secs, accurate: true)` 的逐分支复刻
+/// （`Shared/Functions/Functions.cs:86-108`）：单位是**英文缩写**（C# 自己没本地化），
+/// 只在「将在 {0} 后过期」这类外层文案里被中文包包住。
+#[must_use]
+pub fn format_timespan(secs: f64) -> String {
+    let t = if secs.is_finite() && secs > 0.0 {
+        secs
+    } else {
+        0.0
+    };
+    let total = t.floor() as i64;
+    let days = total / 86_400;
+    let hours = (total % 86_400) / 3_600;
+    let mins = (total % 3_600) / 60;
+    let sec = total % 60;
+    if t < 60.0 {
+        format!("{sec}s")
+    } else if t < 3_600.0 {
+        format!("{mins}m {sec:02}s")
+    } else if t < 86_400.0 {
+        format!("{hours}h {mins:02}m {sec:02}s")
+    } else {
+        format!("{days}d {hours:02}h {mins:02}m {sec:02}s")
+    }
+}
+
+/// 物品提示的**时间三段**：过期（EXPIRE）/ 封印（SEALED）/ 租借（RentalInformation），
+/// 逐条对齐 C# `BindInfoLabel` 里那三段（`GameScene.cs:9464-9558`）。`now_secs` 显式传入以便单测。
+#[must_use]
+pub fn item_time_lines(item: &InvItem, now_secs: i64) -> Vec<String> {
+    let mut out = Vec::new();
+    // EXPIRE：`剩余 > 0` ⇒「将在 {fmt} 后过期」否则「已过期」
+    if let Some(b) = item.expire_binary {
+        let remaining = (binary_to_unix_secs(b) - now_secs) as f64;
+        out.push(if remaining > 0.0 {
+            format!("将在 {} 后过期", format_timespan(remaining)) // Text.ExpiresIn
+        } else {
+            "已过期".to_string() // Text.Expired
+        });
+    }
+    // SEALED：只在还有剩余时输出「封印持续 {fmt}」（C# 的 `remainingSeconds > 0` 分支）
+    if let Some(b) = item.sealed_binary {
+        let remaining = (binary_to_unix_secs(b) - now_secs) as f64;
+        if remaining > 0.0 {
+            out.push(format!("封印持续 {}", format_timespan(remaining))); // Text.SealedFor
+        }
+    }
+    // RENTAL：未锁 ⇒ 来源行 + 到期行（过期为**英文字面量** `"Rental expired"`，C# 如此）；
+    // 已锁且未到期 ⇒ 租借锁到期行
+    if let Some(owner) = item.rental_owner.as_deref() {
+        if !item.rental_locked {
+            out.push(format!("物品租借来源：{owner}")); // Text.ItemRentedFrom
+            let remaining =
+                (binary_to_unix_secs(item.rental_binary.unwrap_or(0)) - now_secs) as f64;
+            out.push(if remaining > 0.0 {
+                format!("租借将在 {} 后到期", format_timespan(remaining)) // Text.RentalExpiresIn
+            } else {
+                "Rental expired".to_string()
+            });
+        } else if let Some(b) = item.rental_binary {
+            let remaining = (binary_to_unix_secs(b) - now_secs) as f64;
+            if remaining > 0.0 {
+                out.push(format!("租借锁将在 {} 后结束", format_timespan(remaining))); // Text.RentalLockExpiresIn
+            }
+        }
+    }
+    out
 }
 
 /// C# `Awake.Type.ToLocalizedString()`（`Enum.AwakeType_*` 中文包）：本端枚举值 = C# + 3
@@ -4168,6 +4270,11 @@ mod tests {
             wedding_ring: -1,
             awake_type: 3,
             unique_flags: 0,
+            expire_binary: None,
+            sealed_binary: None,
+            rental_owner: None,
+            rental_binary: None,
+            rental_locked: false,
         }
     }
 
@@ -4404,6 +4511,65 @@ mod tests {
                 .any(|l| l == "可用于:" || l == "不能用于任何物品。"),
             "非宝石不出行"
         );
+    }
+
+    /// §3.2ea：过期/封印/租借三段 + `PrintTimeSpanFromSeconds` 复刻（都用固定 now 做确定性断言）。
+    #[test]
+    fn tooltip_time_lines_match_csharp() {
+        // ① 时间格式化：45s / 2m 05s / 1h 01m 01s / 1d 01h 01m 01s
+        assert_eq!(format_timespan(45.0), "45s");
+        assert_eq!(format_timespan(125.0), "2m 05s");
+        assert_eq!(format_timespan(3661.0), "1h 01m 01s");
+        assert_eq!(format_timespan(90061.0), "1d 01h 01m 01s");
+        // ② .NET ToBinary → Unix 秒（Kind=Unspecified ⇒ 高位为 0）
+        let now = 1_700_000_000i64;
+        let binary_of = |unix: i64| (unix + 62_135_596_800) * 10_000_000;
+        assert_eq!(binary_to_unix_secs(binary_of(now)), now);
+        // ③ 过期：还有 1 小时 ⇒「将在 1h 00m 00s 后过期」；已过去 ⇒「已过期」
+        let mut it = item_with_type(ItemType::Weapon);
+        it.expire_binary = Some(binary_of(now + 3600));
+        let lines = item_time_lines(&it, now);
+        assert_eq!(lines, vec!["将在 1h 00m 00s 后过期".to_string()]);
+        it.expire_binary = Some(binary_of(now - 10));
+        assert_eq!(item_time_lines(&it, now), vec!["已过期".to_string()]);
+        // ④ 封印：还有剩余 ⇒「封印持续 {fmt}」；已过 ⇒ 不出行
+        it.expire_binary = None;
+        it.sealed_binary = Some(binary_of(now + 125));
+        assert_eq!(
+            item_time_lines(&it, now),
+            vec!["封印持续 2m 05s".to_string()]
+        );
+        it.sealed_binary = Some(binary_of(now - 1));
+        assert!(item_time_lines(&it, now).is_empty(), "封印已过不出行");
+        // ⑤ 租借（未锁）：来源行 + 到期行；已锁：只出锁到期行
+        it.sealed_binary = None;
+        it.rental_owner = Some("张三".into());
+        it.rental_binary = Some(binary_of(now + 90_061));
+        let lines = item_time_lines(&it, now);
+        assert_eq!(
+            lines,
+            vec![
+                "物品租借来源：张三".to_string(),
+                "租借将在 1d 01h 01m 01s 后到期".to_string()
+            ]
+        );
+        it.rental_binary = Some(binary_of(now - 5));
+        assert_eq!(
+            item_time_lines(&it, now),
+            vec![
+                "物品租借来源：张三".to_string(),
+                "Rental expired".to_string()
+            ],
+            "过期租借是 C# 的英文字面量"
+        );
+        it.rental_locked = true;
+        it.rental_binary = Some(binary_of(now + 45));
+        assert_eq!(
+            item_time_lines(&it, now),
+            vec!["租借锁将在 45s 后结束".to_string()]
+        );
+        it.rental_binary = Some(binary_of(now - 1));
+        assert!(item_time_lines(&it, now).is_empty(), "锁已到期不出行");
     }
 
     #[test]
