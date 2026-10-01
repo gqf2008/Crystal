@@ -20,7 +20,7 @@ use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
 use crate::ui::sprite_ui::{shared_cjk_font, UiCjkFont, UiFont};
 use crate::ui::theme::{
-    load_lib_image, spawn_container, spawn_icon_button, spawn_image, spawn_label, spawn_panel,
+    load_lib_image, spawn_container, spawn_icon_button, spawn_image, spawn_label_center, spawn_panel,
 };
 
 /// #2892 批B：面板精灵与 C# 原生尺寸（C# `MiniMapDialog.Index = 2090; Location = (ScreenWidth-126, 0)`）
@@ -58,6 +58,14 @@ pub fn minimap_name(map_title: &str, file_name: &str) -> String {
     } else {
         map_title.to_string()
     }
+}
+
+/// 小地图坐标文字：C# `LocationLabel.Text = Functions.PointToString(CurrentLocation)`，
+/// 而 `PointToString` 是 `String.Format("{0}, {1}", p.X, p.Y)`（`Shared/Functions/Functions.cs:67-70`）
+/// ⇒ 逗号后**有一个空格**。门禁钉住它，防止再退回 `"{},{}"`。
+#[must_use]
+pub fn minimap_pos_text(tx: i32, ty: i32) -> String {
+    format!("{}, {}", tx, ty)
 }
 
 #[must_use]
@@ -106,6 +114,25 @@ const BG_SMALL: usize = 2091;
 /// 底部按钮/标签 y = Size.Height - 23（C# SetBigMode/SetSmallMode）
 const BOTTOM_Y_BIG: f32 = 154.0 - 23.0; // 131
 const BOTTOM_Y_SMALL: f32 = 45.0 - 23.0; // 22
+
+/// C# `MapNameLabel`：`Location=(2,2)`、`Size=(120,18)`、
+/// `DrawFormat = HorizontalCenter | VerticalCenter`（`MainDialogs.cs:1785-1792`）。
+///
+/// `MirLabel` 绘制时把文本放进 `Rectangle(1, 0, Size.Width, Size.Height)`
+/// （`MirLabel.cs:222-226` 的 `(1,1)` 正写）⇒ 文本盒 = 面板内 `[3,123] × [3,21]`，
+/// 水平中心 `2+1+120/2 = 63`。
+///
+/// `NAME_Y` 是**节点顶**：本端 12px 档的墨迹顶比节点顶低 2px（实测 `ours_win_Minimap.png`：
+/// 节点 `top=2` ⇒ 墨迹行 4..12），取 6 让墨迹落在原版的 8..15。
+const NAME_CX: f32 = 63.0;
+const NAME_W: f32 = 120.0;
+const NAME_Y: f32 = 6.0;
+
+/// C# `LocationLabel`：`Location=(46, y)`、`Size=(56,18)`、同样 H+V 居中
+/// （`MainDialogs.cs:1794-1801`）⇒ 文本盒 `[47,103]`，水平中心 `46+1+56/2 = 75`。
+/// `y` 随大/小模式变（`SetBigMode`/`SetSmallMode` 两处都写，见 §3.2db）。
+const POS_CX: f32 = 75.0;
+const POS_W: f32 = 56.0;
 
 #[derive(Component)]
 pub struct MiniMapWidget;
@@ -307,10 +334,23 @@ fn spawn_minimap(
             spawn_image(p, white.clone(), -999.0, -999.0, 2.0, 2.0, 2)
                 .insert((MiniMapMemberDot(i), Visibility::Hidden));
         }
-        // 地图名（C# MapNameLabel (2,2) 120x18）
-        spawn_label(p, &cjk, "", 12.0, 2.0, 12.0, Color::WHITE, 3).insert(MiniMapNameText);
-        // 坐标（C# LocationLabel (46, Height-23)）
-        spawn_label(p, &cjk, "", 54.0, BOTTOM_Y_BIG, 12.0, Color::WHITE, 3).insert(MiniMapPosText);
+        // 地图名（C# MapNameLabel (2,2) 120x18，H+V 居中）
+        // 帧证（§3.2dl）：本端原先左对齐锚在 x=12 ⇒ 墨迹中心 951，原版居中 ⇒ 959.5。
+        spawn_label_center(p, &cjk, "", NAME_CX, NAME_Y, NAME_W, 12.0, Color::WHITE, 3)
+            .insert(MiniMapNameText);
+        // 坐标（C# LocationLabel (46, Height-23) 56x18，H+V 居中）
+        spawn_label_center(
+            p,
+            &cjk,
+            "",
+            POS_CX,
+            BOTTOM_Y_BIG,
+            POS_W,
+            12.0,
+            Color::WHITE,
+            3,
+        )
+        .insert(MiniMapPosText);
         // 大小切换按钮（C# ToggleButton Prguse[2102/2103/2104] (109,3)）
         // #2775：Hint 取 C# `MainDialogs.cs:1849`（MiniMapKey =「小地图 ({Minimap})」）
         spawn_minimap_button(p, &mut libs, &mut images, 2102, 2103, 2104, 109.0, 3.0, 4).insert((
@@ -696,11 +736,12 @@ fn minimap_ui_system(
     // §3.2db：本端此前把它写在 `big` 分支里 ⇒ 切小档后标签**留在 y=131**（45 高的面板外）
     // ⇒ 原版小档帧里有「288, 616」，本端那一块是空的（`orig_win_Minimap.png` vs 本端小档帧）。
     if let (Some((tx, ty)), Ok((mut t, mut tf))) = (player_tile, pos_texts.single_mut()) {
-        let s = format!("{},{}", tx, ty);
+        let s = minimap_pos_text(tx, ty);
         if t.0 != s {
             t.0 = s; // 变化才更新，避免每帧重排文本（ICU4X/CPU，#31）
         }
-        tf.left = Val::Px(54.0);
+        // 居中版：节点 left = cx - width/2 = 75 - 28 = 47（文本盒 [47,103]，与 C# 同）
+        tf.left = Val::Px(POS_CX - POS_W / 2.0);
         tf.top = Val::Px(bottom_y);
     }
 
@@ -996,6 +1037,30 @@ mod tests {
             Val::Px(BOTTOM_Y_BIG),
             "小档不得留在大档的 y=131（那会落到 45 高的面板之外）"
         );
+    }
+
+    /// §3.2dl：小地图两处文字标签都按 C# 的 `HorizontalCenter | VerticalCenter` 居中盒落位，
+    /// 且坐标串用 `Functions.PointToString` 的 `"{0}, {1}"`（**逗号后有空格**）。
+    ///
+    /// C# 证据：`MainDialogs.cs:1785-1792`（`MapNameLabel` `(2,2)` `120x18`）、
+    /// `:1794-1801`（`LocationLabel` `(46,y)` `56x18`）、`Shared/Functions/Functions.cs:67-70`。
+    /// `MirLabel` 文本盒 = `Location + (1,1)` 起的 `Size` ⇒ 名称盒 `[3,123]`、坐标盒 `[47,103]`。
+    ///
+    /// 阳性对照（实做）：把 `NAME_CX` 改回左对齐锚点 12 ⇒ 本测试红。
+    #[test]
+    fn minimap_labels_use_csharp_centered_boxes() {
+        assert_eq!(
+            (NAME_CX - NAME_W / 2.0, NAME_CX + NAME_W / 2.0),
+            (3.0, 123.0),
+            "名称文本盒 = C# (2,2) + MirrorLabel 的 1px 内缩，宽 120"
+        );
+        assert_eq!(
+            (POS_CX - POS_W / 2.0, POS_CX + POS_W / 2.0),
+            (47.0, 103.0),
+            "坐标文本盒 = C# (46,y) 的 1px 内缩，宽 56"
+        );
+        assert_eq!(minimap_pos_text(288, 616), "288, 616", "逗号后须有空格");
+        assert_eq!(minimap_pos_text(0, 0), "0, 0");
     }
 }
 

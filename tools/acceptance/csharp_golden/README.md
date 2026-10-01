@@ -4318,6 +4318,72 @@ spawn」配对，中间夹了个 `for` 循环体就串行了。
 `Prguse[2447]` 信用图标：本端数据里**没有这一帧**（越界）⇒ 无像素可比；原版帧也没拍到过该状态
 （要 `RewardCredit > 0` 的任务）。本条只到"确认它取不到帧、不生成节点"为止，不推像素结论。
 
+### 3.2dl 小地图残留三件小事定性：**标题/坐标文字**按 C# 居中盒落位 ＋ 坐标串补空格（2026-10-01）
+
+#### ① 四件小事的结论一览
+
+| 项 | 结论 | 证据 |
+|---|---|---|
+| 面板 `Prguse[2090]/[2091]` | **已实现**（大 128×154 / 小 128×45，随 C# `Index` 换图换尺寸） | `minimap.rs` 的 `BG_SMALL = 2091` + 单测 `minimap_layout_matches_csharp`；本轮原版帧实测小档 `LocationLabel` 落在 y=22 = `45-23`（见 ③） |
+| S / A / P 标签 | **已实现**（跟随大/小档定位） | `game/hud.rs` 的单测 `mode_labels_follow_minimap_mode`；原版帧里小地图左下方能读到 `[Pet: Attack and Move]` |
+| 标题 / 坐标文字 | **本轮修**（见 ②③） | 名称墨迹中心 951→**960**（原版 959.5）；坐标串补回 C# 的空格 |
+| 昼夜 fade 是否叠缩略图 | **不叠**（澄清）：C# 的 `_fade` 只是大/小档切换值（`Toggle()` 里 `1` 或 `0`，`0.8` 那一支被注释掉），与 `GameScene.TimeOfDay` 无关；本端缩略图同样不做 tint | `MainDialogs.cs` 的 `Toggle()` 全文；`minimap.rs` 无 tint（只有灯光状态**图标** `LightSetting`） |
+
+#### ② 名称标签：本端左对齐 ⇒ 改成 C# 的居中盒
+
+C# `MapNameLabel`：`Location=(2,2)`、`Size=(120,18)`、`DrawFormat = HorizontalCenter | VerticalCenter`
+（`MainDialogs.cs:1785-1792`）。`MirLabel` 把文本画进 `Location+(1,1)` 起、尺寸同 `Size` 的盒子里
+（`MirLabel.cs:222-226`）⇒ 文本盒 = 面板内 `[3,123]`，中心 x = 63。
+
+本端原先写成 `spawn_label(p, &cjk, "", 12.0, 2.0, 12.0, ...)`——**左对齐**锚在 x=12。
+名称标签的位置**与大小档无关**（`SetSmallMode`/`SetBigMode` 都不动它），所以这一处两侧帧直接可比：
+
+| | 墨迹 x | 宽 | 中心 x | 墨迹行 |
+|---|---|---|---|---|
+| 原版（`orig_win_Minimap.png`） | [923,996] | 74 | **959.5** | 8..15 |
+| 本端修前 | [910,992] | 83 | 951.0 | 4..12 |
+| 本端修后 | [919,1001] | 83 | **960.0** | **8..16** |
+
+改法：`spawn_label_center(cx=63, y=6, width=120, 12px)`；`y` 是**节点顶**，由
+"本端 12px 档墨迹顶比节点顶低 2px"（修前 `top=2` ⇒ 墨迹 4）反推为 6。
+宽 83 vs 74 = 1.12×，与 §3.2dk 标定的"12px ↔ C# 8pt"一致（**不是**字号问题）。
+
+#### ③ 坐标标签：同样居中 ＋ 文案补回空格
+
+C# `LocationLabel`：`Location=(46, y)`、`Size=(56,18)`、同样 H+V 居中（`MainDialogs.cs:1794-1801`）
+⇒ 文本盒 `[47,103]`，中心 x = 75；`y` 随大/小档（§3.2db）。文案是
+`LocationLabel.Text = Functions.PointToString(CurrentLocation)`，而
+`PointToString` = `String.Format("{0}, {1}", p.X, p.Y)`（`Shared/Functions/Functions.cs:67-70`）
+——**逗号后有一个空格**；本端此前写的是 `format!("{},{}", ...)`。
+
+改法：`spawn_label_center(cx=75, width=56)` + 新增纯函数 `minimap_pos_text() -> "{}, {}"`；
+运行期仍按模式设 `tf.left = 75-28 = 47`、`tf.top = bottom_y`（§3.2db 的模式跟随保留）。
+
+**横向可比、纵向不可比**（原版帧是小档 y=22，本端是大档 y=131，两侧模式不同源）：
+
+| | 墨迹 x | 宽 | 中心 x | 逗号→后一位间距 |
+|---|---|---|---|---|
+| 原版（小档） | [951,991] | 41 | 971.0 | 5px |
+| 本端修前 | [953,992] | 40 | 972.5 | 6px |
+| 本端修后 | [950,995] | 46 | **972.5** | **12px** |
+
+修后间距变大 = 本端 CJK 字体的**空格 advance ≈ 0.5em（6px）**，原版 Arial 空格 ≈ 3px
+⇒ 属**字体级**残差；文案本身已与 C# 一致（`minimap_pos_text` 有单测钉住）。
+
+#### ④ 门禁
+
+| 门禁 | 结果 |
+|---|---|
+| `cargo test --lib` | **925 passed / 0 failed**（新增 `minimap_labels_use_csharp_centered_boxes`） |
+| `cargo test --test b0001_smoke --test ui_alignment` | **2 + 58 passed** |
+| `ui_interact_sweep.ps1 -ManageServer` | **pass=46 / total=47 / fail=0 / skip=0 / exit=0** |
+| `rustfmt --check minimap.rs` | 2 处 diff = master 既有 import 排序基线（未新增） |
+| 实机 A/B 复跑（构建 `5ee70eb64` dirty=0，`--real-net`） | 名称/坐标墨迹数值见 ②③；其余 19 窗同批无回归（Group 0.0 / Skills 1.7 / Friends 2.3 / Inventory 2.9 / Bigmap 58.2） |
+
+> ⚠️ 交互巡回**环境抖动**（如实记，判据同 §3.2dj）：第一次跑 **44/47**，挂的是 `inventory` 与
+> `character` 的关闭钮（`hits=[66v0 ? [] other - - pick=-]`，与历史同型），**重跑即过**
+> （46/47 exit=0）⇒ 判并行环境抖动，不当回归。
+
 ### 3.2dk 字号 pt-vs-px 逐窗核对（20 扇）：**名义换算不适用本端字体** ＋ 大地图标题条收口（2026-10-01）
 
 #### ① 起念（承接 §3.2dj 的 next_queue）
