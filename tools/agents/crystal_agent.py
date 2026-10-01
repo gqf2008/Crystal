@@ -223,19 +223,63 @@ def _claim_guard():
             time.sleep(0.5)
 
 
-def in_progress_holder(thread: str) -> str | None:
-    """该线程最早那条 in-progress 条目的认领人（claimed_by，回退 actor）。
+def thread_entries(thread: str) -> list[dict] | None:
+    """`walgit collab thread <id>` 的条目（父链顺序，最后一条最新）；读不出来返回 None。
 
-    读失败返回 None —— 调用方必须把 None 当「不能证明是我的」处理（fail-safe），
-    与 BoardUnavailable 同一哲学：读不出来就不动，不凭猜测。
+    真实输出是**多行 pretty JSON 数组**（形如 [{"entry": {...}, "oid", "principal",
+    "verified"}, ...]），不是 NDJSON —— 按行找 { 的解析器在这里**恒失败**（实测：竞态回读
+    因此恒被当成读不出来；fail-open 时被掩盖成"能跑"，改 fail-safe 后变成"任何卡都认领
+    不下来"）。这里整体解析，并兼容 {"entries": [...]} 形状与 entry 未嵌套的形状。
     """
-    obj = _json_from(walgit("collab", "thread", thread))
-    entries = (obj or {}).get("entries", []) if isinstance(obj, dict) else []
+    text = (walgit("collab", "thread", thread).stdout or "").strip()
+    if not text:
+        return None
+    starts = [i for i in (text.find("["), text.find("{")) if i >= 0]
+    if not starts:
+        return None
+    try:
+        obj = json.loads(text[min(starts):])
+    except json.JSONDecodeError:
+        return None
+    if isinstance(obj, dict):
+        obj = obj.get("entries") or obj.get("thread") or []
+    if not isinstance(obj, list):
+        return None
+    out: list[dict] = []
+    for e in obj:
+        if not isinstance(e, dict):
+            continue
+        inner = e.get("entry") if isinstance(e.get("entry"), dict) else e
+        body = inner.get("body") if isinstance(inner.get("body"), dict) else {}
+        out.append({
+            "actor": inner.get("actor") or e.get("principal"),
+            "kind": inner.get("kind"),
+            "status": body.get("status"),
+            "claimed_by": body.get("claimed_by"),
+        })
+    return out
+
+
+def current_claim(thread: str) -> tuple[str | None, str | None]:
+    """父链顺序里**最后一条** status 决定的 (状态, 认领人)；读不出来返回 (None, None)。
+
+    为什么是「最后一条」而不是「最早那条 in-progress」：日志是 append-only，上一轮认领后
+    开工失败会把卡写回 open，而那条旧的 in-progress 条目还在；按「最早」判定会把卡永久钉在
+    已放弃的认领人身上（实测：A 认领 -> 退回 open -> B 来认领被判让出，卡停在「进行中」、
+    只有 A 能续跑 = 僵尸卡）。看板自己就是「最新 status 决定状态」，这里与它同源。
+    """
+    entries = thread_entries(thread)
+    if entries is None:
+        return None, None
+    status: str | None = None
+    claimant: str | None = None
     for e in entries:
-        body = e.get("body") or {}
-        if isinstance(body, dict) and body.get("status") == "in-progress":
-            return body.get("claimed_by") or e.get("actor")
-    return None
+        if e["kind"] == "status" and isinstance(e["status"], str):
+            status = e["status"]
+            claimant = e["claimed_by"] or e["actor"]
+        elif e["kind"] == "merge_result":
+            status = "merged"
+    return status, claimant
 
 
 def claim(agent: str, thread: str) -> bool:
@@ -252,21 +296,24 @@ def claim(agent: str, thread: str) -> bool:
                 return False
             # 「卡在进行中」不等于「是我认领的」：watch 扫「待认领」到 claim 之间，
             # 别的工人可能已经认领走了。只有 status 里写着 claimed_by 是我，才算续跑。
-            holder = in_progress_holder(thread)
+            st, holder = current_claim(thread)
+            if st != "in-progress" or holder is None:
+                print(f"[claim] {thread} 看板说进行中但回读不出认领人（状态 {st!r}）：不认领")
+                return False
             if holder == agent:
                 print(f"[claim] {thread} 已由 {agent} 认领（续跑）")
                 return True
-            print(f"[claim] {thread} 在进行中、认领人是 {holder or 读不出来}，不重复认领")
+            print(f"[claim] {thread} 在进行中、认领人是 {holder}，不重复认领")
             return False
         if not set_status(agent, thread, "in-progress", claimed_by=agent):
             return False
         # 跨机竞态收敛：回读，若最早那条 in-progress 不是自己就让出
         time.sleep(1.5)
-        first = in_progress_holder(thread)
-        if first is None:
-            # 回读读不出来：原实现把它当成「我赢了竞态」（fail-open），与 BoardUnavailable
-            # 的 fail-safe 相反 —— 读不出来就让出，下次再看。
-            print(f"[claim] {thread} 竞态回读读不出来：不猜，让出")
+        st, first = current_claim(thread)
+        if first is None or st != "in-progress":
+            # 回读读不出来（或状态与刚写的不一致）：原实现把它当成「我赢了竞态」
+            # （fail-open），与 BoardUnavailable 的 fail-safe 相反 —— 读不出来就让出。
+            print(f"[claim] {thread} 竞态回读读不出来或不一致（{st!r}）：不猜，让出")
             return False
         if first != agent:
             print(f"[claim] {thread} 已被 {first} 先认领，让出")
@@ -368,7 +415,7 @@ def run_one(agent: str, thread: str, task: str, *, model: str | None = None) -> 
         return False
     try:
         ok, summary, base, head = work(agent, thread, task, model=model)
-    except RuntimeError as e:
+    except (RuntimeError, FileNotFoundError) as e:
         # 开工就失败（例如 worktree 建不起来）：把卡退回「待认领」并留下原因，
         # 不要让 run 单卡模式直接 traceback。
         print(f"[run] {thread} 开工失败：{e}")
@@ -387,17 +434,25 @@ def run_one(agent: str, thread: str, task: str, *, model: str | None = None) -> 
 # --------------------------------------------------------------------------- #
 def watch(agent: str, *, poll: int = 20, model: str | None = None, once: bool = False) -> None:
     print(f"[watch] {agent} 常驻：每 {poll}s 扫一次「待认领」")
+    # 失败退避：worktree 建不起来这类**持久**故障若不退避，每轮都会「认领 -> 失败 ->
+    # 退回待认领」，向 collab 日志灌条目、刷屏，直到人工介入（实测热循环）。
+    cooldown: dict[str, float] = {}
     while True:
         try:
+            now = time.time()
             for c in cards_in("待认领"):
                 thread = c.get("thread") or c.get("id")
                 title = (c.get("title") or c.get("subject") or "").strip()
                 if not thread:
                     continue
+                if cooldown.get(thread, 0.0) > now:
+                    continue
                 body = c.get("body") or {}
                 task = body.get("task") or title or f"完成工作单元 {thread}"
                 print(f"[watch] 发现待认领 {thread}：{title[:60]}")
-                run_one(agent, thread, task, model=model)
+                if not run_one(agent, thread, task, model=model):
+                    cooldown[thread] = time.time() + max(poll, 5) * 15
+                    print(f"[watch] {thread} 本轮失败，退避 {max(poll, 5) * 15}s 再试")
                 if once:
                     return
         except Exception as e:  # 常驻进程不该因为一次失败退出
