@@ -452,13 +452,13 @@ fn delete_dialogs_aligned() {
     require_assets!("delete_dialogs_aligned");
     let mut libs = Libs::new();
     // MirInputBox Prguse[660]
-    assert_centered(
-        "删除输入框",
-        mb::DLG_X,
-        mb::DLG_Y,
-        LibraryName::Prguse,
-        660,
-        &mut libs,
+    // §3.2cu 批⑦：C# `MirInputBox` 用 `Size` = `GetTrueSize(660)` = 286x156 ⇒ ((1024-286)/2, (768-156)/2) = (369,306)
+    let (itw, ith) = libs.true_size(LibraryName::Prguse, 660);
+    assert_eq!((itw, ith), (286.0, 156.0));
+    assert_eq!(
+        (mb::DLG_X, mb::DLG_Y),
+        (((SW - itw) / 2.0).floor(), ((SH - ith) / 2.0).floor()),
+        "[居中] 删除输入框按 C# `Size` = GetTrueSize 代入"
     );
     let (idw, idh) = libs.size(LibraryName::Prguse, 660);
     assert_inside(
@@ -2195,7 +2195,7 @@ fn timer_dialog_aligned() {
 }
 
 /// #2892 批C：游戏内 `MirInputBox` 对齐 C# `Client/MirControls/MirInputBox.cs`——
-/// 面板 `Prguse[660]`（原生 288x156）居中 (368,306)；标题 (25,25) 235x40；
+/// 面板 `Prguse[660]`（图头 288x156、**真尺寸 286x156**）居中 **(369,306)**（§3.2cu 批⑦ 更正，原写 368）；标题 (25,25) 235x40；
 /// 输入框 (23,86) 240x19（1px Lime 边框）；OK `Title[200..202]`@(60,123)、
 /// Cancel `Title[203..205]`@(160,123)。
 #[test]
@@ -2211,18 +2211,18 @@ fn input_box_aligned() {
         "[尺寸] 面板应取 Prguse[660] 原生 288x156，不得拉伸"
     );
     let (ox, oy) = ib::PANEL_ORIGIN;
-    assert_centered(
-        "输入框",
-        ox,
-        oy,
-        LibraryName::Prguse,
-        ib::PANEL_INDEX,
-        &mut libs,
+    // §3.2cu 批⑦：C# 用 `Size` = `GetTrueSize(660)` = 286x156（**不是**图头 288x156）⇒ (369,306)
+    let (itw2, ith2) = libs.true_size(LibraryName::Prguse, ib::PANEL_INDEX);
+    assert_eq!((itw2, ith2), (286.0, 156.0));
+    assert_eq!(
+        (ox, oy),
+        (((SW - itw2) / 2.0).floor(), ((SH - ith2) / 2.0).floor()),
+        "[居中] 输入框按 C# `Size` = GetTrueSize 代入"
     );
     assert_eq!(
         (ox, oy),
-        (368.0, 306.0),
-        "[坐标] C# 居中 ((1024-288)/2,(768-156)/2)"
+        (369.0, 306.0),
+        "[坐标] C# 居中 ((1024-GetTrueSize.Width)/2,(768-156)/2)"
     );
     assert_in_canvas("输入框", ox, oy, w, h);
 
@@ -5133,6 +5133,68 @@ fn questlist_and_creature_use_true_size_batch5() {
 
     println!(
         "  ✓ NPC 任务列表挂点 (485,0) + 宠物窗 (287,196) + 两条宠物条真宽 246/169（§3.2cp 批⑤）"
+    );
+}
+
+/// §3.2cu 批⑦：**「写死字面量的原点」盲区**——§3.2cl ③ 的全仓扫描只认 `center_origin(PANEL…)` 形式，
+/// 那些直接把数字写进公式的原点没被扫到。本轮手工全仓扫 `(1024.0 - N)/2.0` / `1024.0 - N` 后，
+/// 查实两处：
+///
+/// | 窗 | C# 出处 | `Size` = `GetTrueSize` | 正确原点 | 本端修前 |
+/// |---|---|---|---|---|
+/// | 商城 `GameshopDialog` | `GameshopDialog.cs:41` `Location = Center` | `Title[749]` 696x476 → **694x475** | **(165,146)** | (164,146)（图头） |
+/// | 输入框 `MirInputBox` | `MirInputBox.cs:20` `((SW-W)/2, (SH-H)/2)` | `Prguse[660]` 288x156 → **286x156** | **(369,306)** | (368,306)（图头） |
+///
+/// **原版帧**：商城那条**实锤**——`orig_win_GameShop.png` 里 `Title[749]` 最佳落点 **(165,146)**
+/// （`win_locate` 不符率 0.1174）；输入框那条**未采集**（`Prguse[660]` 全量扫 350+ 归档帧零命中）。
+///
+/// 同族**复核为无缺陷**：`MirMessageBox`（`Prguse[360]` 456x190 **无裁剪** ⇒ 284,289 正确）、
+/// `MirAmountBox`（`Prguse[238]` 204x109 **无裁剪** ⇒ 410,329 正确）、
+/// `MountDialog`（`Location = new Point(10,30)` 是**字面量**，与 `Size` 无关）、
+/// `CharacterDialog`（`ScreenWidth - 264` 也是字面量）。
+#[test]
+fn literal_origins_use_true_size_batch7() {
+    require_assets!("literal_origins_use_true_size_batch7");
+    use client_bevy::game::dialogs::game_shop;
+    use client_bevy::ui::modal_box as mb;
+    let mut libs = Libs::new();
+
+    // ① 商城面板 Title[749]：图头 696x476 / 真 694x475 ⇒ 原点 (164,146) → (165,146)
+    assert_eq!(libs.size(LibraryName::Title, 749), game_shop::PANEL_SIZE);
+    let (gtw, gth) = libs.true_size(LibraryName::Title, 749);
+    assert_eq!((gtw, gth), (694.0, 475.0));
+    assert_eq!(
+        (((SW - gtw) / 2.0).floor(), ((SH - gth) / 2.0).floor()),
+        game_shop::PANEL_ORIGIN,
+        "[居中] 商城原点按 C# `Size` = GetTrueSize 代入"
+    );
+    assert_eq!(game_shop::PANEL_ORIGIN, (165.0, 146.0));
+    assert_ne!(
+        (((SW - 696.0) / 2.0).floor(), ((SH - 476.0) / 2.0).floor()),
+        game_shop::PANEL_ORIGIN,
+        "图头模型 =(164,146)（本轮修前，原版帧证否）"
+    );
+
+    // ② 输入框 Prguse[660]：图头 288x156 / 真 286x156 ⇒ x 368 → 369
+    assert_eq!(libs.size(LibraryName::Prguse, 660), (288.0, 156.0));
+    assert_eq!(libs.true_size(LibraryName::Prguse, 660), (286.0, 156.0));
+    assert_eq!((mb::DLG_X, mb::DLG_Y), (369.0, 306.0));
+
+    // ③ 同族复核：MirMessageBox / MirAmountBox 的美术**无裁剪** ⇒ 既有常量为真值（别乱改）
+    assert_eq!(
+        libs.true_size(LibraryName::Prguse, 360),
+        libs.size(LibraryName::Prguse, 360),
+        "MirMessageBox Prguse[360] 无裁剪"
+    );
+    assert_eq!((mb::MSG_X, mb::MSG_Y), (284.0, 289.0));
+    assert_eq!(
+        libs.true_size(LibraryName::Prguse, 238),
+        libs.size(LibraryName::Prguse, 238),
+        "MirAmountBox Prguse[238] 无裁剪"
+    );
+
+    println!(
+        "  ✓ 「写死字面量的原点」批⑦：商城 (165,146)、输入框 (369,306)；MirMessageBox/MirAmountBox 复核无裁剪（§3.2cu）"
     );
 }
 

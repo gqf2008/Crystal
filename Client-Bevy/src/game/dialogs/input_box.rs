@@ -31,12 +31,17 @@ use crate::scenes::AppState;
 use crate::ui::sprite_ui::{shared_cjk_font, UiCjkFont};
 use crate::ui::theme::{load_lib_image, spawn_icon_button, spawn_label, spawn_panel, CloseButton};
 
-/// 面板 `Prguse[660]`（原生 288x156）
+/// 面板 `Prguse[660]` 的**图头**尺寸（贴图 1:1 铺）
 pub const PANEL_INDEX: usize = 660;
 pub const PANEL_W: f32 = 288.0;
 pub const PANEL_H: f32 = 156.0;
-/// C# `Location = ((ScreenWidth-W)/2, (ScreenHeight-H)/2)` = (368,306)
-pub const PANEL_ORIGIN: (f32, f32) = (368.0, 306.0);
+/// `GetTrueSize(Prguse[660])` = **286x156**（图头 288x156，最右 2 列 alpha=0）。
+///
+/// C# `MirInputBox.cs:20` `Location = ((ScreenWidth-Size.Width)/2, (ScreenHeight-Size.Height)/2)`，
+/// `Size` = 真尺寸 ⇒ `((1024-286)/2, (768-156)/2)` = **(369,306)**。
+/// §3.2cu 批⑦：本端此前按图头写成 368（整框偏左 1px）；**原版帧未采集**（`Prguse[660]` 全量扫 350+ 帧零命中）。
+/// 同族另一处 `ui::modal_box::DLG_X` 一起改（它也是 `Prguse[660]` 居中）。
+pub const PANEL_ORIGIN: (f32, f32) = (369.0, 306.0);
 
 /// `CaptionLabel` @(25,25) 235x40
 pub const CAPTION_POS: (f32, f32) = (25.0, 25.0);
@@ -479,7 +484,17 @@ mod tests {
             (288.0, 156.0),
             "Prguse[660] 原生 288x156"
         );
-        assert_eq!(PANEL_ORIGIN, (368.0, 306.0), "(1024-288)/2, (768-156)/2");
+        // §3.2cu 批⑦：原点用 `GetTrueSize(Prguse[660])` = 286 ⇒ ((1024-286)/2, (768-156)/2) = (369,306)
+        assert_eq!(
+            PANEL_ORIGIN,
+            (369.0, 306.0),
+            "((1024-GetTrueSize.Width)/2, (768-156)/2)"
+        );
+        assert_ne!(
+            ((1024.0 - PANEL_W) / 2.0),
+            PANEL_ORIGIN.0,
+            "图头模型 = 368（本轮修前的值）"
+        );
         assert_eq!(CAPTION_POS, (25.0, 25.0));
         assert_eq!(CAPTION_SIZE, (235.0, 40.0));
         assert_eq!(INPUT_POS, (23.0, 86.0));

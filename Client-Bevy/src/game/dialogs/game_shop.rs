@@ -30,6 +30,16 @@ use crate::ui::theme::{
 /// #2892 批B：面板精灵与 C# 原生尺寸（C# `GameShopDialog.Index = 749; Location = Center`）
 pub const PANEL: (LibraryName, usize) = (LibraryName::Title, 749);
 pub const PANEL_SIZE: (f32, f32) = (696.0, 476.0);
+
+/// 面板**屏内原点**：C# `GameshopDialog.cs:41` `Location = Center`，`Size` = `GetTrueSize(Title[749])`
+/// = **694x475**（图头 696x476，最右 2 列 / 最下 1 行 alpha=0）⇒ `((1024-694)/2, (768-475)/2)`
+/// = **(165,146)**（逐项整数除法；`330/2=165`、`293/2=146`）。
+///
+/// 2026-10-01 §3.2cu 批⑦：本端此前把原点**写死成字面量** `((1024-696)/2, (768-476)/2)` = (164,146)，
+/// 用的是图头 ⇒ 整窗偏左 1px。**原版帧实锤**：`orig_win_GameShop.png` 里 `Title[749]` 最佳落点
+/// **(165,146)**（`win_locate` 不符率 0.1174）。§3.2cl ③ 的全仓扫描没扫到它——因为那条扫描只认
+/// `center_origin(PANEL…)` 形式，**写死字面量的原点是盲区**（同型另一处见 `ui::modal_box::DLG_X`）。
+pub const PANEL_ORIGIN: (f32, f32) = (165.0, 146.0);
 /// 关闭键 `Prguse2[360..362]` @(671,4)（`GameShopDialog.cs:67-76`，无 `Size` → 原生 24x21）
 pub const CLOSE_POS: (f32, f32) = (671.0, 4.0);
 
@@ -1145,12 +1155,12 @@ fn spawn_game_shop(
         checked: pay_checked.clone(),
     });
 
-    // 面板 Title[749]（C# GameshopDialog Index=749，696x476 居中 @(164,146)；
+    // 面板 Title[749]（C# GameshopDialog Index=749，**图头** 696x476 贴图 1:1；原点见 PANEL_ORIGIN；
     // 旧 Bevy 用 Title[411] 259 宽占位，分类/搜索悬空面板外）
     let Some(bg) = load_lib_image(&mut libs, &mut images, LibraryName::Title, 749) else {
         return;
     };
-    let (px, py) = ((1024.0 - 696.0) / 2.0, (768.0 - 476.0) / 2.0);
+    let (px, py) = PANEL_ORIGIN;
     let panel = spawn_panel(&mut commands, bg, px, py, PANEL_SIZE.0, PANEL_SIZE.1, 30);
     commands
         .entity(panel)
@@ -1946,8 +1956,8 @@ fn game_shop_ui_system(
     let cursor = windows.single().ok().and_then(|w| w.cursor_position());
     let cat_origin = panel_origin
         .single()
-        .map(|n| crate::ui::theme::node_origin(n, (164.0, 146.0)))
-        .unwrap_or((164.0, 146.0));
+        .map(|n| crate::ui::theme::node_origin(n, PANEL_ORIGIN))
+        .unwrap_or(PANEL_ORIGIN);
     let hover_row = cursor.and_then(|c| {
         (0..22usize).find(|i| {
             let y = cat_origin.1 + 103.0 + *i as f32 * 15.0;
@@ -1983,8 +1993,8 @@ fn game_shop_ui_system(
             if let Some(cursor) = window.cursor_position() {
                 let (ox, oy) = panel_origin
                     .single()
-                    .map(|n| crate::ui::theme::node_origin(n, (164.0, 146.0)))
-                    .unwrap_or((164.0, 146.0));
+                    .map(|n| crate::ui::theme::node_origin(n, PANEL_ORIGIN))
+                    .unwrap_or(PANEL_ORIGIN);
                 for i in 0..22usize {
                     let y = oy + 103.0 + i as f32 * 15.0;
                     if cursor.x >= ox + 15.0

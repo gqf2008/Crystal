@@ -66,8 +66,12 @@ impl Default for ModalState {
     }
 }
 
-// 删除确认输入框（原版 MirInputBox，Prguse[660] 288x156）
-pub const DLG_X: f32 = (1024.0 - 288.0) / 2.0; // 368
+// 删除确认输入框（原版 `MirInputBox`，`Index = 660; Library = Prguse`）
+//
+// `MirInputBox.cs:20` `Location = ((SW - Size.Width)/2, (SH - Size.Height)/2)`，`Size` = `GetTrueSize(660)`
+// = **286x156**（图头 288x156，最右 2 列 alpha=0）⇒ `((1024-286)/2, (768-156)/2)` = **(369, 306)**。
+// §3.2cu 批⑦：本端此前按图头写成 368（整框偏左 1px）；**原版帧未采集**（`Prguse[660]` 全量扫 350+ 归档帧零命中）。
+pub const DLG_X: f32 = (1024.0 - 286.0) / 2.0; // 369
 pub const DLG_Y: f32 = (768.0 - 156.0) / 2.0; // 306
 
 // 删除确认询问框（原版 MirMessageBox，Prguse[360] 456x190）
