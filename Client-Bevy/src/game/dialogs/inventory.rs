@@ -103,6 +103,9 @@ pub struct InvItem {
     pub rental_binary: Option<i64>,
     /// C# `UserItem.RentalInformation.RentalLocked`。
     pub rental_locked: bool,
+    /// C# `UserItem.Awake.listAwake`（逐级觉醒值）——`AwakeInfoLabel` 的总值行与逐级行用
+    /// （`GetAwakeLevel()` = 个数、`GetAwakeValue()` = 求和、`GetAwakeLevelValue(i)` = 第 i 项）。
+    pub awake_levels: Vec<u8>,
 }
 
 impl InvItem {
@@ -1669,6 +1672,28 @@ pub fn item_tooltip_lines(item: &InvItem) -> Vec<String> {
             awake_type_name(item.awake_type),
             item.awake_level
         ));
+    }
+    // C# `AwakeInfoLabel` 的**后两段**（`GameScene.cs:8543-8585`）——注意这两段 C# 用的是
+    // **英文字面量**（`"{0} + {1}~{2}"` / `"MAX {0} + {1}"` / `"Level {0} : …"`，自己没本地化），
+    // 本端照抄；`Type != Armour` 分支给"值~值"，Armour 分支给 `MAX … + 值`。
+    {
+        let ty = awake_type_name(item.awake_type);
+        let is_armour = item.item_type == mir2_shared::enums::ItemType::Armour as u8;
+        let total: u32 = item.awake_levels.iter().map(|v| u32::from(*v)).sum();
+        if total > 0 {
+            lines.push(if is_armour {
+                format!("MAX {ty} + {total}")
+            } else {
+                format!("{ty} + {total}~{total}")
+            });
+        }
+        for (i, v) in item.awake_levels.iter().enumerate() {
+            lines.push(if is_armour {
+                format!("Level {} : MAX {ty} + {v}", i + 1)
+            } else {
+                format!("Level {} : {ty} + {v}~{v}", i + 1)
+            });
+        }
     }
     // 镶嵌孔：C# `SocketInfoLabel`（`GameScene.cs:8622-8670`）——每个孔一行
     // `SocketWithValue` = 「镶嵌孔 : {0}」（{0} = 孔内宝石名，空孔用 `Empty` = 「空」），
@@ -4275,6 +4300,7 @@ mod tests {
             rental_owner: None,
             rental_binary: None,
             rental_locked: false,
+            awake_levels: Vec::new(),
         }
     }
 
@@ -4493,6 +4519,31 @@ mod tests {
         assert_eq!(awake_type_name(8), "魔防");
         assert_eq!(awake_type_name(9), "生命值法力值");
         assert_eq!(awake_type_name(3), "无");
+        // ①b 后两段（C# 的英文字面量行）：总值行 + 逐级行；`Armour` 走 `MAX …` 分支
+        let mut av = item_with_type(ItemType::Weapon);
+        av.awake_type = 4; // DC → 攻击
+        av.awake_level = 2;
+        av.awake_levels = vec![2, 3];
+        let lines = item_tooltip_lines(&av);
+        assert!(lines.iter().any(|l| l == "攻击 + 5~5"), "{lines:?}");
+        assert!(
+            lines.iter().any(|l| l == "Level 1 : 攻击 + 2~2"),
+            "{lines:?}"
+        );
+        assert!(
+            lines.iter().any(|l| l == "Level 2 : 攻击 + 3~3"),
+            "{lines:?}"
+        );
+        let mut aa = item_with_type(ItemType::Armour);
+        aa.awake_type = 4;
+        aa.awake_level = 1;
+        aa.awake_levels = vec![4];
+        let lines = item_tooltip_lines(&aa);
+        assert!(lines.iter().any(|l| l == "MAX 攻击 + 4"), "{lines:?}");
+        assert!(
+            lines.iter().any(|l| l == "Level 1 : MAX 攻击 + 4"),
+            "{lines:?}"
+        );
         // ② 宝石：Unique == 0 ⇒「不能用于任何物品。」；否则「可用于:」+ After* 逐条
         let gem = item_with_type(ItemType::Gem);
         let lines = item_tooltip_lines(&gem);

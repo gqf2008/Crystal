@@ -4318,6 +4318,34 @@ spawn」配对，中间夹了个 `for` 循环体就串行了。
 `Prguse[2447]` 信用图标：本端数据里**没有这一帧**（越界）⇒ 无像素可比；原版帧也没拍到过该状态
 （要 `RewardCredit > 0` 的任务）。本条只到"确认它取不到帧、不生成节点"为止，不推像素结论。
 
+### 3.2eb 物品提示 `AwakeInfoLabel` 的**后两段**（英文字面量行）（2026-10-01）
+
+§3.2dz 只做了 `AwakeInfoLabel` 的第一段（本地化的「{类型名} 觉醒({等级})」）。本轮补后两段
+（`GameScene.cs:8543-8585`）——**这两段 C# 自己就没本地化**，用的是字面量格式串：
+
+| 段 | 条件 | 文案（照抄 C#） |
+|---|---|---|
+| 觉醒总值 | `GetAwakeValue() > 0` | `Type != Armour`：`"{类型名} + {总值}~{总值}"`；`Armour`：`"MAX {类型名} + {总值}"` |
+| 逐级值 | `GetAwakeLevel() > 0`，逐级 | `Type != Armour`：`"Level {i+1} : {类型名} + {值}~{值}"`；`Armour`：`"Level {i+1} : MAX {类型名} + {值}"` |
+
+三个取值口径来自 `Shared/Data/ItemData.cs`：`GetAwakeLevel()` = `listAwake.Count`、
+`GetAwakeValue()` = `listAwake` 求和、`GetAwakeLevelValue(i)` = `listAwake[i]` ——
+本端 `Awake.levels: Vec<u8>` 三者都能算，本轮把 `awake_levels` 带进 `InvItem`。
+
+#### 门禁
+
+| 门禁 | 结果 |
+|---|---|
+| `cargo test --lib` | **936 passed / 0 failed**（`tooltip_awake_and_gem_useon` 增补：`values=[2,3]` ⇒ 「攻击 + 5~5」/「Level 1 : 攻击 + 2~2」/「Level 2 : 攻击 + 3~3」；`Armour` ⇒ 「MAX 攻击 + 4」/「Level 1 : MAX 攻击 + 4」） |
+| `cargo test --test b0001_smoke --test ui_alignment` | **2 + 58 passed** |
+| `ui_interact_sweep.ps1` | **46/47、fail=0、exit=0** |
+| `rustfmt --check` | `inventory.rs` 6 / `packets/mod.rs` 0 = master 既有基线（未新增） |
+
+> 物品提示至此只剩两处：`SoulboundTo`（需绑定者**名字**，本端只有 `soul_bound_id`）、
+> `OverlapInfoLabel`（Ctrl+点击的交互提示，需要"可修理/可合成"等玩法判据）。另外
+> §3.2dz 提到觉醒名行在 C# 是**按品阶上色**（`GradeNameColor`），而本端 tooltip 行统一一种颜色 ——
+> 行级配色是另一条线（需要给 `TooltipState` 的行加颜色）。
+
 ### 3.2ea 物品提示补**过期 / 封印 / 租借**三段（含 `PrintTimeSpanFromSeconds` 复刻）（2026-10-01）
 
 C# 这三段都在 `BindInfoLabel` 尾部（`GameScene.cs:9464-9558`），口径逐条核过：
