@@ -4318,6 +4318,54 @@ spawn」配对，中间夹了个 `for` 循环体就串行了。
 `Prguse[2447]` 信用图标：本端数据里**没有这一帧**（越界）⇒ 无像素可比；原版帧也没拍到过该状态
 （要 `RewardCredit > 0` 的任务）。本条只到"确认它取不到帧、不生成节点"为止，不推像素结论。
 
+### 3.2dr 物品悬浮提示：**属性/需求/职业/价格**四段文案逐字对齐 C#（2026-10-01）
+
+#### ① 出处：C# 的提示是 **11 个子标签**拼的
+
+`GameScene.cs:9836-9857` 的悬浮提示把 11 个 `MirControl` 依次拼起来：
+`NameInfoLabel` / `AttackInfoLabel` / `DefenceInfoLabel` / `WeightInfoLabel` / `AwakeInfoLabel` /
+`SocketInfoLabel` / `NeedInfoLabel` / `BindInfoLabel` / `OverlapInfoLabel` / `StoryInfoLabel` /
+`GMMadeLabel`。每一段的文案都来自中文包（`Client/Localization/Chinese.json`）。
+本端此前是**自造一套中文文案**（"防御: 0-5""需要职业: 战士/法师""价格: 120 金"），
+本轮把其中**四段**按 C# 的 key 逐字改掉。
+
+#### ② 改了哪四段（括号里是 C# 的 `ClientTextKeys`）
+
+| 段 | 本端修前 | 本端修后（= 中文包原文） |
+|---|---|---|
+| 成对属性 | `防御: 0-5` / `魔御: …` | **`物防 + {a}~{b}`**（`AC`）/ **`魔防 + {a}~{b}`**（`MAC`）/ `攻击 + a~b`（`DC`）/ `魔法 + a~b`（`MC`）/ `道术 + a~b`（`SC`） |
+| 单项属性 | `准确: +2` / `幸运: +1` / `反伤: +3` / `强度: +1` / `魔法抗性: +2` … | `准确: + 2`（`Accuracy`）/ `敏捷: + 2`（`Agility`）/ `幸运 + 1`（`Luck`）/ `最大生命值 + 3`（`MaxHpPlus`）/ `最大魔法值 + 3`（`MaxMpPlus`）/ `攻击速度: 2`（`AttackSpeedValue`）/ `反弹几率: 3`（`ReflectChance`）/ `力量 + 1`（`StrongPlus`）/ `神圣: + 1`（`Holy`）/ `冰冻: + 1`（`FreezingPlus`）/ `中毒: + 1`（`PoisonPlus`）/ `魔抗 + 2`（`MagicResistPlus`）/ `毒抗 + 2`（`PoisonResistPlus`）/ `生命恢复 + 1`（`HealthRecoveryPlus`）/ `魔法恢复 + 1`（`ManaRecoveryPlus`）/ `中毒恢复 + 1`（`PoisonRecoveryPlus`）/ `暴击几率: + 5%`（`CriticalChancePlus`）/ `暴击伤害: + 10`（`CriticalDamagePlus`） |
+| 需求 | `需要等级: 30` / `需要防御: 20` | **`等级要求 : 30`**（`RequiredLevel`）/ `所需防御 : {0}`（`RequiredAC`）/ `所需魔防 : {0}`（`RequiredMAC`）/ `攻击要求 : {0}`（`RequiredDC`）/ `魔法要求 : {0}`（`RequiredMC`）/ `道术要求 : {0}`（`RequiredSC`）/ `最高等级 : {0}`（`MaximumLevel`）/ `所需基础防御 : {0}`（`RequiredBaseAC`）/ `所需基础魔防 : {0}`（`RequiredBaseMAC`）/ `需要基础攻击 : {0}`（`RequiredBaseDC`）/ `需要基础魔法 : {0}`（`RequiredBaseMC`）/ `需要基础道术 : {0}`（`RequiredBaseSC`）/ `需要未知类型`（`UnknownTypeRequired`）——**12 种 `RequiredType` 全覆盖**，格式统一是「标签 : 值」（ASCII 冒号、两侧各一空格） |
+| 职业/价格 | `需要职业: 战士/法师` / `价格: 120 金` | **`职业要求 : …`**（`ClassRequired`，值 = `RequiredClass.ToLocalizedString()`）/ **`出售价格 : 60 金币`**（`SellingPriceGold`，值 = `item.Price() / 2` 且按 `"###,###,##0"` 加千分位，见 `GameScene.cs:8842`） |
+
+#### ③ 两处**有意偏离**（已在注释里标明）
+
+1. **多职业连接**：C# `RequiredClass.ToLocalizedString()` 先查 `Enum.RequiredClass_<枚举名>`，
+   查不到就回退 `@enum.ToString()` ⇒ 多职业组合会打印**英文**枚举名（如 `Warrior, Assassin`）。
+   本端改成中文、以 `/` 连接（`战士/刺客`）；**单职业**（战士/法师/道士/刺客/弓箭手）与
+   **命名组合** `WarWizTao`（`战法道`）、`None`（`全职业`）仍与中文包逐字一致。
+2. **暴击几率**保留 `%` 后缀（C# 的 `CriticalChancePlus` 文案里没有 `%`，本端数值是整数百分比，
+   去掉会看不出量纲）。
+
+#### ④ 本轮**没动**的部分（下一轮的线索）
+
+`:953` 那批属于 `NameInfoLabel` 与绑定/套叠/GM 段的行本端仍是旧文案：
+`类型: 武器`（C# `ItemTypeWeapon`=「武器」等价，但 C# 还有 `ItemGrade*` 品阶前缀）、
+`耐久: 30/30`（C# `Durability`=「耐久:」+ `"{0} {1}/{2}"`）、`数量: 2`、
+`重量: 5`（C# `Weight`=「重量:」已一致）——要按 `NameInfoLabel`/`BindInfoLabel` 逐行再对一遍。
+
+#### ⑤ 门禁
+
+| 门禁 | 结果 |
+|---|---|
+| `cargo test --lib` | **930 passed / 0 failed**（更新 `tooltip_lines_pairs_and_singles` / `tooltip_lines_requirements_class` / `quest_reward_item_tooltip_lines_from_item_info` 为 C# 口径，新增 `required_class_text` 断言） |
+| `cargo test --test b0001_smoke --test ui_alignment` | **2 + 58 passed** |
+| `ui_interact_sweep.ps1` | **46/47、fail=0、exit=0** |
+
+> **未采集**：提示的**像素**对照还没做——20 扇窗 A/B 清单里没有"悬停某件物品"这一行，
+> 而且截图前按 §3.0 会把光标移开。本轮的文字出处是 C# 源码 + 中文包（逐 key 可复核），
+> 像素级复核留给后续加一行 hover 夹具时做。
+
 ### 3.2dq 标签**默认不参与拾取**（对齐 C# `MirLabel.NotControl`）——把 §3.2dp 的单点修补做成系统化（2026-10-01）
 
 #### ① 起因
