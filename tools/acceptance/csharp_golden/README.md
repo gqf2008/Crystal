@@ -4318,6 +4318,46 @@ spawn」配对，中间夹了个 `for` 循环体就串行了。
 `Prguse[2447]` 信用图标：本端数据里**没有这一帧**（越界）⇒ 无像素可比；原版帧也没拍到过该状态
 （要 `RewardCredit > 0` 的任务）。本条只到"确认它取不到帧、不生成节点"为止，不推像素结论。
 
+### 3.2dw 物品提示补**绑定标位**一段（C# `BindInfoLabel`，13 个 `BindMode` 标位）（2026-10-01）
+
+C# `BindInfoLabel`（`GameScene.cs:8887-9165`）对每个 `BindMode` 标位输出一行，条件统一是
+`Bind != None && Bind.HasFlag(X)`，文案取中文包、颜色统一 `Color.Yellow`。次序与文案（逐条核过）：
+
+| 标位 | 文案（中文包） |
+|---|---|
+| `DontDeathdrop` 0x0001 | 死亡时不可掉落 |
+| `DontDrop` 0x0002 | 不可丢弃 |
+| `DontUpgrade` 0x0040 | 不可升级 |
+| `DontSell` 0x0004 | 不可出售 |
+| `DontTrade` 0x0010 | 不可交易 |
+| `DontStore` 0x0008 | 不可存放 |
+| `DontRepair` 0x0020 | 不可修理 |
+| `NoSRepair` 0x0400 | 不可特殊修理 |
+| `BreakOnDeath` 0x0100 | 死亡时损坏 |
+| `DestroyOnDrop` 0x0080 | 丢弃时销毁 |
+| `NoWeddingRing` 0x0800 | 不能作为结婚戒指 |
+| `NoHero` 0x8000 | 英雄不可使用 |
+| `BindOnEquip` 0x0200 | 装备时绑定灵魂 |
+
+本端 `ItemInfo.bind`（`BindMode` bitflags，位值同 C#）**早就有**，但 `InvItem` 没带过来、
+提示也就没画。本轮：`InvItem` 增 `bind_mode: u16`（`to_inv_item` 里取 `i.bind.bits()`），
+提示按上表次序逐条输出（标位为 0 不出行）；位置按 C# 的拼装次序放在**最后**
+（`Need` → **`Bind`** → `Overlap` → `Story` → `GM`）。
+
+#### 门禁
+
+| 门禁 | 结果 |
+|---|---|
+| `cargo test --lib` | **933 passed / 0 failed**（新增 `tooltip_bind_flag_lines_match_csharp`：三条标位 + **C# 次序**断言 + 「标位 0 不出行」负对照） |
+| `cargo test --test b0001_smoke --test ui_alignment` | **2 + 58 passed** |
+| `ui_interact_sweep.ps1` | **46/47、fail=0、exit=0** |
+| `rustfmt --check` | `inventory.rs` 6 处 / `packets/mod.rs` 0 处 = master 既有基线（未新增） |
+
+> 仍未对齐：`AwakeInfoLabel`（需觉醒类型名）、`SocketInfoLabel` 之后的 `SoulboundTo`（需绑定者**名字**，
+> 本端只有 `soul_bound_id`）、`Cursed`、`CanBeUsedOn`（需可镶嵌类型清单）、过期/封印/租借的时间戳
+> （需 `ExpiryTime`/`RentalInformation` 的到期时刻）、`OverlapInfoLabel`（Ctrl+点击交互提示）、
+> `StoryInfoLabel`、`GMMadeLabel`。
+
 ### 3.2dv 物品提示补**镶嵌孔**一段（C# `SocketInfoLabel`）（2026-10-01）
 
 C# `SocketInfoLabel`（`GameScene.cs:8622-8670`）逐孔输出：
