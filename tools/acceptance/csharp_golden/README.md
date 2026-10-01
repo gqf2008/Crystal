@@ -4304,6 +4304,57 @@ spawn」配对，中间夹了个 `for` 循环体就串行了。
 `Prguse[2447]` 信用图标：本端数据里**没有这一帧**（越界）⇒ 无像素可比；原版帧也没拍到过该状态
 （要 `RewardCredit > 0` 的任务）。本条只到"确认它取不到帧、不生成节点"为止，不推像素结论。
 
+### 3.2dc §3.2cs 的切口**打通**：用「同源 C# 客户端 ＋ 同源 C# 服务端」拿到**中文原版帧**（2026-10-01）
+
+#### ① 之前为什么拿不到
+
+§3.2cs 只换**客户端**（`dotnet build Client\Client.csproj`）去打沙箱里那份 **2025-10-05** 的服务端：
+登录能过、**进图后掉线**（服务端日志 `女道士 has connected` → 约 8s 后 `Has logged out. Reason: User gone missing`）——
+两边不是同一套协议/数据。要拿中文原版帧必须**两边同源**。
+
+#### ② 同源一对的配方（可复跑）
+
+```powershell
+dotnet build Client\Client.csproj            -c Release    # → Build\Client\Release\
+dotnet build Server.MirForms\Server.csproj   -c Release    # → Build\Server\Release\（本轮 19s，0 error）
+```
+
+1. **客户端**：把重建产物（`Client.exe` / `Client.dll` / `Shared.dll` / `Client.deps.json` / `Client.runtimeconfig.json` /
+   `Localization\`）覆盖到一份客户端目录副本；`Client\Mir2Config.ini` 里
+   - `[Launcher] Enabled=False` —— 跳过 WebView 启动器、直进游戏窗体（§3.2cs 记的"能起但登录接不进"就是没跳启动器）；
+   - `[Game] Language=Chinese` —— 走 `Localization\Chinese.json`（**文本**，不含美术）。
+2. **服务端**：另起一份目录（`Maps`/`Envir` 等大目录用 **junction** 指回原沙箱，只拷 `Configs\` 与 DB/小文件），
+   `Configs\Setup.ini` 改 `Port=7101`。
+   ⚠️ **必须先让开 3000 端口**：`Envir.StartNetwork()`（`Server/MirEnvir/Envir.cs:3428-3432`）在
+   `StatusPortEnabled`（**硬编码 true**）下会绑 **3000**；被占时整个 WorkLoop 抛
+   `SocketException (10048)` 直接死掉——现象是日志里 `Envir Started` 之后**没有 `Network Started.`**。
+   本轮即先停掉沙箱那份旧服务端（当时它空闲、无连接）才起来。
+3. **顺序**：`Server.exe`（等到 `Envir Started` + `Network Started.`）→ `Client.exe` →
+   `tools\acceptance\csharp_golden\csharp_kbd_login.ps1 -SandboxRoot <副本> -Account 333 -Password 333333`。
+
+#### ③ 登录助手修的两处（`csharp_kbd_login.ps1`，本轮）
+
+| 症状 | 根因 | 修法 |
+|---|---|---|
+| 重建版报 `login text boxes not found (got 0)` | `Get-LoginBoxes` 的正则 `rect=\((\d+),(\d+)\)` **不接受负坐标**，而重建版两个 Edit 的窗口坐标是 **`(-31232,-31684)`**（.NET 未定位控件的默认值）⇒ 解析恒空 | 正则改 `rect=\((-?\d+),(-?\d+)\)` |
+| 账号/密码框分不清 | 重建版两个框 **Y 相同**（都在屏幕外），"小 Y = 账号框"的老口径**平局** | 改用 Win32 样式位：**账号框 = 不带 `ES_PASSWORD`，密码框 = 带**（`GetWindowLong(GWL_STYLE) & 0x20`）；老路径留作兜底 |
+| 回车不触发登录 | `TextBox_KeyPress`（`LoginScene.cs:481`）挂在**框**上 | 回车前显式 `SetFocus(密码框)` 再发 `WM_CHAR 0x0D` |
+
+#### ④ 实测证据
+
+| 场景 | 结果 |
+|---|---|
+| **原版客户端回归**（旧服务端 7100） | `login boxes: id=0xE3204E pw=0x3A01078` → `User logging in` / `User logged in` → `女道士 has connected` ✓ 帧：`orig_kbd_01_select/02_ingame/ingame_F9..F11` |
+| **同源一对**（重建客户端 + 重建服务端 7101） | 同样登录成功、**进图后客户端存活**（不再掉线）；帧 `shots/orig_cn_ingame.png`（HUD 中文：`模式 和平` / `跟随 点击屏幕移动`）、`orig_cn_inv2.png` / `orig_ingame_F9_inventory.png`（背包 `Title[196]` @(0,0) 不符率 **0.0486**） |
+
+**顺带一条口径**：背包页签 `ITEMS I / ITEMS II / QUEST` 是**美术**（烘焙在 `.Lib` 里），中文版仍是英文
+⇒ **那一行的差异不是"语言"**；`Language=Chinese` 只影响**文本**（标签/提示/聊天/列表字），不影响美术字。
+
+#### ⑤ 下一轮要做的
+
+把 A/B 表里"语言差 / 不可判"的那些行**换成这次采到的中文原版帧**重比。注意：要比出意义必须先按 §3.2aq
+把两侧摆到**同机位**（本轮只验证了**链路与取帧**，底部聊天/模式标签带的粗比仍被世界差主导，**不作为结论**）。
+
 ### 3.2db 小档下本端坐标文字**停在 y=131**（45 高的面板外）——修掉 ＋ 记小档残余的两层（2026-10-01）
 
 #### ① 缺陷（C# 判据 + 原版帧）

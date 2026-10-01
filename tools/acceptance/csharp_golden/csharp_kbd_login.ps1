@@ -32,6 +32,19 @@ public class CsKbd {
     public IntPtr hwndActive, hwndFocus, hwndCapture, hwndMenuOwner, hwndMoveSize, hwndCaret; public RECT rcCaret; }
   public struct RECT { public int Left,Top,Right,Bottom; }
   public static long Focus(uint tid){ var g=new GTI(); g.cbSize=Marshal.SizeOf(g); GetGUIThreadInfo(tid, ref g); return (long)g.hwndFocus; }
+  // 2026-10-01（§3.2cs 复跑）：账号框/密码框**不能按 Y 排序区分** —— 实测重建版（当前源码
+  // `dotnet build Client\Client.csproj`）两个 Edit 的窗口坐标**相同**（都在屏幕外 -31232,-31684，
+  // 来自 .NET 未定位控件的默认值），Y 排序恒为平局。判据改用 Win32 样式位：密码框带 `ES_PASSWORD`。
+  [DllImport("user32.dll", EntryPoint="GetWindowLongW")] public static extern int GetWindowLong(IntPtr h, int i);
+  [DllImport("user32.dll")] public static extern IntPtr SetFocus(IntPtr h);
+  [DllImport("user32.dll")] public static extern bool AttachThreadInput(uint a, uint b, bool f);
+  [DllImport("kernel32.dll")] public static extern uint GetCurrentThreadId();
+  public static bool IsPassword(IntPtr h){ return (GetWindowLong(h, -16) & 0x20) != 0; }
+  public static void FocusIn(uint tid, IntPtr h){
+    AttachThreadInput(GetCurrentThreadId(), tid, true);
+    SetFocus(h);
+    AttachThreadInput(GetCurrentThreadId(), tid, false);
+  }
 }
 "@
 
@@ -48,10 +61,19 @@ function Get-LoginBoxes {
   $edits = @()
   for ($i = 0; $i -lt 15; $i++) { $edits = @(Get-CsEdits); if ($edits.Count -ge 2) { break }; Start-Sleep -Seconds 2 }
   $parsed = $edits | ForEach-Object {
-    $m = [regex]::Match($_, 'hwnd=0x([0-9A-F]+) vis=\S+ rect=\((\d+),(\d+)\)')
-    if ($m.Success) { [pscustomobject]@{ Hwnd = [Convert]::ToInt64($m.Groups[1].Value, 16); Y = [int]$m.Groups[3].Value } }
-  } | Sort-Object Y
-  return $parsed
+    # 坐标**可能是负数**（控件在屏幕外时；实测重建版恒为 (-31232,-31684)）⇒ 正则必须吃 `-?`
+    $m = [regex]::Match($_, 'hwnd=0x([0-9A-F]+) vis=\S+ rect=\((-?\d+),(-?\d+)\)')
+    if ($m.Success) {
+      $h = [IntPtr][Convert]::ToInt64($m.Groups[1].Value, 16)
+      [pscustomobject]@{ Hwnd = $h; Y = [int]$m.Groups[3].Value; IsPassword = [CsKbd]::IsPassword($h) }
+    }
+  }
+  # 首选判据：账号框 = 不带 `ES_PASSWORD` 的那个，密码框 = 带 `ES_PASSWORD` 的那个（两种客户端都成立）。
+  $acct = $parsed | Where-Object { -not $_.IsPassword } | Select-Object -First 1
+  $pwd  = $parsed | Where-Object { $_.IsPassword } | Select-Object -First 1
+  if ($acct -and $pwd) { return @($acct, $pwd) }
+  # 兜底：老路径（按 Y 排序，小 Y = 账号框）
+  return @($parsed | Sort-Object Y)
 }
 
 Write-Host '=== start original client ==='
@@ -80,7 +102,12 @@ Start-Sleep -Milliseconds 700
 $pid2 = 0
 $tid = [CsKbd]::GetWindowThreadProcessId($global:csHwnd, [ref]$pid2)
 $focus = [CsKbd]::Focus($tid)
-$target = if ($focus -ne 0) { [IntPtr]$focus } else { $pwBox }
+# 2026-10-01：先把焦点**显式**放到密码框再回车 —— 登录处理挂在两个框共用的 `TextBox_KeyPress` 上
+# （`LoginScene.cs:481`），前提是消息发到**框**而不是窗体；重建版实测 `GetGUIThreadInfo` 的
+# 焦点可能就是框本身，但这步显式化后两种客户端都稳。
+$target = $pwBox
+[CsKbd]::FocusIn($tid, $pwBox)
+Start-Sleep -Milliseconds 200
 
 Write-Host '=== Enter #1: login (LoginDialog.TextBox_KeyPress -> OKButton.InvokeMouseClick) ==='
 Send-Key $target 0x0D
