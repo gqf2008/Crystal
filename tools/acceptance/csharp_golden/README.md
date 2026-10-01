@@ -4304,6 +4304,52 @@ spawn」配对，中间夹了个 `for` 循环体就串行了。
 `Prguse[2447]` 信用图标：本端数据里**没有这一帧**（越界）⇒ 无像素可比；原版帧也没拍到过该状态
 （要 `RewardCredit > 0` 的任务）。本条只到"确认它取不到帧、不生成节点"为止，不推像素结论。
 
+### 3.2db 小档下本端坐标文字**停在 y=131**（45 高的面板外）——修掉 ＋ 记小档残余的两层（2026-10-01）
+
+#### ① 缺陷（C# 判据 + 原版帧）
+
+C# `MiniMapDialog`：`LocationLabel.Location = new Point(46, y)` 在 **`SetBigMode()`（`MainDialogs.cs:2067`）
+与 `SetSmallMode()`（`:2053`）里都写**，文本在 `Process()` 每帧写（`:2080`）——**与 `_bigMode` 无关**。
+
+本端 `Client-Bevy/src/game/dialogs/minimap.rs` 把这段更新写在
+`if !open || !big { hidden } else { …玩家点… pos_texts… }` 的 **big 分支里** ⇒ 切小档后标签
+**留在 `bottom_y = 131`**，而小档面板只有 45 高 ⇒ **整块看不见**。
+原版小档帧 `orig_win_Minimap.png` 里有「288, 616」，本端小档帧那一块是空的（同帧其余都对：标题、三个钮都在）。
+
+#### ② 修复 + 门禁
+
+把坐标文字更新**移出 big 分支**（顺带把玩家 tile 取一次复用），`tf.top = Val::Px(bottom_y)`（大 131 / 小 22）。
+新增单测 `minimap_pos_label_follows_mode`：跑 `spawn_minimap` + `minimap_ui_system`（`MiniMapMode{big:false}`），
+断言 `MiniMapPosText` 的 `Node.top == BOTTOM_Y_SMALL`。
+**阳性对照（实做）**：把 `tf.top` 改回 `if big { bottom_y } else { BOTTOM_Y_BIG }` ⇒ 该测试**红**
+（`小档时坐标文字须落在 bottom_y = 45-23 = 22`）。
+
+| 门禁 | 结果 |
+|---|---|
+| `cargo test --lib` | **922 passed / 0 failed**（改前 921，+1 新测） |
+| `cargo test --test b0001_smoke --test ui_alignment` | **2 + 58 passed** |
+| `ui_interact_sweep.ps1 -ManageServer` | **pass=45 / total=47 / fail=0 / skip=1 / exit=0**（skip = 既有的「big_map 未能锚到有大地图的地图」，与本改动无关） |
+| `rustfmt --edition 2024 --check minimap.rs` | **2 = master 基线** |
+
+#### ③ 小档残余（本轮**未修**，如实记，供下一轮）
+
+修完这一处后小档整块仍有差异：**本端 41.1% vs 原版 27.5%**（截断法，见 §3.2da ②）。逐钮量（小档位）：
+
+| 钮 | 位置 | 原版不符 | 本端不符 |
+|---|---|---|---|
+| 切换钮 `Prguse[2102]` | (1007,3) | **0.0%** | 12.9% |
+| 邮件钮 `Prguse[2099]` | (902,22) | **0.0%** | **65.5%**（另两态 2100=80.7% / 2101=76.5% 也都不是） |
+| 大地图钮 `Prguse[2096]` | (923,22) | **0.0%** | 65.5%（2097=76.3% / 2098=74.7%） |
+
+两钮的**位置与尺寸都对**（`ui_nodes_at(910,30)` 命中 `20x20 @(902,22)`、`visibility=Inherited`），
+但像素整体偏暗：同区域 **原版/美术 = 1.00 / 1.00**，**本端/美术 = 0.61 / 0.66 / 0.94**（R、G 被压暗、B 几乎不变）
+⇒ 是**一层偏暖的暗色**盖/混在上面，不是"画错状态"、也不是位移。
+
+覆盖范围与 `MAP_RECT (3,22,120,108)`（绝对 (901,22)）吻合；但 `minimap_probe` 报图区节点 `visible=Hidden`，
+`ui_nodes_at(960,35)` 也把它列为 `Hidden` —— **同一位置另有一颗 `5630v0`、rect `(890,29,111,56)`、`visibility=Visible`、
+祖先为空的节点**。⇒ **下一轮切口**：查 `5630v0` 是谁（疑似遮罩层），并核对小档下 `MiniMapMapArea` 的
+`BackgroundColor`（深绿 `0.12/0.16/0.12`）是否仍被画出来。
+
 ### 3.2da §3.2cz 的「本端小档未采集」**已收口** ＋ 一个「贴边出屏面板」的量测口径坑（2026-10-01）
 
 §3.2cz ③ 留的切口是「控制口 `key` RPC 推不出 `V` ⇒ 拿不到本端小档帧」。本轮发现**不用推 V 也能开**：
