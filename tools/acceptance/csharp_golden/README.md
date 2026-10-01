@@ -4318,6 +4318,67 @@ spawn」配对，中间夹了个 `for` 循环体就串行了。
 `Prguse[2447]` 信用图标：本端数据里**没有这一帧**（越界）⇒ 无像素可比；原版帧也没拍到过该状态
 （要 `RewardCredit > 0` 的任务）。本条只到"确认它取不到帧、不生成节点"为止，不推像素结论。
 
+### 3.2dm 两处「C# `VerticalCenter` 没补」的标签：Ranking 我的排名（高 6px）＋ Friends 页码（高 3px）（2026-10-01）
+
+#### ① 判据：`Size + VerticalCenter` 的标签，本端必须补一个 `DY`
+
+`MirLabel` 把文本画进 `Location+(1,1)` 起、尺寸同 `Size` 的盒子（`MirLabel.cs:222-226`）；
+带 `VerticalCenter` 时文本在这个盒子里**垂直居中**。本端 `spawn_label_center` / `spawn_label`
+只做（或不做）**水平**居中，**节点顶就是文本顶** ⇒ 凡是 C# 用 V-center 盒的标签，
+本端都要补一个下沉量，否则整块文字偏高（`DY ≈ (Size.h − 本端墨迹高)/2 − 本端墨迹偏移`）。
+
+#### ② Ranking「我的排名」：高 6px
+
+C# `MyRank`：`Location=(229,36)`、`Size=(82,22)`、`Font=Font(Settings.FontName, 10F, Bold)`、
+`DrawFormat = HorizontalCenter | VerticalCenter`（`RankingDialog.cs:193-203`）
+⇒ 文本盒窗口内 `[37,59]`、中心 48。
+
+帧证（同一对帧，Ranking 窗口原点 (350,163)；阈值 `sum(RGB)>380`）：
+
+| | 墨迹绝对行 | 窗口内行 |
+|---|---|---|
+| 原版「Ranked: 1」 | **206..215** | 43..52 |
+| 本端修前「排名：33」 | 200..210 | 37..47 |
+| 本端修后 | **206..216** | 43..53 |
+
+本端 12px 档墨迹顶 = 节点顶 + 1 ⇒ 节点顶取 `36 + MYRANK_DY(6) = 42`；修后顶端与原版对齐，
+底端多 1px 是 CJK 字形比拉丁帽高 1px（§3.2dk 的同一条字体度量差）。
+
+#### ③ Friends 页码「1 / 1」：高 3px
+
+C# `PageNumberLabel`：`Location=(87,216)`、`Size=(83,17)`、`HorizontalCenter | VerticalCenter`
+（`FriendDialog.cs:70-77`）⇒ 文本盒 `[217,234]`。本端容器（`FriendPageLabel`）的**位置与尺寸都对**，
+差的只是里面文本节点没做垂直居中（`top` 写了 0）。
+
+| | 墨迹绝对行 |
+|---|---|
+| 原版 | **469..476** |
+| 本端修前 | 466..475 |
+| 本端修后（`FRIEND_PAGE_LABEL_DY = 3`） | **470..477** |
+
+#### ④ 全表复跑无回归
+
+`golden_ab_diff.py`：Ranking **9.0% → 8.9%**、Friends 2.3%（1674 → **1669** 像素）；
+其余同批与 §3.2dl 一致（Group 0.0 / Skills 1.7 / Inventory 2.9 / Options 6.2 / Quests 6.9 /
+Help 10.9 / Keybind 15.1 / Relationship 12.1）。
+
+#### ⑤ 门禁
+
+| 门禁 | 结果 |
+|---|---|
+| `cargo test --lib` | **927 passed / 0 failed**（新增 `myrank_label_is_vertically_centered_in_csharp_box`、`friend_page_label_is_vertically_centered_in_csharp_box`） |
+| `cargo test --test b0001_smoke --test ui_alignment` | **2 + 58 passed** |
+| `ui_interact_sweep.ps1 -ManageServer` | **pass=46 / total=47 / fail=0 / skip=0 / exit=0** |
+| `rustfmt --edition 2024 --check` | `ranking.rs` 1 处 / `friend.rs` 4 处 = master 既有 import 排序基线（**未新增**） |
+| 实机 A/B 复跑 | 构建 `6044b53f5` dirty=0；数值见 ②③④ |
+
+#### ⑥ 下一轮可直接照做的线索
+
+这一类是**通用**的：C# `MirLabel { Size=(w,h); DrawFormat 含 VerticalCenter }` 在本端都要补 `DY`。
+还没逐个量过的候选：`Help` 页标题（Bold10 居中 242×30）、`GameShop` 分类行、`Mail` 各行、
+`CharacterDialog` 的 27 个默认标签（`Ranking` 的行标签是 `AutoSize`，V-center 会被顶掉 ⇒ 本端
+节点顶对齐即可，本轮实测已对）。判据一律是**同一帧对里量两侧的墨迹行区间**，别按公式推。
+
 ### 3.2dl 小地图残留三件小事定性：**标题/坐标文字**按 C# 居中盒落位 ＋ 坐标串补空格（2026-10-01）
 
 #### ① 四件小事的结论一览

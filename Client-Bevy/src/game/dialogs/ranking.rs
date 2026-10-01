@@ -162,6 +162,16 @@ pub const ONLINE_POS: (f32, f32) = (190.0, PANEL_H - 20.0);
 /// 我的排名：`MyRank` 82x22 @(229,36)，`Color.BurlyWood`、水平垂直居中（`:197-206`）
 pub const MYRANK_POS: (f32, f32) = (229.0, 36.0);
 pub const MYRANK_SIZE: (f32, f32) = (82.0, 22.0);
+/// `MyRank` 的**垂直居中补偿**（C# `DrawFormat = HorizontalCenter | VerticalCenter`，
+/// `Size = (82,22)`、`Location = (229,36)`，`RankingDialog.cs:193-203`）。
+///
+/// `MirLabel` 把文本画进 `Rectangle(1, 0, 82, 22)`（`MirLabel.cs:222-226`）⇒ 文本盒窗口内
+/// `[37,59]`、中心 48。本端 `spawn_label_center` 只做**水平**居中，节点顶即文本顶
+/// （12px 档实测墨迹顶 = 节点顶 + 1）⇒ 要让墨迹落回 C# 的 43..52，节点顶须取 `36 + 6`。
+///
+/// 帧证（§3.2dm，`orig_win_Ranking.png` vs `ours_win_Ranking.png`）：原版「Ranked: 1」墨迹
+/// 窗口内行 43..52（绝对 206..215），本端修前「排名：33」行 37..47（绝对 200..210）——**高 6px**。
+pub const MYRANK_DY: f32 = 6.0;
 
 /// C# 行文字色（`RankingRow.Update` `:396-424`）：1=Gold、2=Silver、3=RosyBrown、
 /// 自己=Green、其余=White。注意 C# 的 `if (==3) {} else if (自己) {} else if (>3) {}`
@@ -540,7 +550,7 @@ fn spawn_ranking(
             &font,
             "",
             MYRANK_POS.0 + MYRANK_SIZE.0 / 2.0,
-            MYRANK_POS.1,
+            MYRANK_POS.1 + MYRANK_DY,
             MYRANK_SIZE.0,
             12.0,
             COLOR_BURLY_WOOD,
@@ -856,6 +866,23 @@ mod tests {
             PANEL_ORIGIN,
             (350.0, 163.0),
             "C# (1024-324)/2=350、(768-441)/2=163（整数除法）"
+        );
+    }
+
+    /// §3.2dm：`MyRank` 标签在 C# 里是 `Size=(82,22)` + `HorizontalCenter | VerticalCenter`
+    /// （`RankingDialog.cs:193-203`），本端 `spawn_label_center` 只做水平居中 ⇒ 必须补
+    /// 垂直居中量 `MYRANK_DY`，否则整条「我的排名」比原版**高 6px**（帧证见常量注释）。
+    ///
+    /// 阳性对照（实做）：把 `MYRANK_DY` 改回 0 ⇒ 本测试红。
+    #[test]
+    fn myrank_label_is_vertically_centered_in_csharp_box() {
+        assert_eq!(MYRANK_POS, (229.0, 36.0), "C# MyRank.Location");
+        assert_eq!(MYRANK_SIZE, (82.0, 22.0), "C# MyRank.Size");
+        assert_eq!(
+            MYRANK_POS.1 + MYRANK_DY,
+            42.0,
+            "C# 文本盒 = Location+(1,1) 起高 22 ⇒ [37,59]；本端 12px 墨迹顶 = 节点顶 + 1 \
+             ⇒ 节点顶取 42 时墨迹落在 C# 的 43..52"
         );
     }
 

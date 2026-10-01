@@ -57,6 +57,16 @@ pub fn friend_row_pos(i: usize) -> (f32, f32) {
 /// 上一页 `Prguse2[240/241/242]` @(70,218) 16x16、下一页 `Prguse2[243/244/245]` @(171,218) 16x16
 pub const FRIEND_PAGE_LABEL_POS: (f32, f32) = (87.0, 216.0);
 pub const FRIEND_PAGE_LABEL_SIZE: (f32, f32) = (83.0, 17.0);
+/// 页码标签的**垂直居中补偿**（C# `PageNumberLabel` 是
+/// `Size = (83,17)` + `DrawFormat = HorizontalCenter | VerticalCenter`，`FriendDialog.cs:70-77`）。
+///
+/// `MirLabel` 的文本盒 = `Location + (1,1)` 起、高 17 ⇒ 窗口内 `[217,234]`、中心 225.5；
+/// 本端 12px 档墨迹顶 = 节点顶 + 2 ⇒ 要让墨迹顶端落回原版的窗口内 221（绝对 469），
+/// 节点顶取 `216 + 3`。
+///
+/// 帧证（§3.2dm，`orig_win_Friends.png` vs `ours_win_Friends.png`）：原版「1 / 1」墨迹
+/// 绝对行 469..476，本端修前 466..475——**高 3px**。
+pub const FRIEND_PAGE_LABEL_DY: f32 = 3.0;
 pub const FRIEND_PREV_POS: (f32, f32) = (70.0, 218.0);
 pub const FRIEND_NEXT_POS: (f32, f32) = (171.0, 218.0);
 pub const FRIEND_PAGE_BTN_SIZE: (f32, f32) = (16.0, 16.0);
@@ -374,7 +384,8 @@ fn spawn_friend(
                 Node {
                     position_type: PositionType::Absolute,
                     left: Val::Px(0.0),
-                    top: Val::Px(0.0),
+                    // C# 的 `VerticalCenter` 补偿（见 `FRIEND_PAGE_LABEL_DY` 注释）
+                    top: Val::Px(FRIEND_PAGE_LABEL_DY),
                     width: Val::Px(FRIEND_PAGE_LABEL_SIZE.0),
                     ..default()
                 },
@@ -732,6 +743,31 @@ pub fn friend_whisper_command(name: &str, online: bool) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// §3.2dm：C# `PageNumberLabel` 是 `Size=(83,17)` + `HorizontalCenter | VerticalCenter`
+    /// （`FriendDialog.cs:70-77`）；本端把文本节点顶直接放在 `Location.y=216`（容器不动），
+    /// 少算了垂直居中 ⇒ 「1 / 1」比原版**高 3px**（帧证见常量注释）。
+    ///
+    /// 阳性对照（实做）：把 `FRIEND_PAGE_LABEL_DY` 改回 0 ⇒ 本测试红。
+    #[test]
+    fn friend_page_label_is_vertically_centered_in_csharp_box() {
+        assert_eq!(
+            FRIEND_PAGE_LABEL_POS,
+            (87.0, 216.0),
+            "C# PageNumberLabel.Location"
+        );
+        assert_eq!(
+            FRIEND_PAGE_LABEL_SIZE,
+            (83.0, 17.0),
+            "C# PageNumberLabel.Size"
+        );
+        assert_eq!(
+            FRIEND_PAGE_LABEL_POS.1 + FRIEND_PAGE_LABEL_DY,
+            219.0,
+            "C# 文本盒 = Location+(1,1) 起高 17 ⇒ [217,234]；本端 12px 墨迹顶 = 节点顶 + 2 \
+             ⇒ 节点顶取 219 时墨迹顶端落在原版的窗口内 221（绝对 469）"
+        );
+    }
 
     /// 门禁（金标准 §3.2f）：好友列表必须是 **12 行 × 2 列**的格子 + 翻页条，逐项对齐 C#：
     /// `FriendDialog.Rows = new FriendRow[12]`、`FriendRow.Size = (115,17)`、
