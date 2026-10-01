@@ -69,9 +69,15 @@ const ACTION_ORDER: [RelationshipAction; 5] = [
 /// C# 信息行 `MirLabel` 是 `Location`(左上) + `Size.(200,30)` + `DrawFormat.VerticalCenter`
 /// ⇒ 文本**垂直居中在 30px 高的盒子里**，即文本中心 = `y + 15`。
 ///
-/// 本端 `spawn_label` 是左上锚点、无垂直居中，实测文本高约 11px（A/B：本端文本行
-/// 41..51 / 66..75，C# 51..60 / 76..85）⇒ 顶边补偿 `(30 - 11) / 2 = 9.5`。
-pub const LINE_PAD_Y: f32 = 9.5;
+/// §3.2dj：字号取 C# 的 **10F**（`RelationshipDialog.cs:170/182/194/206`），
+/// `1pt = 4/3 px`（96 DPI）⇒ **13px**（本端此前写 12px，实机帧里字形带 11px，而原版 **14px**）。
+/// 本端 `spawn_label` 是左上锚点、无垂直居中：13px 字体的字形高约 12px
+/// ⇒ 顶边补偿 `(30 - 12) / 2 = 9`，保证文本中心仍落在 C# 的 `y + 15`。
+pub const LINE_PAD_Y: f32 = 9.0;
+/// C# 四行信息标签的 `ForeColour = Color.LightGray`（`RelationshipDialog.cs:166/178/190/202`）
+/// = **#D3D3D3 / (211,211,211)**；实机帧核实：原版那四行的亮像素**全部恰为 (211,211,211)**、
+/// 无一例外（719/719），而本端此前用 `Color::WHITE`。
+pub const LINE_COLOUR: Color = Color::srgb(211.0 / 255.0, 211.0 / 255.0, 211.0 / 255.0);
 
 /// 婚姻状态
 #[derive(Resource, Default)]
@@ -345,10 +351,10 @@ fn spawn_relationship(
                 9,
             );
         }
-        // C# 信息行 4 @(30,40/65/90/115)：30px 高、VerticalCenter ⇒ 文本中心 = y+15，
-        // 本端 12px 字体顶边补 `LINE_PAD_Y`
+        // C# 信息行 4 @(30,40/65/90/115)：Size (200,30) + VerticalCenter + `Font(...,10F)` + LightGray
+        // ⇒ 文本中心 = y+15、字号 ≈13px、颜色 (211,211,211)；本端左上锚点、顶边补 `LINE_PAD_Y`
         for (i, y) in [40.0, 65.0, 90.0, 115.0].into_iter().enumerate() {
-            spawn_label(p, &cjk, "", 30.0, y + LINE_PAD_Y, 12.0, Color::WHITE, 9)
+            spawn_label(p, &cjk, "", 30.0, y + LINE_PAD_Y, 13.0, LINE_COLOUR, 9)
                 .insert(RelationshipLine(i));
         }
         // 目标名输入框（TextInput id 13）@(30,140)，保留简化版求婚目标输入。
@@ -777,20 +783,26 @@ mod tests {
         assert_eq!(ACTION_ORDER.len(), ACTION_BUTTONS.len());
     }
 
-    /// C# 四行信息是 `Location` + `Size(200,30)` + `VerticalCenter` ⇒ 文本中心 = `y + 15`；
-    /// 本端左上锚点 + 12px 字体（文本高约 11px）⇒ 顶边补 `(30 - 11) / 2 = 9.5`。
+    /// C# 四行信息是 `Location` + `Size(200,30)` + `VerticalCenter` + `Font(...,10F)` ⇒ 文本中心 = `y + 15`；
+    /// 本端左上锚点 + **13px** 字体（字形高约 12px）⇒ 顶边补 `(30 - 12) / 2 = 9`。
     #[test]
     fn relationship_line_vertical_centering_matches_csharp() {
-        assert_eq!(LINE_PAD_Y, 9.5);
+        assert_eq!(LINE_PAD_Y, 9.0);
         // 逐行中心（本端）≈ C# 的 y + 15；容差 ±1px（字体行高取整）
         for y in [40.0, 65.0, 90.0, 115.0] {
-            let ours_center = y + LINE_PAD_Y + 11.0 / 2.0;
+            let ours_center = y + LINE_PAD_Y + 12.0 / 2.0;
             assert!(
                 (ours_center - (y + 15.0)).abs() <= 1.0,
                 "y={y}: 本端中心 {ours_center} vs C# {}",
                 y + 15.0
             );
         }
+        // 颜色：C# `Color.LightGray` = (211,211,211)（实机帧里原版四行亮像素全是这个值）
+        assert_eq!(
+            LINE_COLOUR.to_srgba().to_u8_array()[0],
+            211,
+            "四行文字色 = C# Color.LightGray（211,211,211）"
+        );
     }
 
     /// 2026-09-30（§3.2ce）：四行文案必须**逐字**等于 C# `UpdateInterface` 用的

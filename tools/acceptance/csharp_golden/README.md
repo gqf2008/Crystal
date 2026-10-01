@@ -4318,6 +4318,49 @@ spawn」配对，中间夹了个 `for` 循环体就串行了。
 `Prguse[2447]` 信用图标：本端数据里**没有这一帧**（越界）⇒ 无像素可比；原版帧也没拍到过该状态
 （要 `RewardCredit > 0` 的任务）。本条只到"确认它取不到帧、不生成节点"为止，不推像素结论。
 
+### 3.2dj Relationship 四行信息：**字号（C# 10F→13px）与颜色（`LightGray`）**对齐 ＋ 一条**平台级**负结果（2026-10-01）
+
+#### ① 两处按 C# 源码对齐
+
+`RelationshipDialog.cs:161-207`：四行 `MirLabel` 都是 `Size=(200,30)` + `VerticalCenter` + **`Font(Settings.FontName, 10F)`** +
+**`ForeColour = Color.LightGray`**。
+
+- **字号**：本端原先写 **12px**（按 9F 折算的），C# 是 **10F** ⇒ 改 **13px**（10pt × 4/3 ≈ 13.3）；
+  `LINE_PAD_Y` 9.5 → **9.0**（13px 字形高约 12px ⇒ `(30-12)/2 = 9`），文本中心仍落在 C# 的 `y + 15`。
+- **颜色**：本端 `Color::WHITE` ⇒ 改 **`(211,211,211)`**（`Color.LightGray`；新增 `LINE_COLOUR` 常量，单测里钉死 211）。
+
+**实测**（mock；先 `revive_town` + `dialog close hero_manage` 清夹具——§3.2cc ⑦ 记过 mock 常驻英雄窗会盖住屏幕中部）：
+
+| 指标 | 中文原版 | 改前 | 本次 |
+|---|---|---|---|
+| 四行字形带高度 | 14 / 14 / 14 px | 11 / 11 / 11 | **12 / 12 / 12** |
+| 首行带起点 y | **335** | 338 | **337** |
+| 文字最亮色 | 719 个亮像素**全是 (211,211,211)** | 207 亮像素 + 638 中间值 | 最亮 **211** ✓（中间值 899） |
+
+#### ② **负结果（重要）**：我方文字带**反走样**、C# 是**硬边字** ⇒ 平台级不可对齐
+
+原版那四行的像素**只有纯暗（18281 个）与纯亮（719 个）、中灰 0 个** ⇒ C#（GDI `TextRenderer`）在小字号下是**硬边**渲染；
+我方（`bevy_text`/Parley）走灰度 AA ⇒ 必然产生大量中间值。试过 Bevy 的 **`FontSmoothing::None`**：
+
+| | Relationship 整窗 vs 中文 | 文字带 vs 中文 | 观感 |
+|---|---|---|---|
+| 有 AA（现状） | 10.29% | 9.20% | 正常 |
+| **无 AA（实验）** | **10.00%** | **8.65%** | **中文小字号被"打碎"**：`伴侣`→`午爪`、`结婚日期`→`纟吉婚丿期`、`位置`→`亻立` |
+
+⇒ `FontSmoothing::None` 数值上确实更贴近原版（中间值 638 → **0**，与原版一致），但**毁 CJK 字形**
+（Bevy 文档也警告"矢量小字号需专门的像素字体"），**不能用**；`TextFont` 也没暴露 hinting 开关（`FontHinting` 只在内部 atlas key 里）。
+**结论**：这是**平台级**差异，也是**所有文本类窗口 A/B 残差的底噪**（Help 8%、Relationship 5%、Keybind 13% 里都含这一项）
+—— 以后别再用"关 AA"去消它（本轮已实测并回退）。
+
+#### ③ 门禁
+
+| 项 | 结果 |
+|---|---|
+| `cargo test --lib` | **923 passed / 0 failed**（`relationship_line_vertical_centering_matches_csharp` 内新增颜色断言） |
+| `cargo test --test b0001_smoke --test ui_alignment` | **2 + 58 passed** |
+| `ui_interact_sweep.ps1 -ManageServer` | **pass=46 / total=47 / fail=0 / skip=0 / exit=0**（`relationship` closed=YES） |
+| `rustfmt --edition 2024 --check relationship.rs` | **1 = master 基线** |
+
 ### 3.2di A/B 表在 **master `60274e4e2`** 整表复跑：两条修复生效、纯 UI 行无回归（2026-10-01）
 
 §3.2dh 那张表用的是 **mock 帧**（含 §3.2df/§3.2de 改前的旧二进制）。本轮把本会话合入的六个 UI 改动
