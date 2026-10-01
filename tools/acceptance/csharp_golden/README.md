@@ -4318,6 +4318,79 @@ spawn」配对，中间夹了个 `for` 循环体就串行了。
 `Prguse[2447]` 信用图标：本端数据里**没有这一帧**（越界）⇒ 无像素可比；原版帧也没拍到过该状态
 （要 `RewardCredit > 0` 的任务）。本条只到"确认它取不到帧、不生成节点"为止，不推像素结论。
 
+### 3.2dd 「语言对齐」这条线**收敛到两行**：20 扇键位窗的中英双版本对表（2026-10-01）
+
+承接 §3.2dc（同源 C# 一对可跑）。本轮把**原版侧 20 扇键位窗**一次性采成**中文版**，再用同一批矩形做三向对表，
+回答"哪些行的残差真的是语言"。**这一步不依赖同机位**（比的是窗矩形内的像素，面板基本不透明）。
+
+#### ① 采中文版 20 扇窗（可复跑）
+
+用 §3.2dc 的同源一对，但**不改动沙箱服务端**：把同源服务端的 `[Network]` 指到**另一个回环地址**
+`127.0.0.2`（`Configs\Setup.ini`：`IPAddress=127.0.0.2`、`Port=7101`），客户端 `Mir2Config.ini` 同样指过来。
+这样 `Envir.StartNetwork()` 要硬绑的 **3000** 落在 `127.0.0.2:3000`，与沙箱的 `127.0.0.1:3000` **不冲突**
+（省掉"先停沙箱服务端"这一步）。
+
+```powershell
+# 1) 起同源服务端（127.0.0.2:7101），等日志出现 Envir Started + Network Started.
+# 2) 客户端 Client\Mir2Config.ini：[Network] IPAddress=127.0.0.2 / Port=7101；[Launcher] Enabled=False；[Game] Language=Chinese
+# 3) 登录（csharp_kbd_login.ps1）后：
+pwsh -NoProfile -File tools\acceptance\csharp_golden\golden_kbd_windows.ps1 -SandboxRoot $env:TEMP\golden_sandbox
+```
+
+⚠️ 该脚本会**覆盖** `orig_win_*.png` 与 `orig_baseline_none.png`（它按动作名写死文件名）。本轮做法：
+跑之前先把英文那批复制成 `orig_en_win_*.png`，跑完把新帧改名成 `orig_cn_win_*.png`（基线为 `orig_cn_baseline_none.png`），
+再把英文批**还原回原名**、并用原版客户端重采一次英文基线（否则文件名会指着一份中文帧）。两侧 20 扇全采到（`no_effect=0`）。
+
+#### ② 三向对表（矩形口径同 `ab_result_20261001.json`；百分比 = 矩形内不符像素占比）
+
+| 行 | 英文原版 vs 中文原版 | 我方 vs 英文原版 | 我方 vs 中文原版 |
+|---|---|---|---|
+| Help | **8.68** | 10.16 | **8.44** |
+| Relationship | **6.31** | 11.25 | **10.29** |
+| Inventory | 2.44 | 2.71 | 1.77 |
+| Friends | 1.32 | 2.07 | 2.08 |
+| Keybind | 1.11 | 15.93 | 15.82 |
+| Quests | 0.85 | 5.19 | 5.23 |
+| GameShop | 0.81 | 22.80 | 22.83 |
+| Ranking | 0.73 | 7.06 | 7.01 |
+| Equipment / Skills | 0.68 | 4.74 / 1.38 | 4.74 / 1.37 |
+| Bigmap | 0.49 | 47.40 | 47.40 |
+| Options | 0.01 | 4.75 | 4.75 |
+| Group | 0.00 | 0.00 | 0.00 |
+
+（`Guilds 59.7 / Creature 44.9 / MountWindow 84.4 / Fishing 29.0 / Minimap 64.8 / Belt 91.1 / Skillbar 92.9` 的"英中差"是
+**两次原版采集的会话状态差**（守卫窗开不开、露不露世界），**不能**当语言读数，故不列入本表。）
+
+#### ③ 归属检验：把"两版原版不同的像素"当语言像素，看我方更像哪一版
+
+（`lang-px` = 英文/中文两版原版在矩形内不同的像素数；`ours~cn` = 在这些像素上"我方更接近中文版"的比例）
+
+| 行 | lang-px | ours~cn | 归属 |
+|---|---|---|---|
+| **Help** | 23678 | **58.0%** | 我方更像中文版 |
+| **Relationship** | 3477 | **57.7%** | 我方更像中文版 |
+| Inventory | 1820 | 68.5% | 我方更像中文版 |
+| Belt / Skillbar / Fishing / Friends | 8.3k / 5.6k / 16.7k / 947 | 56.6 / 54.0 / 51.0 / 52.8% | 弱偏好中文 |
+| Equipment / Skills / Quests / Ranking / Keybind / GameShop | 684 / 684 / 1251 / 1044 / 2434 / 2689 | 46–48% | 基本五五开 |
+| Options / Group | 10 / 0 | — | **文本未本地化** |
+| Guilds / Creature / MountWindow / Minimap / Bigmap | 152k / 76k / 103k / 13k / 1.9k | 15–43% | **状态差**（非语言，口径不适用） |
+
+#### ④ 结论（这条线到此可以说清楚）
+
+1. **"语言差"只对得上两行**：**Help（10.16% → 8.44%）** 与 **Relationship（11.25% → 10.29%）** —— 换成中文原版后残差下降，
+   且归属检验里我方文本更像中文版（58.0% / 57.7%）。
+2. **其余行的窗内文本压根没被本地化**（`Options 10px`、`Group 0px`；Inventory/Equipment/Skills/Quests/Ranking/Keybind/GameShop 的英中差 ≤2.4%）
+   ⇒ 它们的残差**不是语言**，之前把它们标成"语言差"是口径误判。
+3. **Help 窗的新线索**：逐 16px 行带看，标题/表头逐像素一致（y129-176 只差 0.5~1.2%），差异**集中在列表行区**
+   （y177 起我方 vs 中文 8~16%、vs 英文 9~18%）——目视对照：两侧标题都是「1. 快捷方式信息」、表头都是「快捷键 / 信息」，
+   但我方第一行显示「向上移动」、中文原版同位置是「Alt + Q 退出游戏 / Alt + X 登出 (ID) / F1-F8 技能按钮」
+   ⇒ **列表内容/起始行不同**，是下一轮该查的窗口（不是语言问题）。
+
+#### ⑤ 帧件归档
+
+中文版：`shots/orig_cn_win_*.png`（20 扇）、`shots/orig_cn_baseline_none.png`；
+英文版：`shots/orig_win_*.png`（已还原）、`shots/orig_baseline_none.png`（本轮用原版客户端**重采**，原 2026-09-27 那张被脚本覆盖过）。
+
 ### 3.2dc §3.2cs 的切口**打通**：用「同源 C# 客户端 ＋ 同源 C# 服务端」拿到**中文原版帧**（2026-10-01）
 
 #### ① 之前为什么拿不到
