@@ -78,6 +78,13 @@ pub fn skill_pager_size(libs: &mut GameLibraries) -> (f32, f32) {
 pub const NAME_CX: f32 = 132.0;
 pub const NAME_CY: f32 = 22.0;
 pub const GUILD_CY: f32 = 48.0;
+/// §3.2dp：本端 `spawn_label_center` 的 `y` 是**节点顶**，而上面两个常量是 C# 的**文本盒中心**
+/// ⇒ 落位时要把中心折回节点顶。本端 14px 名称档实测"墨迹中心 = 节点顶 + 7"
+/// （`ours_win_Equipment.png`：节点 2 ⇒ 墨迹行 3..15），故节点顶 = 盒中心 − 7。
+///
+/// 修前这里把 `NAME_CY`/`GUILD_CY` **算了却没用**，spawn 直接写 2.0 / 28.0
+/// ⇒ 名字比原版**高 14px**（原版墨迹 17..28，本端 3..15；两帧同一坐标系）。
+pub const LABEL_CENTER_DY: f32 = 7.0;
 /// C# ClassImage @ (15,33)（CharacterDialog.cs:222，对话框相对、常显不随页）
 pub const CLASS_IMG_X: f32 = 15.0;
 pub const CLASS_IMG_Y: f32 = 33.0;
@@ -344,21 +351,35 @@ fn spawn_character_dialog(
         if let Some(h) = load_lib_image(&mut libs, &mut images, LibraryName::Prguse, class_idx) {
             spawn_image(p, h, CLASS_IMG_X, CLASS_IMG_Y, 30.0, 30.0, 9);
         }
-        // 名字/行会（框内居中）
-        spawn_label_center(p, &cjk, "", NAME_CX, 2.0, 200.0, 14.0, Color::WHITE, 9)
-            .insert(CharNameText);
+        // 名字/行会（框内居中）：C# 两处都是 `Size=(264,·)` + `HCenter|VCenter`
+        // （`CharacterDialog.cs:202-217`）⇒ 节点顶 = 盒中心 − `LABEL_CENTER_DY`
         spawn_label_center(
             p,
             &cjk,
             "",
             NAME_CX,
-            28.0,
-            200.0,
+            NAME_CY - LABEL_CENTER_DY,
+            264.0,
+            14.0,
+            Color::WHITE,
+            9,
+        )
+        // C# 这两个标签都是 `NotControl = true`（`CharacterDialog.cs:204/212`，不吃鼠标）
+        // ⇒ 本端要显式不参与拾取：264 宽的文本节点会盖住关闭钮那一角，否则**吞点击**
+        // （实测：不加 `Pickable::IGNORE` 时 40 窗交互巡回 4 连挂、每次挂不同窗）。
+        .insert((CharNameText, bevy::picking::Pickable::IGNORE));
+        spawn_label_center(
+            p,
+            &cjk,
+            "",
+            NAME_CX,
+            GUILD_CY - LABEL_CENTER_DY,
+            264.0,
             12.0,
             Color::srgb(1.0, 0.85, 0.3),
             9,
         )
-        .insert(CharGuildText);
+        .insert((CharGuildText, bevy::picking::Pickable::IGNORE));
 
         // 4 页容器（页区 (8,90)，页背景 248x284）
         let page_bgs: [(usize, LibraryName, usize); 4] = [
@@ -1040,6 +1061,22 @@ fn exp_label(m: &mir2_shared::data::client_data::ClientMagic) -> String {
 }
 #[cfg(test)]
 mod tests {
+    /// §3.2dp：角色名/行会两处都要按 C# 的 H+V 居中盒落位。
+    ///
+    /// C# 证据（`CharacterDialog.cs:202-217`）：`NameLabel` `(0,12)` `264x20`、
+    /// `GuildLabel` `(0,33)` `264x30`，都是 `HorizontalCenter | VerticalCenter`
+    /// ⇒ 文本盒中心 y = 22 / 48。帧证：原版名字墨迹 17..28（中心 22.5）、本端修前 3..15。
+    ///
+    /// 阳性对照（实做）：把 spawn 的 y 改回 2.0 / 28.0 ⇒ 本测试红。
+    #[test]
+    fn char_name_and_guild_sit_at_csharp_box_centers() {
+        assert_eq!(NAME_CX, 132.0, "C# 文本盒 x 中心 = 264/2");
+        assert_eq!(NAME_CY, 22.0, "C# NameLabel 盒中心 y = 12 + 20/2");
+        assert_eq!(GUILD_CY, 48.0, "C# GuildLabel 盒中心 y = 33 + 30/2");
+        assert_eq!(NAME_CY - LABEL_CENTER_DY, 15.0, "名字节点顶");
+        assert_eq!(GUILD_CY - LABEL_CENTER_DY, 41.0, "行会节点顶");
+    }
+
     use super::*;
 
     /// #2775：技能页行 Hint 的等级数值取法与 C# 一致
