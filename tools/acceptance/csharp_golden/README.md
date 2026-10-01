@@ -4318,6 +4318,28 @@ spawn」配对，中间夹了个 `for` 循环体就串行了。
 `Prguse[2447]` 信用图标：本端数据里**没有这一帧**（越界）⇒ 无像素可比；原版帧也没拍到过该状态
 （要 `RewardCredit > 0` 的任务）。本条只到"确认它取不到帧、不生成节点"为止，不推像素结论。
 
+### 3.2dz 物品提示补**觉醒段**与**宝石"可用于"段**（2026-10-01）
+
+| 段 | C# 出处与口径 | 本端修后 |
+|---|---|---|
+| **觉醒** | `AwakeInfoLabel`（`GameScene.cs:8523-8536`）：`Awake.GetAwakeLevel() > 0` ⇒ `AwakeningWithValue` = 「{类型名} 觉醒({等级})」，类型名取 `Enum.AwakeType_*` | 同左（类型名六档 + `None` 回退「无」；位置按 C# 放在**镶嵌孔之前**） |
+| **宝石"可用于"** | Gems 区（`:9207-9330`）：`Info.Unique == None` ⇒「不能用于任何物品。」；否则先「可用于:」再按 `SpecialItemMode` 逐标位输出 `After*` 文案 | 同左（11 个标位：`Paralize`→-武器 / `Teleport`→-护甲 / `ClearRing`→-头盔 / `Protection`→-项链 / `Revival`→-手镯 / `Muscle`→-戒指 / `Flame`→-护身符 / `Healing`→-腰带 / `Probe`→-靴子 / `Skill`→宝石/石头 / `NoDuraLoss`→-蜡烛；`Blink` 在 C# 里没有对应行，故不输出） |
+
+数据都已在 `SharedRust`：`UserItem.awake: Awake { awake_type, levels }`、`ItemInfo.unique: SpecialItemMode`，
+本轮给 `InvItem` 补 `awake_type` / `unique_flags` 两个字段（`to_inv_item` 映射）即可。
+
+#### 门禁
+
+| 门禁 | 结果 |
+|---|---|
+| `cargo test --lib` | **935 passed / 0 failed**（新增 `tooltip_awake_and_gem_useon`：觉醒文案六档 + 未觉醒不出行 + 宝石两种分支 + 非宝石不出行） |
+| `cargo test --test b0001_smoke --test ui_alignment` | **2 + 58 passed** |
+| `ui_interact_sweep.ps1` | **46/47、fail=0、exit=0** |
+| `rustfmt --check` | `inventory.rs` 6 / `packets/mod.rs` 0 = master 既有基线（未新增） |
+
+> 仍缺：`AwakeInfoLabel` 的后两段**英文字面量**行（`"{0} + {1}~{2}"`、`"Level {i} : …"`，C# 自己也没本地化）、
+> `SoulboundTo`（需绑定者名字，本端只有 id）、`OverlapInfoLabel`、过期/封印/租借的时间格式化。
+
 ### 3.2dy 物品提示再补四段：**物品描述 / GM / 诅咒 / 结婚戒指** ＋ 名字 `(*)` 前缀（2026-10-01）
 
 > **先纠正 §3.2dx 的一句**：上一轮把剩下的提示段判成"数据阻塞"，**判早了**。把
