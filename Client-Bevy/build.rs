@@ -200,7 +200,7 @@ fn build_libpinyin(root: &Path, install: &Path) {
             download_with_fallback(&model_tar, &model_urls());
         }
     }
-    // 3) 兜底容器：.tar.lz（需要解压器：lzip / 7z / python3 依次尝试；都没有就跳过候选，
+    // 3) 兜底容器：.tar.lz（需要解压器：lzip / python3 / python 依次尝试；都没有就跳过候选，
     //    不让缺工具把构建搞红）。解压成功即直接解进 data/，不再走 .tar.gz 的校验路径。
     let mut model_ready = model_tar.exists();
     // 记住 .tar.lz 这一路最后一次失败的真实原因：否则兜底也失败时，panic 尾行只说「取不到」，
@@ -507,7 +507,7 @@ fn extract_lz_into(lz: &Path, into: &Path) -> Result<(), String> {
         }
     }
     if !ok {
-        return Err("没有可用的 lzip 解压器（lzip / 7z / python3 / python 均不可用或都失败）".into());
+        return Err("没有可用的 lzip 解压器（lzip / python3 / python 均不可用或都失败；7-Zip 不支持 lzip 容器，装了也没用）".into());
     }
     fs::create_dir_all(into).map_err(|e| format!("create {}: {}", into.display(), e))?;
     let status = Command::new("tar")
