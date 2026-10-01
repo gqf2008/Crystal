@@ -167,15 +167,28 @@ def board() -> dict:
     return obj if isinstance(obj, dict) else {}
 
 
+class BoardUnavailable(RuntimeError):
+    """看板读不出来——**必须与「卡不在看板上」区分开**。
+
+    实测事故：三个工人抢同一张卡。根因就是把两者混为一谈——读失败返回空，
+    调用方当"还没人认领"就抢了。读不到时正确的做法是**放弃这一轮**（fail-safe），
+    下次再看，而不是凭猜测去认领。
+    """
+
+
 def cards_in(column: str) -> list[dict]:
     b = board()
-    for c in b.get("columns", []):
+    cols = b.get("columns")
+    if not cols:
+        raise BoardUnavailable("collab board 无输出（walgit 调用失败或超时）")
+    for c in cols:
         if c.get("name") == column:
             return c.get("cards", [])
     return []
 
 
 def card_status(thread: str) -> str | None:
+    """返回所在列名；卡确定不在看板上返回 None；**读不出来抛 BoardUnavailable**。"""
     for col in ("待认领", "进行中", "待审", "已完成", "受阻"):
         for c in cards_in(col):
             if (c.get("thread") or c.get("id")) == thread:
@@ -210,26 +223,100 @@ def _claim_guard():
             time.sleep(0.5)
 
 
+def thread_entries(thread: str) -> list[dict] | None:
+    """`walgit collab thread <id>` 的条目（父链顺序，最后一条最新）；读不出来返回 None。
+
+    真实输出是**多行 pretty JSON 数组**（形如 [{"entry": {...}, "oid", "principal",
+    "verified"}, ...]），不是 NDJSON —— 按行找 { 的解析器在这里**恒失败**（实测：竞态回读
+    因此恒被当成读不出来；fail-open 时被掩盖成"能跑"，改 fail-safe 后变成"任何卡都认领
+    不下来"）。这里整体解析，并兼容 {"entries": [...]} 形状与 entry 未嵌套的形状。
+    """
+    text = (walgit("collab", "thread", thread).stdout or "").strip()
+    if not text:
+        return None
+    starts = [i for i in (text.find("["), text.find("{")) if i >= 0]
+    if not starts:
+        return None
+    try:
+        obj = json.loads(text[min(starts):])
+    except json.JSONDecodeError:
+        return None
+    if isinstance(obj, dict):
+        obj = obj.get("entries") or obj.get("thread") or []
+    if not isinstance(obj, list):
+        return None
+    out: list[dict] = []
+    for e in obj:
+        if not isinstance(e, dict):
+            continue
+        inner = e.get("entry") if isinstance(e.get("entry"), dict) else e
+        body = inner.get("body") if isinstance(inner.get("body"), dict) else {}
+        out.append({
+            "actor": inner.get("actor") or e.get("principal"),
+            "kind": inner.get("kind"),
+            "status": body.get("status"),
+            "claimed_by": body.get("claimed_by"),
+        })
+    return out
+
+
+def current_claim(thread: str) -> tuple[str | None, str | None]:
+    """父链顺序里**最后一条** status 决定的 (状态, 认领人)；读不出来返回 (None, None)。
+
+    为什么是「最后一条」而不是「最早那条 in-progress」：日志是 append-only，上一轮认领后
+    开工失败会把卡写回 open，而那条旧的 in-progress 条目还在；按「最早」判定会把卡永久钉在
+    已放弃的认领人身上（实测：A 认领 -> 退回 open -> B 来认领被判让出，卡停在「进行中」、
+    只有 A 能续跑 = 僵尸卡）。看板自己就是「最新 status 决定状态」，这里与它同源。
+    """
+    entries = thread_entries(thread)
+    if entries is None:
+        return None, None
+    status: str | None = None
+    claimant: str | None = None
+    for e in entries:
+        if e["kind"] == "status" and isinstance(e["status"], str):
+            status = e["status"]
+            claimant = e["claimed_by"] or e["actor"]
+        elif e["kind"] == "merge_result":
+            status = "merged"
+    return status, claimant
+
+
 def claim(agent: str, thread: str) -> bool:
     lock = _claim_guard()
     try:
-        cur = card_status(thread)
+        try:
+            cur = card_status(thread)
+        except BoardUnavailable as e:
+            print(f"[claim] {thread} 跳过：看板读不出来（{e}）——不凭猜测认领")
+            return False
         if cur not in ("待认领", None):
-            print(f"[claim] {thread} 已在「{cur}」列，不重复认领")
-            return cur == "进行中"
+            if cur != "进行中":
+                print(f"[claim] {thread} 已在「{cur}」列，不重复认领")
+                return False
+            # 「卡在进行中」不等于「是我认领的」：watch 扫「待认领」到 claim 之间，
+            # 别的工人可能已经认领走了。只有 status 里写着 claimed_by 是我，才算续跑。
+            st, holder = current_claim(thread)
+            if st != "in-progress" or holder is None:
+                print(f"[claim] {thread} 看板说进行中但回读不出认领人（状态 {st!r}）：不认领")
+                return False
+            if holder == agent:
+                print(f"[claim] {thread} 已由 {agent} 认领（续跑）")
+                return True
+            print(f"[claim] {thread} 在进行中、认领人是 {holder}，不重复认领")
+            return False
         if not set_status(agent, thread, "in-progress", claimed_by=agent):
             return False
         # 跨机竞态收敛：回读，若最早那条 in-progress 不是自己就让出
         time.sleep(1.5)
-        r = walgit("collab", "thread", thread)
-        obj = _json_from(r)
-        entries = (obj or {}).get("entries", []) if isinstance(obj, dict) else []
-        claimants = [
-            e.get("actor") for e in entries
-            if isinstance(e.get("body"), dict) and e["body"].get("status") == "in-progress"
-        ]
-        if claimants and claimants[0] != agent:
-            print(f"[claim] {thread} 已被 {claimants[0]} 先认领，让出")
+        st, first = current_claim(thread)
+        if first is None or st != "in-progress":
+            # 回读读不出来（或状态与刚写的不一致）：原实现把它当成「我赢了竞态」
+            # （fail-open），与 BoardUnavailable 的 fail-safe 相反 —— 读不出来就让出。
+            print(f"[claim] {thread} 竞态回读读不出来或不一致（{st!r}）：不猜，让出")
+            return False
+        if first != agent:
+            print(f"[claim] {thread} 已被 {first} 先认领，让出")
             return False
         print(f"[claim] {agent} 认领 {thread}")
         return True
@@ -243,8 +330,52 @@ def claim(agent: str, thread: str) -> bool:
 # --------------------------------------------------------------------------- #
 # 干活：headless Claude Code
 # --------------------------------------------------------------------------- #
-def work(agent: str, thread: str, task: str, *, model: str | None = None, timeout: int = 3600) -> tuple[bool, str]:
-    """在检出里跑一次 headless Claude；返回 (是否成功, 摘要)。"""
+def worktree_for(agent: str, thread: str) -> tuple[Path, str, str]:
+    """给这个 (agent, thread) 一个**独占检出**，返回 (worktree 路径, 基线 commit)。
+
+    为什么必须独占：多个工人 + 人工会话若共用一个工作树，HEAD/分支会互相踩——
+    实测出现过工人干的活其实是别人的提交（`git rev-parse HEAD` 读到的是别人的 HEAD），
+    于是"成功"是假的。独占 worktree 之后，工人产出 = 它自己分支上比基线新的提交。
+    """
+    wt_root = AGENT_HOME / "wt"
+    wt_root.mkdir(parents=True, exist_ok=True)
+    wt = wt_root / f"{agent}-{thread}"
+    base = subprocess.run(
+        ["git", "rev-parse", "origin/master"], cwd=REPO, capture_output=True, text=True
+    ).stdout.strip()
+    br = f"agent/{agent}/{thread}"
+    if not wt.exists():
+        r = subprocess.run(["git", "worktree", "add", "-b", br, str(wt), "origin/master"],
+                           cwd=REPO, capture_output=True, text=True)
+        if r.returncode != 0:  # 分支已存在（重跑）→ 复用同一个 worktree
+            r2 = subprocess.run(["git", "worktree", "add", str(wt), br],
+                                cwd=REPO, capture_output=True, text=True)
+            if r2.returncode != 0:
+                # 分支被别的 worktree 占用之类：不能静默继续 —— wt 目录根本不存在，
+                # 后面 subprocess.run(cwd=wt) 会以 FileNotFoundError 崩在 run 单卡模式里。
+                raise RuntimeError(
+                    f"worktree add 失败：{br} -> {wt}：{(r2.stderr or r.stderr).strip()[:200]}"
+                )
+            # 复用分支时它上面可能残留上一轮的提交（上一轮先 commit 再超时被杀）。
+            # 不清掉的话，产出判据会把上轮残留当成本轮产出 —— 成功又一次是假的。
+            stale = subprocess.run(["git", "rev-parse", "HEAD"], cwd=wt,
+                                   capture_output=True, text=True).stdout.strip()
+            if stale and stale != base:
+                subprocess.run(["git", "-C", str(wt), "reset", "--hard", "origin/master"],
+                               capture_output=True, text=True)
+                print(f"[worktree] 复用 {br}：丢弃上一轮残留 HEAD {stale[:8]}（回到基线 {base[:8]}）")
+    # 本轮开工前的 HEAD：产出判据以它为基准（不是 base —— 分支可能带着上轮残留）。
+    pre_head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=wt,
+                              capture_output=True, text=True).stdout.strip()
+    return wt, base, pre_head
+
+
+def work(agent: str, thread: str, task: str, *, model: str | None = None, timeout: int = 3600) -> tuple[bool, str, str, str]:
+    """在**独占 worktree** 里跑一次 headless Claude。
+
+    返回 `(是否真的产出, 摘要, base, head)`。判据是**分支上有没有比基线新的提交**，
+    不是子进程退出码——退出码 0 也可能是"什么都没做"。
+    """
     prompt = (
         f"你是 Crystal 项目的 agent「{agent}」，正在处理工作单元 `{thread}`。\n\n"
         f"## 任务\n{task}\n\n"
@@ -256,30 +387,43 @@ def work(agent: str, thread: str, task: str, *, model: str | None = None, timeou
         "- 如果发现任务本身有问题，直接说明并停手，不要硬做。\n\n"
         "## 产出\n最后用一段话总结：做了什么、PR 链接、验证方式、还剩什么没做。"
     )
+    wt, base, pre_head = worktree_for(agent, thread)
     argv = ["claude", "-p", prompt, "--dangerously-skip-permissions", "--output-format", "text"]
     if model:
         argv += ["--model", model]
-    print(f"[work] {thread} 开工（timeout={timeout}s）…")
+    print(f"[work] {thread} 在 {wt.name} 开工（基线 {base[:8]}，timeout={timeout}s）…")
     try:
-        r = _run(argv, timeout=timeout)
+        r = subprocess.run(argv, cwd=wt, capture_output=True, text=True,
+                           encoding="utf-8", errors="replace", timeout=timeout)
     except subprocess.TimeoutExpired:
-        return False, f"超时（{timeout}s）"
+        return False, f"超时（{timeout}s）", base, ""
     out = (r.stdout or "").strip()
-    if r.returncode != 0 and not out:
-        return False, (r.stderr or "").strip()[:2000]
-    return True, out[-4000:]
+    head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=wt,
+                          capture_output=True, text=True).stdout.strip()
+    # 真判据：**本轮**出现了提交（开工前 HEAD → 现在）。用 base..HEAD 会把上一轮
+    # 残留在复用分支上的提交算进来，于是「什么都没做」也判成成功。
+    ahead = subprocess.run(["git", "rev-list", "--count", f"{pre_head}..HEAD"], cwd=wt,
+                           capture_output=True, text=True).stdout.strip()
+    produced = ahead.isdigit() and int(ahead) > 0
+    if not produced:
+        return False, (out or (r.stderr or "").strip())[-2000:] + chr(10) + "[未产生任何提交]", base, head
+    return True, out[-4000:], base, head
 
 
 def run_one(agent: str, thread: str, task: str, *, model: str | None = None) -> bool:
     if not claim(agent, thread):
         return False
-    ok, summary = work(agent, thread, task, model=model)
-    head = subprocess.run(
-        ["git", "rev-parse", "HEAD"], cwd=REPO, capture_output=True, text=True
-    ).stdout.strip()
+    try:
+        ok, summary, base, head = work(agent, thread, task, model=model)
+    except (RuntimeError, FileNotFoundError) as e:
+        # 开工就失败（例如 worktree 建不起来）：把卡退回「待认领」并留下原因，
+        # 不要让 run 单卡模式直接 traceback。
+        print(f"[run] {thread} 开工失败：{e}")
+        set_status(agent, thread, "open", ok=False, summary=str(e)[:500])
+        return False
     set_status(
         agent, thread, "needs-review" if ok else "open",
-        ok=ok, summary=summary[:1500], head_commit=head,
+        ok=ok, summary=summary[:1500], base_commit=base, head_commit=head,
     )
     print(f"[run] {thread} → {'待审' if ok else '退回待认领'}")
     return ok
@@ -290,17 +434,25 @@ def run_one(agent: str, thread: str, task: str, *, model: str | None = None) -> 
 # --------------------------------------------------------------------------- #
 def watch(agent: str, *, poll: int = 20, model: str | None = None, once: bool = False) -> None:
     print(f"[watch] {agent} 常驻：每 {poll}s 扫一次「待认领」")
+    # 失败退避：worktree 建不起来这类**持久**故障若不退避，每轮都会「认领 -> 失败 ->
+    # 退回待认领」，向 collab 日志灌条目、刷屏，直到人工介入（实测热循环）。
+    cooldown: dict[str, float] = {}
     while True:
         try:
+            now = time.time()
             for c in cards_in("待认领"):
                 thread = c.get("thread") or c.get("id")
                 title = (c.get("title") or c.get("subject") or "").strip()
                 if not thread:
                     continue
+                if cooldown.get(thread, 0.0) > now:
+                    continue
                 body = c.get("body") or {}
                 task = body.get("task") or title or f"完成工作单元 {thread}"
                 print(f"[watch] 发现待认领 {thread}：{title[:60]}")
-                run_one(agent, thread, task, model=model)
+                if not run_one(agent, thread, task, model=model):
+                    cooldown[thread] = time.time() + max(poll, 5) * 15
+                    print(f"[watch] {thread} 本轮失败，退避 {max(poll, 5) * 15}s 再试")
                 if once:
                     return
         except Exception as e:  # 常驻进程不该因为一次失败退出
