@@ -233,6 +233,7 @@ pub(crate) fn to_inv_item(item: &mir2_shared::data::item::UserItem) -> InvItem {
             .as_ref()
             .map(|r| r.rental_locked)
             .unwrap_or(false),
+        awake_levels: item.awake.levels.clone(),
     }
 }
 
