@@ -3212,7 +3212,8 @@ mod tests {
         let lines = quest_reward_item_tooltip_lines(&item);
         assert!(lines.iter().any(|l| l == "类型: 武器"), "{lines:?}");
         assert!(lines.iter().any(|l| l == "耐久: 30/30"), "{lines:?}");
-        assert!(lines.iter().any(|l| l == "攻击: 5-12"), "{lines:?}");
+        // §3.2dr：文案对齐 C#（`AttackInfoLabel.DC` = 「攻击 + {0}~{1}」）
+        assert!(lines.iter().any(|l| l == "攻击 + 5~12"), "{lines:?}");
     }
 
     /// #2810 单元③：奖励格悬停弹物品说明（探针驱动；离开则清）——C# `OnMouseEnter/OnMouseLeave`

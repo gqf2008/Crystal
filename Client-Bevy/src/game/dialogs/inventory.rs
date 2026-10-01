@@ -1557,10 +1557,11 @@ pub fn item_tooltip_lines(item: &InvItem) -> Vec<String> {
             .map(|(_, v)| *v)
             .unwrap_or(0)
     };
-    // 成对属性：最小-最大（C# 显示 防御 0-5 等）
+    // 成对属性：文案逐字取 C#（`AttackInfoLabel` 的 `DC/MC/SC`、`DefenceInfoLabel` 的 `AC/MAC`，
+    // 中文包 = 「物防 + {0}~{1}」「魔防 + {0}~{1}」「攻击 + {0}~{1}」「魔法 + {0}~{1}」「道术 + {0}~{1}」）
     for (min, max, label) in [
-        (Stat::MinAC, Stat::MaxAC, "防御"),
-        (Stat::MinMAC, Stat::MaxMAC, "魔御"),
+        (Stat::MinAC, Stat::MaxAC, "物防"),
+        (Stat::MinMAC, Stat::MaxMAC, "魔防"),
         (Stat::MinDC, Stat::MaxDC, "攻击"),
         (Stat::MinMC, Stat::MaxMC, "魔法"),
         (Stat::MinSC, Stat::MaxSC, "道术"),
@@ -1568,76 +1569,107 @@ pub fn item_tooltip_lines(item: &InvItem) -> Vec<String> {
         let mn = get(min);
         let mx = get(max);
         if mn != 0 || mx != 0 {
-            lines.push(format!("{}: {}-{}", label, mn, mx));
+            lines.push(format!("{} + {}~{}", label, mn, mx));
         }
     }
-    // 单项属性
+    // 单项属性：前缀逐字取 C# 的中文包（注释里给出 key；`+`/`:`/空格照抄）
     for (stat, label, suffix) in [
-        (Stat::Accuracy, "准确", ""),
-        (Stat::Agility, "敏捷", ""),
-        (Stat::Luck, "幸运", ""),
-        (Stat::HP, "生命", ""),
-        (Stat::MP, "魔法值", ""),
-        (Stat::AttackSpeed, "攻速", ""),
-        (Stat::Reflect, "反伤", ""),
-        (Stat::Strong, "强度", ""),
-        (Stat::Holy, "神圣", ""),
-        (Stat::Freezing, "冰冻", ""),
-        (Stat::PoisonAttack, "中毒攻击", ""),
-        (Stat::MagicResist, "魔法抗性", ""),
-        (Stat::PoisonResist, "中毒抗性", ""),
-        (Stat::HealthRecovery, "生命恢复", ""),
-        (Stat::SpellRecovery, "魔法恢复", ""),
-        (Stat::PoisonRecovery, "中毒恢复", ""),
-        (Stat::CriticalRate, "暴击率", "%"),
-        (Stat::CriticalDamage, "暴击伤害", ""),
+        (Stat::Accuracy, "准确: + ", ""),           // Accuracy = 准确: + {0}
+        (Stat::Agility, "敏捷: + ", ""),            // Agility = 敏捷: + {0}
+        (Stat::Luck, "幸运 + ", ""),                // Luck = 幸运 + {0}
+        (Stat::HP, "最大生命值 + ", ""),            // MaxHpPlus = 最大生命值 + {0}
+        (Stat::MP, "最大魔法值 + ", ""),            // MaxMpPlus = 最大魔法值 + {0}
+        (Stat::AttackSpeed, "攻击速度: ", ""),      // AttackSpeedValue = 攻击速度: {0}{1}
+        (Stat::Reflect, "反弹几率: ", ""),          // ReflectChance = 反弹几率: {0}
+        (Stat::Strong, "力量 + ", ""),              // StrongPlus = 力量 + {0}
+        (Stat::Holy, "神圣: + ", ""),               // Holy = 神圣: + {0}
+        (Stat::Freezing, "冰冻: + ", ""),           // FreezingPlus = 冰冻: + {0}
+        (Stat::PoisonAttack, "中毒: + ", ""),       // PoisonPlus = 中毒: + {0}
+        (Stat::MagicResist, "魔抗 + ", ""),         // MagicResistPlus = 魔抗 + {0}
+        (Stat::PoisonResist, "毒抗 + ", ""),        // PoisonResistPlus = 毒抗 + {0}
+        (Stat::HealthRecovery, "生命恢复 + ", ""),  // HealthRecoveryPlus
+        (Stat::SpellRecovery, "魔法恢复 + ", ""),   // ManaRecoveryPlus
+        (Stat::PoisonRecovery, "中毒恢复 + ", ""),  // PoisonRecoveryPlus
+        (Stat::CriticalRate, "暴击几率: + ", "%"),  // CriticalChancePlus（本端保留 % 后缀）
+        (Stat::CriticalDamage, "暴击伤害: + ", ""), // CriticalDamagePlus
     ] {
         let v = get(stat);
         if v != 0 {
-            lines.push(format!("{}: +{}{}", label, v, suffix));
+            lines.push(format!("{}{}{}", label, v, suffix));
         }
     }
-    // 需求（C# RequiredType：Level=3 或属性值；RequiredClass 位掩码）
-    if item.required_type == 3 && item.required_amount > 0 {
-        lines.push(format!("需要等级: {}", item.required_amount));
-    } else if item.required_amount > 0 {
-        for (k, label) in [
-            (Stat::MaxAC as u8, "防御"),
-            (Stat::MaxMAC as u8, "魔御"),
-            (Stat::MaxDC as u8, "攻击"),
-            (Stat::MaxMC as u8, "魔法"),
-            (Stat::MaxSC as u8, "道术"),
-        ] {
-            if item.required_type == k {
-                lines.push(format!("需要{}: {}", label, item.required_amount));
-                break;
-            }
-        }
+    // 需求：C# `NeedInfoLabel` 的 `#region LEVEL`——`RequiredType` → `ClientTextKeys.*`
+    // （本端 `required_type` 是**本端枚举值** = C# 值 + 3，见 `enums::RequiredType`）
+    if item.required_amount > 0 {
+        let label = match item.required_type {
+            3 => "等级要求",      // C# RequiredType.Level     → Text.RequiredLevel
+            4 => "所需防御",      // MaxAC                     → RequiredAC
+            5 => "所需魔防",      // MaxMAC                    → RequiredMAC
+            6 => "攻击要求",      // MaxDC                     → RequiredDC
+            7 => "魔法要求",      // MaxMC                     → RequiredMC
+            8 => "道术要求",      // MaxSC                     → RequiredSC
+            9 => "最高等级",      // MaxLevel                  → MaximumLevel
+            10 => "所需基础防御", // MinAC                     → RequiredBaseAC
+            11 => "所需基础魔防", // MinMAC                    → RequiredBaseMAC
+            12 => "需要基础攻击", // MinDC                     → RequiredBaseDC
+            13 => "需要基础魔法", // MinMC                     → RequiredBaseMC
+            14 => "需要基础道术", // MinSC                     → RequiredBaseSC
+            _ => "需要未知类型",  // default                   → UnknownTypeRequired
+        };
+        // C# 这 12 条的文案都是「<标签> : {0}」（ASCII 冒号、两侧各一个空格）
+        lines.push(format!("{} : {}", label, item.required_amount));
     }
     if item.required_class != 0 {
-        let mut names = Vec::new();
-        for (bit, n) in [
-            (1u8, "战士"),
-            (2, "法师"),
-            (4, "道士"),
-            (8, "刺客"),
-            (16, "弓箭手"),
-        ] {
-            if item.required_class & bit != 0 {
-                names.push(n);
-            }
-        }
-        if !names.is_empty() {
-            lines.push(format!("需要职业: {}", names.join("/")));
-        }
+        // C# `ClassRequired` = 「职业要求 : {0}」，{0} = `RequiredClass.ToLocalizedString()`
+        lines.push(format!(
+            "职业要求 : {}",
+            required_class_text(item.required_class)
+        ));
     }
     if item.weight > 0 {
         lines.push(format!("重量: {}", item.weight));
     }
     if item.price > 0 {
-        lines.push(format!("价格: {} 金", item.price));
+        // C# `SellingPriceGold` = 「出售价格 : {0} 金币」，{0} = `item.Price() / 2`，
+        // 且按 `"###,###,##0"` 加千分位（`GameScene.cs:8842`）
+        lines.push(format!(
+            "出售价格 : {} 金币",
+            crate::game::dialogs::mail::format_gold(item.price / 2)
+        ));
     }
     lines
+}
+
+/// C# `RequiredClass.ToLocalizedString()`（`Shared/Language.cs:4264-4273`）：先查
+/// `Chinese.json` 的 `Enum.RequiredClass_<枚举名>`，查不到就回退 `@enum.ToString()`。
+///
+/// 命名组合只有 `WarWizTao`（=「战法道」）与 `None`（=「全职业」）；其余多职业组合
+/// C# 会打印**英文**枚举名（`Warrior, Assassin`）。本端**有意**改进：多职业一律用中文、
+/// 以 `/` 连接（见 §3.2dr 的说明），单职业与命名组合仍与中文包逐字一致。
+#[must_use]
+pub fn required_class_text(mask: u8) -> String {
+    const NAMES: [(u8, &str); 5] = [
+        (1, "战士"),
+        (2, "法师"),
+        (4, "道士"),
+        (8, "刺客"),
+        (16, "弓箭手"),
+    ];
+    match mask {
+        0 => "全职业".to_string(), // ClientTextKeys 无此条时的口径：Enum.RequiredClass_None
+        7 => "战法道".to_string(), // Enum.RequiredClass_WarWizTao
+        _ if NAMES.iter().any(|(b, _)| *b == mask) => NAMES
+            .iter()
+            .find(|(b, _)| *b == mask)
+            .map(|(_, n)| (*n).to_string())
+            .unwrap_or_default(),
+        _ => NAMES
+            .iter()
+            .filter(|(b, _)| mask & b != 0)
+            .map(|(_, n)| *n)
+            .collect::<Vec<_>>()
+            .join("/"),
+    }
 }
 
 /// ItemType 枚举 → 中文名（对齐 C# ItemInfo.Type 常见分类）
@@ -3938,12 +3970,15 @@ mod tests {
         it.required_type = 3; // Level
         it.required_amount = 30;
         let lines = item_tooltip_lines(&it);
-        assert!(lines.iter().any(|l| l.contains("攻击: 3-8")));
-        assert!(lines.iter().any(|l| l.contains("准确: +2")));
-        assert!(lines.iter().any(|l| l.contains("幸运: +1")));
-        assert!(lines.iter().any(|l| l.contains("需要等级: 30")));
+        // §3.2dr：文案逐字对齐 C#（`AttackInfoLabel.DC` = 「攻击 + {0}~{1}」、
+        // `Accuracy` = 「准确: + {0}」、`Luck` = 「幸运 + {0}」、
+        // `RequiredLevel` = 「等级要求 : {0}」、`SellingPriceGold` = 「出售价格 : {0} 金币」（半价+千分位））
+        assert!(lines.iter().any(|l| l.contains("攻击 + 3~8")));
+        assert!(lines.iter().any(|l| l.contains("准确: + 2")));
+        assert!(lines.iter().any(|l| l.contains("幸运 + 1")));
+        assert!(lines.iter().any(|l| l.contains("等级要求 : 30")));
         assert!(lines.iter().any(|l| l.contains("重量: 5")));
-        assert!(lines.iter().any(|l| l.contains("价格: 120 金")));
+        assert!(lines.iter().any(|l| l.contains("出售价格 : 60 金币")));
     }
 
     #[test]
@@ -3951,7 +3986,24 @@ mod tests {
         let mut it = item_with_type(ItemType::Armour);
         it.required_class = 1 | 2; // 战士/法师
         let lines = item_tooltip_lines(&it);
-        assert!(lines.iter().any(|l| l.contains("需要职业: 战士/法师")));
+        // 单职业 = 中文包 `Enum.RequiredClass_*`；多职业本端用 `/` 连接（有意改进，见函数注释）
+        assert!(lines.iter().any(|l| l.contains("职业要求 : 战士/法师")));
+        assert_eq!(required_class_text(1), "战士");
+        assert_eq!(
+            required_class_text(7),
+            "战法道",
+            "C# Enum.RequiredClass_WarWizTao"
+        );
+        assert_eq!(
+            required_class_text(0),
+            "全职业",
+            "C# Enum.RequiredClass_None"
+        );
+        assert_eq!(
+            required_class_text(1 | 8),
+            "战士/刺客",
+            "多职业：本端中文连接（C# 会回退英文枚举名）"
+        );
     }
 
     #[test]
