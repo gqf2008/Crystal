@@ -33,6 +33,13 @@ const MODEL_URLS: &[&str] = &[
     "https://netcologne.dl.sourceforge.net/project/libpinyin/models/model20.text.tar.gz",
     "https://cfhcable.dl.sourceforge.net/project/libpinyin/models/model20.text.tar.gz",
 ];
+/// 兜底容器：Slackware 源码镜像提供的是 model20.text.tar.lz（同一个 model20 数据，只是
+/// lzip 压缩）。已用逐文件 SHA-256 比对验证：解出的 18 个文件与 model20.text.tar.gz 完全一致。
+/// 2026-10-01 SourceForge 全线不可用时，它是唯一活着的源。
+const MODEL_LZ_URLS: &[&str] = &[
+    "https://mirrors.slackware.com/slackware/slackware64-current/source/x/libpinyin/model20.text.tar.lz",
+];
+const MODEL_LZ_SHA512: &str = "4c3d568601500eedf3eae3e4462c5150eba1548d5e15f038056c7c63116042d88034276631650cc66f14b69f31bb0c1d0c3de08a3f15db463f19e82b694e375b";
 
 fn main() {
     emit_build_stamp();
@@ -193,8 +200,35 @@ fn build_libpinyin(root: &Path, install: &Path) {
             download_with_fallback(&model_tar, &model_urls());
         }
     }
-    verify_sha512(&model_tar, MODEL_SHA512);
-    extract_into(&model_tar, &src.join("data"));
+    // 3) 兜底容器：.tar.lz（需要解压器：lzip / 7z / python3 依次尝试；都没有就跳过候选，
+    //    不让缺工具把构建搞红）。解压成功即直接解进 data/，不再走 .tar.gz 的校验路径。
+    let mut model_ready = model_tar.exists();
+    if !model_ready {
+        for u in MODEL_LZ_URLS {
+            let lz = root.join("model20.text.tar.lz");
+            if !download_verified(&lz, u, MODEL_LZ_SHA512) {
+                continue;
+            }
+            match extract_lz_into(&lz, &src.join("data")) {
+                Ok(()) => {
+                    model_ready = true;
+                    break;
+                }
+                Err(e) => eprintln!("[libpinyin]   .tar.lz 解压/解包失败（{}），跳过该候选", e),
+            }
+        }
+    }
+    if !model_ready {
+        panic!(
+            "模型数据取不到：.tar.gz 候选 {} 个与 .tar.lz 兜底 {} 个都失败 —— 可用 LIBPINYIN_MODEL_URLS 指定镜像，或用 LIBPINYIN_MODEL_TARBALL 指定本地包",
+            model_urls().len(),
+            MODEL_LZ_URLS.len()
+        );
+    }
+    if model_tar.exists() {
+        verify_sha512(&model_tar, MODEL_SHA512);
+        extract_into(&model_tar, &src.join("data"));
+    }
     // 3) autoreconf + configure + make + install
     // Windows(MSYS2) 下 autoreconf/configure 是 shell 脚本，native 进程无法直接 spawn，
     // 必须经 bash -c 执行；Unix 用 sh -c（行为等价）。
@@ -350,16 +384,14 @@ fn download_verified(target: &Path, url: &str, want: &str) -> bool {
     true
 }
 
-fn download_with_fallback(target: &Path, urls: &[String]) {
+/// 依次试候选，命中即 true；全部失败返回 false（由调用方决定是否还有别的容器/是否 panic）。
+fn download_with_fallback(target: &Path, urls: &[String]) -> bool {
     for u in urls {
         if download_verified(target, u, MODEL_SHA512) {
-            return;
+            return true;
         }
     }
-    panic!(
-        "模型数据 model20.text.tar.gz 全部候选失败（已试 {:?}）—— 可用 LIBPINYIN_MODEL_URLS 指定镜像，或用 LIBPINYIN_MODEL_TARBALL 指定本地包",
-        urls
-    );
+    false
 }
 
 fn sha512_of(path: &Path) -> String {
@@ -419,6 +451,70 @@ fn extract(tar: &Path, into: &Path) {
     if !status.success() {
         panic!("解压失败: {}", tar.display());
     }
+}
+
+/// 把 .tar.lz 解成 tar 再解进 `into`：解压器按 lzip -> 7z -> python3 依次尝试
+/// （三者都不在就返回 Err，调用方跳过该候选 —— 缺工具不该让构建红）。
+/// python3 兜底用内嵌解码器：多成员 lzip = 每个成员 [6 字节头][raw LZMA1][20 字节 trailer]。
+fn extract_lz_into(lz: &Path, into: &Path) -> Result<(), String> {
+    let tar = lz.with_extension("tar");
+    let lz_s = lz.to_string_lossy().to_string();
+    let tar_s = tar.to_string_lossy().to_string();
+    let py = "import lzma,sys\nb=open(sys.argv[1],'rb').read()\npos=0\nout=open(sys.argv[2],'wb')\nwhile pos<len(b):\n    d=b[pos+5]\n    ds=1<<(d&0x1f)\n    ds-=(ds//16)*((d>>5)&7)\n    dec=lzma.LZMADecompressor(format=lzma.FORMAT_RAW,filters=[{'id':lzma.FILTER_LZMA1,'dict_size':ds,'lc':3,'lp':0,'pb':2}])\n    out.write(dec.decompress(b[pos+6:]))\n    pos+=6+(len(b)-pos-6-len(dec.unused_data))+20\nout.close()\n";
+    let mut ok = false;
+    for (cmd, args) in [
+        ("lzip", vec!["-dc".to_string(), lz_s.clone()]),
+        ("7z", vec!["x".to_string(), "-so".to_string(), lz_s.clone()]),
+    ] {
+        if let Ok(out) = fs::File::create(&tar) {
+            if let Ok(status) = Command::new(cmd)
+                .args(&args)
+                .stdout(out)
+                .stderr(std::process::Stdio::null())
+                .status()
+            {
+                if status.success() && fs::metadata(&tar).map(|m| m.len() > 1024).unwrap_or(false) {
+                    ok = true;
+                    break;
+                }
+            }
+        }
+        let _ = fs::remove_file(&tar);
+    }
+    // python 兜底：Ubuntu/macOS 上叫 python3，Windows 上通常只有 python —— 两个名字都要试。
+    for pycmd in ["python3", "python"] {
+        if ok {
+            break;
+        }
+        let status = Command::new(pycmd)
+            .arg("-c")
+            .arg(py)
+            .arg(&lz_s)
+            .arg(&tar_s)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status();
+        ok = matches!(status, Ok(s) if s.success())
+            && fs::metadata(&tar).map(|m| m.len() > 1024).unwrap_or(false);
+        if !ok {
+            let _ = fs::remove_file(&tar);
+        }
+    }
+    if !ok {
+        return Err("没有可用的 lzip 解压器（lzip / 7z / python3 / python 均不可用或都失败）".into());
+    }
+    fs::create_dir_all(into).map_err(|e| format!("create {}: {}", into.display(), e))?;
+    let status = Command::new("tar")
+        .arg("xf")
+        .arg(&tar)
+        .arg("-C")
+        .arg(into)
+        .status()
+        .map_err(|e| format!("spawn tar: {}", e))?;
+    if !status.success() {
+        return Err(format!("tar xf 失败: {}", tar.display()));
+    }
+    Ok(())
 }
 
 fn extract_into(tar: &Path, into: &Path) {
