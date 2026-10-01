@@ -4318,6 +4318,49 @@ spawn」配对，中间夹了个 `for` 循环体就串行了。
 `Prguse[2447]` 信用图标：本端数据里**没有这一帧**（越界）⇒ 无像素可比；原版帧也没拍到过该状态
 （要 `RewardCredit > 0` 的任务）。本条只到"确认它取不到帧、不生成节点"为止，不推像素结论。
 
+### 3.2dt 物品提示的**品阶行**：本端 `grade` 有字段却一直没画（2026-10-01）
+
+C# `NameInfoLabel` 的标题标签是（`GameScene.cs:6863-6871`）：
+
+```csharp
+Text = Grade != ItemGrade.None
+     ? string.Format("{0}{1}{2}", FriendlyName, "\n", GradeString)
+     : FriendlyName,
+ForeColour = GradeNameColor(Grade),
+```
+
+`GradeString` 取 `ItemGrade*` 文案（中文包：**普通 / 稀有 / 传奇 / 神话 / 英勇**），
+所以品阶是**紧跟在物品名下方**的一行；`NameLabel` 整块再按 `GradeNameColor` 上色
+（`Common=Yellow` / `Rare=DeepSkyBlue` / `Legendary=DarkOrange` / `Mythical=Plum` / `Heroic=Red`）。
+
+本端 `InvItem.grade` **早就有字段**（`network/packets/mod.rs` 从 `ItemInfo.grade` 写入，
+值是本端枚举值 = C# 值 + 3：`Common=4 … Heroic=8`），但提示里从来没画过。
+本轮补：
+
+- 新增 `item_grade_name(grade) -> Option<&'static str>`（4→普通、5→稀有、6→传奇、7→神话、8→英勇；
+  `None`(3)/未设值(0) 返回 `None`，对应 C# 的「`Grade != None` 才追加」）；
+- 提示里把品阶放在**第一条内容行**（本端物品名是 tooltip 标题，故品阶紧贴其下、类型行之前）。
+
+| | 修前 | 修后（`grade=6` 的武器） |
+|---|---|---|
+| 提示内容 | `武器` / `重量: 5  耐久: 100/100` / … | **`传奇`** / `武器` / `重量: 5  耐久: 100/100` / … |
+
+#### 仍未对齐（下一轮）
+
+1. **品阶颜色**：本端 tooltip 标题恒为 `srgb(1.0, 0.9, 0.3)`（≈ `Color.Yellow`，只对 `Common` 正确），
+   C# 按 `GradeNameColor` 上色 ⇒ 要给 `TooltipState::update` 加一个标题色参数（12 处调用点，机械改）。
+2. `AwakeInfoLabel` / `SocketInfoLabel` / `BindInfoLabel` / `OverlapInfoLabel` / `StoryInfoLabel` /
+   `GMMadeLabel` 六段本端仍无对应行。
+
+#### 门禁
+
+| 门禁 | 结果 |
+|---|---|
+| `cargo test --lib` | **931 passed / 0 failed**（新增 `tooltip_grade_line_matches_csharp`：五档文案 + None 不显示 + 品阶行在类型行之前） |
+| `cargo test --test b0001_smoke --test ui_alignment` | **2 + 58 passed** |
+| `ui_interact_sweep.ps1` | **46/47、fail=0、exit=0** |
+| `rustfmt --check inventory.rs` | 6 处 = master 既有基线（未新增） |
+
 ### 3.2ds 物品提示**头部两行**对齐 C# `NameInfoLabel`（2026-10-01）
 
 承 §3.2dr：C# 悬浮提示的头部由 `NameInfoLabel` 构成，结构是

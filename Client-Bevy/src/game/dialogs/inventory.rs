@@ -1547,6 +1547,12 @@ pub fn item_tooltip_lines(item: &InvItem) -> Vec<String> {
     // ① `baseText` = `ItemType*` 文案（**没有**「类型:」前缀）；
     // ② 尾部行 = 「重量: {w}」+ 耐久，用**两个空格**连接（`GameScene.cs:7056-7066`，
     //    `tailParts` 用 `string.Join("  ", …)`）。数量不在提示里——它画在格子上（同 C#）。
+    // ⓪ C# `nameLabel.Text = Grade != None ? FriendlyName + "\n" + GradeString : FriendlyName`
+    //   （`GameScene.cs:6863-6871`）⇒ 品阶紧跟在**名字下方**、类型行之前（本端名字是 tooltip 标题，
+    //   故品阶作为第一条内容行）。
+    if let Some(grade) = item_grade_name(item.grade) {
+        lines.push(grade.to_string());
+    }
     lines.push(item_type_name(item.item_type).to_string());
     let mut tail: Vec<String> = Vec::new();
     if item.weight > 0 {
@@ -1647,6 +1653,24 @@ pub fn item_tooltip_lines(item: &InvItem) -> Vec<String> {
         ));
     }
     lines
+}
+
+/// C# 品阶文案（`Text.ItemGradeCommon/Rare/Legendary/Mythical/Heroic`，
+/// 中文包依次为 普通/稀有/传奇/神话/英勇）。
+///
+/// 本端 `InvItem.grade` 是**本端枚举值** = C# 值 + 3（`mir2_shared::enums::ItemGrade`：
+/// Common=4、Rare=5、Legendary=6、Mythical=7、Heroic=8）；`None`(3) 与未设值(0) 不显示品阶行
+/// （C# `Grade != ItemGrade.None` 才追加）。
+#[must_use]
+pub fn item_grade_name(grade: u8) -> Option<&'static str> {
+    match grade {
+        4 => Some("普通"), // ItemGradeCommon
+        5 => Some("稀有"), // ItemGradeRare
+        6 => Some("传奇"), // ItemGradeLegendary
+        7 => Some("神话"), // ItemGradeMythical
+        8 => Some("英勇"), // ItemGradeHeroic
+        _ => None,
+    }
 }
 
 /// C# `RequiredClass.ToLocalizedString()`（`Shared/Language.cs:4264-4273`）：先查
@@ -4017,6 +4041,24 @@ mod tests {
             "战士/刺客",
             "多职业：本端中文连接（C# 会回退英文枚举名）"
         );
+    }
+
+    /// §3.2dt：C# 品阶文案与「非 None 才显示」的口径（`GameScene.cs:6852-6871`）。
+    #[test]
+    fn tooltip_grade_line_matches_csharp() {
+        assert_eq!(item_grade_name(4), Some("普通"));
+        assert_eq!(item_grade_name(5), Some("稀有"));
+        assert_eq!(item_grade_name(6), Some("传奇"));
+        assert_eq!(item_grade_name(7), Some("神话"));
+        assert_eq!(item_grade_name(8), Some("英勇"));
+        assert_eq!(item_grade_name(3), None, "C# ItemGrade.None 不显示");
+        assert_eq!(item_grade_name(0), None, "未设值不显示");
+        // 品阶行排在类型行之前（C# 画在名字正下方）
+        let mut it = item_with_type(ItemType::Weapon);
+        it.grade = 6; // Legendary
+        let lines = item_tooltip_lines(&it);
+        assert_eq!(lines.first().map(String::as_str), Some("传奇"), "{lines:?}");
+        assert_eq!(lines.get(1).map(String::as_str), Some("武器"), "{lines:?}");
     }
 
     #[test]
