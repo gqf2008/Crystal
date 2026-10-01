@@ -1543,12 +1543,21 @@ fn inv_tooltip_system(
 pub fn item_tooltip_lines(item: &InvItem) -> Vec<String> {
     use mir2_shared::enums::Stat;
     let mut lines = Vec::new();
-    if item.count > 1 {
-        lines.push(format!("数量: {}", item.count));
+    // 头部两行（C# `NameInfoLabel`）：
+    // ① `baseText` = `ItemType*` 文案（**没有**「类型:」前缀）；
+    // ② 尾部行 = 「重量: {w}」+ 耐久，用**两个空格**连接（`GameScene.cs:7056-7066`，
+    //    `tailParts` 用 `string.Join("  ", …)`）。数量不在提示里——它画在格子上（同 C#）。
+    lines.push(item_type_name(item.item_type).to_string());
+    let mut tail: Vec<String> = Vec::new();
+    if item.weight > 0 {
+        tail.push(format!("重量: {}", item.weight)); // C# `Weight` = 「重量:」
     }
-    lines.push(format!("类型: {}", item_type_name(item.item_type)));
     if item.is_equipment() {
-        lines.push(format!("耐久: {}/{}", item.current_dura, item.max_dura));
+        // C# `Durability` = 「耐久:」 + `"{0} {1}/{2}"`
+        tail.push(format!("耐久: {}/{}", item.current_dura, item.max_dura));
+    }
+    if !tail.is_empty() {
+        lines.push(tail.join("  "));
     }
     let get = |s: Stat| {
         item.stats
@@ -1592,6 +1601,9 @@ pub fn item_tooltip_lines(item: &InvItem) -> Vec<String> {
         (Stat::PoisonRecovery, "中毒恢复 + ", ""),  // PoisonRecoveryPlus
         (Stat::CriticalRate, "暴击几率: + ", "%"),  // CriticalChancePlus（本端保留 % 后缀）
         (Stat::CriticalDamage, "暴击伤害: + ", ""), // CriticalDamagePlus
+        // C# `WeightInfoLabel` 的两条（中文包 = 「手持重量 + {0}」「穿戴重量 + {0}」）
+        (Stat::HandWeight, "手持重量 + ", ""), // HandWeightPlus
+        (Stat::WearWeight, "穿戴重量 + ", ""), // WearWeightPlus
     ] {
         let v = get(stat);
         if v != 0 {
@@ -1625,9 +1637,6 @@ pub fn item_tooltip_lines(item: &InvItem) -> Vec<String> {
             "职业要求 : {}",
             required_class_text(item.required_class)
         ));
-    }
-    if item.weight > 0 {
-        lines.push(format!("重量: {}", item.weight));
     }
     if item.price > 0 {
         // C# `SellingPriceGold` = 「出售价格 : {0} 金币」，{0} = `item.Price() / 2`，
@@ -3977,7 +3986,11 @@ mod tests {
         assert!(lines.iter().any(|l| l.contains("准确: + 2")));
         assert!(lines.iter().any(|l| l.contains("幸运 + 1")));
         assert!(lines.iter().any(|l| l.contains("等级要求 : 30")));
-        assert!(lines.iter().any(|l| l.contains("重量: 5")));
+        // §3.2ds：C# `NameInfoLabel` 把「重量」与「耐久」拼成**一行**（两个空格分隔、重量在前）
+        assert!(
+            lines.iter().any(|l| l == "重量: 5  耐久: 100/100"),
+            "{lines:?}"
+        );
         assert!(lines.iter().any(|l| l.contains("出售价格 : 60 金币")));
     }
 

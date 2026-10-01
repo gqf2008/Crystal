@@ -4318,6 +4318,39 @@ spawn」配对，中间夹了个 `for` 循环体就串行了。
 `Prguse[2447]` 信用图标：本端数据里**没有这一帧**（越界）⇒ 无像素可比；原版帧也没拍到过该状态
 （要 `RewardCredit > 0` 的任务）。本条只到"确认它取不到帧、不生成节点"为止，不推像素结论。
 
+### 3.2ds 物品提示**头部两行**对齐 C# `NameInfoLabel`（2026-10-01）
+
+承 §3.2dr：C# 悬浮提示的头部由 `NameInfoLabel` 构成，结构是
+
+```
+<物品名>            ← nameLabel（品阶非 None 时另起一行显示品阶；RefineAdded>0 前缀 "(*)"）
+<类型名>            ← baseText = ItemType* 文案（**没有**「类型:」前缀；结婚戒指再追加 WeddingRing）
+重量: {w}  耐久: {c}/{m}   ← tailParts 用 `string.Join("  ", …)` 拼成一行（`GameScene.cs:7056-7066`）
+```
+
+本端修前是「数量: 2」「类型: 武器」「耐久: 100/100」三条独立行、重量还在列表末尾。本轮改：
+
+| 本端修前 | 本端修后（= C# 结构） |
+|---|---|
+| `数量: 2` | **删除**——C# 提示里没有数量（数量画在格子上，本端格子也照画，见 `theme.rs::spawn_item_cell_ui` 的 count 子节点） |
+| `类型: 武器` | **`武器`**（裸类型名） |
+| `耐久: 100/100` 与列表末尾的 `重量: 5` | **`重量: 5  耐久: 100/100`**（一行，两个空格分隔，**重量在前**） |
+
+同时补上本端此前缺的两条 `WeightInfoLabel`（`GameScene.cs:8348-8410`）：
+`手持重量 + n`（`HandWeightPlus`）/ `穿戴重量 + n`（`WearWeightPlus`，中文包原文）。
+
+#### 门禁
+
+| 门禁 | 结果 |
+|---|---|
+| `cargo test --lib` | **930 passed / 0 failed**（`tooltip_lines_pairs_and_singles` 断言改成「重量 + 耐久 同行」；`quest_reward_item_tooltip_lines_from_item_info` 改成裸类型名） |
+| `cargo test --test b0001_smoke --test ui_alignment` | **2 + 58 passed** |
+| `ui_interact_sweep.ps1` | **46/47、fail=0、exit=0** |
+
+> **仍未对齐（下一轮）**：品阶行（`ItemGrade*` = 普通/稀有/传奇/神话/英勇，本端 `InvItem.grade` 有字段但没画进提示）、
+> 以及 `AwakeInfoLabel`/`SocketInfoLabel`/`BindInfoLabel`/`OverlapInfoLabel`/`StoryInfoLabel`/`GMMadeLabel` 六段——
+> 本端目前都没有对应行。像素对照同样仍未做（A/B 清单里没有 hover 行）。
+
 ### 3.2dr 物品悬浮提示：**属性/需求/职业/价格**四段文案逐字对齐 C#（2026-10-01）
 
 #### ① 出处：C# 的提示是 **11 个子标签**拼的
