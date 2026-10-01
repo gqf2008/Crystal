@@ -4318,6 +4318,72 @@ spawn」配对，中间夹了个 `for` 循环体就串行了。
 `Prguse[2447]` 信用图标：本端数据里**没有这一帧**（越界）⇒ 无像素可比；原版帧也没拍到过该状态
 （要 `RewardCredit > 0` 的任务）。本条只到"确认它取不到帧、不生成节点"为止，不推像素结论。
 
+### 3.2de Help 窗「快捷键」页改成 **C# 三页固定清单** ＋ 字号/居中的 pt→px 口径（2026-10-01）
+
+#### ① 根因（源码级）
+
+本端 `Client-Bevy/src/game/dialogs/help.rs` 的快捷键页原本是
+`shortcut_rows(state, &["移动","交互","界面"])` —— **按 `KeyBinds` 的分组动态生成**（文件头自己记为"有意偏差"）；
+C# 是 `ShortcutPage1/2/3` **三页固定清单**（`Client/MirScenes/Dialogs/HelpDialog.cs:211-286`），
+描述列取 `ClientTextKeys`（中文串在 `Client/Localization/Chinese.json` 的 `Text` 段、按枚举名索引）。
+§3.2dd 的实机对表把这条差异量化成：Help 窗 en-vs-cn **8.68%**，且差异集中在列表行区、首行就不同
+（本端「W 向上移动」 vs C#「Alt + Q 退出游戏」）。
+
+#### ② 改法（按 C# 分页/顺序/文案，**只列本端已实现的动作**）
+
+| 页 | C# 条数 | 本端实现 | 未列出的 C# 项 |
+|---|---|---|---|
+| `ShortcutPage1` | 18 | **17** | `TargetSpellLockOn`（本端没有"把法术锁定在目标"的键位） |
+| `ShortcutPage2` | 18 | **7** | `ChangeAttackmode`、四个 `Attackmode*`、`Autorun`、`Cameramode`、`Screenshot`、`Mentor`、`CtrlRightClick`（本端没有对应键位/功能） |
+| `ShortcutPage3` | 3 | **3** | — |
+
+> 只列已实现项是有意的：把 C# 有、本端没有的快捷键也印出来，等于**对外声明本端支持这些键**。清单用
+> `(本端动作, C# ClientTextKeys 名, 中文描述原串)` 三元组写死，中间那项只作溯源。
+
+键位列仍按**当前绑定**渲染（`binding_text_for`，与 C# `CMain.InputKeys.GetKey(KeybindOptions.X)` 同口径、含修饰键）；
+技能栏那条用跨度写法 `F1-F8`（= C# `GetKey(Bar1Skill1) + "-" + GetKey(Bar1Skill8)`）。
+
+#### ③ 三处口径修正（都由实机帧暴露）
+
+1. **页偏移**：C# `ShortcutInfoPage` 的 `Parent` 是 `HelpDialog`（`HelpDialog.cs:109-111`）、自身 `Location` 为默认 `(0,0)`；
+   那个 `(12,35)` 只是 `HelpPage` **包装层**（图文页用）的位置 ⇒ 快捷键页的表头/行**不该 +12/+35**。
+   改前实测：表头比原版**低 45px**、行**低 29px**。
+2. **字号是 pt 不是 px**：C# `new Font(Settings.FontName, 9F/10F)` 是**磅**，本端 `spawn_label*` 的 `size` 是 **px**，
+   96 DPI 下 `1pt = 4/3 px` ⇒ 行 9→**12**、表头 10→**13**、页标题 10→**13**、页码 9→**12**。
+   改前字形带只有原版的一半高（Help 行 6px vs 原版 9px）。
+3. **垂直居中**：C# 行标签 `Size=(95,23)` + `VerticalCenter`、表头 `Size=(100,30)` + `VerticalCenter`，
+   而本端 `spawn_label`/`spawn_label_center` 的 `y` 都是**顶** ⇒ 行顶 `107→114`（中心 118.5）、表头顶 `90→83`（中心 90）。
+
+#### ④ 实机取证（mock，`dialog open help`，**截图前先 `cursor` 移开光标**）
+
+| 帧 | vs 中文原版 Help 窗 `(244,129,780,638)` |
+|---|---|
+| 旧二进制（动态分组 + 页偏移 + 小字号） | 8.44% |
+| 只换 C# 清单 | 8.84% |
+| ＋ 去页偏移 | 9.39% |
+| **＋ 字号与垂直居中（本次）** | **8.01%** |
+
+窄带定位（黄色键名列 x263-360）：**本端行带 245-253 / 原版 244-252**（差 1px，步进 20 一致）；
+表头带本端 216-224 / 原版 212-225。
+
+> 口径提醒：中间两档"越改越差"是**度量本身的性质** —— 像素差异比在"文字没画/画在别处（那里是暗底，正好匹配）"
+> 与"文字画了但差几 px（两边笔画都算不符）"之间**偏向后者**。所以文本类页面不能只看整窗差异比，
+> 要配合**带状定位**（这里就是靠行带 244 vs 273 才把问题钉死的）。
+
+#### ⑤ 门禁
+
+| 项 | 结果 |
+|---|---|
+| `cargo test --lib` | **923 passed**（+1：`shortcut_pages_match_csharp_fixed_lists`；**阳性对照实做**：把首行改回「向上移动」该测即红） |
+| `cargo test --test b0001_smoke --test ui_alignment` | **2 + 58 passed** |
+| `ui_interact_sweep.ps1 -ManageServer` | **pass=46 / total=47 / fail=0 / skip=0 / exit=0** |
+| `rustfmt --edition 2024 --check help.rs` | **1 ≤ master 基线 2** |
+
+#### ⑥ 未做（如实记）
+
+Page1 的 `TargetSpellLockOn` 与 Page2 的 9 条本端没有对应键位/功能，故不列（理由见 ②）。若哪天真补齐这些功能，
+清单里补上对应三元组即可（测试会按行数与首末行兜住）。
+
 ### 3.2dd 「语言对齐」这条线**收敛到两行**：20 扇键位窗的中英双版本对表（2026-10-01）
 
 承接 §3.2dc（同源 C# 一对可跑）。本轮把**原版侧 20 扇键位窗**一次性采成**中文版**，再用同一批矩形做三向对表，
