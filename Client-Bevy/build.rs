@@ -200,9 +200,12 @@ fn build_libpinyin(root: &Path, install: &Path) {
             download_with_fallback(&model_tar, &model_urls());
         }
     }
-    // 3) 兜底容器：.tar.lz（需要解压器：lzip / 7z / python3 依次尝试；都没有就跳过候选，
+    // 3) 兜底容器：.tar.lz（需要解压器：lzip / python3 / python 依次尝试；都没有就跳过候选，
     //    不让缺工具把构建搞红）。解压成功即直接解进 data/，不再走 .tar.gz 的校验路径。
     let mut model_ready = model_tar.exists();
+    // 记住 .tar.lz 这一路最后一次失败的真实原因：否则兜底也失败时，panic 尾行只说「取不到」，
+    // CI 日志里容易被读成网络问题（实际可能是「没有解压器」）。
+    let mut lz_err: Option<String> = None;
     if !model_ready {
         for u in MODEL_LZ_URLS {
             let lz = root.join("model20.text.tar.lz");
@@ -214,15 +217,19 @@ fn build_libpinyin(root: &Path, install: &Path) {
                     model_ready = true;
                     break;
                 }
-                Err(e) => eprintln!("[libpinyin]   .tar.lz 解压/解包失败（{}），跳过该候选", e),
+                Err(e) => {
+                    eprintln!("[libpinyin]   .tar.lz 解压/解包失败（{}），跳过该候选", e);
+                    lz_err = Some(e);
+                }
             }
         }
     }
     if !model_ready {
         panic!(
-            "模型数据取不到：.tar.gz 候选 {} 个与 .tar.lz 兜底 {} 个都失败 —— 可用 LIBPINYIN_MODEL_URLS 指定镜像，或用 LIBPINYIN_MODEL_TARBALL 指定本地包",
+            "模型数据取不到：.tar.gz 候选 {} 个与 .tar.lz 兜底 {} 个都失败（.tar.lz 最后一次失败原因：{}）—— 可用 LIBPINYIN_MODEL_URLS 指定镜像，或用 LIBPINYIN_MODEL_TARBALL 指定本地包",
             model_urls().len(),
-            MODEL_LZ_URLS.len()
+            MODEL_LZ_URLS.len(),
+            lz_err.as_deref().unwrap_or("未尝试（下载/校验阶段就没过）")
         );
     }
     if model_tar.exists() {
@@ -453,19 +460,18 @@ fn extract(tar: &Path, into: &Path) {
     }
 }
 
-/// 把 .tar.lz 解成 tar 再解进 `into`：解压器按 lzip -> 7z -> python3 依次尝试
-/// （三者都不在就返回 Err，调用方跳过该候选 —— 缺工具不该让构建红）。
-/// python3 兜底用内嵌解码器：多成员 lzip = 每个成员 [6 字节头][raw LZMA1][20 字节 trailer]。
+/// 把 .tar.lz 解成 tar 再解进 `into`：解压器按 lzip -> python3 -> python 依次尝试
+/// （都不在就返回 Err，调用方跳过该候选 —— 缺工具不该让构建红）。
+/// 注：7-Zip 不支持 lzip 容器（实测 `7z x -so` 退出码 2），所以链条里没有它。
+/// python 兜底用内嵌解码器：多成员 lzip = 每个成员 [6 字节头][raw LZMA1][20 字节 trailer]。
 fn extract_lz_into(lz: &Path, into: &Path) -> Result<(), String> {
-    let tar = lz.with_extension("tar");
+    // 产物名写死，避免 with_extension("tar") 把 model20.text.tar.lz 变成 model20.text.tar.tar
+    let tar = lz.with_file_name("model20.plain.tar");
     let lz_s = lz.to_string_lossy().to_string();
     let tar_s = tar.to_string_lossy().to_string();
     let py = "import lzma,sys\nb=open(sys.argv[1],'rb').read()\npos=0\nout=open(sys.argv[2],'wb')\nwhile pos<len(b):\n    d=b[pos+5]\n    ds=1<<(d&0x1f)\n    ds-=(ds//16)*((d>>5)&7)\n    dec=lzma.LZMADecompressor(format=lzma.FORMAT_RAW,filters=[{'id':lzma.FILTER_LZMA1,'dict_size':ds,'lc':3,'lp':0,'pb':2}])\n    out.write(dec.decompress(b[pos+6:]))\n    pos+=6+(len(b)-pos-6-len(dec.unused_data))+20\nout.close()\n";
     let mut ok = false;
-    for (cmd, args) in [
-        ("lzip", vec!["-dc".to_string(), lz_s.clone()]),
-        ("7z", vec!["x".to_string(), "-so".to_string(), lz_s.clone()]),
-    ] {
+    for (cmd, args) in [("lzip", vec!["-dc".to_string(), lz_s.clone()])] {
         if let Ok(out) = fs::File::create(&tar) {
             if let Ok(status) = Command::new(cmd)
                 .args(&args)
@@ -501,7 +507,7 @@ fn extract_lz_into(lz: &Path, into: &Path) -> Result<(), String> {
         }
     }
     if !ok {
-        return Err("没有可用的 lzip 解压器（lzip / 7z / python3 / python 均不可用或都失败）".into());
+        return Err("没有可用的 lzip 解压器（lzip / python3 / python 均不可用或都失败；7-Zip 不支持 lzip 容器，装了也没用）".into());
     }
     fs::create_dir_all(into).map_err(|e| format!("create {}: {}", into.display(), e))?;
     let status = Command::new("tar")
