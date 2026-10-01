@@ -1536,7 +1536,16 @@ fn inv_tooltip_system(
         return;
     };
     let lines = item_tooltip_lines(&item);
-    tooltip.update(2, true, item.name.clone(), lines, cursor.x, cursor.y);
+    // §3.2du：物品提示的标题（名字+品阶）按品阶上色（C# `GradeNameColor`）
+    tooltip.update_colored(
+        2,
+        true,
+        item.name.clone(),
+        item_grade_color(item.grade),
+        lines,
+        cursor.x,
+        cursor.y,
+    );
 }
 
 /// 物品 tooltip 行（对齐 C# MirItemCell：成对属性合并 + 单项 + 需求 + 重量/价格）
@@ -1670,6 +1679,23 @@ pub fn item_grade_name(grade: u8) -> Option<&'static str> {
         7 => Some("神话"), // ItemGradeMythical
         8 => Some("英勇"), // ItemGradeHeroic
         _ => None,
+    }
+}
+
+/// C# `GameScene.GradeNameColor`（`GameScene.cs:6791-6808`）：物品提示的**名字+品阶**按品阶上色。
+///
+/// `Common=Yellow` / `Rare=DeepSkyBlue` / `Legendary=DarkOrange` / `Mythical=Plum` / `Heroic=Red`；
+/// `None` 与未知档回退 `Yellow`（C# 的 `default` 分支）。本端入参是**本端枚举值**（= C# 值 + 3）。
+#[must_use]
+pub fn item_grade_color(grade: u8) -> bevy::prelude::Color {
+    use bevy::prelude::Color;
+    match grade {
+        5 => Color::srgb(0.0, 191.0 / 255.0, 1.0), // Rare: DeepSkyBlue
+        6 => Color::srgb(1.0, 140.0 / 255.0, 0.0), // Legendary: DarkOrange
+        7 => Color::srgb(221.0 / 255.0, 160.0 / 255.0, 221.0 / 255.0), // Mythical: Plum
+        8 => Color::srgb(1.0, 0.0, 0.0),           // Heroic: Red
+        // Common(4) 与 None(3)/未设值(0)：C# 都落在 Yellow / default 分支
+        _ => Color::srgb(1.0, 1.0, 0.0),
     }
 }
 
@@ -4059,6 +4085,25 @@ mod tests {
         let lines = item_tooltip_lines(&it);
         assert_eq!(lines.first().map(String::as_str), Some("传奇"), "{lines:?}");
         assert_eq!(lines.get(1).map(String::as_str), Some("武器"), "{lines:?}");
+        // §3.2du：标题色按品阶（C# `GameScene.GradeNameColor`，GameScene.cs:6791-6808）
+        use bevy::prelude::Color;
+        assert_eq!(item_grade_color(5), Color::srgb(0.0, 191.0 / 255.0, 1.0));
+        assert_eq!(item_grade_color(6), Color::srgb(1.0, 140.0 / 255.0, 0.0));
+        assert_eq!(
+            item_grade_color(7),
+            Color::srgb(221.0 / 255.0, 160.0 / 255.0, 221.0 / 255.0)
+        );
+        assert_eq!(item_grade_color(8), Color::srgb(1.0, 0.0, 0.0));
+        assert_eq!(
+            item_grade_color(4),
+            Color::srgb(1.0, 1.0, 0.0),
+            "Common=Yellow"
+        );
+        assert_eq!(
+            item_grade_color(0),
+            Color::srgb(1.0, 1.0, 0.0),
+            "未知档回退 Yellow"
+        );
     }
 
     #[test]

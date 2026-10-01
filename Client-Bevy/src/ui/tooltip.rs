@@ -15,7 +15,7 @@ use crate::ui::sprite_ui::UiButton;
 use crate::ui::sprite_ui::{shared_cjk_font, UiCjkFont};
 
 /// 通用提示状态
-#[derive(Resource, Default)]
+#[derive(Resource)]
 pub struct TooltipState {
     pub visible: bool,
     /// 当前提示归属方（0=无 1=按钮Hint 2=背包 3=仓库 4=其他 5=角色/商品 11=HUD按钮Hint 12=头顶名字）
@@ -24,7 +24,28 @@ pub struct TooltipState {
     pub lines: Vec<String>,
     pub x: f32,
     pub y: f32,
+    /// 标题色（§3.2du）。默认 = C# `Color.Yellow` 那一档（见 [`TOOLTIP_TITLE_COLOR`]）；
+    /// **物品提示**按品阶上色（C# `GradeNameColor`），由 [`TooltipState::update_colored`] 写入。
+    pub title_color: Color,
 }
+
+impl Default for TooltipState {
+    fn default() -> Self {
+        Self {
+            visible: false,
+            source: 0,
+            title: String::new(),
+            lines: Vec::new(),
+            x: 0.0,
+            y: 0.0,
+            // 面板标题实体在 `spawn_tooltip_panel` 里也用这个色，两处必须同源
+            title_color: TOOLTIP_TITLE_COLOR,
+        }
+    }
+}
+
+/// 提示标题默认色（≈ C# `Color.Yellow`，仅 `ItemGrade.Common` 与「非物品提示」用得到）。
+pub const TOOLTIP_TITLE_COLOR: Color = Color::srgb(1.0, 0.9, 0.3);
 
 impl TooltipState {
     /// 写入方更新提示；无目标时调用以清除自己归属的提示。
@@ -38,6 +59,22 @@ impl TooltipState {
         x: f32,
         y: f32,
     ) {
+        self.update_colored(source, visible, title, TOOLTIP_TITLE_COLOR, lines, x, y);
+    }
+
+    /// 同 [`TooltipState::update`]，但显式指定**标题色**（§3.2du：物品提示按品阶上色，
+    /// C# `GameScene.GradeNameColor`）。
+    #[allow(clippy::too_many_arguments)]
+    pub fn update_colored(
+        &mut self,
+        source: u16,
+        visible: bool,
+        title: String,
+        title_color: Color,
+        lines: Vec<String>,
+        x: f32,
+        y: f32,
+    ) {
         if visible {
             if self.visible
                 && self.source == source
@@ -45,6 +82,7 @@ impl TooltipState {
                 && self.lines == lines
                 && self.x == x
                 && self.y == y
+                && self.title_color == title_color
             {
                 return;
             }
@@ -54,6 +92,7 @@ impl TooltipState {
             self.lines = lines;
             self.x = x;
             self.y = y;
+            self.title_color = title_color;
         } else if self.source == source {
             if !self.visible {
                 return;
@@ -134,7 +173,7 @@ pub fn spawn_tooltip_panel(commands: &mut Commands, font: &Handle<Font>) -> Enti
             8.0,
             5.0,
             13.0,
-            Color::srgb(1.0, 0.9, 0.3),
+            TOOLTIP_TITLE_COLOR,
             1,
         )
         .insert(TooltipTitle);
@@ -376,7 +415,7 @@ pub fn tooltip_panel_system(
         (With<TooltipBg>, Without<TooltipTitle>, Without<TooltipLine>),
     >,
     mut title: Query<
-        (&mut Text, &mut Visibility),
+        (&mut Text, &mut Visibility, &mut TextColor),
         (With<TooltipTitle>, Without<TooltipBg>, Without<TooltipLine>),
     >,
     mut lines: Query<
@@ -422,7 +461,7 @@ pub fn tooltip_panel_system(
             node.height = Val::Px(h);
         }
     }
-    if let Ok((mut t, mut vis)) = title.single_mut() {
+    if let Ok((mut t, mut vis, mut color)) = title.single_mut() {
         *vis = if show && !state.title.is_empty() {
             Visibility::Visible
         } else {
@@ -431,6 +470,10 @@ pub fn tooltip_panel_system(
         if show && !state.title.is_empty() {
             if t.0 != state.title {
                 t.0 = state.title.clone();
+            }
+            // §3.2du：标题色随写入方给的值走（物品提示按品阶）
+            if color.0 != state.title_color {
+                color.0 = state.title_color;
             }
         } else if !t.0.is_empty() {
             // 隐藏时必须清空正文：描边副本由 `sync_outline_ui_system` 按正文内容同步，
