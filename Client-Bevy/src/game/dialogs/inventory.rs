@@ -74,6 +74,8 @@ pub struct InvItem {
     pub rental: bool,
     /// 觉醒等级（C# `UserItem.Awake.GetAwakeLevel()`）——`DisassemblePrice()`/`DowngradePrice()` 用。
     pub awake_level: u8,
+    /// 绑定标位（C# `ItemInfo.Bind` / `BindMode` bitflags，位值同 C#）——提示的 `BindInfoLabel` 段用。
+    pub bind_mode: u16,
 }
 
 impl InvItem {
@@ -1673,6 +1675,29 @@ pub fn item_tooltip_lines(item: &InvItem) -> Vec<String> {
             "出售价格 : {} 金币",
             crate::game::dialogs::mail::format_gold(item.price / 2)
         ));
+    }
+    // 绑定标位：C# `BindInfoLabel`（`GameScene.cs:8887-9165`）——标位非 0 时按固定次序逐条输出
+    // （条件统一是 `Bind != None && Bind.HasFlag(X)`，文案取中文包；本端位值同 C# `BindMode`）。
+    if item.bind_mode != 0 {
+        for (bit, text) in [
+            (0x0001u16, "死亡时不可掉落"), // DontDeathdrop → CantDropOnDeath
+            (0x0002, "不可丢弃"),          // DontDrop      → CantDrop
+            (0x0040, "不可升级"),          // DontUpgrade   → CantUpgrade
+            (0x0004, "不可出售"),          // DontSell      → CantSell
+            (0x0010, "不可交易"),          // DontTrade     → CantTrade
+            (0x0008, "不可存放"),          // DontStore     → CantStore
+            (0x0020, "不可修理"),          // DontRepair    → CantRepair
+            (0x0400, "不可特殊修理"),      // NoSRepair     → CantSpecialRepair
+            (0x0100, "死亡时损坏"),        // BreakOnDeath  → BreaksOnDeath
+            (0x0080, "丢弃时销毁"),        // DestroyOnDrop → DestroyedWhenDropped
+            (0x0800, "不能作为结婚戒指"),  // NoWeddingRing → CannotBeWeddingRing
+            (0x8000, "英雄不可使用"),      // NoHero        → CannotBeUsedByHero
+            (0x0200, "装备时绑定灵魂"),    // BindOnEquip   → SoulBindsOnEquip
+        ] {
+            if item.bind_mode & bit != 0 {
+                lines.push(text.to_string());
+            }
+        }
     }
     lines
 }
@@ -4025,6 +4050,7 @@ mod tests {
             added_stats_count: 0,
             rental: false,
             awake_level: 0,
+            bind_mode: 0,
         }
     }
 
@@ -4139,6 +4165,28 @@ mod tests {
         let lines = item_tooltip_lines(&plain);
         assert!(!lines.iter().any(|l| l.starts_with("镶嵌孔")), "{lines:?}");
         assert!(!lines.iter().any(|l| l.contains("打开镶嵌孔")), "{lines:?}");
+    }
+
+    /// §3.2dw：绑定标位行对齐 C# `BindInfoLabel`（`GameScene.cs:8887-9165`）——
+    /// 标位非 0 时按 C# 次序逐条输出，文案取中文包；标位为 0 不出行。
+    #[test]
+    fn tooltip_bind_flag_lines_match_csharp() {
+        let mut it = item_with_type(ItemType::Weapon);
+        it.bind_mode = 0x0002 | 0x0010 | 0x0080; // 不可丢弃 + 不可交易 + 丢弃时销毁
+        let lines = item_tooltip_lines(&it);
+        let idx = |s: &str| lines.iter().position(|l| l == s);
+        assert!(lines.iter().any(|l| l == "不可丢弃"), "{lines:?}");
+        assert!(lines.iter().any(|l| l == "不可交易"), "{lines:?}");
+        assert!(lines.iter().any(|l| l == "丢弃时销毁"), "{lines:?}");
+        // C# 次序：不可丢弃(0x0002) → 不可交易(0x0010) → 丢弃时销毁(0x0080)
+        assert!(idx("不可丢弃") < idx("不可交易"), "{lines:?}");
+        assert!(idx("不可交易") < idx("丢弃时销毁"), "{lines:?}");
+        // Bound 为 0 的普通物品不出任何标位行
+        let plain = item_with_type(ItemType::Weapon);
+        let lines = item_tooltip_lines(&plain);
+        for s in ["不可丢弃", "不可交易", "丢弃时销毁", "装备时绑定灵魂"] {
+            assert!(!lines.iter().any(|l| l == s), "{s} 不该出现: {lines:?}");
+        }
     }
 
     #[test]

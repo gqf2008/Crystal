@@ -208,6 +208,7 @@ pub(crate) fn to_inv_item(item: &mir2_shared::data::item::UserItem) -> InvItem {
         added_stats_count: item.added_stats.len() as u8,
         rental: item.rental_information.is_some(),
         awake_level: item.awake.awake_level() as u8,
+        bind_mode: item.info.as_ref().map(|i| i.bind.bits()).unwrap_or(0),
     }
 }
 
