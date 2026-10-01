@@ -669,28 +669,39 @@ fn minimap_ui_system(
         None => (1.0, 1.0),
     };
 
+    // 玩家格子坐标（一次取用，两种模式都要用）
+    let player_tile = players
+        .single()
+        .ok()
+        .map(|tf| world_to_tile(tf.translation.x, tf.translation.y));
+
     if let Ok((mut dot_node, mut dot_vis)) = dot.single_mut() {
         if !open || !big {
             *dot_vis = Visibility::Hidden;
         } else {
             *dot_vis = Visibility::Visible;
             // 玩家格子坐标 → 小地图像素（面板子节点，相对坐标；面板原点 (898,0)）
-            if let Ok(player_tf) = players.single() {
-                let (tx, ty) = world_to_tile(player_tf.translation.x, player_tf.translation.y);
+            if let Some((tx, ty)) = player_tile {
                 let px = MAP_RECT.0 + (tx as f32 / map_w) * MAP_RECT.2;
                 let py = MAP_RECT.1 + (ty as f32 / map_h) * MAP_RECT.3;
                 dot_node.left = Val::Px(px - 2.0);
                 dot_node.top = Val::Px(py - 2.0);
-                if let Ok((mut t, mut tf)) = pos_texts.single_mut() {
-                    let s = format!("{},{}", tx, ty);
-                    if t.0 != s {
-                        t.0 = s; // 变化才更新，避免每帧重排文本（ICU4X/CPU，#31）
-                    }
-                    tf.left = Val::Px(54.0);
-                    tf.top = Val::Px(bottom_y);
-                }
             }
         }
+    }
+
+    // 坐标文字 `LocationLabel`：C# `SetBigMode`/`SetSmallMode` **两种模式都**设
+    // `Location = new Point(46, y)`（`MainDialogs.cs:2053` / `:2067`），`Process()` 里
+    // 每帧写 `Text`（`:2080`）—— 与 `_bigMode` 无关。
+    // §3.2db：本端此前把它写在 `big` 分支里 ⇒ 切小档后标签**留在 y=131**（45 高的面板外）
+    // ⇒ 原版小档帧里有「288, 616」，本端那一块是空的（`orig_win_Minimap.png` vs 本端小档帧）。
+    if let (Some((tx, ty)), Ok((mut t, mut tf))) = (player_tile, pos_texts.single_mut()) {
+        let s = format!("{},{}", tx, ty);
+        if t.0 != s {
+            t.0 = s; // 变化才更新，避免每帧重排文本（ICU4X/CPU，#31）
+        }
+        tf.left = Val::Px(54.0);
+        tf.top = Val::Px(bottom_y);
     }
 
     // 对象光点（#120 C# RadarTexture）：玩家白/NPC 绿/怪物红；仅大模式
@@ -929,6 +940,62 @@ mod tests {
         // 默认大模式（C# _bigMode = true）
         assert!(MiniMapMode::default().big, "C# 默认 _bigMode = true");
         println!("  ✓ 小地图 大/小模式布局与 C# 对齐（2090=128x154 / 2091=128x45）");
+    }
+
+    /// §3.2db：坐标文字 `LocationLabel` 必须**跟着大/小模式走**。
+    ///
+    /// C# `SetBigMode()` / `SetSmallMode()` **两处都**写 `LocationLabel.Location = new Point(46, y)`
+    /// （`MainDialogs.cs:2067` / `:2053`），`Process()` 每帧写它的 `Text`（`:2080`），与 `_bigMode` 无关。
+    /// 本端此前把这段更新写在 `big` 分支里 ⇒ 切小档后标签**留在 y=131**（45 高的面板外），
+    /// 原版小档帧里有「288, 616」而本端那一块是空的（`orig_win_Minimap.png` vs 本端小档帧，§3.2da/§3.2db）。
+    ///
+    /// 阳性对照（实做）：把 `tf.top` 的更新挪回 `big` 分支 → 本测试红。
+    #[test]
+    fn minimap_pos_label_follows_mode() {
+        use bevy::ecs::system::RunSystemOnce;
+        use bevy::prelude::{Transform, World};
+
+        // 依赖真实 .Lib 数据：本地无数据（CI/新检出）时跳过（同本文件其它资产测试的口径）
+        if !crate::resources::libraries::data_assets_present() {
+            eprintln!("跳过 minimap_pos_label_follows_mode：无 Data 资产");
+            return;
+        }
+
+        let mut world = World::new();
+        world.insert_resource(GameLibraries(Libraries::new(resolve_data_path())));
+        world.insert_resource(Assets::<Image>::default());
+        world.insert_resource(Assets::<Font>::default());
+        world.insert_resource(UiCjkFont::default());
+        world.insert_resource(UiFont::default());
+        world.insert_resource(crate::game::dialogs::keyboard_layout::KeyboardState::default());
+        world.insert_resource(DialogManager::default());
+        // 小档
+        world.insert_resource(MiniMapMode { big: false });
+        world.insert_resource(crate::game::day_night::DayNight::default());
+        world.insert_resource(GameData::default());
+        world.spawn((LocalPlayer, Transform::from_xyz(0.0, 0.0, 0.0)));
+        world
+            .run_system_once(spawn_minimap)
+            .expect("spawn_minimap 应可运行");
+        world
+            .resource_mut::<DialogManager>()
+            .open(DialogKind::Minimap);
+        world
+            .run_system_once(minimap_ui_system)
+            .expect("minimap_ui_system 应可运行");
+
+        let mut q = world.query_filtered::<&Node, With<MiniMapPosText>>();
+        let node = q.single(&world).expect("应有坐标文字节点");
+        assert_eq!(
+            node.top,
+            Val::Px(BOTTOM_Y_SMALL),
+            "小档时坐标文字须落在 bottom_y = 45-23 = 22（C# SetSmallMode）"
+        );
+        assert_ne!(
+            node.top,
+            Val::Px(BOTTOM_Y_BIG),
+            "小档不得留在大档的 y=131（那会落到 45 高的面板之外）"
+        );
     }
 }
 
