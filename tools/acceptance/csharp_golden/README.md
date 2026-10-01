@@ -4318,6 +4318,65 @@ spawn」配对，中间夹了个 `for` 循环体就串行了。
 `Prguse[2447]` 信用图标：本端数据里**没有这一帧**（越界）⇒ 无像素可比；原版帧也没拍到过该状态
 （要 `RewardCredit > 0` 的任务）。本条只到"确认它取不到帧、不生成节点"为止，不推像素结论。
 
+### 3.2df 键位设置窗行改成 **C# 三列**（名称 / 默认键 / 当前键按钮）＋ 点击区收到按钮本身（2026-10-01）
+
+#### ① 从哪里看出来
+
+§3.2dd 的逐带扫描：Keybind 窗 `(256,169,768,599)` 在 **y289-528** 有连续一二十条带是
+「**两版原版互相一致**（`en-cn` 0.3~0.4%）**而本方差 23~27%**」⇒ 与语言无关的真差异。
+
+#### ② C# 规格（`Client/MirScenes/Dialogs/KeyboardLayoutDialog.cs`）
+
+- 行容器 `Location = (20, 90 + y)`、`Size = (460,15)`（`:249-255`）；
+- 行内**三件**（`KeybindRow`，`:342-394`）：
+
+| 控件 | 行内位置 | 尺寸 | 内容 |
+|---|---|---|---|
+| `BindName` | (0,0) | 200x15 | `defaultBind.Description` |
+| `DefaultBind` | (200,0) | 100x15 | `GetKey(option, true)`（**默认**键位） |
+| `CurrentBindButton` | (340,0) | 120x16 | `"  " + GetKey(option, false)`，美术 **`Prguse2[190/191/192]`**，等待重绑时显示 `"  ????"` |
+
+- 点击：**只有那颗按钮**进入等待重绑（`:379-394`）。
+- 本端改前：名称与 `[当前键]` 拼成一个字符串、**没有默认键列、没有按钮美术**，且**整行** 20..480 都能点。
+
+#### ③ 本端改法
+
+`Client-Bevy/src/game/dialogs/keyboard_layout.rs`：
+
+- `RowSpec::Bind` 由单串拆成 `name` / `def`（默认键，取 `state.defaults` 里同名动作）/ `cur`（当前键，等待重绑时 `????`）；
+- 每槽 spawn 三件：名称 x=20、默认键 x=220、当前键按钮 x=360 120x16（`Prguse2[190/191/192]`）＋按钮内文字(+4,+2)；
+- 新增 `KeyboardRowAux { slot, kind }`（1=默认键文字 2=当前键文字 3=按钮节点）让三件**共用一条更新查询**（本系统参数已到 16 上限，不能再拆）；
+- 点击区由整行 20..480 **收到按钮 360..480**（C# 语义）。
+
+> ⚠️ 踩坑：新查询与 `pos_bar`/`panel_origin` 同写 `Node` ⇒ 起客户端直接 **B0001 panic**
+> （`cargo test --lib` 拦不住，它是运行期；本轮是"mock 起不来"才发现）。按本文件既有的互斥矩阵补
+> `Without<KeyboardRowAux>` 后正常。
+
+#### ④ 实测
+
+| 帧 | vs 中文原版 Keybind 窗 `(256,169,768,599)` |
+|---|---|
+| 旧二进制（名称+[键]，无默认键列/无按钮美术） | 15.82% |
+| **本次（三列 + 按钮美术 + 点击区）** | **13.04%** |
+
+#### ⑤ 仍差的 ~13%：**C# 的键位窗连中文版也是英文**（不是本端回归）
+
+C# 的 `Description` 其实走 `GetLocalization(ClientTextKeys.X)`（`KeyBindSettings.cs:183+`，中文串在
+`Localization/Chinese.json` 里有，如 `InventoryOpenClose = 背包 打开/关闭`），但实测
+**英中两版原版帧在这个窗几乎完全相同（`en-cn` 1.11%）**，且原版帧里显示的是 `Belt Slot 1 / NumPad1`
+这类**英文** ⇒ C# 构造键位表时用的是**英文文案**（启动顺序怪癖：`CMain.InputKeys` 在语言表就绪前构造）。
+本端保留**中文动作名**（`向上移动` / `背包` 这套）是**有意的本地化改进**，不为像素对齐把中文退回英文；
+该窗残差里这一块属"语言选择差"，已在 §3.2dd 的归属检验里作为偏差项单列。
+
+#### ⑥ 门禁
+
+| 项 | 结果 |
+|---|---|
+| `cargo test --lib` | **923 passed / 0 failed** |
+| `cargo test --test b0001_smoke --test ui_alignment` | **2 + 58 passed** |
+| `ui_interact_sweep.ps1 -ManageServer` | **pass=46 / total=47 / fail=0 / skip=0 / exit=0**（`keyboard_layout` closed=YES） |
+| `rustfmt --edition 2024 --check keyboard_layout.rs` | **2 = master 基线** |
+
 ### 3.2de Help 窗「快捷键」页改成 **C# 三页固定清单** ＋ 字号/居中的 pt→px 口径（2026-10-01）
 
 #### ① 根因（源码级）
