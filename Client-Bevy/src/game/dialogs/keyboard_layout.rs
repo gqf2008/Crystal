@@ -393,7 +393,12 @@ enum RowSpec {
     },
     Bind {
         y: f32,
-        text: String,
+        /// C# `KeybindRow.BindName.Text`（本端用中文动作名，见文件头"有意偏差"）
+        name: String,
+        /// C# `KeybindRow.DefaultBind.Text` = `GetKey(option, true)`（**默认**键位）
+        def: String,
+        /// C# `KeybindRow.CurrentBindButton.Text` = `"  " + GetKey(option, false)`（**当前**键位）
+        cur: String,
         index: usize,
         waiting: bool,
     },
@@ -431,14 +436,25 @@ fn build_rows(state: &KeyboardState) -> Vec<RowSpec> {
             break;
         }
         let waiting = state.rebinding == Some(i);
-        let key_txt = if waiting {
-            "按新按键...".to_string()
+        // §3.2df：C# `KeybindRow` 是**三列** —— 名称 / 默认键(`GetKey(option,true)`) /
+        // 当前键按钮(`GetKey(option,false)`，等待重绑时显示 `"  ????"`，`KeyboardLayoutDialog.cs:342-394`）。
+        // 本端此前把"名称 + [当前键]"并成一个字符串，且**没有默认键列、没有那颗按钮美术**。
+        let cur = if waiting {
+            "????".to_string()
         } else {
-            key_name(b.key)
+            binding_key_text(b)
         };
+        let def = state
+            .defaults
+            .iter()
+            .find(|d| d.action == b.action)
+            .map(binding_key_text)
+            .unwrap_or_else(|| cur.clone());
         rows.push(RowSpec::Bind {
             y,
-            text: format!("{}  [{}]", b.action, key_txt),
+            name: b.action.to_string(),
+            def,
+            cur,
             index: i,
             waiting,
         });
@@ -489,6 +505,16 @@ pub struct KeyboardPositionBar(pub f32);
 
 #[derive(Component)]
 pub struct KeyboardRow(pub usize, pub f32);
+
+/// 行内「默认键」文字 / 「当前键」按钮与其文字（C# `KeybindRow.DefaultBind` / `CurrentBindButton`）。
+///
+/// `kind`：1 = 默认键文字（对话框 x=220）、2 = 当前键文字（按钮内，+4/+2）、3 = 当前键按钮节点（x=360）。
+/// 三者共用**同一条更新查询**（系统参数已到 16 上限，不能再拆）。
+#[derive(Component)]
+pub struct KeyboardRowAux {
+    pub slot: usize,
+    pub kind: u8,
+}
 
 pub struct KeyboardPlugin;
 
@@ -616,10 +642,43 @@ fn spawn_keyboard_layout(
             ));
         }
         spawn_label(p, &cjk, "严格规则", 125.0, 405.0, 12.0, Color::WHITE, 9);
-        // 行区文字实体（16 个槽，位置每帧按 build_rows 更新）
+        // 行区实体（16 个槽，位置每帧按 build_rows 更新）。
+        // 每槽三件（C# `KeybindRow` + 行容器 `(20, 90+y)`，`KeyboardLayoutDialog.cs:249-255`）：
+        //   名称  对话框 x=20（容器 0）   大小 200x15
+        //   默认键 对话框 x=220（容器 200）大小 100x15
+        //   当前键 对话框 x=360（容器 340）大小 120x16，美术 `Prguse2[190/191/192]`，文字前缀两个空格
         for i in 0..16usize {
             spawn_label(p, &cjk, "", 20.0, 90.0, 12.0, Color::WHITE, 9)
                 .insert(KeyboardRow(i, 90.0));
+            spawn_label(p, &cjk, "", 220.0, 90.0, 12.0, Color::WHITE, 9)
+                .insert(KeyboardRowAux { slot: i, kind: 1 });
+            if let (Some(n), Some(h), Some(pr)) = (
+                load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 190),
+                load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 191),
+                load_lib_image(&mut libs, &mut images, LibraryName::Prguse2, 192),
+            ) {
+                let mut e = spawn_icon_button(p, n, h, pr, 360.0, 90.0, 120.0, 16.0, 10);
+                e.insert(KeyboardRowAux { slot: i, kind: 3 });
+                e.with_children(|c| {
+                    c.spawn((
+                        Node {
+                            position_type: PositionType::Absolute,
+                            left: Val::Px(4.0),
+                            top: Val::Px(2.0),
+                            ..default()
+                        },
+                        Text::new(String::new()),
+                        TextFont {
+                            font: FontSource::Handle(cjk.clone()),
+                            font_size: FontSize::Px(12.0),
+                            ..default()
+                        },
+                        TextColor(Color::WHITE),
+                        ZIndex(11),
+                        KeyboardRowAux { slot: i, kind: 2 },
+                    ));
+                });
+            }
         }
     });
 }
@@ -637,8 +696,17 @@ fn keyboard_layout_ui_system(
         With<KeyboardEnforce>,
     >,
     mut widgets: Query<&mut Visibility, With<KeyboardWidget>>,
-    mut pos_bar: Query<(&mut Node, &KeyboardPositionBar), Without<KeyboardRow>>,
+    // B0001 互斥：本系统里有三条查询写 `Node`（pos_bar / rows / row_aux），彼此必须两两不相交
+    mut pos_bar: Query<
+        (&mut Node, &KeyboardPositionBar),
+        (Without<KeyboardRow>, Without<KeyboardRowAux>),
+    >,
     mut rows: Query<(&mut Text, &mut Node, &KeyboardRow)>,
+    // 行内「默认键文字 / 当前键文字 / 当前键按钮节点」共用一个标记（见 `KeyboardRowAux` 注释）
+    mut row_aux: Query<
+        (&mut Node, Option<&mut Text>, &KeyboardRowAux),
+        (Without<KeyboardRow>, Without<KeyboardPositionBar>),
+    >,
     keys: Res<ButtonInput<KeyCode>>,
     mouse: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window>,
@@ -651,6 +719,7 @@ fn keyboard_layout_ui_system(
             With<KeyboardWidget>,
             Without<KeyboardRow>,
             Without<KeyboardPositionBar>,
+            Without<KeyboardRowAux>,
         ),
     >,
 ) {
@@ -736,10 +805,13 @@ fn keyboard_layout_ui_system(
                     for spec in build_rows(&state) {
                         if let RowSpec::Bind { y, index, .. } = spec {
                             let ry = oy + base + y;
-                            if cursor.x >= ox + 20.0
+                            // 只有「当前键」那颗按钮能点（C# `CurrentBindButton.Click`；
+                            // 按钮在行容器 (20,90+y) 内 x=340..460 ⇒ 对话框 x=360..480）。
+                            // 本端此前整行 20..480 都能点，与 C# 不同。
+                            if cursor.x >= ox + 360.0
                                 && cursor.x <= ox + 480.0
                                 && cursor.y >= ry
-                                && cursor.y <= ry + 15.0
+                                && cursor.y <= ry + 16.0
                             {
                                 state.rebinding = Some(index);
                                 tracing::info!("🎹 等待按键: 行 {}", index);
@@ -815,12 +887,33 @@ fn keyboard_layout_ui_system(
                 text.0 = format!("◆ {}", t);
                 node.top = Val::Px(row.1 + *y);
             }
-            Some(RowSpec::Bind { y, text: t, .. }) => {
-                text.0 = t.clone();
+            // 名称列（C# `KeybindRow.BindName`）
+            Some(RowSpec::Bind { y, name, .. }) => {
+                text.0 = name.clone();
                 node.top = Val::Px(row.1 + *y);
             }
             None => {
                 text.0 = String::new();
+            }
+        }
+    }
+    // 默认键列 / 当前键按钮（C# `DefaultBind` / `CurrentBindButton`）
+    for (mut node, text, aux) in &mut row_aux {
+        match specs.get(aux.slot) {
+            Some(RowSpec::Bind { y, def, cur, .. }) => {
+                node.top = Val::Px(90.0 + *y);
+                if let Some(mut t) = text {
+                    t.0 = if aux.kind == 1 {
+                        def.clone()
+                    } else {
+                        format!("  {cur}")
+                    };
+                }
+            }
+            _ => {
+                if let Some(mut t) = text {
+                    t.0 = String::new();
+                }
             }
         }
     }
