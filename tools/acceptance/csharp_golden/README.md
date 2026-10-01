@@ -4318,6 +4318,42 @@ spawn」配对，中间夹了个 `for` 循环体就串行了。
 `Prguse[2447]` 信用图标：本端数据里**没有这一帧**（越界）⇒ 无像素可比；原版帧也没拍到过该状态
 （要 `RewardCredit > 0` 的任务）。本条只到"确认它取不到帧、不生成节点"为止，不推像素结论。
 
+### 3.2ea 物品提示补**过期 / 封印 / 租借**三段（含 `PrintTimeSpanFromSeconds` 复刻）（2026-10-01）
+
+C# 这三段都在 `BindInfoLabel` 尾部（`GameScene.cs:9464-9558`），口径逐条核过：
+
+| 段 | 条件 | 文案 |
+|---|---|---|
+| 过期 `ExpireInfo` | 剩余 > 0 / ≤ 0 | 「将在 {fmt} 后过期」(`ExpiresIn`) / 「已过期」(`Expired`) |
+| 封印 `SealedInfo` | 只在剩余 > 0 | 「封印持续 {fmt}」(`SealedFor`) |
+| 租借（未锁） | `RentalLocked == false` | 「物品租借来源：{OwnerName}」(`ItemRentedFrom`) + 「租借将在 {fmt} 后到期」(`RentalExpiresIn`)；过期时 C# 用的是**英文字面量** `"Rental expired"` |
+| 租借（已锁且未到期） | `RentalLocked == true && ExpiryDate > now` | 「租借锁将在 {fmt} 后结束」(`RentalLockExpiresIn`) |
+
+两处口径细节：
+
+1. **时间格式**：`{fmt}` = `Functions.PrintTimeSpanFromSeconds(secs, accurate:true)`（`Shared/Functions/Functions.cs:86-108`），
+   四档全是**英文缩写**（C# 自己没本地化）：`"45s"` / `"2m 05s"` / `"1h 01m 01s"` / `"1d 01h 01m 01s"`。
+   本端新增 `format_timespan()` **逐分支复刻**（含 `D2` 补零）。
+2. **时间字段是 .NET `DateTime.ToBinary`**（`expiry_date_binary` / `sealed_info` / `rental_information.expiry_date_binary`）：
+   本端新增 `binary_to_unix_secs()`（低 62 位 ticks ÷10⁷ − 62135596800，掩码与 `DateTime.FromBinary` 一致；
+   `SharedRust/src/data/client_data.rs:41` 已有同款"Unix 纪元 ticks"常量）。
+
+实现上把三段拆成 `item_time_lines(item, now_secs)`（`now` 显式传入 ⇒ 单测可用固定时间做确定性断言），
+`item_tooltip_lines` 内部用 `now_unix_secs()` 调它；位置按 C# 放在**宝石段之后、物品描述段之前**。
+`InvItem` 相应新增 `expire_binary` / `sealed_binary` / `rental_owner` / `rental_binary` / `rental_locked` 五个字段。
+
+#### 门禁
+
+| 门禁 | 结果 |
+|---|---|
+| `cargo test --lib` | **936 passed / 0 failed**（新增 `tooltip_time_lines_match_csharp`：时间格式四档 + `ToBinary` 往返 + 过期/封印/租借五种分支，含"已过不出行"与英文 `Rental expired` 口径） |
+| `cargo test --test b0001_smoke --test ui_alignment` | **2 + 58 passed** |
+| `ui_interact_sweep.ps1` | **46/47、fail=0、exit=0** |
+| `rustfmt --check` | `inventory.rs` 6 / `packets/mod.rs` 0 = master 既有基线（未新增） |
+
+> 仍缺：`SoulboundTo`（需绑定者名字，本端只有 id）、`OverlapInfoLabel`（Ctrl+点击交互提示）、
+> `AwakeInfoLabel` 的两段英文字面量行。
+
 ### 3.2dz 物品提示补**觉醒段**与**宝石"可用于"段**（2026-10-01）
 
 | 段 | C# 出处与口径 | 本端修后 |

@@ -218,6 +218,21 @@ pub(crate) fn to_inv_item(item: &mir2_shared::data::item::UserItem) -> InvItem {
         wedding_ring: item.wedding_ring,
         awake_type: item.awake.awake_type as u8,
         unique_flags: item.info.as_ref().map(|i| i.unique.bits()).unwrap_or(0),
+        expire_binary: item.expire_info.as_ref().map(|e| e.expiry_date_binary),
+        sealed_binary: item.sealed_info.as_ref().map(|s| s.expiry_date_binary),
+        rental_owner: item
+            .rental_information
+            .as_ref()
+            .map(|r| r.owner_name.clone()),
+        rental_binary: item
+            .rental_information
+            .as_ref()
+            .map(|r| r.expiry_date_binary),
+        rental_locked: item
+            .rental_information
+            .as_ref()
+            .map(|r| r.rental_locked)
+            .unwrap_or(false),
     }
 }
 
