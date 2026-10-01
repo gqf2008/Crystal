@@ -192,14 +192,16 @@ fn login_dialog_aligned() {
 fn new_account_dialog_aligned() {
     require_assets!("new_account_dialog_aligned");
     let mut libs = Libs::new();
-    assert_centered(
-        "新建账号框",
-        lg::NA_X,
-        lg::NA_Y,
-        LibraryName::Prguse,
-        63,
-        &mut libs,
+    // §3.2cv 批⑧：C# `NewAccountDialog`（`LoginScene.cs:773-776`）用 `Size` = `GetTrueSize(Prguse[63])`
+    // = 586x457（图头 588x460）⇒ ((1024-586)/2, (768-457)/2) = (219,155)；本端原按图头写成 (218,154)。
+    let (aw, ah) = libs.true_size(LibraryName::Prguse, 63);
+    assert_eq!((aw, ah), (586.0, 457.0));
+    assert_eq!(
+        (lg::NA_X, lg::NA_Y),
+        (((SW - aw) / 2.0).floor(), ((SH - ah) / 2.0).floor()),
+        "[居中] 新建账号框按 C# `Size` = GetTrueSize 代入"
     );
+    assert_eq!((lg::NA_X, lg::NA_Y), (219.0, 155.0));
     let (dw, dh) = libs.size(LibraryName::Prguse, 63);
     // 8 输入框：C# NewAccountDialog，x=226，ys/widths 如下
     let ys = [103.0f32, 129.0, 155.0, 189.0, 215.0, 250.0, 276.0, 311.0];

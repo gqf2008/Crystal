@@ -1,0 +1,14 @@
+# 已知「**故意**用图头/字面量」的窗原点（**不是**缺陷；命中不在表内才 FAIL）
+# 生成：py -3.12 rust_origin_audit.py --repo . --data Data
+# 每行 `相对路径:行号`（路径用正斜杠）
+#
+# 这批的共同点：C# 源码里那个锚点**本来就是字面量**（与 `MirImageControl.Size` 无关），
+# 所以本端照抄字面量是对的——别按"真尺寸"去改：
+#
+# 1) `CharacterDialog.cs:34` `Location = new Point(Settings.ScreenWidth - 264, 0)`
+#    用的是字面量 264（`Title[504]` 图头 264x380、真尺寸 263x378）。本端这三处写 `1024.0 - 264.0` 与 C# 同值：
+#      - `game/dialogs/character.rs:30`（人窗 `DIALOG_X`）
+#      - `game/dialogs/hero_equipment.rs:30` / `game/dialogs/hero_skills.rs:21`（英雄页复用 `Title[504]`，同一条字面量口径）
+Client-Bevy/src/game/dialogs/character.rs:30
+Client-Bevy/src/game/dialogs/hero_equipment.rs:30
+Client-Bevy/src/game/dialogs/hero_skills.rs:21

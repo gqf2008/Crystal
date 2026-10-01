@@ -95,10 +95,17 @@ pub struct CursorBlink {
 
 pub const DX: f32 = 348.0;
 pub const DY: f32 = 274.0;
-/// 新建账号对话框原点（Prguse[63] 588×460 居中）
-pub const NA_X: f32 = (1024.0 - 588.0) / 2.0;
-pub const NA_Y: f32 = (768.0 - 460.0) / 2.0;
-/// 修改密码对话框原点（Prguse[50] 348×268 居中）
+/// 新建账号对话框原点。C# `LoginScene.cs:773-776`：`Index = 63; Library = Prguse;
+/// Location = ((ScreenWidth - Size.Width)/2, (ScreenHeight - Size.Height)/2)`，
+/// `Size` = `GetTrueSize(Prguse[63])` = **586x457**（图头 588x460）⇒ `((1024-586)/2, (768-457)/2)` = **(219,155)**。
+///
+/// §3.2cv 批⑧：本端此前按图头写成 (218,154)——**两轴各偏 1px**；这条是
+/// `rust_origin_audit.py`（写死字面量原点扫描）新抓出来的。
+/// **两项都写字面值**：C# 是整数除法（`438/2 = 219`、`311/2 = 155`），
+/// 而 `(768.0-457.0)/2.0` 在 Rust 里是 155.5 —— 不 floor 就会偏 0.5px（与 §3.2cl 的 Help 同款坑）。
+pub const NA_X: f32 = 219.0;
+pub const NA_Y: f32 = 155.0;
+/// 修改密码对话框原点（`Prguse[50]` 348x268 **无裁剪** ⇒ 图头即真尺寸，本端原值就对）
 pub const CP_X: f32 = (1024.0 - 348.0) / 2.0;
 pub const CP_Y: f32 = (768.0 - 268.0) / 2.0;
 

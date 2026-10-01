@@ -4239,6 +4239,62 @@ dbtool <沙箱>\Server setpos 333 384 99 100 ; dbtool <沙箱>\Server setpos gqf
 **未采集**：交易中的「双方都放物品/改金币/按确认锁定」这些**内容态**帧（本轮只做到"空窗"同状态对拍）；
 以及**原版鼠标点 YES 点不动**这条本身（是"控制被盖住"还是"点击语义"没查，如实记）。
 
+### 3.2cv 批⑧：「写死字面量原点」的扫描**固化成工具** ＋ 新账号窗 (218,154)→**(219,155)**（2026-10-01）
+
+#### ① 为什么要把 §3.2cu 的手扫固化
+
+§3.2cl ③ 的扫描只认 `center_origin(PANEL…)`；§3.2cu 靠**手工**扫字面量才抓到商城/输入框。本轮把这套变成工具，
+以后新增窗口不会再漏这一类。
+
+**`tools/acceptance/csharp_golden/rust_origin_audit.py`**
+
+- 扫 `Client-Bevy/src/**/*.rs`，取每个文件里出现的 `(LibraryName::X, idx)` 当**候选美术**；
+- 找「原点表达式」：`1024.0 - <数字或本文件常量>`、`768.0 - …`、`(1024.0 - …)/2.0`、`center_origin(<…>, <…>)`
+  （符号是本文件 `const NAME: f32 = N` 时解析成 N）；
+- 判定：解析出的数 **== 某美术的图头宽/高** 且**该轴真尺寸≠图头** ⇒ 报一行（这正是"拿图头当 `Size`"的特征；
+  用真尺寸时数不会等于图头，所以不报）；
+- 只扫**生产代码**：`#[cfg(test)]` 之后整段跳过 —— 单测里常有"故意用图头模型"的对照断言（§3.2cl/§3.2co 都写过），那不是缺陷；
+- 已知**故意用字面量**的窗放 `rust_origin_audit_known.txt`（只标 `known`、不算 FAIL）；
+- `--selftest`：负对照（干净树 **0 新命中**）＋ 正对照（把商城原点改回 `((1024-696)/2,(768-476)/2)` ⇒ **必须被抓到**）。
+
+```
+py -3.12 tools/acceptance/csharp_golden/rust_origin_audit.py --repo . --data Data \
+   --known tools/acceptance/csharp_golden/rust_origin_audit_known.txt     # 有新命中即 exit 1
+```
+
+#### ② 工具首跑就抓出一处真缺陷：登录「新建账号」窗
+
+`LoginScene.cs:773-776`：`Index = 63; Library = Prguse; Size = new Size();`
+`Location = ((Settings.ScreenWidth - Size.Width)/2, (Settings.ScreenHeight - Size.Height)/2)`
+—— `Size` = `GetTrueSize(Prguse[63])` = **586x457**（图头 588x460）⇒ `((1024-586)/2, (768-457)/2)` = **(219,155)**。
+本端 `NA_X/NA_Y` 原来按图头写成 **(218,154)**：**两轴各偏 1px**。
+
+⚠️ 顺带一个坑：`(768.0-457.0)/2.0` 在 Rust 里是 **155.5**，而 C# 是**整数除法** 155 ⇒ 常量和断言都写成**字面值**
+（与 §3.2cl 的 Help `(1024-533)/2=245` 同一坑）。
+
+同族的 `ChangePasswordDialog`（`Prguse[50]` 348x268）**无裁剪** ⇒ 图头即真尺寸，本端 (338,250) **本来就对**
+（工具也没报它——判据里"该轴真尺寸≠图头"这一条把它排除了）。
+
+#### ③ 工具首跑的其余命中：3 条**已知、故意**的字面量（已进 known 表）
+
+`CharacterDialog.cs:34` `Location = new Point(Settings.ScreenWidth - 264, 0)` 用的是**字面量 264**
+（`Title[504]` 图头 264x380、真 263x378）⇒ 本端 `character.rs:30` / `hero_equipment.rs:30` / `hero_skills.rs:21`
+三处 `1024.0 - 264.0` **与 C# 同值，别按真尺寸改**。
+
+#### ④ 本端验证
+
+- `rust_origin_audit.py --selftest` = **exit 0**（负对照 0 新命中 / 正对照抓到）
+- `rust_origin_audit.py`（带 `--known`）= **命中 3 条（新命中 0）⇒ exit 0**
+- `cargo test --lib` = **921 passed**；`cargo test --test b0001_smoke --test ui_alignment` = **2 + 58 passed**
+  （`new_account_dialog_aligned` 里那条按图头算的 `assert_centered` 改成按真尺寸代入，并钉 `(219,155)`）
+- `pwsh tools/acceptance/ui_interact_sweep.ps1 -ManageServer` = **pass=46 / total=47 / fail=0 / skip=0 / exit=0**
+- `rustfmt --edition 2024 --check`：2 个改动文件的告警**计数与 master 基线逐个相等**
+
+#### ⑤ 未采集
+
+新建账号窗的**原版帧**：它在登录场景里（`LoginScene._account = new NewAccountDialog`，要在登录框点「新建账号」才出现），
+归档帧没有该状态 ⇒ 本条**只有源码判据**（C# 公式 + `GetTrueSize`）。
+
 ### 3.2cu 「真尺寸」批⑦：**写死字面量的原点**盲区——商城 (164→165) ＋ 输入框 (368→369)（2026-10-01）
 
 #### ① 为什么这批还会漏
