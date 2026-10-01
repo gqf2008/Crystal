@@ -141,6 +141,7 @@ jobs:
             tar
             curl
             gettext
+            lzip
       - name: Add GNU target (Windows only)
         if: runner.os == 'Windows'
         run: rustup target add x86_64-pc-windows-gnu
@@ -171,10 +172,44 @@ jobs:
           echo "${fork_sha}  $work/fork.tar.gz" | sha512sum -c -
           tar xzf "$work/fork.tar.gz" -C "$work"
           mv "$work/libpinyin-${fork_ref}" "$work/src"
-          curl -sL --retry 3 --max-time 600 -o "$work/model20.text.tar.gz" "https://downloads.sourceforge.net/project/libpinyin/models/model20.text.tar.gz"
-          echo "${model_sha}  $work/model20.text.tar.gz" | sha512sum -c -
+          # 模型数据：多候选 + **逐候选校验** + Slackware .tar.lz 兜底 —— 与 Client-Bevy/build.rs
+          # 同一策略。单 URL 无兜底会让 SourceForge 一挂这条 leg 就红（2026-10-01 实测：红在
+          # sha512sum 校验失败，得到的是空串的哈希 —— 即 200+空文件被当成下载成功）。
+          model_lz_sha=4c3d568601500eedf3eae3e4462c5150eba1548d5e15f038056c7c63116042d88034276631650cc66f14b69f31bb0c1d0c3de08a3f15db463f19e82b694e375b
+          model_kind=""
+          for url in \
+            "https://downloads.sourceforge.net/project/libpinyin/models/model20.text.tar.gz" \
+            "https://master.dl.sourceforge.net/project/libpinyin/models/model20.text.tar.gz" \
+            "https://netcologne.dl.sourceforge.net/project/libpinyin/models/model20.text.tar.gz" \
+            "https://cfhcable.dl.sourceforge.net/project/libpinyin/models/model20.text.tar.gz" ; do
+            rm -f "$work/model20.text.tar.gz"
+            echo "[model] 尝试 $url"
+            curl -sSL --retry 5 --retry-delay 5 --retry-all-errors --connect-timeout 20 --max-time 900 \
+              -o "$work/model20.text.tar.gz" "$url" || continue
+            [ "$(stat -c%s "$work/model20.text.tar.gz" 2>/dev/null || echo 0)" -gt 1024 ] \
+              || { echo "[model]   内容过小（空文件/错误页），换下一个候选"; continue; }
+            echo "${model_sha}  $work/model20.text.tar.gz" | sha512sum -c - \
+              || { echo "[model]   SHA512 不匹配，换下一个候选"; continue; }
+            model_kind=gz; break
+          done
+          if [ -z "$model_kind" ]; then
+            echo "[model] .tar.gz 候选全失败 → 试 Slackware 的 .tar.lz 兜底"
+            rm -f "$work/model20.text.tar.lz" "$work/model20.tar"
+            curl -sSL --retry 5 --retry-delay 5 --retry-all-errors --connect-timeout 20 --max-time 900 \
+              -o "$work/model20.text.tar.lz" \
+              "https://mirrors.slackware.com/slackware/slackware64-current/source/x/libpinyin/model20.text.tar.lz" \
+              && echo "${model_lz_sha}  $work/model20.text.tar.lz" | sha512sum -c - \
+              && lzip -dc "$work/model20.text.tar.lz" > "$work/model20.tar" \
+              && [ "$(stat -c%s "$work/model20.tar")" -gt 1024 ] \
+              && model_kind=lz
+          fi
+          [ -n "$model_kind" ] || { echo "[model] 所有来源都失败（SourceForge 与 Slackware 兜底）"; exit 1; }
           mkdir -p "$work/src/data"
-          tar xzf "$work/model20.text.tar.gz" -C "$work/src/data"
+          if [ "$model_kind" = gz ]; then
+            tar xzf "$work/model20.text.tar.gz" -C "$work/src/data"
+          else
+            tar xf "$work/model20.tar" -C "$work/src/data"
+          fi
           cd "$work/src"
           autoreconf -f -i
           ./configure --prefix="$install" --with-dbm=BerkeleyDB --disable-libzhuyin --disable-dependency-tracking \

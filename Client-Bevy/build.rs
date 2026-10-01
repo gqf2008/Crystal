@@ -20,10 +20,26 @@ use std::process::Command;
 const FORK_REF: &str = "f21ef9a12a14eef626a89a38bb06e8ed115c38ca";
 const FORK_SHA512: &str = "d3e293d5a4a7bcf6dfc2f96724e2c16ecb2046d38de4d8c7fc349bd6eab3b4472f01cba317c50d75ef6afa773c9e007a273fd065a7418e0819a420616ef12858";
 const MODEL_SHA512: &str = "ed4d0607ad35e0e7ea424670539ddcd81a2b03c1da914b9c00cb748cf065f29471502d40b9a189852001da1fb9178c3bcc4675d7efebea5d081d78bfeee9b5d6";
+// 模型数据的候选下载点。
+//
+// 每个候选都按自己的 SHA512 **单独**校验后才被接受（见 download_verified）：2026-10-01 的
+// 事故就是 SourceForge 对下载请求返回 200 + 空文件/错误页，而旧代码只看 curl 退出码与文件
+// 是否存在就认定成功并 return —— 于是永远不会去试下一个候选，最后在统一校验处 panic，
+// 兜底形同虚设。
+// 另外 fcitx 那条（download.fcitx-im.org/data/model20.text.tar.gz）实测已 404，删掉。
 const MODEL_URLS: &[&str] = &[
     "https://downloads.sourceforge.net/project/libpinyin/models/model20.text.tar.gz",
-    "https://download.fcitx-im.org/data/model20.text.tar.gz",
+    "https://master.dl.sourceforge.net/project/libpinyin/models/model20.text.tar.gz",
+    "https://netcologne.dl.sourceforge.net/project/libpinyin/models/model20.text.tar.gz",
+    "https://cfhcable.dl.sourceforge.net/project/libpinyin/models/model20.text.tar.gz",
 ];
+/// 兜底容器：Slackware 源码镜像提供的是 model20.text.tar.lz（同一个 model20 数据，只是
+/// lzip 压缩）。已用逐文件 SHA-256 比对验证：解出的 18 个文件与 model20.text.tar.gz 完全一致。
+/// 2026-10-01 SourceForge 全线不可用时，它是唯一活着的源。
+const MODEL_LZ_URLS: &[&str] = &[
+    "https://mirrors.slackware.com/slackware/slackware64-current/source/x/libpinyin/model20.text.tar.lz",
+];
+const MODEL_LZ_SHA512: &str = "4c3d568601500eedf3eae3e4462c5150eba1548d5e15f038056c7c63116042d88034276631650cc66f14b69f31bb0c1d0c3de08a3f15db463f19e82b694e375b";
 
 fn main() {
     emit_build_stamp();
@@ -166,20 +182,53 @@ fn build_libpinyin(root: &Path, install: &Path) {
     // 2) model20 数据（可用 LIBPINYIN_MODEL_TARBALL 指定本地 tarball，跳过下载）。
     //    无论是否复用缓存包，都做 SHA512 校验，防止上次残留损坏包在解压/构建时出错。
     let model_tar = root.join("model20.text.tar.gz");
+    // 复用的缓存包也要先验签：残留的坏包（今天的事故形态）会让构建一路走到解压/编译才炸，
+    // 报错点离原因很远。
+    if model_tar.exists() && !sha512_matches(&model_tar, MODEL_SHA512) {
+        eprintln!("[libpinyin] 缓存包校验失败，删除后重新获取: {}", model_tar.display());
+        let _ = fs::remove_file(&model_tar);
+    }
     if !model_tar.exists() {
         if let Ok(local) = env::var("LIBPINYIN_MODEL_TARBALL") {
             if Path::new(&local).exists() {
                 fs::copy(&local, &model_tar)
                     .unwrap_or_else(|e| panic!("copy model tarball: {}", e));
             } else {
-                download_with_fallback(&model_tar, MODEL_URLS);
+                download_with_fallback(&model_tar, &model_urls());
             }
         } else {
-            download_with_fallback(&model_tar, MODEL_URLS);
+            download_with_fallback(&model_tar, &model_urls());
         }
     }
-    verify_sha512(&model_tar, MODEL_SHA512);
-    extract_into(&model_tar, &src.join("data"));
+    // 3) 兜底容器：.tar.lz（需要解压器：lzip / 7z / python3 依次尝试；都没有就跳过候选，
+    //    不让缺工具把构建搞红）。解压成功即直接解进 data/，不再走 .tar.gz 的校验路径。
+    let mut model_ready = model_tar.exists();
+    if !model_ready {
+        for u in MODEL_LZ_URLS {
+            let lz = root.join("model20.text.tar.lz");
+            if !download_verified(&lz, u, MODEL_LZ_SHA512) {
+                continue;
+            }
+            match extract_lz_into(&lz, &src.join("data")) {
+                Ok(()) => {
+                    model_ready = true;
+                    break;
+                }
+                Err(e) => eprintln!("[libpinyin]   .tar.lz 解压/解包失败（{}），跳过该候选", e),
+            }
+        }
+    }
+    if !model_ready {
+        panic!(
+            "模型数据取不到：.tar.gz 候选 {} 个与 .tar.lz 兜底 {} 个都失败 —— 可用 LIBPINYIN_MODEL_URLS 指定镜像，或用 LIBPINYIN_MODEL_TARBALL 指定本地包",
+            model_urls().len(),
+            MODEL_LZ_URLS.len()
+        );
+    }
+    if model_tar.exists() {
+        verify_sha512(&model_tar, MODEL_SHA512);
+        extract_into(&model_tar, &src.join("data"));
+    }
     // 3) autoreconf + configure + make + install
     // Windows(MSYS2) 下 autoreconf/configure 是 shell 脚本，native 进程无法直接 spawn，
     // 必须经 bash -c 执行；Unix 用 sh -c（行为等价）。
@@ -282,26 +331,70 @@ fn download(target: &Path, url: &str) {
     }
 }
 
-fn download_with_fallback(target: &Path, urls: &[&str]) {
-    for u in urls {
-        if target.exists() {
-            return;
-        }
-        eprintln!("[libpinyin] 尝试下载模型数据: {}", u);
-        let status = Command::new("curl")
-            .args(["-sL", "--retry", "3", "--max-time", "600", "-o"])
-            .arg(target)
-            .arg(u)
-            .status()
-            .unwrap_or_else(|e| panic!("spawn curl: {}", e));
-        if status.success() && target.exists() {
-            return;
-        }
+/// 候选下载点：LIBPINYIN_MODEL_URLS（逗号分隔）可整体替换内置列表 —— 给运维/CI 一个
+/// 不改编代码就能换镜像的逃生口，也是本地端到端测试注入假镜像的入口。
+fn model_urls() -> Vec<String> {
+    match env::var("LIBPINYIN_MODEL_URLS") {
+        Ok(v) if !v.trim().is_empty() => v
+            .split(',')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect(),
+        _ => MODEL_URLS.iter().map(|s| s.to_string()).collect(),
     }
-    panic!("模型数据 model20.text.tar.gz 下载失败（尝试了 {:?}）", urls);
 }
 
-fn verify_sha512(path: &Path, want: &str) {
+/// 下载**一个**候选并就地校验：不通过就删掉自己的产物并返回 false（调用方接着试下一个）。
+/// 三条失败线：curl 非零/未落地、内容过小（200 + 空文件/错误页，今天的事故形态）、SHA512 不匹配。
+fn download_verified(target: &Path, url: &str, want: &str) -> bool {
+    // 上一次候选的残渣绝不能被当成这一次的结果（旧代码正是栽在 target.exists() 上）。
+    let _ = fs::remove_file(target);
+    eprintln!("[libpinyin] 尝试下载模型数据: {}", url);
+    let status = Command::new("curl")
+        .args([
+            "-sSL",
+            "--retry", "5",
+            "--retry-delay", "5",
+            "--retry-all-errors",
+            "--connect-timeout", "20",
+            "--max-time", "900",
+            "-o",
+        ])
+        .arg(target)
+        .arg(url)
+        .status()
+        .unwrap_or_else(|e| panic!("spawn curl: {}", e));
+    if !status.success() || !target.exists() {
+        eprintln!("[libpinyin]   下载失败（curl 非零或未落地），换下一个候选");
+        let _ = fs::remove_file(target);
+        return false;
+    }
+    let size = fs::metadata(target).map(|m| m.len()).unwrap_or(0);
+    if size < 1024 {
+        eprintln!("[libpinyin]   响应只有 {} 字节，判为坏响应（空文件/错误页），换下一个候选", size);
+        let _ = fs::remove_file(target);
+        return false;
+    }
+    if !sha512_matches(target, want) {
+        eprintln!("[libpinyin]   SHA512 校验未通过，换下一个候选（坏文件已删除）");
+        let _ = fs::remove_file(target);
+        return false;
+    }
+    eprintln!("[libpinyin]   SHA512 校验通过: {}", target.display());
+    true
+}
+
+/// 依次试候选，命中即 true；全部失败返回 false（由调用方决定是否还有别的容器/是否 panic）。
+fn download_with_fallback(target: &Path, urls: &[String]) -> bool {
+    for u in urls {
+        if download_verified(target, u, MODEL_SHA512) {
+            return true;
+        }
+    }
+    false
+}
+
+fn sha512_of(path: &Path) -> String {
     // macOS: shasum -a 512；Linux: sha512sum。两命令都试，兼容 CI(ubuntu) 与本地(mac)。
     let tries: &[(&str, &[&str])] = &[("shasum", &["-a", "512"]), ("sha512sum", &[])];
     let mut got = String::new();
@@ -325,6 +418,12 @@ fn verify_sha512(path: &Path, want: &str) {
             }
         }
     }
+    got
+}
+
+/// 不匹配就 panic —— 用于源码包与最终成品（这两处失败就该停下）。
+fn verify_sha512(path: &Path, want: &str) {
+    let got = sha512_of(path);
     if got != want {
         panic!(
             "SHA512 校验失败: 得到 {}，期望 {}（文件: {}）",
@@ -334,6 +433,11 @@ fn verify_sha512(path: &Path, want: &str) {
         );
     }
     eprintln!("[libpinyin] SHA512 校验通过: {}", path.display());
+}
+
+/// 非 panic 的判定：候选下载与缓存复用都靠它决定「接受还是换下一个」。
+fn sha512_matches(path: &Path, want: &str) -> bool {
+    sha512_of(path) == want
 }
 
 fn extract(tar: &Path, into: &Path) {
@@ -347,6 +451,70 @@ fn extract(tar: &Path, into: &Path) {
     if !status.success() {
         panic!("解压失败: {}", tar.display());
     }
+}
+
+/// 把 .tar.lz 解成 tar 再解进 `into`：解压器按 lzip -> 7z -> python3 依次尝试
+/// （三者都不在就返回 Err，调用方跳过该候选 —— 缺工具不该让构建红）。
+/// python3 兜底用内嵌解码器：多成员 lzip = 每个成员 [6 字节头][raw LZMA1][20 字节 trailer]。
+fn extract_lz_into(lz: &Path, into: &Path) -> Result<(), String> {
+    let tar = lz.with_extension("tar");
+    let lz_s = lz.to_string_lossy().to_string();
+    let tar_s = tar.to_string_lossy().to_string();
+    let py = "import lzma,sys\nb=open(sys.argv[1],'rb').read()\npos=0\nout=open(sys.argv[2],'wb')\nwhile pos<len(b):\n    d=b[pos+5]\n    ds=1<<(d&0x1f)\n    ds-=(ds//16)*((d>>5)&7)\n    dec=lzma.LZMADecompressor(format=lzma.FORMAT_RAW,filters=[{'id':lzma.FILTER_LZMA1,'dict_size':ds,'lc':3,'lp':0,'pb':2}])\n    out.write(dec.decompress(b[pos+6:]))\n    pos+=6+(len(b)-pos-6-len(dec.unused_data))+20\nout.close()\n";
+    let mut ok = false;
+    for (cmd, args) in [
+        ("lzip", vec!["-dc".to_string(), lz_s.clone()]),
+        ("7z", vec!["x".to_string(), "-so".to_string(), lz_s.clone()]),
+    ] {
+        if let Ok(out) = fs::File::create(&tar) {
+            if let Ok(status) = Command::new(cmd)
+                .args(&args)
+                .stdout(out)
+                .stderr(std::process::Stdio::null())
+                .status()
+            {
+                if status.success() && fs::metadata(&tar).map(|m| m.len() > 1024).unwrap_or(false) {
+                    ok = true;
+                    break;
+                }
+            }
+        }
+        let _ = fs::remove_file(&tar);
+    }
+    // python 兜底：Ubuntu/macOS 上叫 python3，Windows 上通常只有 python —— 两个名字都要试。
+    for pycmd in ["python3", "python"] {
+        if ok {
+            break;
+        }
+        let status = Command::new(pycmd)
+            .arg("-c")
+            .arg(py)
+            .arg(&lz_s)
+            .arg(&tar_s)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status();
+        ok = matches!(status, Ok(s) if s.success())
+            && fs::metadata(&tar).map(|m| m.len() > 1024).unwrap_or(false);
+        if !ok {
+            let _ = fs::remove_file(&tar);
+        }
+    }
+    if !ok {
+        return Err("没有可用的 lzip 解压器（lzip / 7z / python3 / python 均不可用或都失败）".into());
+    }
+    fs::create_dir_all(into).map_err(|e| format!("create {}: {}", into.display(), e))?;
+    let status = Command::new("tar")
+        .arg("xf")
+        .arg(&tar)
+        .arg("-C")
+        .arg(into)
+        .status()
+        .map_err(|e| format!("spawn tar: {}", e))?;
+    if !status.success() {
+        return Err(format!("tar xf 失败: {}", tar.display()));
+    }
+    Ok(())
 }
 
 fn extract_into(tar: &Path, into: &Path) {
