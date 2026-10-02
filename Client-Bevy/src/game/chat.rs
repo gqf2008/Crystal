@@ -2643,6 +2643,7 @@ fn chat_item_click_system(
             &crate::game::player_state::Progression,
             &crate::game::player_state::CombatStats,
             &crate::actor::ActorAppearance,
+            &crate::actor::PlayerName,
         ),
         With<crate::actor::LocalPlayer>,
     >,
@@ -2688,11 +2689,12 @@ fn chat_item_click_system(
         // 提示（`GameScene.CreateItemLabel` → 11 个子标签），本端也必须单一真源：
         // 直接复用 `inventory::item_tooltip_lines`（此前这里是第二份旧格式副本：
         // 「数量/类型:/耐久:」，与 §3.2dr–§3.2dt 对齐过的口径不一致）。
-        let ctx = player_q.single().ok().map(|(prog, cs, app)| {
+        let ctx = player_q.single().ok().map(|(prog, cs, app, name)| {
             crate::game::dialogs::inventory::TooltipPlayerCtx {
                 level: prog.level,
                 class: app.class,
                 stats: cs.stats,
+                name: Some(name.0.as_str()),
             }
         });
         let (texts, colors) =
@@ -2960,12 +2962,7 @@ mod whisper_partner_tests {
             .spawn((
                 ChatBarButton(ChatBarAction::Size),
                 crate::ui::sprite_ui::UiButton {
-                    rect: (
-                        CHAT_BAR_X + 574.0,
-                        chat_bar_button_y(0),
-                        20.0,
-                        16.0,
-                    ),
+                    rect: (CHAT_BAR_X + 574.0, chat_bar_button_y(0), 20.0, 16.0),
                     clicked: false,
                 },
                 Transform::from_xyz(CHAT_BAR_X + 574.0, -chat_bar_button_y(0), 2.5),

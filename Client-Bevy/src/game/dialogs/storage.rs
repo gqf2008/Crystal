@@ -1427,6 +1427,7 @@ fn storage_tooltip_system(
             &crate::game::player_state::Progression,
             &crate::game::player_state::CombatStats,
             &crate::actor::ActorAppearance,
+            &crate::actor::PlayerName,
         ),
         With<crate::actor::LocalPlayer>,
     >,
@@ -1467,11 +1468,12 @@ fn storage_tooltip_system(
         return;
     };
     // 与背包一致：完整属性行（#1244 item_tooltip_lines）+ §3.2ed 逐行配色
-    let ctx = player_q.single().ok().map(|(prog, cs, app)| {
+    let ctx = player_q.single().ok().map(|(prog, cs, app, name)| {
         crate::game::dialogs::inventory::TooltipPlayerCtx {
             level: prog.level,
             class: app.class,
             stats: cs.stats,
+            name: Some(name.0.as_str()),
         }
     });
     let (texts, colors) =
