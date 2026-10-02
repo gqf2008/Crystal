@@ -1422,6 +1422,14 @@ fn storage_server_events(
 /// 悬停提示（#93 通用 Tooltip）：光标在仓库物品格上显示 名称 x数量
 fn storage_tooltip_system(
     state: Res<StorageState>,
+    player_q: Query<
+        (
+            &crate::game::player_state::Progression,
+            &crate::game::player_state::CombatStats,
+            &crate::actor::ActorAppearance,
+        ),
+        With<crate::actor::LocalPlayer>,
+    >,
     mut tooltip: ResMut<crate::ui::tooltip::TooltipState>,
     windows: Query<&Window>,
     panel_origin: Query<&Node, With<StorageWidget>>,
@@ -1458,11 +1466,30 @@ fn storage_tooltip_system(
         tooltip.update(3, false, String::new(), Vec::new(), cursor.x, cursor.y);
         return;
     };
-    // 与背包一致：完整属性行（#1244 item_tooltip_lines）
-    let lines = crate::game::dialogs::inventory::item_tooltip_lines(&item);
+    // 与背包一致：完整属性行（#1244 item_tooltip_lines）+ §3.2ed 逐行配色
+    let ctx = player_q.single().ok().map(|(prog, cs, app)| {
+        crate::game::dialogs::inventory::TooltipPlayerCtx {
+            level: prog.level,
+            class: app.class,
+            stats: cs.stats,
+        }
+    });
+    let (texts, colors) =
+        crate::game::dialogs::inventory::item_tooltip_lines_colored(&item, ctx.as_ref())
+            .into_iter()
+            .unzip();
     // P3-3（#782）：格子里存的是线包名（常常只是 `#id`），显示前按本地表解析
     let title = state.display_name(&item);
-    tooltip.update(3, true, title, lines, cursor.x, cursor.y);
+    tooltip.update_colored_lines(
+        3,
+        true,
+        title,
+        crate::ui::tooltip::TOOLTIP_TITLE_COLOR,
+        texts,
+        colors,
+        cursor.x,
+        cursor.y,
+    );
 }
 
 // ============================================================================

@@ -211,6 +211,14 @@ fn char_equip_tooltip_system(
     mgr: Res<DialogManager>,
     page: Res<CharPage>,
     loadout_q: Query<&Loadout, With<LocalPlayer>>,
+    player_q: Query<
+        (
+            &crate::game::player_state::Progression,
+            &crate::game::player_state::CombatStats,
+            &crate::actor::ActorAppearance,
+        ),
+        With<LocalPlayer>,
+    >,
     mut tooltip: ResMut<crate::ui::tooltip::TooltipState>,
     windows: Query<&Window>,
     panel_origin: Query<&Node, With<CharDialogWidget>>,
@@ -256,8 +264,28 @@ fn char_equip_tooltip_system(
         tooltip.update(5, false, String::new(), Vec::new(), cursor.x, cursor.y);
         return;
     };
-    let lines = crate::game::dialogs::inventory::item_tooltip_lines(&item);
-    tooltip.update(5, true, item.name.clone(), lines, cursor.x, cursor.y);
+    // §3.2ed：与背包口径一致地逐行配色（需求/职业行的红字要玩家等级·属性·职业）
+    let ctx = player_q.single().ok().map(|(prog, cs, app)| {
+        crate::game::dialogs::inventory::TooltipPlayerCtx {
+            level: prog.level,
+            class: app.class,
+            stats: cs.stats,
+        }
+    });
+    let (texts, colors) =
+        crate::game::dialogs::inventory::item_tooltip_lines_colored(&item, ctx.as_ref())
+            .into_iter()
+            .unzip();
+    tooltip.update_colored_lines(
+        5,
+        true,
+        item.name.clone(),
+        crate::ui::tooltip::TOOLTIP_TITLE_COLOR,
+        texts,
+        colors,
+        cursor.x,
+        cursor.y,
+    );
 }
 
 pub struct CharacterDialogPlugin;

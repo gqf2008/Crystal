@@ -2638,6 +2638,14 @@ fn chat_item_click_system(
     mut chat: ResMut<ChatState>,
     cache: Res<ChatItemCache>,
     net: Res<NetConnection>,
+    player_q: Query<
+        (
+            &crate::game::player_state::Progression,
+            &crate::game::player_state::CombatStats,
+            &crate::actor::ActorAppearance,
+        ),
+        With<crate::actor::LocalPlayer>,
+    >,
     mut tooltip: ResMut<crate::ui::tooltip::TooltipState>,
     mouse: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window>,
@@ -2680,13 +2688,24 @@ fn chat_item_click_system(
         // 提示（`GameScene.CreateItemLabel` → 11 个子标签），本端也必须单一真源：
         // 直接复用 `inventory::item_tooltip_lines`（此前这里是第二份旧格式副本：
         // 「数量/类型:/耐久:」，与 §3.2dr–§3.2dt 对齐过的口径不一致）。
-        let lines = crate::game::dialogs::inventory::item_tooltip_lines(item);
-        tooltip.update_colored(
+        let ctx = player_q.single().ok().map(|(prog, cs, app)| {
+            crate::game::dialogs::inventory::TooltipPlayerCtx {
+                level: prog.level,
+                class: app.class,
+                stats: cs.stats,
+            }
+        });
+        let (texts, colors) =
+            crate::game::dialogs::inventory::item_tooltip_lines_colored(item, ctx.as_ref())
+                .into_iter()
+                .unzip();
+        tooltip.update_colored_lines(
             2,
             true,
             crate::game::dialogs::inventory::item_display_name(item),
             crate::game::dialogs::inventory::item_grade_color(item.grade),
-            lines,
+            texts,
+            colors,
             cursor.x,
             cursor.y,
         );
