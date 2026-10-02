@@ -1525,6 +1525,14 @@ pub fn inv_weight_text(inv: Option<&Inventory>) -> String {
 /// 命中用 InventoryOrigin（#2560：背包推位/拖动后 tooltip 跟随）
 fn inv_tooltip_system(
     inv_q: Query<&Inventory, With<LocalPlayer>>,
+    player_q: Query<
+        (
+            &crate::game::player_state::Progression,
+            &crate::game::player_state::CombatStats,
+            &crate::actor::ActorAppearance,
+        ),
+        With<LocalPlayer>,
+    >,
     inv_ui: Res<InvUiState>,
     mut tooltip: ResMut<crate::ui::tooltip::TooltipState>,
     origin: Res<InventoryOrigin>,
@@ -1569,23 +1577,123 @@ fn inv_tooltip_system(
         tooltip.update(2, false, String::new(), Vec::new(), cursor.x, cursor.y);
         return;
     };
-    let lines = item_tooltip_lines(&item);
+    // §3.2ed：需求/职业行的红字要玩家等级·属性·职业（C# `MapObject.User`）
+    let ctx = player_q.single().ok().map(|(prog, cs, app)| TooltipPlayerCtx {
+        level: prog.level,
+        class: app.class,
+        stats: cs.stats,
+    });
+    let lines = item_tooltip_lines_colored(&item, ctx.as_ref());
+    let (texts, colors): (Vec<String>, Vec<Color>) = lines.into_iter().unzip();
     // §3.2du：物品提示的标题（名字+品阶）按品阶上色（C# `GradeNameColor`）
-    tooltip.update_colored(
+    tooltip.update_colored_lines(
         2,
         true,
         item_display_name(&item),
         item_grade_color(item.grade),
-        lines,
+        texts,
+        colors,
         cursor.x,
         cursor.y,
     );
 }
 
-/// 物品 tooltip 行（对齐 C# MirItemCell：成对属性合并 + 单项 + 需求 + 重量/价格）
+// ============================================================================
+// 物品提示行级配色（§3.2ed）
+//
+// C# 的物品提示（`GameScene.DrawItemHint` 调 `NameInfoLabel` / `…InfoLabel` 一族）是
+// **每一段各自一个 `MirLabel`**、各自 `ForeColour`；本端早年把整框塞进一个通用提示面板、
+// 行统一一色。这里把各段的 `ForeColour` 逐个抄下来（取值与出处见各段注释）。
+// ============================================================================
+
+/// C# `Color.White` 那一档（普通属性行）。
+const HINT_WHITE: Color = crate::ui::tooltip::TOOLTIP_LINE_COLOR;
+/// C# `Color.Yellow`（与提示标题同源：`Common` 品阶名、绑定标位、宝石「可用于」、过期行）。
+const HINT_YELLOW: Color = crate::ui::tooltip::TOOLTIP_TITLE_COLOR;
+/// C# `Color.Red`（需求未达标、封印行）。
+const HINT_RED: Color = Color::srgb(1.0, 0.0, 0.0);
+/// C# `Color.Khaki`（租借到期行、物品描述正文）。
+const HINT_KHAKI: Color = Color::srgb(240.0 / 255.0, 230.0 / 255.0, 140.0 / 255.0);
+/// C# `Color.DarkKhaki`（租借来源/租借锁行、「物品描述」标题）。
+const HINT_DARKKHAKI: Color = Color::srgb(189.0 / 255.0, 183.0 / 255.0, 107.0 / 255.0);
+/// C# `Color.Orchid`（「由游戏管理员创建」）。
+const HINT_ORCHID: Color = Color::srgb(218.0 / 255.0, 112.0 / 255.0, 214.0 / 255.0);
+
+/// 提示行配色需要的**玩家上下文**：C# 的 `NeedInfoLabel`（`:8700-8771`）与
+/// `ClassRequired`（`:8790-8817`）会拿 `MapObject.User` 的等级/属性/职业和需求比，不达标就
+/// 把该行染红。本端在悬停系统里从本地玩家实体读（`Progression`/`CombatStats`/`ActorView`）。
+///
+/// 传 `None`（纯函数调用方 / 单测）时这些行一律按白色处理——与历史行为一致。
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TooltipPlayerCtx {
+    /// 本地玩家等级（C# `MapObject.User.Level`）
+    pub level: u16,
+    /// 本地玩家职业（C# `MapObject.User.Class`）
+    pub class: mir2_shared::MirClass,
+    /// `[min, max]` × `AC/MAC/DC/MC/SC`，与 [`crate::game::player_state::CombatStats::stats`] 同序
+    pub stats: [[i32; 2]; 5],
+}
+
+/// C# `NeedInfoLabel` 的需求行颜色：不达标 `Color.Red`，达标（或无法判定）白。
+fn requirement_color(item: &InvItem, ctx: Option<&TooltipPlayerCtx>) -> Color {
+    let Some(ctx) = ctx else {
+        return HINT_WHITE;
+    };
+    let need = i32::from(item.required_amount);
+    let unmet = match item.required_type {
+        3 => i32::from(ctx.level) < need,  // Level
+        4 => ctx.stats[0][1] < need,       // MaxAC
+        5 => ctx.stats[1][1] < need,       // MaxMAC
+        6 => ctx.stats[2][1] < need,       // MaxDC
+        7 => ctx.stats[3][1] < need,       // MaxMC
+        8 => ctx.stats[4][1] < need,       // MaxSC
+        9 => i32::from(ctx.level) > need,  // MaxLevel（超过上限同样红）
+        10 => ctx.stats[0][0] < need,      // MinAC
+        11 => ctx.stats[1][0] < need,      // MinMAC
+        12 => ctx.stats[2][0] < need,      // MinDC
+        13 => ctx.stats[3][0] < need,      // MinMC
+        14 => ctx.stats[4][0] < need,      // MinSC
+        _ => false,                        // default：C# 不置红
+    };
+    if unmet {
+        HINT_RED
+    } else {
+        HINT_WHITE
+    }
+}
+
+/// C# `NeedInfoLabel` 的**职业需求行**颜色：当前职业不在 `RequiredClass` 掩码里就红
+/// （`GameScene.cs:8790-8817`；掩码位 = `1 << MirClass`）。
+fn class_requirement_color(item: &InvItem, ctx: Option<&TooltipPlayerCtx>) -> Color {
+    let Some(ctx) = ctx else {
+        return HINT_WHITE;
+    };
+    let flag = 1u8 << (ctx.class as u8);
+    if item.required_class & flag == 0 {
+        HINT_RED
+    } else {
+        HINT_WHITE
+    }
+}
+
+/// 物品 tooltip 行（对齐 C# MirItemCell：成对属性合并 + 单项 + 需求 + 重量/价格）。
+/// 只要文本、不要配色的调用方走这里（与历史签名一致）。
+#[must_use]
 pub fn item_tooltip_lines(item: &InvItem) -> Vec<String> {
+    item_tooltip_lines_colored(item, None)
+        .into_iter()
+        .map(|(s, _)| s)
+        .collect()
+}
+
+/// 同 [`item_tooltip_lines`]，但**逐行带前景色**（§3.2ed）。`ctx` 见 [`TooltipPlayerCtx`]。
+#[must_use]
+pub fn item_tooltip_lines_colored(
+    item: &InvItem,
+    ctx: Option<&TooltipPlayerCtx>,
+) -> Vec<(String, Color)> {
     use mir2_shared::enums::Stat;
-    let mut lines = Vec::new();
+    let mut lines: Vec<(String, Color)> = Vec::new();
     // 头部两行（C# `NameInfoLabel`）：
     // ① `baseText` = `ItemType*` 文案（**没有**「类型:」前缀）；
     // ② 尾部行 = 「重量: {w}」+ 耐久，用**两个空格**连接（`GameScene.cs:7056-7066`，
@@ -1594,7 +1702,9 @@ pub fn item_tooltip_lines(item: &InvItem) -> Vec<String> {
     //   （`GameScene.cs:6863-6871`）⇒ 品阶紧跟在**名字下方**、类型行之前（本端名字是 tooltip 标题，
     //   故品阶作为第一条内容行）。
     if let Some(grade) = item_grade_name(item.grade) {
-        lines.push(grade.to_string());
+        // C# 名字与品阶是**同一个** `nameLabel`（`Text = FriendlyName + "\n" + GradeString`），
+        // `ForeColour = GradeNameColor(Grade)` ⇒ 品阶行与标题同色（`:6863-6871`）。
+        lines.push((grade.to_string(), item_grade_color(item.grade)));
     }
     // C# `baseText`：类型名，**结婚戒指时直接在后面拼接**「结婚戒指」（原文无分隔符，
     // `GameScene.cs:7049-7052` ⇒ 如「戒指结婚戒指」）。本端复刻该拼接（§3.2dy）。
@@ -1602,7 +1712,7 @@ pub fn item_tooltip_lines(item: &InvItem) -> Vec<String> {
     if item.wedding_ring != -1 {
         type_line.push_str("结婚戒指"); // C# Text.WeddingRing
     }
-    lines.push(type_line);
+    lines.push((type_line, HINT_WHITE)); // C# `baseText` 标签 `ForeColour = Color.White`
     let mut tail: Vec<String> = Vec::new();
     if item.weight > 0 {
         tail.push(format!("重量: {}", item.weight)); // C# `Weight` = 「重量:」
@@ -1612,7 +1722,7 @@ pub fn item_tooltip_lines(item: &InvItem) -> Vec<String> {
         tail.push(format!("耐久: {}/{}", item.current_dura, item.max_dura));
     }
     if !tail.is_empty() {
-        lines.push(tail.join("  "));
+        lines.push((tail.join("  "), HINT_WHITE)); // 重量/耐久行（C# `Color.White`）
     }
     let get = |s: Stat| {
         item.stats
@@ -1633,7 +1743,10 @@ pub fn item_tooltip_lines(item: &InvItem) -> Vec<String> {
         let mn = get(min);
         let mx = get(max);
         if mn != 0 || mx != 0 {
-            lines.push(format!("{} + {}~{}", label, mn, mx));
+            // C# 属性行 `ForeColour = addValue > 0 ? Color.Cyan : Color.White`（如 `:7207`）——
+            // `addValue` 是该属性的**附加属性**值，本端 `InvItem` 只有 `added_stats_count`、
+            // 没有逐属性附加表 ⇒ 一律按 White（未采集，见 §3.2ed 的残留清单）。
+            lines.push((format!("{} + {}~{}", label, mn, mx), HINT_WHITE));
         }
     }
     // 单项属性：前缀逐字取 C# 的中文包（注释里给出 key；`+`/`:`/空格照抄）
@@ -1662,17 +1775,21 @@ pub fn item_tooltip_lines(item: &InvItem) -> Vec<String> {
     ] {
         let v = get(stat);
         if v != 0 {
-            lines.push(format!("{}{}{}", label, v, suffix));
+            lines.push((format!("{}{}{}", label, v, suffix), HINT_WHITE)); // 同上：逐属性附加表缺
         }
     }
     // 觉醒：C# `AwakeInfoLabel`（`GameScene.cs:8523-8536`）——`Awake.GetAwakeLevel() > 0` 时输出
     // `AwakeningWithValue` = 「{类型名} 觉醒({等级})」，类型名取 `AwakeType_X` 的中文包值。
     // （C# 之后还有两段**英文**字面量行 `"{0} + {1}~{2}"` / `"Level {i} : …"`，本端暂未复刻，见 §3.2dz。）
     if item.awake_level > 0 {
-        lines.push(format!(
-            "{} 觉醒({})",
-            awake_type_name(item.awake_type),
-            item.awake_level
+        // C# `AwakeInfoLabel` 的觉醒名行 `ForeColour = GradeNameColor(Grade)`（`:8529`）
+        lines.push((
+            format!(
+                "{} 觉醒({})",
+                awake_type_name(item.awake_type),
+                item.awake_level
+            ),
+            item_grade_color(item.grade),
         ));
     }
     // C# `AwakeInfoLabel` 的**后两段**（`GameScene.cs:8543-8585`）——注意这两段 C# 用的是
@@ -1683,18 +1800,25 @@ pub fn item_tooltip_lines(item: &InvItem) -> Vec<String> {
         let is_armour = item.item_type == mir2_shared::enums::ItemType::Armour as u8;
         let total: u32 = item.awake_levels.iter().map(|v| u32::from(*v)).sum();
         if total > 0 {
-            lines.push(if is_armour {
-                format!("MAX {ty} + {total}")
-            } else {
-                format!("{ty} + {total}~{total}")
-            });
+            // 后两段在 C# 是独立 `MirLabel`，`ForeColour = Color.White`（`:8571`）
+            lines.push((
+                if is_armour {
+                    format!("MAX {ty} + {total}")
+                } else {
+                    format!("{ty} + {total}~{total}")
+                },
+                HINT_WHITE,
+            ));
         }
         for (i, v) in item.awake_levels.iter().enumerate() {
-            lines.push(if is_armour {
-                format!("Level {} : MAX {ty} + {v}", i + 1)
-            } else {
-                format!("Level {} : {ty} + {v}~{v}", i + 1)
-            });
+            lines.push((
+                if is_armour {
+                    format!("Level {} : MAX {ty} + {v}", i + 1)
+                } else {
+                    format!("Level {} : {ty} + {v}~{v}", i + 1)
+                },
+                HINT_WHITE,
+            ));
         }
     }
     // 镶嵌孔：C# `SocketInfoLabel`（`GameScene.cs:8622-8670`）——每个孔一行
@@ -1704,10 +1828,13 @@ pub fn item_tooltip_lines(item: &InvItem) -> Vec<String> {
         let gem = slot
             .as_ref()
             .map_or_else(|| "空".to_string(), |g| g.name.clone());
-        lines.push(format!("镶嵌孔 : {}", gem));
+        // C# `SocketInfoLabel`：`ForeColour = (count > realItem.Slots && …) ? Cyan : White`，
+        // `count` 是**本标签方法内**的 1-based 行号、`realItem.Slots` 是模板孔数上限 ⇒
+        // `count > Slots` 对正常物品恒假（孔数不会超过模板上限）⇒ 实际恒 `White`（`:8631`）。
+        lines.push((format!("镶嵌孔 : {}", gem), HINT_WHITE));
     }
     if !item.slots.is_empty() {
-        lines.push("按 Ctrl + 右键 打开镶嵌孔".to_string());
+        lines.push(("按 Ctrl + 右键 打开镶嵌孔".to_string(), HINT_WHITE)); // `:8653` Color.White
     }
 
     // 需求：C# `NeedInfoLabel` 的 `#region LEVEL`——`RequiredType` → `ClientTextKeys.*`
@@ -1728,22 +1855,32 @@ pub fn item_tooltip_lines(item: &InvItem) -> Vec<String> {
             14 => "需要基础道术", // MinSC                     → RequiredBaseSC
             _ => "需要未知类型",  // default                   → UnknownTypeRequired
         };
-        // C# 这 12 条的文案都是「<标签> : {0}」（ASCII 冒号、两侧各一个空格）
-        lines.push(format!("{} : {}", label, item.required_amount));
+        // C# 这 12 条的文案都是「<标签> : {0}」（ASCII 冒号、两侧各一个空格）；
+        // 颜色由 `NeedInfoLabel` 与玩家当前等级/属性比较决定（不达标红，`:8705-8776`）。
+        lines.push((
+            format!("{} : {}", label, item.required_amount),
+            requirement_color(item, ctx),
+        ));
     }
     if item.required_class != 0 {
         // C# `ClassRequired` = 「职业要求 : {0}」，{0} = `RequiredClass.ToLocalizedString()`
-        lines.push(format!(
-            "职业要求 : {}",
-            required_class_text(item.required_class)
+        lines.push((
+            format!(
+                "职业要求 : {}",
+                required_class_text(item.required_class)
+            ),
+            class_requirement_color(item, ctx),
         ));
     }
     if item.price > 0 {
         // C# `SellingPriceGold` = 「出售价格 : {0} 金币」，{0} = `item.Price() / 2`，
         // 且按 `"###,###,##0"` 加千分位（`GameScene.cs:8842`）
-        lines.push(format!(
-            "出售价格 : {} 金币",
-            crate::game::dialogs::mail::format_gold(item.price / 2)
+        lines.push((
+            format!(
+                "出售价格 : {} 金币",
+                crate::game::dialogs::mail::format_gold(item.price / 2)
+            ),
+            HINT_WHITE, // C# `colour` 初值 White，之后没再置红（`:8840-8847`）
         ));
     }
     // 绑定标位：C# `BindInfoLabel`（`GameScene.cs:8887-9165`）——标位非 0 时按固定次序逐条输出
@@ -1765,23 +1902,24 @@ pub fn item_tooltip_lines(item: &InvItem) -> Vec<String> {
             (0x0200, "装备时绑定灵魂"),    // BindOnEquip   → SoulBindsOnEquip
         ] {
             if item.bind_mode & bit != 0 {
-                lines.push(text.to_string());
+                lines.push((text.to_string(), HINT_YELLOW)); // C# 每条 `ForeColour = Color.Yellow`
             }
         }
     }
     // C# `BindInfoLabel` 的 CURSED 区（`:9191-9204`）：`(!hideAdded && (!NeedIdentify || Identified))
     // && Cursed`（本端没有 Inspect 的 hideAdded 变体 ⇒ 取 !hideAdded = true）
     if (!item.need_identify || item.identified) && item.cursed {
-        lines.push("被诅咒".to_string()); // Text.Cursed
+        lines.push(("被诅咒".to_string(), HINT_YELLOW)); // Text.Cursed；C# `:9195` Yellow
     }
     // 宝石"可用于"段：C# `BindInfoLabel` 的 Gems 区（`GameScene.cs:9207-9330`）——
     // `Info.Unique == None` ⇒ 「不能用于任何物品。」，否则先「可用于:」再按 `SpecialItemMode`
     // 逐标位输出 `After*` 文案（标位→文案见下；`Blink(0x0800)` 在 C# 里没有对应行）。
     if item.item_type == mir2_shared::enums::ItemType::Gem as u8 {
         if item.unique_flags == 0 {
-            lines.push("不能用于任何物品。".to_string()); // Text.CannotBeUsedOnAnyItem
+            // Text.CannotBeUsedOnAnyItem；C# `GemUseOn` `ForeColour = Color.Yellow`（`:9226`）
+            lines.push(("不能用于任何物品。".to_string(), HINT_YELLOW));
         } else {
-            lines.push("可用于:".to_string()); // Text.CanBeUsedOn
+            lines.push(("可用于:".to_string(), HINT_YELLOW)); // Text.CanBeUsedOn
             for (bit, text) in [
                 (0x0001u16, "-武器"),  // Paralize  → AfterWeapon
                 (0x0002, "-护甲"),     // Teleport  → AfterArmour
@@ -1796,14 +1934,15 @@ pub fn item_tooltip_lines(item: &InvItem) -> Vec<String> {
                 (0x0400, "-蜡烛"),     // NoDuraLoss→ AfterCandle
             ] {
                 if item.unique_flags & bit != 0 {
-                    lines.push(text.to_string());
+                    // C# 的 `After*` 逐条标签 `ForeColour = Color.White`（`:9243-9387`）
+                    lines.push((text.to_string(), HINT_WHITE));
                 }
             }
         }
     }
     // 过期/封印/租借三段（C# 的 EXPIRE / SEALED / RentalInformation 三处，`:9464-9558`）——
     // 依赖"当前时间"，独立成 [`item_time_lines`] 以便用固定 now 做确定性单测。
-    lines.extend(item_time_lines(item, now_unix_secs()));
+    lines.extend(item_time_lines_colored(item, now_unix_secs()));
     // 交互提示：C# `OverlapInfoLabel`（`:9586-9648`）——两处都是数据驱动：
     // ① `Type == Gem` 时按 `Shape` 给 Ctrl+左键的修理/合成/封印提示（1/2/3/4/5/6/8 有文案，
     //    其余 Shape 在 C# 里是空串标签，本端直接不出行）；
@@ -1821,12 +1960,16 @@ pub fn item_tooltip_lines(item: &InvItem) -> Vec<String> {
             _ => None,
         };
         if let Some(h) = hint {
-            lines.push(h.to_string());
+            // C# `GEMLabel` `ForeColour = Color.White`（`:9629-9632`）
+            lines.push((h.to_string(), HINT_WHITE));
         }
     } else if item.stack_size > 1 {
-        lines.push(format!(
-            "最大合并数量：{}\n按住 Shift + 左键点击以分离堆叠", // Text.MaxCombine
-            item.stack_size
+        lines.push((
+            format!(
+                "最大合并数量：{}\n按住 Shift + 左键点击以分离堆叠", // Text.MaxCombine
+                item.stack_size
+            ),
+            HINT_WHITE, // C# `SPLITUPLabel` `ForeColour = Color.White`（`:9650-9653`）
         ));
     }
     // C# `StoryInfoLabel`（`:9692-9737`）：`ItemInfo.ToolTip` 非空时先一行「物品描述」再一行正文；
@@ -1837,12 +1980,14 @@ pub fn item_tooltip_lines(item: &InvItem) -> Vec<String> {
         item.tool_tip.clone().filter(|s| !s.is_empty())
     };
     if let Some(text) = story {
-        lines.push("物品描述".to_string()); // Text.ItemDescription
-        lines.push(text);
+        // Text.ItemDescription；C# `IDLabel` DarkKhaki（`:9714-9717`）
+        lines.push(("物品描述".to_string(), HINT_DARKKHAKI));
+        lines.push((text, HINT_KHAKI)); // C# `TOOLTIPLabel` Khaki（`:9727-9730`）
     }
     // C# `GMMadeLabel`（`:9770-9805`）：`item.GMMade` 时为最后一段
     if item.is_gm_made {
-        lines.push("由游戏管理员创建".to_string()); // Text.CreatedByGameMaster
+        // Text.CreatedByGameMaster；C# `GMLabel` `ForeColour = Color.Orchid`（`:9778-9781`）
+        lines.push(("由游戏管理员创建".to_string(), HINT_ORCHID));
     }
     lines
 }
@@ -1897,39 +2042,61 @@ pub fn format_timespan(secs: f64) -> String {
 /// 逐条对齐 C# `BindInfoLabel` 里那三段（`GameScene.cs:9464-9558`）。`now_secs` 显式传入以便单测。
 #[must_use]
 pub fn item_time_lines(item: &InvItem, now_secs: i64) -> Vec<String> {
+    item_time_lines_colored(item, now_secs)
+        .into_iter()
+        .map(|(s, _)| s)
+        .collect()
+}
+
+/// 同 [`item_time_lines`]，但逐行带 C# 的 `ForeColour`（§3.2ed）：
+/// 过期 `Yellow`（`:9469`）、封印 `Red`（`:9494`）、租借来源/租借锁 `DarkKhaki`（`:9514`/`:9547`）、
+/// 租借到期 `Khaki`（`:9530`）。
+#[must_use]
+pub fn item_time_lines_colored(item: &InvItem, now_secs: i64) -> Vec<(String, Color)> {
     let mut out = Vec::new();
     // EXPIRE：`剩余 > 0` ⇒「将在 {fmt} 后过期」否则「已过期」
     if let Some(b) = item.expire_binary {
         let remaining = (binary_to_unix_secs(b) - now_secs) as f64;
-        out.push(if remaining > 0.0 {
-            format!("将在 {} 后过期", format_timespan(remaining)) // Text.ExpiresIn
-        } else {
-            "已过期".to_string() // Text.Expired
-        });
+        out.push((
+            if remaining > 0.0 {
+                format!("将在 {} 后过期", format_timespan(remaining)) // Text.ExpiresIn
+            } else {
+                "已过期".to_string() // Text.Expired
+            },
+            HINT_YELLOW,
+        ));
     }
     // SEALED：只在还有剩余时输出「封印持续 {fmt}」（C# 的 `remainingSeconds > 0` 分支）
     if let Some(b) = item.sealed_binary {
         let remaining = (binary_to_unix_secs(b) - now_secs) as f64;
         if remaining > 0.0 {
-            out.push(format!("封印持续 {}", format_timespan(remaining))); // Text.SealedFor
+            // Text.SealedFor；C# `SEALEDLabel` `ForeColour = Color.Red`（`:9491-9494`）
+            out.push((format!("封印持续 {}", format_timespan(remaining)), HINT_RED));
         }
     }
     // RENTAL：未锁 ⇒ 来源行 + 到期行（过期为**英文字面量** `"Rental expired"`，C# 如此）；
     // 已锁且未到期 ⇒ 租借锁到期行
     if let Some(owner) = item.rental_owner.as_deref() {
         if !item.rental_locked {
-            out.push(format!("物品租借来源：{owner}")); // Text.ItemRentedFrom
+            // Text.ItemRentedFrom；C# `OWNERLabel` DarkKhaki（`:9511-9514`）
+            out.push((format!("物品租借来源：{owner}"), HINT_DARKKHAKI));
             let remaining =
                 (binary_to_unix_secs(item.rental_binary.unwrap_or(0)) - now_secs) as f64;
-            out.push(if remaining > 0.0 {
-                format!("租借将在 {} 后到期", format_timespan(remaining)) // Text.RentalExpiresIn
-            } else {
-                "Rental expired".to_string()
-            });
+            out.push((
+                if remaining > 0.0 {
+                    format!("租借将在 {} 后到期", format_timespan(remaining)) // Text.RentalExpiresIn
+                } else {
+                    "Rental expired".to_string()
+                },
+                HINT_KHAKI, // C# `RENTALLabel` Khaki（`:9527-9530`）
+            ));
         } else if let Some(b) = item.rental_binary {
             let remaining = (binary_to_unix_secs(b) - now_secs) as f64;
             if remaining > 0.0 {
-                out.push(format!("租借锁将在 {} 后结束", format_timespan(remaining))); // Text.RentalLockExpiresIn
+                out.push((
+                    format!("租借锁将在 {} 后结束", format_timespan(remaining)), // Text.RentalLockExpiresIn
+                    HINT_DARKKHAKI, // C# `RentalLockLabel` DarkKhaki（`:9544-9547`）
+                ));
             }
         }
     }
@@ -4707,6 +4874,138 @@ mod tests {
             !lines.iter().any(|l| l.contains("最大合并数量")),
             "宝石不走堆叠提示"
         );
+    }
+
+    /// §3.2ed：逐行配色逐段对 C# `ForeColour` 取值。
+    #[test]
+    fn tooltip_lines_are_colored_like_csharp() {
+        fn color_of<'a>(lines: &'a [(String, Color)], needle: &str) -> Color {
+            lines
+                .iter()
+                .find(|(s, _)| s.contains(needle))
+                .map(|(_, c)| *c)
+                .unwrap_or_else(|| panic!("找不到含 {needle:?} 的行：{lines:?}"))
+        }
+        // .NET `DateTime.ToBinary()`（Kind=Unspecified ⇒ 高两位 0），与 §3.2ea 单测同式
+        let binary_of = |unix: i64| (unix + 62_135_596_800) * 10_000_000;
+
+        // ① 品阶行 = `GradeNameColor(Grade)`（与标题同色）；类型/重量行白
+        let mut rare = item_with_type(ItemType::Weapon);
+        rare.grade = 5; // Rare → DeepSkyBlue
+        rare.weight = 10;
+        let lines = item_tooltip_lines_colored(&rare, None);
+        assert_eq!(lines[0].1, item_grade_color(5), "品阶行取品阶色");
+        assert_eq!(lines[1].1, HINT_WHITE, "类型行白");
+        assert_eq!(lines[2].1, HINT_WHITE, "重量/耐久行白");
+
+        // ② 觉醒名行 = 品阶色（C# `:8529`）；觉醒数值行白（`:8571`）
+        let mut aw = item_with_type(ItemType::Weapon);
+        aw.grade = 6; // Legendary
+        aw.awake_level = 2;
+        aw.awake_type = 4;
+        aw.awake_levels = vec![2, 3];
+        let lines = item_tooltip_lines_colored(&aw, None);
+        assert_eq!(
+            color_of(&lines, "觉醒("),
+            item_grade_color(6),
+            "觉醒名行按品阶上色"
+        );
+        assert_eq!(color_of(&lines, "Level 1 :"), HINT_WHITE, "逐级值行白");
+
+        // ③ 需求/职业行：默认（无玩家上下文）白
+        let mut need = item_with_type(ItemType::Weapon);
+        need.required_type = 3; // Level
+        need.required_amount = 30;
+        need.required_class = 1; // 战士
+        let lines = item_tooltip_lines_colored(&need, None);
+        assert_eq!(color_of(&lines, "等级要求"), HINT_WHITE);
+        assert_eq!(color_of(&lines, "职业要求"), HINT_WHITE);
+
+        // ③′ 有玩家上下文：等级不够 → 红；职业不符 → 红；达标 → 白
+        let low = TooltipPlayerCtx {
+            level: 10,
+            class: mir2_shared::MirClass::Wizard,
+            stats: [[0; 2]; 5],
+        };
+        let lines = item_tooltip_lines_colored(&need, Some(&low));
+        assert_eq!(color_of(&lines, "等级要求"), HINT_RED, "等级不够标红");
+        assert_eq!(color_of(&lines, "职业要求"), HINT_RED, "职业不符标红");
+        let ok = TooltipPlayerCtx {
+            level: 40,
+            class: mir2_shared::MirClass::Warrior,
+            stats: [[0; 2]; 5],
+        };
+        let lines = item_tooltip_lines_colored(&need, Some(&ok));
+        assert_eq!(color_of(&lines, "等级要求"), HINT_WHITE, "等级够则不红");
+        assert_eq!(color_of(&lines, "职业要求"), HINT_WHITE, "职业符合则不红");
+        // MaxLevel：**超过**上限也红（C# `User.Level > RequiredAmount`）
+        let mut maxlvl = item_with_type(ItemType::Weapon);
+        maxlvl.required_type = 9;
+        maxlvl.required_amount = 30;
+        let over = TooltipPlayerCtx {
+            level: 31,
+            class: mir2_shared::MirClass::Warrior,
+            stats: [[0; 2]; 5],
+        };
+        let lines = item_tooltip_lines_colored(&maxlvl, Some(&over));
+        assert_eq!(color_of(&lines, "最高等级"), HINT_RED);
+
+        // ④ 属性需求走玩家属性：MaxDC 需求 50、玩家 30 → 红
+        let mut dc = item_with_type(ItemType::Weapon);
+        dc.required_type = 6; // MaxDC
+        dc.required_amount = 50;
+        let mut weak = ok;
+        weak.stats[2] = [10, 30];
+        let lines = item_tooltip_lines_colored(&dc, Some(&weak));
+        assert_eq!(color_of(&lines, "攻击要求"), HINT_RED);
+        weak.stats[2] = [10, 60];
+        let lines = item_tooltip_lines_colored(&dc, Some(&weak));
+        assert_eq!(color_of(&lines, "攻击要求"), HINT_WHITE);
+
+        // ⑤ 绑定 13 条 + 被诅咒 = Yellow；出售价格白
+        let mut bound = item_with_type(ItemType::Weapon);
+        bound.bind_mode = 0x0002 | 0x0010; // 不可丢弃 + 不可交易
+        bound.price = 100;
+        let lines = item_tooltip_lines_colored(&bound, None);
+        assert_eq!(color_of(&lines, "不可丢弃"), HINT_YELLOW);
+        assert_eq!(color_of(&lines, "不可交易"), HINT_YELLOW);
+        assert_eq!(color_of(&lines, "出售价格"), HINT_WHITE);
+
+        // ⑥ 宝石「可用于」黄、逐条 After* 白
+        let mut gem = item_with_type(ItemType::Gem);
+        gem.unique_flags = 0x0001 | 0x0002;
+        let lines = item_tooltip_lines_colored(&gem, None);
+        assert_eq!(color_of(&lines, "可用于:"), HINT_YELLOW);
+        assert_eq!(color_of(&lines, "-武器"), HINT_WHITE);
+        gem.unique_flags = 0;
+        let lines = item_tooltip_lines_colored(&gem, None);
+        assert_eq!(color_of(&lines, "不能用于任何物品。"), HINT_YELLOW);
+
+        // ⑦ 过期黄 / 封印红（时间三段走 `item_time_lines_colored`）
+        let mut timed = item_with_type(ItemType::Weapon);
+        timed.expire_binary = Some(binary_of(2_000_000));
+        timed.sealed_binary = Some(binary_of(2_000_000));
+        timed.rental_owner = Some("老王".into());
+        timed.rental_binary = Some(binary_of(2_000_000));
+        let time = item_time_lines_colored(&timed, 1_000_000);
+        assert_eq!(time[0].1, HINT_YELLOW, "过期行黄");
+        assert_eq!(time[1].1, HINT_RED, "封印行红");
+        assert_eq!(time[2].1, HINT_DARKKHAKI, "租借来源行 DarkKhaki");
+        assert_eq!(time[3].1, HINT_KHAKI, "租借到期行 Khaki");
+        // 与纯文本版逐条同文（颜色是唯一差异）
+        assert_eq!(
+            item_time_lines(&timed, 1_000_000),
+            time.iter().map(|(s, _)| s.clone()).collect::<Vec<_>>()
+        );
+
+        // ⑧ 描述段：标题 DarkKhaki + 正文 Khaki；GM 段 Orchid
+        let mut story = item_with_type(ItemType::Weapon);
+        story.tool_tip = Some("很久以前……".into());
+        story.is_gm_made = true;
+        let lines = item_tooltip_lines_colored(&story, None);
+        assert_eq!(color_of(&lines, "物品描述"), HINT_DARKKHAKI);
+        assert_eq!(color_of(&lines, "很久以前"), HINT_KHAKI);
+        assert_eq!(color_of(&lines, "由游戏管理员创建"), HINT_ORCHID);
     }
 
     #[test]

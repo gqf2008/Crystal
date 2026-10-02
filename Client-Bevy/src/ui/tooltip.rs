@@ -4,7 +4,8 @@
 // 架构：
 //   - TooltipState 资源：任意系统写入（source 归属 + 标题/多行/位置）
 //   - TooltipHint(String) 组件：挂在 UiButton 上，tooltip_hint_system 自动检测悬停
-//   - 常驻面板：背景 + 标题 + 最多 6 行，tooltip_panel_system 渲染（跟随光标、防出屏）
+//   - 常驻面板：背景 + 标题 + 行池（`TOOLTIP_LINE_SLOTS` 行，§3.2ed 前是 6 行），
+//     tooltip_panel_system 渲染（跟随光标、防出屏）
 // 写入约定：每个写入方用独立 source id；无目标时只清除自己归属的提示，避免互相覆盖。
 // ============================================================================
 
@@ -22,6 +23,11 @@ pub struct TooltipState {
     pub source: u16,
     pub title: String,
     pub lines: Vec<String>,
+    /// 逐行前景色（§3.2ed）。**空 vec = 全部用 [`TOOLTIP_LINE_COLOR`]**（按钮 Hint、头顶名字
+    /// 这类单色调用方不必关心）；长度与 `lines` 一致时逐行生效，多出的行回落默认色。
+    /// C# 的 `GameScene.DrawItemHint` 各段是**各自一个 `MirLabel`**、`ForeColour` 各不相同
+    /// （`GradeNameColor` / 需求未达标 `Red` / 宝石·绑定 `Yellow` / 描述 `DarkKhaki` …）。
+    pub line_colors: Vec<Color>,
     pub x: f32,
     pub y: f32,
     /// 标题色（§3.2du）。默认 = C# `Color.Yellow` 那一档（见 [`TOOLTIP_TITLE_COLOR`]）；
@@ -36,6 +42,7 @@ impl Default for TooltipState {
             source: 0,
             title: String::new(),
             lines: Vec::new(),
+            line_colors: Vec::new(),
             x: 0.0,
             y: 0.0,
             // 面板标题实体在 `spawn_tooltip_panel` 里也用这个色，两处必须同源
@@ -46,6 +53,17 @@ impl Default for TooltipState {
 
 /// 提示标题默认色（≈ C# `Color.Yellow`，仅 `ItemGrade.Common` 与「非物品提示」用得到）。
 pub const TOOLTIP_TITLE_COLOR: Color = Color::srgb(1.0, 0.9, 0.3);
+
+/// 提示正文默认前景色（≈ C# `Color.White` 那一档；中文黑描边下略偏暖，与历史取帧一致）。
+pub const TOOLTIP_LINE_COLOR: Color = Color::srgb(1.0, 1.0, 0.9);
+
+/// 提示正文字体池大小（§3.2ed）。
+///
+/// C# 的物品提示（`GameScene.DrawItemHint`）是**每段一个新 `MirLabel`**、行数不设上限；
+/// 本端早年只开了 6 行（`title + 6 行 = 7 个描边文本`）——物品提示满配（品阶/类型/重量耐久/
+/// 5 组成对属性/20 条单项/觉醒/镶嵌/需求/职业/价格/13 条绑定/宝石/过期封印租借/交互/描述/GM）
+/// 轻松超过 20 行，6 行会把后半段整段吞掉。这里按「够放最长物品提示」开池，多余的恒 Hidden 不占位。
+pub const TOOLTIP_LINE_SLOTS: usize = 40;
 
 impl TooltipState {
     /// 写入方更新提示；无目标时调用以清除自己归属的提示。
@@ -75,11 +93,29 @@ impl TooltipState {
         x: f32,
         y: f32,
     ) {
+        self.update_colored_lines(source, visible, title, title_color, lines, Vec::new(), x, y);
+    }
+
+    /// 同 [`TooltipState::update_colored`]，但**逐行**给出前景色（§3.2ed：物品提示的
+    /// `ForeColour` 逐段不同）。`line_colors` 为空 = 全部用 [`TOOLTIP_LINE_COLOR`]。
+    #[allow(clippy::too_many_arguments)]
+    pub fn update_colored_lines(
+        &mut self,
+        source: u16,
+        visible: bool,
+        title: String,
+        title_color: Color,
+        lines: Vec<String>,
+        line_colors: Vec<Color>,
+        x: f32,
+        y: f32,
+    ) {
         if visible {
             if self.visible
                 && self.source == source
                 && self.title == title
                 && self.lines == lines
+                && self.line_colors == line_colors
                 && self.x == x
                 && self.y == y
                 && self.title_color == title_color
@@ -90,6 +126,7 @@ impl TooltipState {
             self.source = source;
             self.title = title;
             self.lines = lines;
+            self.line_colors = line_colors;
             self.x = x;
             self.y = y;
             self.title_color = title_color;
@@ -101,6 +138,7 @@ impl TooltipState {
             self.source = 0;
             self.title.clear();
             self.lines.clear();
+            self.line_colors.clear();
         }
     }
 }
@@ -140,7 +178,7 @@ pub struct TooltipLine(pub usize);
 /// 所属对话框盖住（光标在面板内时+16 偏移的提示框必然重叠，实机不可见）。
 pub const TOOLTIP_Z: i32 = 90;
 
-/// 生成常驻提示面板（背景 + 标题 + 6 行），返回背景实体。
+/// 生成常驻提示面板（背景 + 标题 + [`TOOLTIP_LINE_SLOTS`] 行），返回背景实体。
 ///
 /// #2775：改为 **bevy_ui 节点**（根节点 `GlobalZIndex(TOOLTIP_Z)` + 子文本），
 /// 否则被对话框（bevy_ui）整体遮挡。描边用 `outlined_text::spawn_outlined_label`
@@ -177,7 +215,7 @@ pub fn spawn_tooltip_panel(commands: &mut Commands, font: &Handle<Font>) -> Enti
             1,
         )
         .insert(TooltipTitle);
-        for i in 0..6usize {
+        for i in 0..TOOLTIP_LINE_SLOTS {
             crate::ui::outlined_text::spawn_outlined_label(
                 p,
                 font.clone(),
@@ -185,7 +223,7 @@ pub fn spawn_tooltip_panel(commands: &mut Commands, font: &Handle<Font>) -> Enti
                 8.0,
                 24.0 + i as f32 * 16.0,
                 12.0,
-                Color::srgb(1.0, 1.0, 0.9),
+                TOOLTIP_LINE_COLOR,
                 1,
             )
             .insert(TooltipLine(i));
@@ -419,7 +457,7 @@ pub fn tooltip_panel_system(
         (With<TooltipTitle>, Without<TooltipBg>, Without<TooltipLine>),
     >,
     mut lines: Query<
-        (&mut Text, &mut Visibility, &TooltipLine),
+        (&mut Text, &mut Visibility, &mut TextColor, &TooltipLine),
         (Without<TooltipBg>, Without<TooltipTitle>),
     >,
 ) {
@@ -481,7 +519,7 @@ pub fn tooltip_panel_system(
             t.0.clear();
         }
     }
-    for (mut t, mut vis, line) in &mut lines {
+    for (mut t, mut vis, mut color, line) in &mut lines {
         let s = state.lines.get(line.0).cloned().unwrap_or_default();
         let visible = show && !s.is_empty();
         *vis = if visible {
@@ -492,6 +530,15 @@ pub fn tooltip_panel_system(
         if visible {
             if t.0 != s {
                 t.0 = s;
+            }
+            // §3.2ed：逐行前景色；未给色的行（或给色不足）回落默认白
+            let want = state
+                .line_colors
+                .get(line.0)
+                .copied()
+                .unwrap_or(TOOLTIP_LINE_COLOR);
+            if color.0 != want {
+                color.0 = want;
             }
         } else if !t.0.is_empty() {
             t.0.clear();
@@ -714,7 +761,7 @@ mod tests {
     /// C# MirLabel 构造器默认 _outLine=true（MirLabel.cs:181-182）→ 按钮 Hint
     /// （CMain.cs:534-540 HintTextLabel 未显式设 OutLine）同样有描边。
     /// #2775：面板改 bevy_ui 后，描边副本是 `outlined_text` 的兄弟层级副本
-    /// （title + 6 行各 4 个 = 28），随面板 bg 显隐跟随；正文与副本内容由
+    /// （title + 行池各 4 个 = `(1 + TOOLTIP_LINE_SLOTS) * 4`），随面板 bg 显隐跟随；正文与副本内容由
     /// `sync_outline_ui_system` 同步。
     #[test]
     fn tooltip_panel_is_ui_node_with_outlined_copies() {
@@ -738,22 +785,22 @@ mod tests {
             .expect("面板背景应是根 UI 节点");
         assert_eq!(bg_z, GlobalZIndex(TOOLTIP_Z));
 
-        // title + 6 行 = 7 个描边文本 × 4 副本
+        // title + TOOLTIP_LINE_SLOTS 行 = 池内每个描边文本各 4 个黑色副本
         assert_eq!(
             world
                 .query_filtered::<Entity, With<OutlineUiShadow>>()
                 .iter(&world)
                 .count(),
-            28,
-            "title + 6 行各 4 个黑色副本"
+            (1 + TOOLTIP_LINE_SLOTS) * 4,
+            "title + 行池各 4 个黑色副本"
         );
         assert_eq!(
             world
                 .query_filtered::<Entity, With<OutlineUiShadows>>()
                 .iter(&world)
                 .count(),
-            7,
-            "7 个正文各自记录 4 个副本 id"
+            1 + TOOLTIP_LINE_SLOTS,
+            "每个正文各自记录 4 个副本 id"
         );
 
         // 按钮 Hint（source=1）：面板显示 → 背景 Visible、行文本写入、位置跟随光标
@@ -822,5 +869,59 @@ mod tests {
             .copied()
             .expect("面板背景存在");
         assert_eq!(vis, Visibility::Hidden, "面板隐藏");
+    }
+
+    /// §3.2ed：行池开到 [`TOOLTIP_LINE_SLOTS`]（不再只有 6 行），且**逐行**前景色按
+    /// `TooltipState::line_colors` 写进 `TextColor`；未给色的行回落 [`TOOLTIP_LINE_COLOR`]。
+    #[test]
+    fn tooltip_panel_renders_many_lines_with_per_line_colors() {
+        use bevy::ecs::system::RunSystemOnce;
+        use bevy::ecs::world::CommandQueue;
+
+        let mut world = World::new();
+        let mut queue = CommandQueue::default();
+        let mut commands = Commands::new(&mut queue, &world);
+        spawn_tooltip_panel(&mut commands, &Handle::default());
+        queue.apply(&mut world);
+
+        // 20 行（远超旧 6 行上限）：第 20 行也必须落在池内实体上
+        let texts: Vec<String> = (0..20).map(|i| format!("第 {i} 行")).collect();
+        let mut colors = vec![TOOLTIP_LINE_COLOR; 20];
+        colors[7] = Color::srgb(1.0, 0.0, 0.0);
+        let mut state = TooltipState::default();
+        state.update_colored_lines(
+            2,
+            true,
+            "标题".to_string(),
+            TOOLTIP_TITLE_COLOR,
+            texts,
+            colors,
+            10.0,
+            10.0,
+        );
+        world.insert_resource(state);
+        world
+            .run_system_once(tooltip_panel_system)
+            .expect("面板渲染应成功");
+
+        let mut rendered: Vec<(usize, String, Color)> = world
+            .query_filtered::<(&Text, &TextColor, &TooltipLine), Without<TooltipTitle>>()
+            .iter(&world)
+            .map(|(t, c, l)| (l.0, t.0.clone(), c.0))
+            .collect();
+        rendered.sort_by_key(|(i, _, _)| *i);
+        assert!(
+            rendered.len() >= 20,
+            "行池应至少 20 行，实际 {}",
+            rendered.len()
+        );
+        assert_eq!(rendered[19].1, "第 19 行", "第 20 行必须被渲染");
+        assert_eq!(rendered[19].2, TOOLTIP_LINE_COLOR, "未给色的行回落默认色");
+        assert_eq!(
+            rendered[7].2,
+            Color::srgb(1.0, 0.0, 0.0),
+            "逐行色必须写进 TextColor"
+        );
+        assert_eq!(rendered[0].2, TOOLTIP_LINE_COLOR);
     }
 }

@@ -4318,6 +4318,84 @@ spawn」配对，中间夹了个 `for` 循环体就串行了。
 `Prguse[2447]` 信用图标：本端数据里**没有这一帧**（越界）⇒ 无像素可比；原版帧也没拍到过该状态
 （要 `RewardCredit > 0` 的任务）。本条只到"确认它取不到帧、不生成节点"为止，不推像素结论。
 
+### 3.2ed 物品提示**行池上限**（6→40 行）＋**行级配色**（2026-10-02）
+
+这一轮把 §3.2ec 收口清单里的第②条（行级配色）做掉，顺带挖出并修掉一个**行数截断缺陷**。
+
+#### ① 缺陷：提示面板的正文行池只有 **6 行**（C# 不设上限）
+
+`Client-Bevy/src/ui/tooltip.rs` 的 `spawn_tooltip_panel` 早年只 spawn `for i in 0..6usize`
+（`tooltip_panel_is_ui_node_with_outlined_copies` 的断言原文就是「title + **6 行** = 7 个描边文本 × 4 副本」），
+而物品提示走的就是这个通用面板（`inv_tooltip_system` → `tooltip::TooltipState`）。
+C# 的物品提示（`GameScene.DrawItemHint`）是**每段一个新 `MirLabel`、行数不设上限**
+（`NameInfoLabel` + 属性 12 段 + 觉醒 3 段 + 镶嵌 + 需求 + 职业 + 价格 + 绑定 13 条 + 宝石 +
+过期/封印/租借 + 交互 + 描述 + GM），满配轻松 > 20 行 ⇒ **第 7 行起整段被丢**。
+
+为什么此前没被抓到：20 窗 A/B 表里**没有 hover 行**，物品提示一直是「源码逐 key 可复核、
+像素未采集」（§3.2ec 的原话），所以"少了几行"既没进数值表、也没被交互巡回（它只守点得动）覆盖。
+
+修法：行池改 `TOOLTIP_LINE_SLOTS = 40`（够放最长物品提示），多余的恒 `Hidden` 不占位——
+`tooltip_panel_system` 的尺寸估算早就按 `state.lines.len()` 算高/宽（`text_lines` 还把 `\n` 也计入），
+面板本身没有 6 行假设，只有**实体池**有。
+
+#### ② 行级配色：逐段抄 C# `ForeColour`
+
+`TooltipState` 新增 `line_colors: Vec<Color>`（空 = 全部回落 [`TOOLTIP_LINE_COLOR`]，单色调用方不用改），
+写入走新方法 `update_colored_lines(…)`；面板渲染时把每行色写进 `TextColor`
+（描边副本是黑色、由 `sync_outline_ui_system` 只同步文本/位置 ⇒ 不受影响）。
+物品提示的取色函数 `item_tooltip_lines_colored(item, ctx)` 与 `item_time_lines_colored(item, now)`：
+
+| 段 | C# 出处 | `ForeColour` |
+|---|---|---|
+| 名字+品阶（本端：标题 + 品阶行） | `:6863-6871` `GradeNameColor(Grade)` | Common=Yellow / Rare=DeepSkyBlue / Legendary=DarkOrange / Mythical=Plum / Heroic=Red |
+| 类型名 / 重量·耐久 / 成对·单项属性 | `:7072` `:7179` `:7207`… | White |
+| 觉醒名行 | `:8529` | `GradeNameColor(Grade)`（与标题同色） |
+| 觉醒总值行 / 逐级值行 | `:8571` | White |
+| 镶嵌孔 / 「按 Ctrl + 右键 打开镶嵌孔」 | `:8631` `:8653` | 见下（实际恒 White） |
+| 需求 12 种 | `:8705-8776` | 未达标 `Red`、达标 White |
+| 职业需求 | `:8793-8822` | 当前职业不在掩码内 `Red` |
+| 出售价格 | `:8840-8847` | White |
+| 绑定标位 13 条 / 被诅咒 | `:8906-9195` | Yellow |
+| 宝石「可用于:」/「不能用于任何物品。」 | `:9226` | Yellow |
+| 宝石逐条 `After*` | `:9243-9387` | White |
+| 过期行 | `:9469` | Yellow |
+| 封印行 | `:9494` | Red |
+| 租借来源行 / 租借锁行 | `:9514` `:9547` | DarkKhaki |
+| 租借到期行 | `:9530` | Khaki |
+| 交互提示（Ctrl+左键）/ 可分离堆叠 | `:9632` `:9653` | White |
+| 「物品描述」标题 | `:9717` | DarkKhaki |
+| 物品描述正文 | `:9730` | Khaki |
+| 「由游戏管理员创建」 | `:9781` | Orchid |
+
+**需求/职业判红要玩家上下文**（C# 读 `MapObject.User.Level` / `Stats[…]` / `Class`）⇒
+新增 `TooltipPlayerCtx { level, class, stats[5][2] }`，由悬停系统从本地玩家实体
+（`Progression` / `CombatStats` / `ActorAppearance`）读；纯函数调用方（聊天链接、任务奖励格子）传 `None`
+⇒ 这些行按 White 处理（与历史行为一致）。掩码位 = `1 << MirClass`，与 `RequiredClass` 位值同源。
+
+**镶嵌孔为什么最终是 White**：C# 条件是 `count > realItem.Slots && !IsFishingRod && Type != Mount ? Cyan : White`
+（`:8631`），其中 `count` 是**该标签方法内**的 1-based 行号、`realItem.Slots` 是模板孔数上限 ⇒
+`count > Slots` 对正常物品恒假（孔数不会超过模板上限）。C# 那个 `Cyan` 分支在本端**不实现**，
+不是"漏抄"，是**不可达**。
+
+#### ③ 残留（未采集 / 数据缺口，不许推数）
+
+- **属性行的 `Cyan`（`addValue > 0`）未实现**：C# 判的是**该属性的附加属性值**
+  （`addedStats[Stat.X]`，`:7195`），本端 `InvItem` 只有 `added_stats_count`（条数）、
+  **没有逐属性附加表** ⇒ 一律 White。同一数据缺口也解释了为什么属性行没有 C# 的 `(+N)` 尾标。
+- `SoulboundTo`（§3.2ec 第①条）仍未做：要绑**定者名字**，本端 `soul_bound_id` 是自定义哨兵。
+- **像素未采集**：本轮是源码级对齐 + 离线渲染断言；20 窗 A/B 表仍无 hover 行，
+  **没有**「本端 40 行 vs 原版 N 行」的像素对拍，不报差异占比。
+
+#### 门禁
+
+| 门禁 | 结果 |
+|---|---|
+| `cargo check` | 通过（仅既有 warning） |
+| `cargo test --lib` | **939 passed / 0 failed**（新增 `tooltip_lines_are_colored_like_csharp`、`tooltip_panel_renders_many_lines_with_per_line_colors`） |
+| `cargo test --test b0001_smoke --test ui_alignment` | **2 + 58 passed** |
+| `ui_interact_sweep.ps1` | **46/47、fail=0、exit=0** |
+| `rustfmt --check` | 本轮改动的 5 个文件 **0 条**（master 既有基线 81 条未新增） |
+
 ### 3.2ec 物品提示补**交互提示段**（C# `OverlapInfoLabel`）——工具提示这条线收口（2026-10-01）
 
 C# `OverlapInfoLabel`（`GameScene.cs:9586-9648`）两处都是**数据驱动**的，本轮补齐：
@@ -4349,8 +4427,8 @@ C# `OverlapInfoLabel`（`GameScene.cs:9586-9648`）两处都是**数据驱动**�
 **只剩两处**：① `SoulboundTo`（「灵魂绑定于:」+ **绑定者名字**）——本端 `soul_bound_id` 是我们的
 自定义哨兵（`1`=本人、`0/-1`=未绑定、`>1`=C# 迁移数据绑定他人，见 `inventory.rs:2682` 注释），
 要显示名字得把**本地角色名**透传进提示构建（`item_tooltip_lines` 目前是纯函数）；
-② C# 的 tooltip **行级配色**（觉醒名行按品阶色、需求未达标为红、宝石/绑定为黄、描述为 Khaki…），
-本端 tooltip 行统一一色 ⇒ 需要给 `TooltipState` 的行加颜色（另一条线）。
+② C# 的 tooltip **行级配色** —— **已在 §3.2ed（2026-10-02）完成**，连带修掉该面板的
+**6 行上限截断**（详见该节；那边还留了"属性行 Cyan 需逐属性附加表"的数据缺口）。
 
 ### 3.2eb 物品提示 `AwakeInfoLabel` 的**后两段**（英文字面量行）（2026-10-01）
 
