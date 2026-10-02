@@ -14,6 +14,13 @@ import sys
 
 from PIL import Image, ImageChops
 
+# 归因档位（`--localize`）：**是否差异**用与主表同一条判据（`sum(RGB) > 12`），
+# **幅度**另按「最大通道差」分档——用来区分「字形/AA 级差异」（小档）与「一侧根本没有这块内容」
+# （大档：实测面板底 vs 地图 Δmax≈48、纯黑 vs 面板底 Δmax≈240）。第一档是 `≤12`，
+# 因为两个判据不完全等价（如 (5,5,5)：sum=15 算差异，但 max=5 落在此档）——列出来让各档之和 = 差异像素数。
+DELTA_BUCKETS = ((0, 13, "<=12"), (13, 25, "13-24"), (25, 65, "25-64"),
+                 (65, 128, "65-127"), (128, 256, "128-255"))
+
 # 窗口 kind 的**别名**：同一块 C# 面板在不同键位下被我们的 A/B 清单记成不同 kind。
 #  - `character_skill_page`（F11 技能页）= `CharacterDialog` 的**同一扇窗**（技能页是它的子页），
 #    矩形与 `character` 逐值相同 ⇒ 直接复用几何表里的 `character` 行。
@@ -125,11 +132,137 @@ def selftest() -> int:
     ok6 = n6_shift > 0 and n6_shift >= n6_raw * 0.5
     print(f"  [{'PASS' if ok6 else 'FAIL'}] 真差异（6px 平移）：raw={n6_raw} shifted={n6_shift}（不许被 ±1 口径吃掉）")
     bad += 0 if ok6 else 1
+
+    # ③ `--localize`：一侧多出的实心块必须被 top 块抓到、且最优平移为 (0,0)
+    blank = Image.new("RGB", (64, 48), (0, 0, 0))
+    withblk = blank.copy()
+    ImageDraw.Draw(withblk).rectangle((16, 16, 31, 31), fill=(255, 255, 255))
+    pa2, pb2 = os.path.join(tmp, "loc_a.png"), os.path.join(tmp, "loc_b.png")
+    blank.save(pa2)
+    withblk.save(pb2)
+    n2, _t2, lines2 = localize_report(
+        Image.open(pa2).convert("RGB"), Image.open(pb2).convert("RGB"), (0, 0, 64, 48), 1.0, 1
+    )
+    top2 = next((l for l in lines2 if "block" in l), "")
+    ok3 = n2 == 256 and "+( 16, 16)" in top2
+    print(f"  [{'PASS' if ok3 else 'FAIL'}] --localize：实心 16x16 块被 top 抓到（{top2.strip()}）")
+    bad += 0 if ok3 else 1
     import shutil
 
     shutil.rmtree(tmp, ignore_errors=True)
     print("SelfTest PASS" if not bad else "SelfTest FAIL")
     return 1 if bad else 0
+
+
+def _diff_mask(a, b, box, dx=0, dy=0):
+    """把 `a`（我方/本端）整体平移 (dx,dy) 后与 `b`（原版）在 box 内做差异掩膜。
+
+    返回 `(diffsum, magmax, w, h)`：
+      * `diffsum`：三通道差之**和**（`ImageChops.add` 链，饱和在 255）——与主表 `sum(RGB) > 12` **同口径**；
+      * `magmax`：三通道差的**最大值**——只用来给差异像素标幅度。
+    """
+    x0, y0, w, h = box
+    ca = a.crop((x0 + dx, y0 + dy, x0 + w + dx, y0 + h + dy))
+    cb = b.crop((x0, y0, x0 + w, y0 + h))
+    d = ImageChops.difference(ca.convert("RGB"), cb.convert("RGB"))
+    r, g, bl = d.split()
+    diffsum = ImageChops.add(ImageChops.add(r, g), bl)
+    magmax = ImageChops.lighter(ImageChops.lighter(r, g), bl)
+    return diffsum, magmax, w, h
+
+
+def localize_report(a, b, box, scale=1.0, max_shift=1, block=16, band=8, min_band=15.0,
+                    top=8, label=""):
+    """`--localize` 的单窗归因：最优平移 + 幅度直方图 + 16px 网格 top 块 + 逐行带。
+
+    为什么要它：整窗一个「差异占比」只能判"这两扇窗长得不一样"，判不了**差在哪、是什么性质**。
+    实测三种典型形态各自有签名（见 README §3.2ef）：
+      * 实心方块（一侧多一个控件）  ⇒ 某个 16px 块 100%、且连续多行同宽；
+      * 字形/AA 差异（同文本不同字体）⇒ 逐行带铺满整窗、top 块是**窄竖条**（汉字笔画）、
+        幅度直方图两头都重（笔画边缘 Δ 大、边缘外 Δ 小）；
+      * 整体 ±1px 取帧口径          ⇒ 平移后差异掉到 <0.5%。
+    文本输出（不落图），供把结论抄进 README。
+    """
+    sx, sy, sw, sh = box
+    box = (int(round(sx * scale)), int(round(sy * scale)),
+           int(round(sw * scale)), int(round(sh * scale)))
+    x0, y0, w, h = box
+    best = None
+    for dy in range(-max_shift, max_shift + 1):
+        for dx in range(-max_shift, max_shift + 1):
+            diffsum, _, _, _ = _diff_mask(a, b, box, dx, dy)
+            n = sum(1 for p in diffsum.tobytes() if p > 12)
+            if best is None or n < best[0]:
+                best = (n, dx, dy)
+    n_shift, sdx, sdy = best
+    diffsum, magmax, w, h = _diff_mask(a, b, box, sdx, sdy)
+    px = diffsum.load()
+    mp = magmax.load()
+    total = w * h
+    flat = sum(1 for p in diffsum.tobytes() if p > 12)
+    lines = [f"== {label or ''} rect=({x0},{y0},{w},{h}) 差异={flat}/{total}={100.0 * flat / max(total, 1):.1f}%"
+             f"  最优平移 dx={sdx} dy={sdy} ⇒ 平移后={n_shift}({100.0 * n_shift / max(total, 1):.1f}%)"]
+    # 幅度直方图
+    bucket = {name: 0 for _, _, name in DELTA_BUCKETS}
+    for y in range(h):
+        for x in range(w):
+            if px[x, y] <= 12:
+                continue
+            p = mp[x, y]
+            for lo, hi, name in DELTA_BUCKETS:
+                if lo <= p < hi:
+                    bucket[name] += 1
+                    break
+    lines.append("   幅度档(max通道差，仅统计差异像素)： " + "  ".join(
+        f"{name}={bucket[name]}({100.0 * bucket[name] / max(flat, 1):.0f}%)"
+        for _, _, name in DELTA_BUCKETS))
+    # 16px 网格块
+    blocks = []
+    for by in range(0, h, block):
+        for bx in range(0, w, block):
+            c = t = 0
+            for yy in range(by, min(by + block, h)):
+                for xx in range(bx, min(bx + block, w)):
+                    t += 1
+                    if px[xx, yy] > 12:
+                        c += 1
+            blocks.append((c / max(t, 1), bx, by, min(block, w - bx), min(block, h - by)))
+    blocks.sort(key=lambda r: -r[0])
+    for ratio, bx, by, bw, bh in blocks[:top]:
+        if ratio <= 0:
+            break
+        lines.append(f"   block +({bx:>3},{by:>3}) {bw}x{bh} {100.0 * ratio:5.1f}%  abs=({x0 + bx},{y0 + by})")
+        # 几乎整块都差（≥90%）时再钻一层：它在那一带里是**实心矩形**（一侧多/少一个控件）
+        # 还是**字迹笔画**？判据 = 「该 16px 带内整列都差」的**连续列段宽度**——
+        # 实心块给一条 ≥ 块宽的连续段；汉字/数字笔画给多段 2~20px 的窄条（GameShop 实测）。
+        if ratio >= 0.9:
+            col_full = []
+            for xx in range(bx, bx + bw):
+                col_full.append(all(px[xx, y2] > 12 for y2 in range(by, by + bh)))
+            runs, s = [], None
+            for i, full in enumerate(col_full + [False]):
+                if full and s is None:
+                    s = i
+                elif not full and s is not None:
+                    runs.append((bx + s, bx + i - 1))
+                    s = None
+            widths = [e - b + 1 for b, e in runs]
+            lines.append(
+                f"      整列都差的列段（{len(runs)} 段，宽 {min(widths) if widths else 0}"
+                f"~{max(widths) if widths else 0}px）： " + ", ".join(f"{b}-{e}" for b, e in runs[:8]))
+    # 逐行带（8px 聚成一带）
+    for yy in range(0, h, band):
+        c = t = 0
+        xs = []
+        for y2 in range(yy, min(yy + band, h)):
+            for xx in range(w):
+                t += 1
+                if px[xx, y2] > 12:
+                    c += 1
+                    xs.append(xx)
+        if c and 100.0 * c / max(t, 1) > min_band:
+            lines.append(f"   band y={yy:>3} abs={y0 + yy:>3} {100.0 * c / max(t, 1):5.1f}%  x={min(xs)}..{max(xs)}")
+    return n_shift, total, lines
 
 
 def _changed_vs_base(base_path, frame_path, box, scale):
@@ -157,6 +290,11 @@ def main():
     # 「居中窗 ±1px」口径（见 diff_region_shifted 的说明）：默认开；`--no-shift` 关掉
     ap.add_argument("--max-shift", type=int, default=1)
     ap.add_argument("--no-shift", action="store_true")
+    # 逐窗归因（可选）：`--localize relationship,game_shop` 或 `--localize all`。
+    # 只在主表之后**多打一段文本**，不改主表口径/退出码。
+    ap.add_argument("--localize", default="")
+    ap.add_argument("--localize-top", type=int, default=8)
+    ap.add_argument("--localize-min-band", type=float, default=15.0)
     ap.add_argument("--selftest", action="store_true")
     a = ap.parse_args()
     if a.selftest:
@@ -176,6 +314,7 @@ def main():
     base_orig = os.path.join(a.shots, "orig_baseline_none.png")
     base_ours = os.path.join(a.shots, "ours_kbd_02_ingame.png")
     results = []
+    kept = {}
     print(f"{'action':16s} {'kind':22s} {'区域(x,y,w,h)':>22s} {'差异像素':>10s} {'占比':>7s}  判定")
     for p in pairs:
         kind = p.get("kind")
@@ -238,6 +377,22 @@ def main():
         results.append(dict(p, region=r, changed=n, total=total, pct=round(pct, 3), tag=tag,
                             orig_rendered=o_chg, ours_rendered=m_chg,
                             shift_note=shift_note.strip()))
+        kept[kind] = (ia, ib, box if box is not None else (0, 0, ia.width, ia.height), 1.0)
+    if a.localize:
+        want = [k.strip() for k in a.localize.split(",") if k.strip()]
+        if want == ["all"]:
+            want = [p.get("kind") for p in pairs if p.get("kind")]
+        print()
+        for kind in want:
+            if kind not in kept:
+                print(f"== {kind}: 无可用帧（未在该轮 A/B 清单里 / 缺帧 / 无矩形）")
+                continue
+            ia_, ib_, box_, scale_ = kept[kind]
+            _n, _t, lines = localize_report(
+                ia_, ib_, box_, scale_, a.max_shift, top=a.localize_top,
+                min_band=a.localize_min_band, label=kind,
+            )
+            print("\n".join(lines))
     if a.out:
         json.dump(results, open(a.out, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
         print("wrote", a.out)
