@@ -1530,6 +1530,7 @@ fn inv_tooltip_system(
             &crate::game::player_state::Progression,
             &crate::game::player_state::CombatStats,
             &crate::actor::ActorAppearance,
+            &crate::actor::PlayerName,
         ),
         With<LocalPlayer>,
     >,
@@ -1577,12 +1578,17 @@ fn inv_tooltip_system(
         tooltip.update(2, false, String::new(), Vec::new(), cursor.x, cursor.y);
         return;
     };
-    // §3.2ed：需求/职业行的红字要玩家等级·属性·职业（C# `MapObject.User`）
-    let ctx = player_q.single().ok().map(|(prog, cs, app)| TooltipPlayerCtx {
-        level: prog.level,
-        class: app.class,
-        stats: cs.stats,
-    });
+    // §3.2ed：需求/职业行的红字要玩家等级·属性·职业（C# `MapObject.User`）；
+    // §3.2ee：`SoulboundTo` 行还要**本地角色名**（哨兵 `soul_bound_id == 1` = 本人）
+    let ctx = player_q
+        .single()
+        .ok()
+        .map(|(prog, cs, app, name)| TooltipPlayerCtx {
+            level: prog.level,
+            class: app.class,
+            stats: cs.stats,
+            name: Some(name.0.as_str()),
+        });
     let lines = item_tooltip_lines_colored(&item, ctx.as_ref());
     let (texts, colors): (Vec<String>, Vec<Color>) = lines.into_iter().unzip();
     // §3.2du：物品提示的标题（名字+品阶）按品阶上色（C# `GradeNameColor`）
@@ -1625,35 +1631,38 @@ const HINT_ORCHID: Color = Color::srgb(218.0 / 255.0, 112.0 / 255.0, 214.0 / 255
 ///
 /// 传 `None`（纯函数调用方 / 单测）时这些行一律按白色处理——与历史行为一致。
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct TooltipPlayerCtx {
+pub struct TooltipPlayerCtx<'a> {
     /// 本地玩家等级（C# `MapObject.User.Level`）
     pub level: u16,
     /// 本地玩家职业（C# `MapObject.User.Class`）
     pub class: mir2_shared::MirClass,
     /// `[min, max]` × `AC/MAC/DC/MC/SC`，与 [`crate::game::player_state::CombatStats::stats`] 同序
     pub stats: [[i32; 2]; 5],
+    /// 本地角色名（`PlayerName` 组件）。只给 C# `GetUserName(SoulBoundId)` 那一行用
+    /// （本端 `soul_bound_id` 哨兵 `1`=本人 ⇒ 名字就是本地角色名）。
+    pub name: Option<&'a str>,
 }
 
 /// C# `NeedInfoLabel` 的需求行颜色：不达标 `Color.Red`，达标（或无法判定）白。
-fn requirement_color(item: &InvItem, ctx: Option<&TooltipPlayerCtx>) -> Color {
+fn requirement_color(item: &InvItem, ctx: Option<&TooltipPlayerCtx<'_>>) -> Color {
     let Some(ctx) = ctx else {
         return HINT_WHITE;
     };
     let need = i32::from(item.required_amount);
     let unmet = match item.required_type {
-        3 => i32::from(ctx.level) < need,  // Level
-        4 => ctx.stats[0][1] < need,       // MaxAC
-        5 => ctx.stats[1][1] < need,       // MaxMAC
-        6 => ctx.stats[2][1] < need,       // MaxDC
-        7 => ctx.stats[3][1] < need,       // MaxMC
-        8 => ctx.stats[4][1] < need,       // MaxSC
-        9 => i32::from(ctx.level) > need,  // MaxLevel（超过上限同样红）
-        10 => ctx.stats[0][0] < need,      // MinAC
-        11 => ctx.stats[1][0] < need,      // MinMAC
-        12 => ctx.stats[2][0] < need,      // MinDC
-        13 => ctx.stats[3][0] < need,      // MinMC
-        14 => ctx.stats[4][0] < need,      // MinSC
-        _ => false,                        // default：C# 不置红
+        3 => i32::from(ctx.level) < need, // Level
+        4 => ctx.stats[0][1] < need,      // MaxAC
+        5 => ctx.stats[1][1] < need,      // MaxMAC
+        6 => ctx.stats[2][1] < need,      // MaxDC
+        7 => ctx.stats[3][1] < need,      // MaxMC
+        8 => ctx.stats[4][1] < need,      // MaxSC
+        9 => i32::from(ctx.level) > need, // MaxLevel（超过上限同样红）
+        10 => ctx.stats[0][0] < need,     // MinAC
+        11 => ctx.stats[1][0] < need,     // MinMAC
+        12 => ctx.stats[2][0] < need,     // MinDC
+        13 => ctx.stats[3][0] < need,     // MinMC
+        14 => ctx.stats[4][0] < need,     // MinSC
+        _ => false,                       // default：C# 不置红
     };
     if unmet {
         HINT_RED
@@ -1664,7 +1673,7 @@ fn requirement_color(item: &InvItem, ctx: Option<&TooltipPlayerCtx>) -> Color {
 
 /// C# `NeedInfoLabel` 的**职业需求行**颜色：当前职业不在 `RequiredClass` 掩码里就红
 /// （`GameScene.cs:8790-8817`；掩码位 = `1 << MirClass`）。
-fn class_requirement_color(item: &InvItem, ctx: Option<&TooltipPlayerCtx>) -> Color {
+fn class_requirement_color(item: &InvItem, ctx: Option<&TooltipPlayerCtx<'_>>) -> Color {
     let Some(ctx) = ctx else {
         return HINT_WHITE;
     };
@@ -1690,7 +1699,7 @@ pub fn item_tooltip_lines(item: &InvItem) -> Vec<String> {
 #[must_use]
 pub fn item_tooltip_lines_colored(
     item: &InvItem,
-    ctx: Option<&TooltipPlayerCtx>,
+    ctx: Option<&TooltipPlayerCtx<'_>>,
 ) -> Vec<(String, Color)> {
     use mir2_shared::enums::Stat;
     let mut lines: Vec<(String, Color)> = Vec::new();
@@ -1865,10 +1874,7 @@ pub fn item_tooltip_lines_colored(
     if item.required_class != 0 {
         // C# `ClassRequired` = 「职业要求 : {0}」，{0} = `RequiredClass.ToLocalizedString()`
         lines.push((
-            format!(
-                "职业要求 : {}",
-                required_class_text(item.required_class)
-            ),
+            format!("职业要求 : {}", required_class_text(item.required_class)),
             class_requirement_color(item, ctx),
         ));
     }
@@ -1883,8 +1889,10 @@ pub fn item_tooltip_lines_colored(
             HINT_WHITE, // C# `colour` 初值 White，之后没再置红（`:8840-8847`）
         ));
     }
-    // 绑定标位：C# `BindInfoLabel`（`GameScene.cs:8887-9165`）——标位非 0 时按固定次序逐条输出
+    // 绑定标位：C# `BindInfoLabel`（`GameScene.cs:8887-9146`）——标位非 0 时按固定次序逐条输出
     // （条件统一是 `Bind != None && Bind.HasFlag(X)`，文案取中文包；本端位值同 C# `BindMode`）。
+    // 注意 `BindOnEquip(0x0200)` **不在这张表里**：C# 那条是独立的 `if/else`（`else` 分支是
+    // 「灵魂绑定于」），见下面 SOULBOUND 段。
     if item.bind_mode != 0 {
         for (bit, text) in [
             (0x0001u16, "死亡时不可掉落"), // DontDeathdrop → CantDropOnDeath
@@ -1899,12 +1907,27 @@ pub fn item_tooltip_lines_colored(
             (0x0080, "丢弃时销毁"),        // DestroyOnDrop → DestroyedWhenDropped
             (0x0800, "不能作为结婚戒指"),  // NoWeddingRing → CannotBeWeddingRing
             (0x8000, "英雄不可使用"),      // NoHero        → CannotBeUsedByHero
-            (0x0200, "装备时绑定灵魂"),    // BindOnEquip   → SoulBindsOnEquip
         ] {
             if item.bind_mode & bit != 0 {
                 lines.push((text.to_string(), HINT_YELLOW)); // C# 每条 `ForeColour = Color.Yellow`
             }
         }
+    }
+    // C# `BindInfoLabel` 的 BIND_ON_EQUIP / SOULBOUND 段（`:9150-9183`）——**二选一**：
+    //   `Bind.HasFlag(BindOnEquip) && SoulBoundId == -1` ⇒「装备时绑定灵魂」（Yellow）
+    //   否则 `SoulBoundId != -1`                          ⇒「灵魂绑定于:」+ `GetUserName(id)`（Yellow）
+    // 本端 `soul_bound_id` 是自定义哨兵：`1`=本人 / `0`、`-1`=未绑定 / `>1`=C# 迁移数据绑定他人
+    // （没有 id→名字表）。故「未绑定」= `<= 0`，名字只对哨兵 `1` 取本地角色名；
+    // `>1` 出**空名字**那条——与 C# `GetUserName` 查不到 id 时返回空串的行为逐字一致。
+    let soul_bound_owner = if item.soul_bound_id == 1 {
+        ctx.and_then(|c| c.name).unwrap_or("")
+    } else {
+        ""
+    };
+    if item.bind_mode & 0x0200 != 0 && item.soul_bound_id <= 0 {
+        lines.push(("装备时绑定灵魂".to_string(), HINT_YELLOW)); // Text.SoulBindsOnEquip
+    } else if item.soul_bound_id > 0 {
+        lines.push((format!("灵魂绑定于:{}", soul_bound_owner), HINT_YELLOW)); // Text.SoulboundTo
     }
     // C# `BindInfoLabel` 的 CURSED 区（`:9191-9204`）：`(!hideAdded && (!NeedIdentify || Identified))
     // && Cursed`（本端没有 Inspect 的 hideAdded 变体 ⇒ 取 !hideAdded = true）
@@ -4669,11 +4692,9 @@ mod tests {
         // ③ GM 段（GMMadeLabel）
         let mut gm = item_with_type(ItemType::Weapon);
         gm.is_gm_made = true;
-        assert!(
-            item_tooltip_lines(&gm)
-                .iter()
-                .any(|l| l == "由游戏管理员创建")
-        );
+        assert!(item_tooltip_lines(&gm)
+            .iter()
+            .any(|l| l == "由游戏管理员创建"));
         // ④ 结婚戒指：C# 是**直接拼接**（无分隔符）到类型行
         let mut wr = item_with_type(ItemType::Ring);
         wr.wedding_ring = 3;
@@ -4926,6 +4947,7 @@ mod tests {
             level: 10,
             class: mir2_shared::MirClass::Wizard,
             stats: [[0; 2]; 5],
+            name: None,
         };
         let lines = item_tooltip_lines_colored(&need, Some(&low));
         assert_eq!(color_of(&lines, "等级要求"), HINT_RED, "等级不够标红");
@@ -4934,6 +4956,7 @@ mod tests {
             level: 40,
             class: mir2_shared::MirClass::Warrior,
             stats: [[0; 2]; 5],
+            name: None,
         };
         let lines = item_tooltip_lines_colored(&need, Some(&ok));
         assert_eq!(color_of(&lines, "等级要求"), HINT_WHITE, "等级够则不红");
@@ -4946,6 +4969,7 @@ mod tests {
             level: 31,
             class: mir2_shared::MirClass::Warrior,
             stats: [[0; 2]; 5],
+            name: None,
         };
         let lines = item_tooltip_lines_colored(&maxlvl, Some(&over));
         assert_eq!(color_of(&lines, "最高等级"), HINT_RED);
@@ -4962,7 +4986,7 @@ mod tests {
         let lines = item_tooltip_lines_colored(&dc, Some(&weak));
         assert_eq!(color_of(&lines, "攻击要求"), HINT_WHITE);
 
-        // ⑤ 绑定 13 条 + 被诅咒 = Yellow；出售价格白
+        // ⑤ 绑定 12 条 + 被诅咒 = Yellow；出售价格白
         let mut bound = item_with_type(ItemType::Weapon);
         bound.bind_mode = 0x0002 | 0x0010; // 不可丢弃 + 不可交易
         bound.price = 100;
@@ -5006,6 +5030,79 @@ mod tests {
         assert_eq!(color_of(&lines, "物品描述"), HINT_DARKKHAKI);
         assert_eq!(color_of(&lines, "很久以前"), HINT_KHAKI);
         assert_eq!(color_of(&lines, "由游戏管理员创建"), HINT_ORCHID);
+    }
+
+    /// §3.2ee：`BindInfoLabel` 的 BIND_ON_EQUIP / SOULBOUND 二选一分支
+    /// （`GameScene.cs:9150-9183`）——`(BindOnEquip && SoulBoundId == -1)` ⇒「装备时绑定灵魂」；
+    /// 否则 `SoulBoundId != -1` ⇒「灵魂绑定于:」+ `GetUserName(id)`。
+    #[test]
+    fn tooltip_soulbound_line_matches_csharp() {
+        fn lines_of(item: &InvItem, name: Option<&str>) -> Vec<String> {
+            let ctx = name.map(|n| TooltipPlayerCtx {
+                level: 1,
+                class: mir2_shared::MirClass::Warrior,
+                stats: [[0; 2]; 5],
+                name: Some(n),
+            });
+            item_tooltip_lines_colored(item, ctx.as_ref())
+                .into_iter()
+                .map(|(s, _)| s)
+                .collect()
+        }
+
+        // ① 哨兵 1 = 本人 ⇒ 出名字；ForeColour = Yellow
+        let mut it = item_with_type(ItemType::Weapon);
+        it.soul_bound_id = 1;
+        let colored = item_tooltip_lines_colored(
+            &it,
+            Some(&TooltipPlayerCtx {
+                level: 1,
+                class: mir2_shared::MirClass::Warrior,
+                stats: [[0; 2]; 5],
+                name: Some("小明"),
+            }),
+        );
+        let (text, color) = colored
+            .iter()
+            .find(|(s, _)| s.starts_with("灵魂绑定于:"))
+            .expect("绑定本人应出「灵魂绑定于:」行");
+        assert_eq!(text, "灵魂绑定于:小明");
+        assert_eq!(*color, HINT_YELLOW);
+
+        // ② 哨兵 1 但没有名字（纯函数调用方）⇒ 只出标签，同 C# `GetUserName` 返回空串
+        assert!(lines_of(&it, None).iter().any(|l| l == "灵魂绑定于:"));
+        // ③ 哨兵 >1 = C# 迁移数据绑定他人：本端没有 id→名字表 ⇒ 空名字（同 C# 查不到 id）
+        it.soul_bound_id = 7;
+        assert!(lines_of(&it, Some("小明"))
+            .iter()
+            .any(|l| l == "灵魂绑定于:"));
+        // ④ 未绑定（-1/0）不出行
+        it.soul_bound_id = -1;
+        assert!(!lines_of(&it, Some("小明"))
+            .iter()
+            .any(|l| l.starts_with("灵魂绑定于:")));
+        it.soul_bound_id = 0;
+        assert!(!lines_of(&it, None)
+            .iter()
+            .any(|l| l.starts_with("灵魂绑定于:")));
+
+        // ⑤ BindOnEquip(0x0200) + 未绑定 ⇒「装备时绑定灵魂」（且在灵魂绑定行之前）
+        let mut boe = item_with_type(ItemType::Weapon);
+        boe.bind_mode = 0x0200;
+        let l = lines_of(&boe, None);
+        assert!(l.iter().any(|s| s == "装备时绑定灵魂"), "{l:?}");
+        assert!(!l.iter().any(|s| s.starts_with("灵魂绑定于:")));
+
+        // ⑥ BindOnEquip 但已绑定本人 ⇒ 走 else 分支：只出「灵魂绑定于:」（C# 的 `&` 条件不成立）
+        let mut both = item_with_type(ItemType::Weapon);
+        both.bind_mode = 0x0200;
+        both.soul_bound_id = 1;
+        let l = lines_of(&both, Some("小明"));
+        assert!(
+            !l.iter().any(|s| s == "装备时绑定灵魂"),
+            "已绑定不该再出「装备时绑定灵魂」：{l:?}"
+        );
+        assert!(l.iter().any(|s| s == "灵魂绑定于:小明"), "{l:?}");
     }
 
     #[test]

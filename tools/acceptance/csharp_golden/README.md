@@ -4382,7 +4382,7 @@ C# 的物品提示（`GameScene.DrawItemHint`）是**每段一个新 `MirLabel`�
 - **属性行的 `Cyan`（`addValue > 0`）未实现**：C# 判的是**该属性的附加属性值**
   （`addedStats[Stat.X]`，`:7195`），本端 `InvItem` 只有 `added_stats_count`（条数）、
   **没有逐属性附加表** ⇒ 一律 White。同一数据缺口也解释了为什么属性行没有 C# 的 `(+N)` 尾标。
-- `SoulboundTo`（§3.2ec 第①条）仍未做：要绑**定者名字**，本端 `soul_bound_id` 是自定义哨兵。
+- `SoulboundTo`（§3.2ec 第①条）当时仍未做 ⇒ **已在 §3.2ee 完成**。
 - **像素未采集**：本轮是源码级对齐 + 离线渲染断言；20 窗 A/B 表仍无 hover 行，
   **没有**「本端 40 行 vs 原版 N 行」的像素对拍，不报差异占比。
 
@@ -4394,7 +4394,72 @@ C# 的物品提示（`GameScene.DrawItemHint`）是**每段一个新 `MirLabel`�
 | `cargo test --lib` | **939 passed / 0 failed**（新增 `tooltip_lines_are_colored_like_csharp`、`tooltip_panel_renders_many_lines_with_per_line_colors`） |
 | `cargo test --test b0001_smoke --test ui_alignment` | **2 + 58 passed** |
 | `ui_interact_sweep.ps1` | **46/47、fail=0、exit=0** |
-| `rustfmt --check` | 本轮改动的 5 个文件 **0 条**（master 既有基线 81 条未新增） |
+| `rustfmt --check` | 本轮改动把 master 基线 80 条→**84 条**（自己在 `inventory.rs` 净增 4 条）、后经 **§3.2ee 用 `rustfmt` 回写这 4 个文件**修平 ⇒ 现 master 基线 **74 条**、本轮涉及文件 0 条。**教训**：当时用 `Select-String -Pattern "…\\\\…"` 过滤（PowerShell 双引号不做转义、正则里成了两个反斜杠）**静默匹配不到**、误报"0 条"，见 §3.2ee |
+
+> 本节的「0 条」是**错误结论**（过滤串写错导致假绿），已在 §3.2ee 更正并修平。
+
+### 3.2ee 物品提示补 **SOULBOUND 行**（C# `GetUserName(SoulBoundId)`）＋ 上面那条 rustfmt 误报的更正（2026-10-02）
+
+#### ① `BindInfoLabel` 的 BIND_ON_EQUIP / SOULBOUND 是**二选一**
+
+C# `GameScene.cs:9150-9183`：
+
+```csharp
+if ((item.Bind.HasFlag(BindMode.BindOnEquip)) & item.SoulBoundId == -1)  // 「装备时绑定灵魂」
+else if (item.SoulBoundId != -1)                                        // 「灵魂绑定于:」+ GetUserName(id)
+```
+
+两处 `ForeColour` 都是 `Color.Yellow`。此前本端把 `BindOnEquip(0x0200)` 当成绑定表里的
+**第 13 条**无条件输出，且完全没有 SOULBOUND 行 ⇒ 两处都不对。本轮：
+
+- 把 `0x0200` 从绑定表里**摘出来**，按 C# 的 `if/else` 结构放在**NoHero 之后**（次序同 C#）；
+- `装备时绑定灵魂` 追加 `&& soul_bound_id <= 0` 的条件（C# 是 `& SoulBoundId == -1`；
+  本端哨兵 `0`/`-1` 都表示未绑定）。
+
+#### ② 名字从哪来：`TooltipPlayerCtx` 增 `name`
+
+`GetUserName(id)` 是「按玩家 id 查名字」。本端 `soul_bound_id` 是**自定义哨兵**
+（`1`=本人 / `0`、`-1`=未绑定 / `>1`=C# 迁移数据绑定他人，`inventory.rs:2876` 注释），
+没有 id→名字表 ⇒ **只有哨兵 `1` 能给出名字**，就是本地角色名。
+
+- `TooltipPlayerCtx` 增 `name: Option<&str>`（带生命周期，仍是 `Copy`）；
+- 背包 / 角色 / 仓库悬停与聊天物品链接四处，把 `PlayerName` 部件一并查出来填进 `ctx`；
+- 哨兵 `>1` 时输出**空名字**那条（`灵魂绑定于:`）——这正是 C# `GetUserName` 查不到 id 时的行为
+  （`GetLocalization(SoulboundTo) + GetUserName(id)`，名字为空就只剩标签），逐字一致，不是猜。
+- 常量：中文包 `SoulboundTo` = 「灵魂绑定于:」（带冒号、无空格；`Client/Localization/Chinese.json`）。
+
+#### ③ 更正上一条 round 的 rustfmt 结论（教训）
+
+§3.2ed 那张门禁表写「本轮改动的 5 个文件 **0 条**」是**假绿**：过滤命令
+`Select-String -Pattern "dialogs\\\\inventory.rs"` 在 PowerShell 双引号里不做转义 ⇒ 正则实际是
+`dialogs\\inventory.rs`（两个反斜杠），路径里只有一个 ⇒ **永远匹配不到**，于是"0 条"。
+实测（`cargo fmt -- --check` 数 `^Diff in`）：master `948cc9c6b` 共 **80** 条，其中 §3.2ed 自己
+在 `inventory.rs` 净增 4 条。**判据：先数总条数、再按文件出现次数对账，不要用带反斜杠的过滤串。**
+
+本轮用 `rustfmt --edition 2021` 回写这 4 个文件（`inventory.rs` / `character.rs` / `storage.rs` /
+`chat.rs`）⇒ 基线 **80 → 74 条**，本轮涉及文件 **0 条**。`character.rs` 那处顺带修掉一段
+**既有**错缩进（`break;` 多缩进一级，纯空白改动，无行为变化）。
+
+#### 门禁
+
+| 门禁 | 结果 |
+|---|---|
+| `cargo check` | 通过（仅既有 warning） |
+| `cargo test --lib` | **940 passed / 0 failed**（新增 `tooltip_soulbound_line_matches_csharp`：哨兵 1 出名字 / 无名字只出标签 / `>1` 空名字 / `-1`·`0` 不出行 / `BindOnEquip` 且未绑定出「装备时绑定灵魂」/ 已绑定走 else 只出「灵魂绑定于:」） |
+| `cargo test --test b0001_smoke --test ui_alignment` | **2 + 58 passed** |
+| `ui_interact_sweep.ps1` | **46/47、fail=0、exit=0** |
+| `rustfmt --check` | 本轮涉及 4 文件 **0 条**；master 基线 80 → **74 条**（净减 6） |
+
+#### 物品提示这条线：**源码级已收口**
+
+§3.2dr → §3.2ee（12 轮）后，C# `CreateItemLabel` 的**每一段**都已在源码级对齐（文案 + 品阶色 +
+逐行配色 + 二选一分支）。**剩下的都不是本端能单方面补的**：
+
+1. **属性行的 `(+N)` 附加值与 Cyan**：需要 `UserItem.AddedStats` 的**逐属性表**（C# `addedStats[Stat.X]`），
+   本端线包只给条数 ⇒ **协议/数据缺口**；要做得先加字段并同步 ServerRust 与线格式。
+2. **像素对拍**：20 窗 A/B 清单里没有 hover 行 ⇒ 物品提示始终「源码逐 key 可复核、像素未采集」。
+   要补得先给 A/B 夹具加一条 hover 行（本端可 `cursor {x,y}` + `dialog open`，原版侧要**真实鼠标**
+   悬停物品格，即需要解锁工作站）。
 
 ### 3.2ec 物品提示补**交互提示段**（C# `OverlapInfoLabel`）——工具提示这条线收口（2026-10-01）
 
@@ -4428,7 +4493,10 @@ C# `OverlapInfoLabel`（`GameScene.cs:9586-9648`）两处都是**数据驱动**�
 自定义哨兵（`1`=本人、`0/-1`=未绑定、`>1`=C# 迁移数据绑定他人，见 `inventory.rs:2682` 注释），
 要显示名字得把**本地角色名**透传进提示构建（`item_tooltip_lines` 目前是纯函数）；
 ② C# 的 tooltip **行级配色** —— **已在 §3.2ed（2026-10-02）完成**，连带修掉该面板的
-**6 行上限截断**（详见该节；那边还留了"属性行 Cyan 需逐属性附加表"的数据缺口）。
+**6 行上限截断**（详见该节）。
+
+> 上面 ①（`SoulboundTo`）**已在 §3.2ee（2026-10-02）完成**，同一轮把 `BindOnEquip` 与
+> `SoulboundTo` 改成 C# 的**二选一**结构。仍未做的只剩**数据缺口**（属性行 `(+N)` 逐属性附加表）。
 
 ### 3.2eb 物品提示 `AwakeInfoLabel` 的**后两段**（英文字面量行）（2026-10-01）
 
