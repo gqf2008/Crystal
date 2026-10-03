@@ -4346,7 +4346,7 @@ spawn」配对，中间夹了个 `for` 循环体就串行了。
 | `guild` | 66.2% | ❌ 不可比 | 我方 `Show()` 守卫：`提示=你不在任何公会中。` |
 | `mount` | 94.4% | ❌ 不可比 | 我方 `Show()` 守卫：`提示=你没有坐骑。` |
 | `minimap` | 91.0% | ❌ 不可比 | 工具判定 `不可比(单边未出窗)`（小地图整块被 HUD/地图遮挡口径不同） |
-| `hud_belt` / `hud_skillbar` | 85.4% | ➖ 参考 | **整帧比**（C# 侧无窗口矩形）；两侧角色/地图不同 ⇒ 无判据 |
+| `hud_belt` / `hud_skillbar` | 85.4%（整帧）→ **98.2% / 98.5%**（按 C# 矩形，见 ③） | ❌ 不可比（**状态**） | HUD 不是对话框：`rect_table.json` 里没有它们 ⇒ 默认退化成整帧比；换 `rect_table_belt.json` 后有 C# 矩形，但两端 HUD 状态/语言不同（见 ③） |
 
 #### ② 结论
 
@@ -4358,6 +4358,28 @@ spawn」配对，中间夹了个 `for` 循环体就串行了。
   根治要改取帧夹具（把原版切中文或给本端加英文渲染开关），**不是改产品代码**。
 - 要把 `big_map`/`fishing`/`creature`/`guild`/`mount` 从"不可比"变成"可比"，需要**两侧同状态夹具**
   （同地图同坐标 / 同宠物 / 同鱼竿 / 同坐骑 / 同公会），见 §3.2ef ① 的 `Show()` 守卫说明与后续批次。
+
+#### ③ `Belt` / `Skillbar` 两行的**可比口径**（本轮补：从"整帧参考"升级为"按 C# 矩形"）
+
+`hud_belt` / `hud_skillbar` 不是对话框，`rect_table.json` 里没有它们，于是主表退化成**整帧比**（85.4%，
+两侧角色/地图不同 ⇒ 无判据）。但 HUD 矩形其实能从 C# 源码取到，`rect_table_belt.json` 里就有：
+
+| kind | C# 出处 | 矩形 | 按矩形比（`--table rect_table_belt.json`） |
+|---|---|---|---|
+| `hud_belt` | `InventoryDialog.cs` `BeltDialog`：`Prguse[1932]`，`(MainDialog.Location.X + 230, ScreenHeight - 150)` | `(230,618,240,38)` | **8953 / 9120 = 98.2%**（`--localize` 同表 97.9%，±1px 无实质改善） |
+| `hud_skillbar` | `MainDialogs.cs` `SkillBarDialog`：`Prguse[2190]`，`(0, BarIndex * 20)` | `(0,0,216,28)`（第 0 条） | **5960 / 6048 = 98.5%**（`--localize` 98.3%） |
+
+**但按矩形比之后仍是"不可比（状态）"**，证据是把这两块裁出来看：
+
+- `hud_belt` 矩形里，**两端画的都是聊天栏**（C# 的 `MainDialog.Location.X + 230 / ScreenHeight-150` 此刻落在聊天栏上），
+  而 ours 是**中文**（「欢迎进入…」）、orig 是**英文**（`Welcome to the Legend of Legend of Mir 2 Server. [Mode: Peaceful]`）
+  ⇒ 语言不可比（§3.2cs），且腰带本体在该矩形内两侧都看不到。
+- `hud_skillbar` 矩形 `(0,0)-(216,28)`：ours 是**明亮技能栏美术**（均值 `(116,101,81)`、主色 `(240,244,216)`），
+  orig 该处**近黑**（均值 `(59,45,36)`、26.5% 是纯 `(8,0,0)`）⇒ 两端的**技能栏默认可见性/条序不同**。
+
+**待查（下一批，本轮只取证到"状态不同"这一层，不推结论）**：C# `MainDialogs.cs` 的 `SkillBarDialog`
+（`(0, BarIndex*20)`，共 3 条）与 `BeltDialog` 的**默认可见性门控**（`Settings.SkillBarSwitch` / 腰带开关）
+是否与本端默认不同 —— 这决定"到底是谁多画/少画"。
 
 #### 门禁
 
